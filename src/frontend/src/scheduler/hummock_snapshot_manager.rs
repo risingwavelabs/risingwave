@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use log::error;
 use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
 use crate::meta_client::FrontendMetaClient;
+use crate::scheduler::plan_fragmenter::QueryId;
 
 /// Cache of hummock snapshot in meta.
 pub struct HummockSnapshotManager {
@@ -35,7 +37,7 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn get_epoch(&self) -> Result<u64> {
+    pub async fn get_epoch(&self, query_id: QueryId) -> Result<u64> {
         let mut core_guard = self.core.lock().await;
         if core_guard.is_outdated {
             let epoch = self
@@ -44,26 +46,43 @@ impl HummockSnapshotManager {
                 .await?;
             core_guard.is_outdated = false;
             core_guard.last_pinned = epoch;
-            core_guard.reference_number.insert(epoch, 1);
-        } else {
-            let last_pinned = core_guard.last_pinned;
-            *core_guard.reference_number.get_mut(&last_pinned).unwrap() += 1;
+            core_guard.epoch_to_query_ids.insert(epoch, HashSet::new());
         }
+        let last_pinned = core_guard.last_pinned;
+        core_guard
+            .epoch_to_query_ids
+            .get_mut(&last_pinned)
+            .unwrap()
+            .insert(query_id);
         Ok(core_guard.last_pinned)
     }
 
-    pub async fn unpin_snapshot(&self, epoch: u64) -> Result<()> {
-        let mut core_guard = self.core.lock().await;
-        let reference_number = core_guard.reference_number.get_mut(&epoch);
-        if let Some(reference_number) = reference_number {
-            *reference_number -= 1;
-            if *reference_number == 0 {
-                self.meta_client.unpin_snapshot(epoch).await?;
-                core_guard.reference_number.remove(&epoch);
-                if epoch == core_guard.last_pinned {
-                    core_guard.is_outdated = true;
+    pub async fn unpin_snapshot(&self, epoch: u64, query_id: &QueryId) -> Result<()> {
+        let local_count = async {
+            let mut core_guard = self.core.lock().await;
+            let query_ids = core_guard.epoch_to_query_ids.get_mut(&epoch);
+            if let Some(query_ids) = query_ids {
+                query_ids.remove(query_id);
+                if query_ids.is_empty() {
+                    core_guard.epoch_to_query_ids.remove(&epoch);
+                    if epoch == core_guard.last_pinned {
+                        core_guard.is_outdated = true;
+                    }
+                    return true;
                 }
             }
+            false
+        };
+        let need_to_request_meta = local_count.await;
+        if need_to_request_meta {
+            let meta_client = self.meta_client.clone();
+            tokio::spawn(async move {
+                let handle = tokio::spawn(async move { meta_client.unpin_snapshot(epoch).await });
+
+                if let Err(join_error) = handle.await && join_error.is_panic() {
+                    error!("Request meta to unpin snapshot panic {:?}!", join_error);
+                }
+            });
         }
         Ok(())
     }
@@ -81,9 +100,9 @@ impl HummockSnapshotManager {
 struct HummockSnapshotManagerCore {
     is_outdated: bool,
     last_pinned: u64,
-    /// Record the number of references of snapshot. Send an `unpin_snapshot` RPC when the number
-    /// drops to 0.
-    reference_number: HashMap<u64, u32>,
+    /// Record the query ids that pin each snapshot.
+    /// Send an `unpin_snapshot` RPC when a snapshot is not pinned any more.
+    epoch_to_query_ids: HashMap<u64, HashSet<QueryId>>,
 }
 
 impl HummockSnapshotManagerCore {

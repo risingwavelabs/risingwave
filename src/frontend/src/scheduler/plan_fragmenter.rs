@@ -133,6 +133,10 @@ impl Query {
     pub fn root_stage_id(&self) -> StageId {
         self.stage_graph.root_stage_id
     }
+
+    pub fn query_id(&self) -> &QueryId {
+        &self.query_id
+    }
 }
 
 /// Fragment part of `Query`.

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::swap;
 use std::sync::Arc;
 
@@ -211,7 +211,8 @@ impl QueryExecution {
 impl QueryRunner {
     async fn run(mut self) -> Result<()> {
         // Start leaf stages.
-        for stage_id in &self.query.leaf_stages() {
+        let leaf_stages = self.query.leaf_stages();
+        for stage_id in &leaf_stages {
             // TODO: We should not return error here, we should abort query.
             info!(
                 "Starting query stage: {:?}-{:?}",
@@ -232,6 +233,7 @@ impl QueryRunner {
                 self.query.query_id, stage_id
             );
         }
+        let mut leaf_stages = leaf_stages.into_iter().collect::<HashSet<StageId>>();
 
         // Schedule stages when leaf stages all scheduled
         while let Some(msg) = self.msg_receiver.recv().await {
@@ -242,9 +244,19 @@ impl QueryRunner {
                         self.query.query_id, stage_id
                     );
                     self.scheduled_stages_count += 1;
+                    leaf_stages.remove(&stage_id);
+                    if leaf_stages.is_empty() {
+                        // Since all the iterators are created during building the leaf tasks in the
+                        // backend, we can be sure here that all the
+                        // iterator have been created, thus they all successfully pinned a
+                        // HummockVersion. So we can now unpin their epoch.
+                        self.hummock_snapshot_manager
+                            .clone()
+                            .unpin_snapshot(self.epoch, self.query.query_id());
+                    }
 
                     if self.scheduled_stages_count == self.stage_executions.len() {
-                        // Now all stages schedules, send root stage info.
+                        // Now all stages have been scheduled, send root stage info.
                         self.send_root_stage_info().await;
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
