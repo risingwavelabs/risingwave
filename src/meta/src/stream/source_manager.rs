@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::{BorrowMut};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -20,9 +20,9 @@ use std::time::Duration;
 use risingwave_common::error::internal_error;
 
 use futures::future::try_join_all;
-use hyper::service::service_fn;
+
 use itertools::Itertools;
-use prost::Message;
+
 use tokio::sync::{Mutex, oneshot};
 use tokio::time;
 
@@ -67,7 +67,7 @@ impl ConnectorSourceWorker {
         let properties = ConnectorProperties::extract(info.properties.to_owned()).to_rw_result()?;
         let enumerator = SplitEnumeratorImpl::create(properties).await.to_rw_result()?;
         let current_splits = Arc::new(Mutex::new(None));
-        Ok(Self { current_splits, source_id, stop_tx, enumerator })
+        Ok(Self { source_id, current_splits, enumerator, stop_tx })
     }
 
     pub async fn run(&mut self, mut stop_rx: oneshot::Receiver<()>) {
@@ -116,14 +116,14 @@ impl SourceManagerCore
     }
 
     async fn tick(&mut self) -> Result<()> {
-        for (source_id, splits) in self.managed_sources.iter() {
+        for (source_id, splits) in &self.managed_sources {
             let splits_guard = splits.lock().await;
             if splits_guard.is_none() {
                 continue;
             }
 
             if let Some(splits) = splits_guard.as_ref() {
-                let actor_group = match self.actors.get(source_id) {
+                let actor_group = match self.actors.get_mut(source_id) {
                     None => {
                         log::warn!("no actors bind to source {}", source_id);
                         continue;
@@ -135,7 +135,7 @@ impl SourceManagerCore
                     let mut assigned_splits = HashSet::new();
                     let mut id_to_splits = HashMap::new();
 
-                    for (actor_id, actor_splits) in actor_group_assigned_splits {
+                    for actor_splits in actor_group_assigned_splits.values() {
                         for split in actor_splits {
                             let id = split.id();
                             assigned_splits.insert(id.clone());
@@ -143,9 +143,23 @@ impl SourceManagerCore
                         }
                     }
 
-                    let new_splits = splits.iter().filter(|split| !assigned_splits.contains(split.id().as_str())).collect_vec();
-                    // we don't check
+                    let new_splits = splits.iter().filter(|split| !assigned_splits.contains(split.id().as_str())).cloned().collect_vec();
 
+                    // todo: use heap
+                    let actors = actor_group_assigned_splits.keys().collect_vec();
+                    let actor_len = actors.len();
+
+                    let mut assigned = HashMap::new();
+
+                    for (i, split) in new_splits.into_iter().enumerate() {
+                        assigned.entry(actors[i % actor_len].clone()).or_insert(vec![]).push(split)
+                    }
+
+                    // do something
+
+                    for (k, mut vs) in assigned {
+                        actor_group_assigned_splits.entry(k).or_insert(vec![]).append(&mut vs)
+                    }
                 }
             }
         }
@@ -180,30 +194,35 @@ impl<S> SourceManager<S>
 
         let source_ref = &affiliated_source;
 
-        for (source_id, mut actor_groups) in actors {
-            if !core.managed_sources.contains_key(&source_id) {
+        for (source_id, actor_groups) in actors {
+            if let std::collections::hash_map::Entry::Vacant(e) = core.managed_sources.entry(source_id) {
                 let source = if let Some(affiliated_source) = source_ref && affiliated_source.get_id() == source_id {
                     affiliated_source.clone()
                 } else {
                     let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
                     catalog_guard.get_source(source_id).await?.ok_or_else(|| {
-                        RwError::from(internal_error(
+                        internal_error(
                             format!("could not find source catalog for {}", source_id)
-                        ))
+                        )
                     })?
                 };
-
 
                 let info = source.info.unwrap();
                 let stream_source_info = try_match_expand!(info, Info::StreamSource)?;
 
                 let (stop_tx, stop_rx) = oneshot::channel();
                 let mut worker = ConnectorSourceWorker::create(source_id, &stream_source_info, stop_tx).await?;
-                core.managed_sources.insert(source_id, worker.current_splits.clone());
+                e.insert(worker.current_splits.clone());
                 let _ = tokio::spawn(async move { worker.run(stop_rx).await });
             }
 
-            let mut map = actor_groups.into_iter().map(|actors| actors.into_iter().map(|actor| (actor, vec![])).collect_vec()).collect_vec();
+            let mut map = actor_groups
+                .into_iter()
+                .map(|actors|
+                    actors
+                        .into_iter()
+                        .map(|actor| (actor, vec![])).collect() )
+                .collect();
             core.actors.entry(source_id).or_insert(vec![]).append(&mut map);
         }
 
@@ -335,132 +354,12 @@ impl<S> SourceManager<S>
 
     pub async fn run(&self) -> Result<()> {
         // todo: in the future, split change will be pushed as a long running service
-
-
         let mut interval = time::interval(Duration::from_secs(1));
-
-
         loop {
             interval.tick().await;
 
             let mut core_guard = self.core.lock().await;
             let _ = core_guard.tick().await;
         }
-        Ok(())
     }
 }
-
-#[cfg(test)]
-mod test {
-    use std::collections::HashMap;
-    use tokio::sync::oneshot;
-    use tonic::codegen::ok;
-    use risingwave_common::error::Result;
-    use risingwave_pb::catalog::StreamSourceInfo;
-    use crate::stream::ConnectorSourceWorker;
-
-    #[tokio::test]
-    async fn test_discov() -> Result<()> {
-        let (a, b) = oneshot::channel();
-
-        let mut prop = HashMap::new();
-        prop.insert("connector", "kafka");
-        prop.insert("kafka.brokers", "localhost:29092");
-        prop.insert("kafka.topic", "t2");
-
-        let mut x = ConnectorSourceWorker::create(0, &StreamSourceInfo {
-            properties: prop.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-            row_format: 0,
-            row_schema_location: "".to_string(),
-            row_id_index: 0,
-            columns: vec![],
-            pk_column_ids: vec![],
-        }, a).await.unwrap();
-
-        x.run().await;
-
-        Ok(())
-    }
-}
-
-// let last_assign_splits = &source.last_assigned_splits;
-//
-// let current_splits = match {
-//     let guard = source.current_splits.lock().await;
-//     guard.clone()
-// } {
-//     None => {
-//         // source discovery is not ready
-//         continue;
-//     }
-//     Some(splits) => splits,
-// };
-//
-// let current_split_with_ids = current_splits
-//     .iter()
-//     .map(|split| (split.id(), split))
-//     .collect::<HashMap<_, _>>();
-//
-// let mut assign = HashMap::new();
-// let mut current_assigned_splits = vec![];
-//
-// // TODO(peng): use metastore instead
-// for last_splits in last_assign_splits {
-//     let mut grouped_splits = last_splits.clone();
-//
-//     // for now we only check new splits
-//     let assigned_ids = last_splits
-//         .iter()
-//         .flat_map(|(_, splits)| splits.iter().map(|s| s.id()))
-//         .collect::<HashSet<_>>();
-//
-//     let new_created_ids = current_split_with_ids
-//         .iter()
-//         .filter(|(id, _)| !assigned_ids.contains(*id))
-//         .collect_vec();
-//
-//     let actor_ids = last_splits
-//         .iter()
-//         .map(|(actor_id, _)| actor_id)
-//         .collect_vec();
-//
-//     // todo: use heap
-//     for (i, (_, split)) in new_created_ids.iter().cloned().enumerate() {
-//         let actor_id = actor_ids[i % actor_ids.len()];
-//         assign
-//             .entry(*actor_id)
-//             .or_insert_with(Vec::new)
-//             .push((**split).clone());
-//
-//         grouped_splits
-//             .entry(*actor_id)
-//             .or_insert_with(Vec::new)
-//             .push((**split).clone());
-//     }
-//
-//     current_assigned_splits.push(grouped_splits);
-// }
-//
-// // todo: error handling
-// if !assign.is_empty() {
-//     // self.barrier_manager
-//     //     .run_command(Command::Plain(Mutation::SplitAssign(SplitAssignMutation {
-//     //         splits: assign
-//     //             .into_iter()
-//     //             .map(|(actor_id, assigned_splits)| {
-//     //                 (
-//     //                     actor_id,
-//     //                     Splits {
-//     //                         splits: assigned_splits
-//     //                             .into_iter()
-//     //                             .map(|split| serde_json::to_vec(&split).unwrap())
-//     //                             .collect(),
-//     //                     },
-//     //                 )
-//     //             })
-//     //             .collect(),
-//     //     })))
-//     //     .await?;
-//
-//     source.last_assigned_splits = current_assigned_splits;
-// }
