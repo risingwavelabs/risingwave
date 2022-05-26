@@ -131,6 +131,33 @@ impl<S: MetaStore> UserManager<S> {
 
 /// Defines privilege grant for a user.
 impl<S: MetaStore> UserManager<S> {
+    // Merge new granted privilege.
+    #[inline(always)]
+    fn merge_privilege(origin_privilege: &mut GrantPrivilege, new_privilege: &GrantPrivilege) {
+        assert_eq!(origin_privilege.target, new_privilege.target);
+
+        let mut privilege_map = HashMap::<i32, bool>::from_iter(
+            origin_privilege
+                .privilege_with_opts
+                .iter()
+                .map(|po| (po.privilege, po.with_grant_option)),
+        );
+        for npo in &new_privilege.privilege_with_opts {
+            if let Some(po) = privilege_map.get_mut(&npo.privilege) {
+                *po |= npo.with_grant_option;
+            } else {
+                privilege_map.insert(npo.privilege, npo.with_grant_option);
+            }
+        }
+        origin_privilege.privilege_with_opts = privilege_map
+            .into_iter()
+            .map(|(privilege, with_grant_option)| PrivilegeWithGrantOption {
+                privilege,
+                with_grant_option,
+            })
+            .collect();
+    }
+
     pub async fn grant_privilege(
         &self,
         user_name: &UserName,
@@ -155,26 +182,7 @@ impl<S: MetaStore> UserManager<S> {
                 .iter_mut()
                 .find(|p| p.target == new_grant_privilege.target)
             {
-                let mut privilege_map = HashMap::<i32, bool>::from_iter(
-                    privilege
-                        .privilege_with_opts
-                        .iter()
-                        .map(|po| (po.privilege, po.with_grant_option)),
-                );
-                for npo in &new_grant_privilege.privilege_with_opts {
-                    if let Some(po) = privilege_map.get_mut(&npo.privilege) {
-                        *po |= npo.with_grant_option;
-                    } else {
-                        privilege_map.insert(npo.privilege, npo.with_grant_option);
-                    }
-                }
-                privilege.privilege_with_opts = privilege_map
-                    .into_iter()
-                    .map(|(privilege, with_grant_option)| PrivilegeWithGrantOption {
-                        privilege,
-                        with_grant_option,
-                    })
-                    .collect();
+                Self::merge_privilege(privilege, new_grant_privilege);
             } else {
                 user.grant_privileges.push(new_grant_privilege.clone());
             }
@@ -183,6 +191,40 @@ impl<S: MetaStore> UserManager<S> {
         user.insert(self.env.meta_store()).await?;
         core.insert(user_name.clone(), user);
         Ok(())
+    }
+
+    // Revoke privilege from target.
+    #[inline(always)]
+    fn revoke_privilege_inner(
+        origin_privilege: &mut GrantPrivilege,
+        revoke_grant_privilege: &GrantPrivilege,
+        revoke_grant_option: bool,
+    ) {
+        assert_eq!(origin_privilege.target, revoke_grant_privilege.target);
+
+        if revoke_grant_option {
+            // Only revoke with grant option.
+            origin_privilege
+                .privilege_with_opts
+                .iter_mut()
+                .for_each(|po| {
+                    if revoke_grant_privilege
+                        .privilege_with_opts
+                        .iter()
+                        .any(|ro| ro.privilege == po.privilege)
+                    {
+                        po.with_grant_option = false;
+                    }
+                })
+        } else {
+            // Revoke all privileges matched with revoke_grant_privilege.
+            origin_privilege.privilege_with_opts.retain(|po| {
+                !revoke_grant_privilege
+                    .privilege_with_opts
+                    .iter()
+                    .any(|ro| ro.privilege == po.privilege)
+            });
+        }
     }
 
     pub async fn revoke_privilege(
@@ -210,27 +252,12 @@ impl<S: MetaStore> UserManager<S> {
             .for_each(|revoke_grant_privilege| {
                 for privilege in &mut user.grant_privileges {
                     if privilege.target == revoke_grant_privilege.target {
-                        if revoke_grant_option {
-                            // Only revoke with grant option.
-                            privilege.privilege_with_opts.iter_mut().for_each(|po| {
-                                if revoke_grant_privilege
-                                    .privilege_with_opts
-                                    .iter()
-                                    .any(|ro| ro.privilege == po.privilege)
-                                {
-                                    po.with_grant_option = false;
-                                }
-                            })
-                        } else {
-                            // Revoke all privileges matched with revoke_grant_privilege.
-                            privilege.privilege_with_opts.retain(|po| {
-                                !revoke_grant_privilege
-                                    .privilege_with_opts
-                                    .iter()
-                                    .any(|ro| ro.privilege == po.privilege)
-                            });
-                            empty_privilege |= privilege.privilege_with_opts.is_empty();
-                        }
+                        Self::revoke_privilege_inner(
+                            privilege,
+                            revoke_grant_privilege,
+                            revoke_grant_option,
+                        );
+                        empty_privilege |= privilege.privilege_with_opts.is_empty();
                         break;
                     }
                 }
