@@ -301,8 +301,8 @@ pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
 
-/// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
-/// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]
+/// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
+/// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
 ///
 /// Every tuple has two elements, where `{ convention, name }`
 /// You can use it as follows

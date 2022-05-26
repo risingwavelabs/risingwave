@@ -104,7 +104,7 @@ mod tests {
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn union() {
         let streams = vec![
             try_stream! {

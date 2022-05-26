@@ -70,7 +70,8 @@
     BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = $0))] }
       BatchSimpleAgg { aggs: [min($0)] }
         BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [v1] }
+          BatchSimpleAgg { aggs: [min($0)] }
+            BatchScan { table: t, columns: [v1] }
 - sql: |
     /* in-list with non-const: scalar subquery */
     create table t (v1 int);
@@ -84,7 +85,8 @@
             BatchScan { table: b, columns: [b2] }
           BatchSimpleAgg { aggs: [min($0)] }
             BatchExchange { order: [], dist: Single }
-              BatchScan { table: t, columns: [v1] }
+              BatchSimpleAgg { aggs: [min($0)] }
+                BatchScan { table: t, columns: [v1] }
 - sql: |
     /* in-list with non-const: correlated ref */
     create table t (v1 int);

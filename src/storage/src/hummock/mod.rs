@@ -27,6 +27,7 @@ pub use block_cache::*;
 mod sstable;
 pub use sstable::*;
 mod cache;
+pub mod compaction_executor;
 pub mod compactor;
 #[cfg(test)]
 mod compactor_tests;
@@ -49,6 +50,7 @@ pub(crate) mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
+
 pub use cache::{CachableEntry, LookupResult, LruCache};
 pub use error::*;
 use value::*;

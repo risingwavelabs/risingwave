@@ -112,7 +112,7 @@ message KeyRange {
 
 message TableSetStatistics {
   uint32 level_idx = 1;
-  double size_gb = 2;
+  uint64 size_kb = 2;
   uint64 cnt = 3;
 }
 

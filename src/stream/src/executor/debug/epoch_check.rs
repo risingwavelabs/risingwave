@@ -67,7 +67,7 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::executor::Executor;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_epoch_ok() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_barrier(100, false);
@@ -87,7 +87,7 @@ mod tests {
     }
 
     #[should_panic]
-    #[madsim::test]
+    #[tokio::test]
     async fn test_epoch_bad() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_barrier(100, false);
@@ -108,7 +108,7 @@ mod tests {
     }
 
     #[should_panic]
-    #[madsim::test]
+    #[tokio::test]
     async fn test_epoch_first_not_barrier() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::default());
@@ -120,7 +120,7 @@ mod tests {
         checked.next().await.unwrap().unwrap(); // should panic
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_empty() {
         let (_, mut source) = MockSource::channel(Default::default(), vec![]);
         source = source.stop_on_finish(false);

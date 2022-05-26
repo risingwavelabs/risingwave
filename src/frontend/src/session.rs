@@ -29,7 +29,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
 use risingwave_sqlparser::parser::Parser;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -131,7 +131,7 @@ pub struct FrontendEnv {
 impl FrontendEnv {
     pub async fn init(
         opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
         Self::with_meta_client(meta_client, opts).await
     }
@@ -163,7 +163,7 @@ impl FrontendEnv {
     pub async fn with_meta_client(
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
         let config = load_config(opts);
         tracing::info!("Starting frontend node with config {:?}", config);
 
@@ -346,7 +346,7 @@ pub struct SessionManagerImpl {
     env: FrontendEnv,
     observer_join_handle: JoinHandle<()>,
     heartbeat_join_handle: JoinHandle<()>,
-    _heartbeat_shutdown_sender: UnboundedSender<()>,
+    _heartbeat_shutdown_sender: Sender<()>,
 }
 
 impl SessionManager for SessionManagerImpl {

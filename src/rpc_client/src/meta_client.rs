@@ -55,7 +55,8 @@ use risingwave_pb::meta::{
     SubscribeRequest, SubscribeResponse,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use tokio::sync::mpsc::{Receiver, UnboundedSender};
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
@@ -259,8 +260,8 @@ impl MetaClient {
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
-    ) -> (JoinHandle<()>, UnboundedSender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval_ticker = tokio::time::interval(min_interval);
             loop {
@@ -268,7 +269,7 @@ impl MetaClient {
                     // Wait for interval
                     _ = min_interval_ticker.tick() => {},
                     // Shutdown
-                    _ = shutdown_rx.recv() => {
+                    _ = &mut shutdown_rx => {
                         tracing::info!("Heartbeat loop is shutting down");
                         return;
                     }

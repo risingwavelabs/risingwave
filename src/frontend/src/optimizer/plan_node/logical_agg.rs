@@ -67,6 +67,23 @@ impl PlanAggCall {
         }
     }
 
+    pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
+        let total_agg_kind = match &self.agg_kind {
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::Avg
+            | AggKind::StringAgg
+            | AggKind::SingleValue => self.agg_kind.clone(),
+
+            AggKind::Count | AggKind::RowCount | AggKind::Sum => AggKind::Sum,
+        };
+        PlanAggCall {
+            agg_kind: total_agg_kind,
+            inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
+            ..self.clone()
+        }
+    }
+
     pub fn count_star() -> Self {
         PlanAggCall {
             agg_kind: AggKind::Count,
@@ -540,8 +557,9 @@ impl PredicatePushdown for LogicalAgg {
         let num_agg_calls = self.agg_calls.len();
         assert!(num_group_keys + num_agg_calls == self.schema().len());
 
-        // Specially, SimpleAgg should be skipped because the predicate either references agg_calls
+        // SimpleAgg should be skipped because the predicate either references agg_calls
         // or is const.
+        // If the filter references agg_calls, we can not push it.
         // When it is constantly true, pushing is useless and may actually cause more evaulation
         // cost of the predicate.
         // When it is constantly false, pushing is wrong - the old plan returns 0 rows but new one
