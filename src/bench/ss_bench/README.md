@@ -5,7 +5,7 @@ State Store Benchmark (ss-bench)
 
 # Usage Example
 
-We use a mock meta-service for ss_becnh, and it may not be fully functional.
+We use a mock meta-service for `ss_bench`, and it may not be fully functional.
 
 ```shell
 ~/code/risingwave/rust: cargo run --bin ss-bench -- \
@@ -103,7 +103,7 @@ We use a mock meta-service for ss_becnh, and it may not be fully functional.
 
 - `--async-checkpoint-disabled`
   
-  - Disable async chekcpoint
+  - Disable async checkpoint
   - Default: false
 
 - `--write-conflict-detection-enabled`
@@ -199,5 +199,5 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 # Metrics
 
-- Letancy (`min/mean/P50/P95/P99/max/std_dev`)
+- Latency (`min/mean/P50/P95/P99/max/std_dev`)
 - Throughput (`QPS/OPS/bytes_pre_second`)
