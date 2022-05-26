@@ -26,8 +26,9 @@ use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
 struct TopNHeap {
@@ -83,18 +84,18 @@ impl TopNHeap {
     }
 }
 
-pub struct TopNExecutor2 {
-    child: BoxedExecutor2,
+pub struct TopNExecutor {
+    child: BoxedExecutor,
     top_n_heap: TopNHeap,
     identity: String,
     chunk_size: usize,
     offset: usize,
 }
 
-impl BoxedExecutor2Builder for TopNExecutor2 {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for TopNExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let top_n_node =
@@ -106,7 +107,7 @@ impl BoxedExecutor2Builder for TopNExecutor2 {
             .map(OrderPair::from_prost)
             .collect();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build2()?;
+            let child = source.clone_for_plan(child_plan).build()?;
             return Ok(Box::new(Self::new(
                 child,
                 order_pairs,
@@ -120,9 +121,9 @@ impl BoxedExecutor2Builder for TopNExecutor2 {
     }
 }
 
-impl TopNExecutor2 {
+impl TopNExecutor {
     fn new(
-        child: BoxedExecutor2,
+        child: BoxedExecutor,
         order_pairs: Vec<OrderPair>,
         limit: usize,
         offset: usize,
@@ -143,7 +144,7 @@ impl TopNExecutor2 {
     }
 }
 
-impl Executor2 for TopNExecutor2 {
+impl Executor for TopNExecutor {
     fn schema(&self) -> &Schema {
         self.child.schema()
     }
@@ -157,7 +158,7 @@ impl Executor2 for TopNExecutor2 {
     }
 }
 
-impl TopNExecutor2 {
+impl TopNExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         #[for_await]
@@ -210,7 +211,7 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let top_n_executor = Box::new(TopNExecutor2::new(
+        let top_n_executor = Box::new(TopNExecutor::new(
             Box::new(mock_executor),
             order_pairs,
             3,

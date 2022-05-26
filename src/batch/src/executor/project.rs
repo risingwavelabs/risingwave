@@ -20,18 +20,19 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
-pub struct ProjectExecutor2 {
+pub struct ProjectExecutor {
     expr: Vec<BoxedExpression>,
-    child: BoxedExecutor2,
+    child: BoxedExecutor,
     schema: Schema,
     identity: String,
 }
 
-impl Executor2 for ProjectExecutor2 {
+impl Executor for ProjectExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -45,7 +46,7 @@ impl Executor2 for ProjectExecutor2 {
     }
 }
 
-impl ProjectExecutor2 {
+impl ProjectExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         #[for_await]
@@ -67,10 +68,10 @@ impl ProjectExecutor2 {
     }
 }
 
-impl BoxedExecutor2Builder for ProjectExecutor2 {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for ProjectExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let project_node = try_match_expand!(
@@ -83,7 +84,7 @@ impl BoxedExecutor2Builder for ProjectExecutor2 {
                 "Child interpreting error",
             )))
         })?;
-        let child_node = source.clone_for_plan(proto_child).build2()?;
+        let child_node = source.clone_for_plan(proto_child).build()?;
 
         let project_exprs = project_node
             .get_select_list()
@@ -116,7 +117,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor2::{Executor2, ValuesExecutor2};
+    use crate::executor::{Executor, ValuesExecutor};
     use crate::*;
 
     #[tokio::test]
@@ -144,7 +145,7 @@ mod tests {
             .map(|expr| Field::unnamed(expr.return_type()))
             .collect::<Vec<Field>>();
 
-        let proj_executor = Box::new(ProjectExecutor2 {
+        let proj_executor = Box::new(ProjectExecutor {
             expr: expr_vec,
             child: Box::new(mock_executor),
             schema: Schema { fields },
@@ -173,14 +174,14 @@ mod tests {
     async fn test_project_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
 
-        let values_executor2: Box<dyn Executor2> = Box::new(ValuesExecutor2::new(
+        let values_executor2: Box<dyn Executor> = Box::new(ValuesExecutor::new(
             vec![vec![]], // One single row with no column.
             Schema::default(),
             "ValuesExecutor".to_string(),
             1024,
         ));
 
-        let proj_executor = Box::new(ProjectExecutor2 {
+        let proj_executor = Box::new(ProjectExecutor {
             expr: vec![Box::new(literal)],
             child: values_executor2,
             schema: schema_unnamed!(DataType::Int32),

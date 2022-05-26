@@ -25,19 +25,20 @@ use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
-/// `ValuesExecutor` implements Values executor.
-pub struct ValuesExecutor2 {
+/// [`ValuesExecutor`] implements Values executor.
+pub struct ValuesExecutor {
     rows: vec::IntoIter<Vec<BoxedExpression>>,
     schema: Schema,
     identity: String,
     chunk_size: usize,
 }
 
-impl ValuesExecutor2 {
+impl ValuesExecutor {
     pub(crate) fn new(
         rows: Vec<Vec<BoxedExpression>>,
         schema: Schema,
@@ -53,7 +54,7 @@ impl ValuesExecutor2 {
     }
 }
 
-impl Executor2 for ValuesExecutor2 {
+impl Executor for ValuesExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -67,7 +68,7 @@ impl Executor2 for ValuesExecutor2 {
     }
 }
 
-impl ValuesExecutor2 {
+impl ValuesExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         if !self.rows.is_empty() {
@@ -110,10 +111,10 @@ impl ValuesExecutor2 {
         }
     }
 }
-impl BoxedExecutor2Builder for ValuesExecutor2 {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for ValuesExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         let value_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Values
@@ -156,7 +157,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression};
 
-    use crate::executor2::{Executor2, ValuesExecutor2};
+    use crate::executor::{Executor, ValuesExecutor};
 
     #[tokio::test]
     async fn test_values_executor() {
@@ -187,7 +188,7 @@ mod tests {
             .map(|col| Field::unnamed(col.return_type()))
             .collect::<Vec<Field>>();
 
-        let values_executor = Box::new(ValuesExecutor2 {
+        let values_executor = Box::new(ValuesExecutor {
             rows: vec![exprs].into_iter(),
             schema: Schema { fields },
             identity: "ValuesExecutor2".to_string(),
@@ -262,7 +263,7 @@ mod tests {
 
         let fields = vec![Field::unnamed(DataType::Int32)];
 
-        let values_executor = Box::new(ValuesExecutor2::new(
+        let values_executor = Box::new(ValuesExecutor::new(
             rows,
             Schema { fields },
             "ValuesExecutor2".to_string(),
@@ -277,7 +278,7 @@ mod tests {
     // Handle the possible case of ValuesNode([[]])
     #[tokio::test]
     async fn test_no_column_values_executor() {
-        let values_executor = Box::new(ValuesExecutor2::new(
+        let values_executor = Box::new(ValuesExecutor::new(
             vec![vec![]],
             Schema::default(),
             "ValuesExecutor2".to_string(),

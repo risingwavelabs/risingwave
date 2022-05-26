@@ -14,7 +14,7 @@
 /// While technically public, the library's users are not supposed to rely
 /// on this module, as it will change without notice.
 // Integration tests (i.e. everything under `tests/`) import this
-// via `tests/test_utils/mod.rs`.
+// via `tests/test_utils/executor`.
 
 #[cfg(not(feature = "std"))]
 use alloc::{

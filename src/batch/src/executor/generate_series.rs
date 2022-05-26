@@ -26,12 +26,11 @@ use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use super::{BoxedExecutor2, BoxedExecutor2Builder};
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, Executor2};
+use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::executor::{BoxedDataChunkStream, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
-pub struct GenerateSeriesExecutor2<T: Array, S: Array> {
+pub struct GenerateSeriesExecutor<T: Array, S: Array> {
     start: T::OwnedItem,
     stop: T::OwnedItem,
     step: S::OwnedItem,
@@ -40,7 +39,7 @@ pub struct GenerateSeriesExecutor2<T: Array, S: Array> {
     identity: String,
 }
 
-impl<T: Array, S: Array> GenerateSeriesExecutor2<T, S> {
+impl<T: Array, S: Array> GenerateSeriesExecutor<T, S> {
     pub fn new(
         start: T::OwnedItem,
         stop: T::OwnedItem,
@@ -58,7 +57,7 @@ impl<T: Array, S: Array> GenerateSeriesExecutor2<T, S> {
     }
 }
 
-impl<T: Array, S: Array> Executor2 for GenerateSeriesExecutor2<T, S>
+impl<T: Array, S: Array> Executor for GenerateSeriesExecutor<T, S>
 where
     T::OwnedItem: PartialOrd<T::OwnedItem>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
@@ -76,7 +75,7 @@ where
     }
 }
 
-impl<T, S> GenerateSeriesExecutor2<T, S>
+impl<T, S> GenerateSeriesExecutor<T, S>
 where
     T: Array,
     S: Array,
@@ -114,12 +113,12 @@ where
     }
 }
 
-pub struct GenerateSeriesExecutor2Builder {}
+pub struct GenerateSeriesExecutorBuilder {}
 
-impl BoxedExecutor2Builder for GenerateSeriesExecutor2Builder {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for GenerateSeriesExecutorBuilder {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::GenerateSeries
@@ -145,7 +144,7 @@ impl BoxedExecutor2Builder for GenerateSeriesExecutor2Builder {
                 if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
                     let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
 
-                    Ok(Box::new(GenerateSeriesExecutor2::<
+                    Ok(Box::new(GenerateSeriesExecutor::<
                         NaiveDateTimeArray,
                         IntervalArray,
                     >::new(
@@ -166,11 +165,9 @@ impl BoxedExecutor2Builder for GenerateSeriesExecutor2Builder {
                 if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
                     let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
 
-                    Ok(Box::new(
-                        GenerateSeriesExecutor2::<I32Array, I32Array>::new(
-                            start, stop, step, schema, identity,
-                        ),
-                    ))
+                    Ok(Box::new(GenerateSeriesExecutor::<I32Array, I32Array>::new(
+                        start, stop, step, schema, identity,
+                    )))
                 } else {
                     Err(ErrorCode::InternalError(
                         "the parameters of Generate Series Function are incorrect".to_string(),
@@ -205,7 +202,7 @@ mod tests {
     }
 
     async fn generate_series_test_case(start: i32, stop: i32, step: i32) {
-        let executor = Box::new(GenerateSeriesExecutor2::<I32Array, I32Array> {
+        let executor = Box::new(GenerateSeriesExecutor::<I32Array, I32Array> {
             start,
             stop,
             step,
@@ -249,7 +246,7 @@ mod tests {
         expected_rows_count: usize,
     ) {
         let executor = Box::new(
-            GenerateSeriesExecutor2::<NaiveDateTimeArray, IntervalArray>::new(
+            GenerateSeriesExecutor::<NaiveDateTimeArray, IntervalArray>::new(
                 start,
                 stop,
                 step,
