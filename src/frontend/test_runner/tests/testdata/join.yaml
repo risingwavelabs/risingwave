@@ -195,3 +195,4 @@
       LogicalFilter { predicate: ($0 > 100:Int32) }
         LogicalScan { table: t1, columns: [v1, v2] }
       LogicalFilter { predicate: ($0 < 1000:Int32) }
+        LogicalScan { table: t2, columns: [v1, v2] }
