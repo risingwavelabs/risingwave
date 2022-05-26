@@ -21,7 +21,9 @@ use rand::{thread_rng, Rng};
 use serde_json::json;
 
 use super::{DEFAULT_END, DEFAULT_MAX, DEFAULT_MIN, DEFAULT_START};
-use crate::datagen::source::field_generator::{FieldKind, NumericFieldGenerator};
+use crate::datagen::source::field_generator::{
+    NumericFieldRandomGenerator, NumericFieldSequenceGenerator,
+};
 
 trait NumericType
 where
@@ -43,7 +45,7 @@ where
 }
 
 macro_rules! impl_numeric_type {
-    ($({ $variant_name:ident, $field_type:ty }),*) => {
+    ($({ $random_variant_name:ident, $sequence_variant_name:ident,$field_type:ty }),*) => {
         $(
             impl NumericType for $field_type {
                 const DEFAULT_MIN: $field_type = DEFAULT_MIN as $field_type;
@@ -56,10 +58,13 @@ macro_rules! impl_numeric_type {
 }
 
 #[derive(Default)]
-pub struct NumericFieldConcrete<T> {
-    kind: FieldKind,
+pub struct NumericFieldRandomConcrete<T> {
     min: T,
     max: T,
+}
+
+#[derive(Default)]
+pub struct NumericFieldSequenceConcrete<T> {
     start: T,
     end: T,
     cur: T,
@@ -67,12 +72,15 @@ pub struct NumericFieldConcrete<T> {
     split_num: u64,
 }
 
-impl<T> NumericFieldGenerator for NumericFieldConcrete<T>
+impl<T> NumericFieldRandomGenerator for NumericFieldRandomConcrete<T>
 where
     T: NumericType,
     <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
-    fn with_random(min_option: Option<String>, max_option: Option<String>) -> Result<Self> {
+    fn new(min_option: Option<String>, max_option: Option<String>) -> Result<Self>
+    where
+        Self: Sized,
+    {
         let mut min = T::DEFAULT_MIN;
         let mut max = T::DEFAULT_MAX;
 
@@ -85,24 +93,34 @@ where
 
         assert!(min < max);
 
-        Ok(Self {
-            kind: FieldKind::Random,
-            min,
-            max,
-            ..Default::default()
-        })
+        Ok(Self { min, max })
     }
 
-    fn with_sequence(
-        star_optiont: Option<String>,
+    fn generate(&mut self) -> serde_json::Value {
+        let mut rng = thread_rng();
+        let result = rng.gen_range(self.min..=self.max);
+        json!(result)
+    }
+}
+
+impl<T> NumericFieldSequenceGenerator for NumericFieldSequenceConcrete<T>
+where
+    T: NumericType,
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+{
+    fn new(
+        star_option: Option<String>,
         end_option: Option<String>,
         split_index: u64,
         split_num: u64,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
         let mut start = T::DEFAULT_START;
         let mut end = T::DEFAULT_END;
 
-        if let Some(star_optiont) = star_optiont {
+        if let Some(star_optiont) = star_option {
             start = star_optiont.parse::<T>()?;
         }
         if let Some(end_option) = end_option {
@@ -110,9 +128,7 @@ where
         }
 
         assert!(start < end);
-
         Ok(Self {
-            kind: FieldKind::Sequence,
             start,
             end,
             split_index,
@@ -122,25 +138,16 @@ where
     }
 
     fn generate(&mut self) -> serde_json::Value {
-        match self.kind {
-            FieldKind::Random => {
-                let mut rng = thread_rng();
-                let result = rng.gen_range(self.min..=self.max);
-                json!(result)
-            }
-            FieldKind::Sequence => {
-                let partition_result = self.start
-                    + T::from(self.split_index).unwrap()
-                    + T::from(self.split_num).unwrap() * self.cur;
-                let partition_result = if partition_result > self.end {
-                    None
-                } else {
-                    Some(partition_result)
-                };
-                self.cur += T::one();
-                json!(partition_result)
-            }
-        }
+        let partition_result = self.start
+            + T::from(self.split_index).unwrap()
+            + T::from(self.split_num).unwrap() * self.cur;
+        let partition_result = if partition_result > self.end {
+            None
+        } else {
+            Some(partition_result)
+        };
+        self.cur += T::one();
+        json!(partition_result)
     }
 }
 
@@ -148,41 +155,50 @@ where
 macro_rules! for_all_fields_variants {
     ($macro:ident) => {
         $macro! {
-            { I16Field,i16 },
-            { I32Field,i32 },
-            { I64Field,i64 },
-            { F32Field,f32 },
-            { F64Field,f64 }
+            { I16RandomField,I16SequenceField,i16 },
+            { I32RandomField,I32SequenceField,i32 },
+            { I64RandomField,I64SequenceField,i64 },
+            { F32RandomField,F32SequenceField,f32 },
+            { F64RandomField,F64SequenceField,f64 }
         }
     };
 }
 
-macro_rules! gen_field_alias {
-    ($({ $variant_name:ident, $field_type:ty }),*) => {
+macro_rules! gen_random_field_alias {
+    ($({ $random_variant_name:ident, $sequence_variant_name:ident,$field_type:ty }),*) => {
         $(
-            pub type $variant_name = NumericFieldConcrete<$field_type>;
+            pub type $random_variant_name = NumericFieldRandomConcrete<$field_type>;
+        )*
+    };
+}
+
+macro_rules! gen_sequence_field_alias {
+    ($({ $random_variant_name:ident, $sequence_variant_name:ident,$field_type:ty }),*) => {
+        $(
+            pub type $sequence_variant_name = NumericFieldSequenceConcrete<$field_type>;
         )*
     };
 }
 
 for_all_fields_variants! { impl_numeric_type }
-for_all_fields_variants! { gen_field_alias }
+for_all_fields_variants! { gen_random_field_alias }
+for_all_fields_variants! { gen_sequence_field_alias }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn test_field_generator_with_sequence() {
+    fn test_sequence_field_generator() {
         let mut i16_field =
-            I16Field::with_sequence(Some("5".to_string()), Some("10".to_string()), 0, 1).unwrap();
+            I16SequenceField::new(Some("5".to_string()), Some("10".to_string()), 0, 1).unwrap();
         for i in 5..=10 {
             assert_eq!(i16_field.generate(), json!(i));
         }
     }
     #[test]
-    fn test_field_generator_with_random() {
+    fn test_random_field_generator() {
         let mut i64_field =
-            I64Field::with_random(Some("5".to_string()), Some("10".to_string())).unwrap();
+            I64RandomField::new(Some("5".to_string()), Some("10".to_string())).unwrap();
         for _ in 0..100 {
             let res = i64_field.generate();
             assert!(res.is_number());

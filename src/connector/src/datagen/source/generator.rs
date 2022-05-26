@@ -83,9 +83,8 @@ impl DatagenEventGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::datagen::source::field_generator::FieldKind;
 
-    async fn check_partition_result(
+    async fn check_sequence_partition_result(
         split_num: u64,
         split_index: u64,
         rows_per_second: u64,
@@ -95,9 +94,8 @@ mod tests {
         let mut fields_map = HashMap::new();
         fields_map.insert(
             "v1".to_string(),
-            FieldGeneratorImpl::new(
+            FieldGeneratorImpl::with_sequence(
                 risingwave_common::types::DataType::Int32,
-                FieldKind::Sequence,
                 Some("1".to_string()),
                 Some("10".to_string()),
                 split_index,
@@ -108,9 +106,8 @@ mod tests {
 
         fields_map.insert(
             "v2".to_string(),
-            FieldGeneratorImpl::new(
+            FieldGeneratorImpl::with_sequence(
                 risingwave_common::types::DataType::Float32,
-                FieldKind::Sequence,
                 Some("1".to_string()),
                 Some("10".to_string()),
                 split_index,
@@ -135,19 +132,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_one_partition_sequence() {
-        check_partition_result(1, 0, 10, 10).await;
+        check_sequence_partition_result(1, 0, 10, 10).await;
     }
 
     #[tokio::test]
     async fn test_two_partition_sequence() {
-        check_partition_result(2, 0, 10, 5).await;
-        check_partition_result(2, 1, 10, 5).await;
+        check_sequence_partition_result(2, 0, 10, 5).await;
+        check_sequence_partition_result(2, 1, 10, 5).await;
     }
 
     #[tokio::test]
     async fn test_three_partition_sequence() {
-        check_partition_result(3, 0, 10, 4).await;
-        check_partition_result(3, 1, 10, 3).await;
-        check_partition_result(3, 2, 10, 3).await;
+        check_sequence_partition_result(3, 0, 10, 4).await;
+        check_sequence_partition_result(3, 1, 10, 3).await;
+        check_sequence_partition_result(3, 2, 10, 3).await;
     }
 }

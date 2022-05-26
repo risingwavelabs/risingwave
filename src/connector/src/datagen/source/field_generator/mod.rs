@@ -30,26 +30,32 @@ pub const DEFAULT_MAX: i16 = i16::MAX;
 pub const DEFAULT_START: i16 = 0;
 pub const DEFAULT_END: i16 = i16::MAX;
 
-/// default max_past for TimestampField =  1 day
+/// default max past for `TimestampField` = 1 day
 pub const DEFAULT_MAX_PAST: Duration = Duration::from_secs(60 * 60 * 24);
 
-/// default length for VarcharField = 10
+/// default length for `VarcharField` = 10
 pub const DEFAULT_LENGTH: usize = 10;
 
-/// fields that can be continuously or randomly generated impl this trait
-/// such as i32, float32
-pub trait NumericFieldGenerator {
-    fn with_sequence(
-        min: Option<String>,
-        max: Option<String>,
+/// fields that can be randomly generated impl this trait
+pub trait NumericFieldRandomGenerator {
+    fn new(min: Option<String>, max: Option<String>) -> Result<Self>
+    where
+        Self: Sized;
+
+    fn generate(&mut self) -> Value;
+}
+
+/// fields that can be continuously generated impl this trait
+pub trait NumericFieldSequenceGenerator {
+    fn new(
+        start: Option<String>,
+        end: Option<String>,
         split_index: u64,
         split_num: u64,
     ) -> Result<Self>
     where
         Self: Sized;
-    fn with_random(start: Option<String>, end: Option<String>) -> Result<Self>
-    where
-        Self: Sized;
+
     fn generate(&mut self) -> Value;
 }
 
@@ -66,91 +72,106 @@ impl Default for FieldKind {
 }
 
 pub enum FieldGeneratorImpl {
-    I16(I16Field),
-    I32(I32Field),
-    I64(I64Field),
-    F32(F32Field),
-    F64(F64Field),
+    I16Sequence(I16SequenceField),
+    I32Sequence(I32SequenceField),
+    I64Sequence(I64SequenceField),
+    F32Sequence(F32SequenceField),
+    F64Sequence(F64SequenceField),
+    I16Random(I16RandomField),
+    I32Random(I32RandomField),
+    I64Random(I64RandomField),
+    F32Random(F32RandomField),
+    F64Random(F64RandomField),
     Varchar(VarcharField),
     Timestamp(TimestampField),
 }
 
 impl FieldGeneratorImpl {
-    pub fn new(
+    pub fn with_sequence(
         data_type: DataType,
-        kind: FieldKind,
-        first_arg: Option<String>,
-        second_arg: Option<String>,
+        start: Option<String>,
+        end: Option<String>,
         split_index: u64,
         split_num: u64,
     ) -> Result<Self> {
-        match kind {
-            // todo(d2lark) use macro to simplify the code later
-            FieldKind::Random => match data_type {
-                DataType::Int16 => Ok(FieldGeneratorImpl::I16(I16Field::with_random(
-                    first_arg, second_arg,
-                )?)),
-                DataType::Int32 => Ok(FieldGeneratorImpl::I32(I32Field::with_random(
-                    first_arg, second_arg,
-                )?)),
-                DataType::Int64 => Ok(FieldGeneratorImpl::I64(I64Field::with_random(
-                    first_arg, second_arg,
-                )?)),
-                DataType::Float32 => Ok(FieldGeneratorImpl::F32(F32Field::with_random(
-                    first_arg, second_arg,
-                )?)),
-                DataType::Float64 => Ok(FieldGeneratorImpl::F64(F64Field::with_random(
-                    first_arg, second_arg,
-                )?)),
-                DataType::Varchar => Ok(FieldGeneratorImpl::Varchar(VarcharField::new(first_arg)?)),
-                DataType::Timestamp => Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(
-                    first_arg,
-                )?)),
-                _ => unimplemented!(),
-            },
-            FieldKind::Sequence => match data_type {
-                DataType::Int16 => Ok(FieldGeneratorImpl::I16(I16Field::with_sequence(
-                    first_arg,
-                    second_arg,
-                    split_index,
-                    split_num,
-                )?)),
-                DataType::Int32 => Ok(FieldGeneratorImpl::I32(I32Field::with_sequence(
-                    first_arg,
-                    second_arg,
-                    split_index,
-                    split_num,
-                )?)),
-                DataType::Int64 => Ok(FieldGeneratorImpl::I64(I64Field::with_sequence(
-                    first_arg,
-                    second_arg,
-                    split_index,
-                    split_num,
-                )?)),
-                DataType::Float32 => Ok(FieldGeneratorImpl::F32(F32Field::with_sequence(
-                    first_arg,
-                    second_arg,
-                    split_index,
-                    split_num,
-                )?)),
-                DataType::Float64 => Ok(FieldGeneratorImpl::F64(F64Field::with_sequence(
-                    first_arg,
-                    second_arg,
-                    split_index,
-                    split_num,
-                )?)),
-                _ => unimplemented!(),
-            },
+        match data_type {
+            DataType::Int16 => Ok(FieldGeneratorImpl::I16Sequence(I16SequenceField::new(
+                start,
+                end,
+                split_index,
+                split_num,
+            )?)),
+            DataType::Int32 => Ok(FieldGeneratorImpl::I32Sequence(I32SequenceField::new(
+                start,
+                end,
+                split_index,
+                split_num,
+            )?)),
+            DataType::Int64 => Ok(FieldGeneratorImpl::I64Sequence(I64SequenceField::new(
+                start,
+                end,
+                split_index,
+                split_num,
+            )?)),
+            DataType::Float32 => Ok(FieldGeneratorImpl::F32Sequence(F32SequenceField::new(
+                start,
+                end,
+                split_index,
+                split_num,
+            )?)),
+            DataType::Float64 => Ok(FieldGeneratorImpl::F64Sequence(F64SequenceField::new(
+                start,
+                end,
+                split_index,
+                split_num,
+            )?)),
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn with_random(
+        data_type: DataType,
+        min: Option<String>,
+        max: Option<String>,
+        mast_past: Option<String>,
+        length: Option<String>,
+    ) -> Result<Self> {
+        match data_type {
+            DataType::Int16 => Ok(FieldGeneratorImpl::I16Random(I16RandomField::new(
+                min, max,
+            )?)),
+            DataType::Int32 => Ok(FieldGeneratorImpl::I32Random(I32RandomField::new(
+                min, max,
+            )?)),
+            DataType::Int64 => Ok(FieldGeneratorImpl::I64Random(I64RandomField::new(
+                min, max,
+            )?)),
+            DataType::Float32 => Ok(FieldGeneratorImpl::F32Random(F32RandomField::new(
+                min, max,
+            )?)),
+            DataType::Float64 => Ok(FieldGeneratorImpl::F64Random(F64RandomField::new(
+                min, max,
+            )?)),
+            DataType::Varchar => Ok(FieldGeneratorImpl::Varchar(VarcharField::new(length)?)),
+            DataType::Timestamp => Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(
+                mast_past,
+            )?)),
+            _ => unimplemented!(),
         }
     }
 
     pub fn generate(&mut self) -> Value {
         match self {
-            FieldGeneratorImpl::I16(f) => f.generate(),
-            FieldGeneratorImpl::I32(f) => f.generate(),
-            FieldGeneratorImpl::I64(f) => f.generate(),
-            FieldGeneratorImpl::F32(f) => f.generate(),
-            FieldGeneratorImpl::F64(f) => f.generate(),
+            FieldGeneratorImpl::I16Sequence(f) => f.generate(),
+            FieldGeneratorImpl::I32Sequence(f) => f.generate(),
+            FieldGeneratorImpl::I64Sequence(f) => f.generate(),
+            FieldGeneratorImpl::F32Sequence(f) => f.generate(),
+            FieldGeneratorImpl::F64Sequence(f) => f.generate(),
+            FieldGeneratorImpl::I16Random(f) => f.generate(),
+            FieldGeneratorImpl::I32Random(f) => f.generate(),
+            FieldGeneratorImpl::I64Random(f) => f.generate(),
+            FieldGeneratorImpl::F32Random(f) => f.generate(),
+            FieldGeneratorImpl::F64Random(f) => f.generate(),
             FieldGeneratorImpl::Varchar(f) => f.generate(),
             FieldGeneratorImpl::Timestamp(f) => f.generate(),
         }
@@ -165,11 +186,10 @@ mod tests {
     fn test_partition_sequence() {
         let split_num = 4;
         let mut i32_fields = vec![];
-        for split_index in 0..4 {
+        for split_index in 0..split_num {
             i32_fields.push(
-                FieldGeneratorImpl::new(
+                FieldGeneratorImpl::with_sequence(
                     DataType::Int32,
-                    FieldKind::Sequence,
                     Some("1".to_string()),
                     Some("20".to_string()),
                     split_index,
@@ -183,8 +203,8 @@ mod tests {
             for (index, i32_field) in i32_fields.iter_mut().enumerate() {
                 let value = i32_field.generate();
                 assert!(value.is_number());
-                let num = value.as_i64();
-                let expected_num = 4 * step + 1 + index as i64;
+                let num = value.as_u64();
+                let expected_num = split_num * step + 1 + index as u64;
                 assert_eq!(expected_num, num.unwrap());
             }
         }

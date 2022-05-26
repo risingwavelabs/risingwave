@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::field_generator::{FieldGeneratorImpl, FieldKind};
+use super::field_generator::FieldGeneratorImpl;
 use super::generator::DatagenEventGenerator;
 use crate::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::datagen::{DatagenProperties, DatagenSplit};
@@ -74,6 +74,7 @@ impl SplitReader for DatagenSplitReader {
         let fields_option_map = properties.fields;
         let mut fields_map = HashMap::<String, FieldGeneratorImpl>::new();
 
+        // check columns
         assert!(columns.as_ref().is_some());
         let columns = columns.unwrap();
         assert!(columns.len() > 1);
@@ -89,13 +90,13 @@ impl SplitReader for DatagenSplitReader {
         // 'fields.f_sequence.kind'='sequence',
         // 'fields.f_sequence.start'='1',
         // 'fields.f_sequence.end'='1000',
-       
+
         // 'fields.f_random.min'='1',
         // 'fields.f_random.max'='1000',
-       
+
         // 'fields.f_random_str.length'='10'
         // )
-        
+
         for column in columns {
             let name = column.name.clone();
             let kind_key = format!("fields.{}.kind", name);
@@ -107,13 +108,12 @@ impl SplitReader for DatagenSplitReader {
                 fields_option_map.get(&max_past_key).map(|s| s.to_string());
                 fields_map.insert(
                     name,
-                    FieldGeneratorImpl::new(
+                    FieldGeneratorImpl::with_random(
                         data_type,
-                            FieldKind::Random,
-                            max_past_value,
+                            None,
                         None,
-                        split_index,
-                        split_num
+                        max_past_value,
+                        None
                     )?,
                 );},
                 DataType::Varchar => {
@@ -122,13 +122,12 @@ impl SplitReader for DatagenSplitReader {
                 fields_option_map.get(&length_key).map(|s| s.to_string());
                 fields_map.insert(
                     name,
-                    FieldGeneratorImpl::new(
+                    FieldGeneratorImpl::with_random(
                         data_type,
-                            FieldKind::Random,
-                        length_value,
                         None,
-                        split_index,
-                        split_num
+                        None,
+                        None,
+                        length_value
                     )?,
                 );},
                 _ => {
@@ -140,9 +139,8 @@ impl SplitReader for DatagenSplitReader {
                         let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
                         fields_map.insert(
                             name,
-                            FieldGeneratorImpl::new(
+                            FieldGeneratorImpl::with_sequence(
                                 data_type,
-                                FieldKind::Sequence,
                                 start_value,
                                 end_value,
                                 split_index,
@@ -156,13 +154,12 @@ impl SplitReader for DatagenSplitReader {
                         let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
                         fields_map.insert(
                             name,
-                            FieldGeneratorImpl::new(
+                            FieldGeneratorImpl::with_random(
                                 data_type,
-                                FieldKind::Random,
                                 min_value,
                                 max_value,
-                                split_index,
-                                split_num
+                                None,
+                                None
                             )?,
                         );
                     }
