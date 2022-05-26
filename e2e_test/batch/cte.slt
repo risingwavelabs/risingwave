@@ -16,9 +16,6 @@ insert into t2 values (3, 4, 5);
 statement ok
 insert into t2 values (1, 2, 3);
 
-statement ok
-flush;
-
 query I
 with cte as (select v1, v2 from t1) select v1 from cte;
 ----
