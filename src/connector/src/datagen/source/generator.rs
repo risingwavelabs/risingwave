@@ -26,7 +26,7 @@ pub struct DatagenEventGenerator {
     pub events_so_far: u64,
     pub rows_per_second: u64,
     pub split_id: String,
-    pub partition_size:u64
+    pub partition_size: u64,
 }
 
 impl DatagenEventGenerator {
@@ -38,7 +38,7 @@ impl DatagenEventGenerator {
         split_num: u64,
         split_index: u64,
     ) -> Result<Self> {
-        let partition_size = if rows_per_second% split_num > split_index {
+        let partition_size = if rows_per_second % split_num > split_index {
             rows_per_second / split_num + 1
         } else {
             rows_per_second / split_num

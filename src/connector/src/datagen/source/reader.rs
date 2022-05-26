@@ -113,7 +113,8 @@ impl SplitReader for DatagenSplitReader {
                             None,
                         None,
                         max_past_value,
-                        None
+                        None,
+                        split_index
                     )?,
                 );},
                 DataType::Varchar => {
@@ -127,7 +128,8 @@ impl SplitReader for DatagenSplitReader {
                         None,
                         None,
                         None,
-                        length_value
+                        length_value,
+                        split_index
                     )?,
                 );},
                 _ => {
@@ -159,7 +161,8 @@ impl SplitReader for DatagenSplitReader {
                                 min_value,
                                 max_value,
                                 None,
-                                None
+                                None,
+                                split_index
                             )?,
                         );
                     }

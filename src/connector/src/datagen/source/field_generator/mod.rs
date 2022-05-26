@@ -38,7 +38,7 @@ pub const DEFAULT_LENGTH: usize = 10;
 
 /// fields that can be randomly generated impl this trait
 pub trait NumericFieldRandomGenerator {
-    fn new(min: Option<String>, max: Option<String>) -> Result<Self>
+    fn new(min: Option<String>, max: Option<String>, seed: u64) -> Result<Self>
     where
         Self: Sized;
 
@@ -47,12 +47,7 @@ pub trait NumericFieldRandomGenerator {
 
 /// fields that can be continuously generated impl this trait
 pub trait NumericFieldSequenceGenerator {
-    fn new(
-        start: Option<String>,
-        end: Option<String>,
-        offset: u64,
-        step: u64,
-    ) -> Result<Self>
+    fn new(start: Option<String>, end: Option<String>, offset: u64, step: u64) -> Result<Self>
     where
         Self: Sized;
 
@@ -135,22 +130,23 @@ impl FieldGeneratorImpl {
         max: Option<String>,
         mast_past: Option<String>,
         length: Option<String>,
+        seed: u64,
     ) -> Result<Self> {
         match data_type {
             DataType::Int16 => Ok(FieldGeneratorImpl::I16Random(I16RandomField::new(
-                min, max,
+                min, max, seed,
             )?)),
             DataType::Int32 => Ok(FieldGeneratorImpl::I32Random(I32RandomField::new(
-                min, max,
+                min, max, seed,
             )?)),
             DataType::Int64 => Ok(FieldGeneratorImpl::I64Random(I64RandomField::new(
-                min, max,
+                min, max, seed,
             )?)),
             DataType::Float32 => Ok(FieldGeneratorImpl::F32Random(F32RandomField::new(
-                min, max,
+                min, max, seed,
             )?)),
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Random(F64RandomField::new(
-                min, max,
+                min, max, seed,
             )?)),
             DataType::Varchar => Ok(FieldGeneratorImpl::Varchar(VarcharField::new(length)?)),
             DataType::Timestamp => Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(

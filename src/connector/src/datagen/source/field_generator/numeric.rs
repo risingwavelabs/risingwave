@@ -17,7 +17,8 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use rand::distributions::uniform::SampleUniform;
-use rand::{thread_rng, Rng};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use super::{DEFAULT_END, DEFAULT_MAX, DEFAULT_MIN, DEFAULT_START};
@@ -57,10 +58,10 @@ macro_rules! impl_numeric_type {
     };
 }
 
-#[derive(Default)]
 pub struct NumericFieldRandomConcrete<T> {
     min: T,
     max: T,
+    rng: StdRng,
 }
 
 #[derive(Default)]
@@ -77,7 +78,7 @@ where
     T: NumericType,
     <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
-    fn new(min_option: Option<String>, max_option: Option<String>) -> Result<Self>
+    fn new(min_option: Option<String>, max_option: Option<String>, seed: u64) -> Result<Self>
     where
         Self: Sized,
     {
@@ -93,12 +94,13 @@ where
 
         assert!(min < max);
 
-        Ok(Self { min, max })
+        let rng = StdRng::seed_from_u64(seed);
+
+        Ok(Self { min, max, rng })
     }
 
     fn generate(&mut self) -> serde_json::Value {
-        let mut rng = thread_rng();
-        let result = rng.gen_range(self.min..=self.max);
+        let result = self.rng.gen_range(self.min..=self.max);
         json!(result)
     }
 }
@@ -137,9 +139,8 @@ where
     }
 
     fn generate(&mut self) -> serde_json::Value {
-        let partition_result = self.start
-            + T::from(self.offset).unwrap()
-            + T::from(self.step).unwrap() * self.cur;
+        let partition_result =
+            self.start + T::from(self.offset).unwrap() + T::from(self.step).unwrap() * self.cur;
         let partition_result = if partition_result > self.end {
             None
         } else {
@@ -197,7 +198,7 @@ mod tests {
     #[test]
     fn test_random_field_generator() {
         let mut i64_field =
-            I64RandomField::new(Some("5".to_string()), Some("10".to_string())).unwrap();
+            I64RandomField::new(Some("5".to_string()), Some("10".to_string()), 114).unwrap();
         for _ in 0..100 {
             let res = i64_field.generate();
             assert!(res.is_number());
