@@ -119,7 +119,7 @@ where
     }
 }
 #[derive(Clone, Copy, Debug)]
-pub enum Operation {
+pub enum Comparison {
     Eq,
     Ne,
     Lt,
@@ -128,27 +128,27 @@ pub enum Operation {
     Ge,
 }
 
-pub(crate) static EQ: Operation = Operation::Eq;
-pub(crate) static NE: Operation = Operation::Ne;
-pub(crate) static LT: Operation = Operation::Lt;
-pub(crate) static GT: Operation = Operation::Gt;
-pub(crate) static LE: Operation = Operation::Le;
-pub(crate) static GE: Operation = Operation::Ge;
+pub(crate) static EQ: Comparison = Comparison::Eq;
+pub(crate) static NE: Comparison = Comparison::Ne;
+pub(crate) static LT: Comparison = Comparison::Lt;
+pub(crate) static GT: Comparison = Comparison::Gt;
+pub(crate) static LE: Comparison = Comparison::Le;
+pub(crate) static GE: Comparison = Comparison::Ge;
 
 #[inline(always)]
-pub fn struct_cmp(op: Operation) -> fn(StructRef, StructRef) -> Result<bool> {
+pub fn gen_struct_cmp(op: Comparison) -> fn(StructRef, StructRef) -> Result<bool> {
     use crate::gen_cmp;
     gen_cmp!(op)
 }
 
 #[inline(always)]
-pub fn list_cmp(op: Operation) -> fn(ListRef, ListRef) -> Result<bool> {
+pub fn gen_list_cmp(op: Comparison) -> fn(ListRef, ListRef) -> Result<bool> {
     use crate::gen_cmp;
     gen_cmp!(op)
 }
 
 #[inline(always)]
-pub fn str_cmp(op: Operation) -> fn(&str, &str) -> Result<bool> {
+pub fn gen_str_cmp(op: Comparison) -> fn(&str, &str) -> Result<bool> {
     use crate::gen_cmp;
     gen_cmp!(op)
 }
@@ -157,19 +157,19 @@ pub fn str_cmp(op: Operation) -> fn(&str, &str) -> Result<bool> {
 macro_rules! gen_cmp {
     ($op:expr) => {
         match $op {
-            Operation::Eq => |l, r| Ok(l == r),
-            Operation::Ne => |l, r| Ok(l != r),
-            Operation::Lt => |l, r| Ok(l < r),
-            Operation::Gt => |l, r| Ok(l > r),
-            Operation::Le => |l, r| Ok(l <= r),
-            Operation::Ge => |l, r| Ok(l >= r),
+            Comparison::Eq => |l, r| Ok(l == r),
+            Comparison::Ne => |l, r| Ok(l != r),
+            Comparison::Lt => |l, r| Ok(l < r),
+            Comparison::Gt => |l, r| Ok(l > r),
+            Comparison::Le => |l, r| Ok(l <= r),
+            Comparison::Ge => |l, r| Ok(l >= r),
         }
     };
 }
 
 pub fn str_is_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Option<bool>> {
     match (l, r) {
-        (Some(lv), Some(rv)) => Ok(str_cmp(Operation::Ne)(lv, rv).ok()),
+        (Some(lv), Some(rv)) => Ok(Some(lv != rv)),
         (Some(_), None) => Ok(Some(true)),
         (None, Some(_)) => Ok(Some(true)),
         (None, None) => Ok(Some(false)),

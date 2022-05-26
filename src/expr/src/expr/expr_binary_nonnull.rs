@@ -118,7 +118,7 @@ macro_rules! gen_binary_expr_cmp {
                     $l,
                     $r,
                     $ret,
-                    str_cmp($op),
+                    gen_str_cmp($op),
                 ))
             }
             (DataType::Struct { fields: _ }, DataType::Struct { fields: _ }) => Box::new(
@@ -126,7 +126,7 @@ macro_rules! gen_binary_expr_cmp {
                     $l,
                     $r,
                     $ret,
-                    struct_cmp($op),
+                    gen_struct_cmp($op),
                 ),
             ),
             (DataType::List { datatype: _ }, DataType::List { datatype: _ }) => {
@@ -134,7 +134,7 @@ macro_rules! gen_binary_expr_cmp {
                     $l,
                     $r,
                     $ret,
-                    list_cmp($op),
+                    gen_list_cmp($op),
                 ))
             }
             _ => {
