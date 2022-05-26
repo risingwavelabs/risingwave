@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::ops::Index;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::ensure;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -52,6 +53,11 @@ impl Expression for InputRefExpression {
             }
             None => Ok(array),
         }
+    }
+
+    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+        let cell = input.index(self.idx).as_ref().cloned();
+        Ok(cell)
     }
 }
 

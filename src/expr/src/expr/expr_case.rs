@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, ScalarRefImpl, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, ScalarRefImpl, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
 
@@ -93,6 +93,31 @@ impl Expression for CaseExpression {
         }
         let output_array = output_array.finish()?.into();
         Ok(output_array)
+    }
+
+    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+        let els = self
+            .else_clause
+            .as_deref()
+            .map(|else_clause| else_clause.eval_row_ref(input).unwrap());
+        let when_then_first = self
+            .when_clauses
+            .iter()
+            .map(|when_clause| {
+                (
+                    when_clause.when.eval_row_ref(input).unwrap(),
+                    when_clause.then.eval_row_ref(input).unwrap(),
+                )
+            })
+            .find(|(w, _)| *(w.as_ref().unwrap_or(&ScalarImpl::Bool(false)).as_bool()));
+
+        let ret = if let Some((_, t)) = when_then_first {
+            t
+        } else {
+            els.unwrap_or(None)
+        };
+
+        Ok(ret)
     }
 }
 

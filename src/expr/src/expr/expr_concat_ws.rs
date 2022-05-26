@@ -16,10 +16,10 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8ArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Row, Utf8ArrayBuilder,
 };
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -84,6 +84,33 @@ impl Expression for ConcatWsExpression {
             builder = writer.finish()?.into_inner();
         }
         Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
+    }
+
+    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+        let sep = self.sep_expr.eval_row_ref(input)?;
+        let sep = match sep {
+            Some(sep) => sep,
+            None => return Ok(None),
+        };
+
+        let strings = self
+            .string_exprs
+            .iter()
+            .map(|c| c.eval_row_ref(input))
+            .collect::<Result<Vec<_>>>()?;
+        let mut final_string = String::new();
+
+        let mut strings_iter = strings.iter();
+        if let Some(string) = strings_iter.by_ref().flatten().next() {
+            final_string.push_str(string.as_utf8())
+        }
+
+        for string in strings_iter.flatten() {
+            final_string.push_str(sep.as_utf8());
+            final_string.push_str(string.as_utf8());
+        }
+
+        Ok(Some(final_string.to_scalar_value()))
     }
 }
 

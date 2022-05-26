@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use prost::DecodeError;
 use risingwave_common::array::{
-    read_interval_unit, Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk,
+    read_interval_unit, Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, Row,
 };
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -68,6 +68,10 @@ impl Expression for LiteralExpression {
         let literal = &self.literal;
         for_all_variants! {array_impl_literal_append, builder, literal, cardinality}
         array_builder.finish().map(Arc::new)
+    }
+
+    fn eval_row_ref(&self, _input: &Row) -> Result<Datum> {
+        Ok(self.literal.as_ref().cloned())
     }
 }
 

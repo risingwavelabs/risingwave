@@ -14,9 +14,11 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, BoolArrayBuilder, DataChunk};
+use risingwave_common::array::{
+    ArrayBuilder, ArrayImpl, ArrayRef, BoolArrayBuilder, DataChunk, Row,
+};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
 
@@ -65,6 +67,12 @@ impl Expression for IsNullExpression {
 
         Ok(Arc::new(ArrayImpl::Bool(builder.finish()?)))
     }
+
+    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+        let result = self.child.eval_row_ref(input)?;
+        let is_null = result.is_none();
+        Ok(Some(is_null.to_scalar_value()))
+    }
 }
 
 impl Expression for IsNotNullExpression {
@@ -81,6 +89,12 @@ impl Expression for IsNotNullExpression {
             .try_for_each(|b| builder.append(Some(b)))?;
 
         Ok(Arc::new(ArrayImpl::Bool(builder.finish()?)))
+    }
+
+    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+        let result = self.child.eval_row_ref(input)?;
+        let is_not_null = result.is_some();
+        Ok(Some(is_not_null.to_scalar_value()))
     }
 }
 

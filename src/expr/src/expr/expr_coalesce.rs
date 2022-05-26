@@ -15,9 +15,9 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -56,6 +56,21 @@ impl Expression for CoalesceExpression {
             builder.append_datum(&data)?;
         }
         Ok(Arc::new(builder.finish()?))
+    }
+
+    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+        let children_array = self
+            .children
+            .iter()
+            .map(|c| c.eval_row_ref(input))
+            .collect::<Result<Vec<_>>>()?;
+        for datum in children_array {
+            if datum.is_some() {
+                return Ok(datum);
+            }
+        }
+
+        Ok(None)
     }
 }
 

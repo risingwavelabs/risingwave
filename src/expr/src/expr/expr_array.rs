@@ -17,10 +17,10 @@ use std::sync::Arc;
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder,
+    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue, Row,
 };
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -61,6 +61,15 @@ impl Expression for ArrayExpression {
             .rows()
             .try_for_each(|row| builder.append_row_ref(row))?;
         builder.finish().map(|a| Arc::new(ArrayImpl::List(a)))
+    }
+
+    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+        let datums = self
+            .elements
+            .iter()
+            .map(|e| e.eval_row_ref(input))
+            .collect::<Result<Vec<Datum>>>()?;
+        Ok(Some(ListValue::new(datums).to_scalar_value()))
     }
 }
 

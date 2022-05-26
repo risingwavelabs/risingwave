@@ -17,8 +17,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
-use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
+use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk, Row};
+use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
 
@@ -78,6 +78,12 @@ impl Expression for InExpression {
             }
         };
         Ok(Arc::new(output_array.finish()?.into()))
+    }
+
+    fn eval_row_ref(&self, input: &Row) -> risingwave_common::error::Result<Datum> {
+        let data = self.left.eval_row_ref(input)?;
+        let ret = self.exists(&data);
+        Ok(Some(ret.to_scalar_value()))
     }
 }
 
