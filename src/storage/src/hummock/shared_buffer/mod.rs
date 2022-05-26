@@ -109,7 +109,6 @@ impl SharedBuffer {
     pub fn get_overlap_data<R, B>(
         &self,
         key_range: &R,
-        backward_range: bool,
         vnode_set: Option<&VNodeBitmap>,
     ) -> (Vec<SharedBufferBatch>, Vec<UncommittedData>)
     where
@@ -119,30 +118,17 @@ impl SharedBuffer {
         let replicated_batches = self
             .replicate_batches
             .range((
-                if backward_range {
-                    key_range.end_bound().map(|b| b.as_ref().to_vec())
-                } else {
-                    key_range.start_bound().map(|b| b.as_ref().to_vec())
-                },
+                key_range.start_bound().map(|b| b.as_ref().to_vec()),
                 std::ops::Bound::Unbounded,
             ))
             .filter(|(_, batch)| {
-                range_overlap(
-                    key_range,
-                    batch.start_user_key(),
-                    batch.end_user_key(),
-                    backward_range,
-                )
+                range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
             })
             .map(|(_, batches)| batches.clone())
             .collect_vec();
 
         let range = (
-            if backward_range {
-                key_range.end_bound().map(|b| b.as_ref().to_vec())
-            } else {
-                key_range.start_bound().map(|b| b.as_ref().to_vec())
-            },
+            key_range.start_bound().map(|b| b.as_ref().to_vec()),
             std::ops::Bound::Unbounded,
         );
 
@@ -155,15 +141,10 @@ impl SharedBuffer {
                     .flat_map(|payload| payload.range(range.clone())),
             )
             .filter(|(_, data)| match data {
-                UncommittedData::Batch(batch) => range_overlap(
-                    key_range,
-                    batch.start_user_key(),
-                    batch.end_user_key(),
-                    backward_range,
-                ),
-                UncommittedData::Sst(info) => {
-                    filter_single_sst(info, key_range, backward_range, vnode_set)
+                UncommittedData::Batch(batch) => {
+                    range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
                 }
+                UncommittedData::Sst(info) => filter_single_sst(info, key_range, vnode_set),
             })
             .map(|(_, data)| data.clone())
             .collect_vec();
@@ -358,7 +339,7 @@ mod tests {
         for key in &keys[0..3] {
             // Single key
             let (replicate_batches, overlap_data) =
-                shared_buffer.get_overlap_data(&(key.clone()..=key.clone()), false, None);
+                shared_buffer.get_overlap_data(&(key.clone()..=key.clone()), None);
             assert_eq!(overlap_data.len(), 1);
             assert_eq!(
                 overlap_data[0],
@@ -369,18 +350,7 @@ mod tests {
 
             // Forward key range
             let (replicate_batches, overlap_data) =
-                shared_buffer.get_overlap_data(&(key.clone()..=keys[3].clone()), false, None);
-            assert_eq!(overlap_data.len(), 1);
-            assert_eq!(
-                overlap_data[0],
-                UncommittedData::Batch(shared_buffer_batch1.clone()),
-            );
-            assert_eq!(replicate_batches.len(), 1);
-            assert_eq!(replicate_batches[0], shared_buffer_batch2);
-
-            // Backward key range
-            let (replicate_batches, overlap_data) =
-                shared_buffer.get_overlap_data(&(keys[3].clone()..=key.clone()), true, None);
+                shared_buffer.get_overlap_data(&(key.clone()..=keys[3].clone()), None);
             assert_eq!(overlap_data.len(), 1);
             assert_eq!(
                 overlap_data[0],
@@ -391,19 +361,13 @@ mod tests {
         }
         // Non-existent key
         let (replicate_batches, overlap_data) =
-            shared_buffer.get_overlap_data(&(large_key.clone()..=large_key.clone()), false, None);
+            shared_buffer.get_overlap_data(&(large_key.clone()..=large_key.clone()), None);
         assert!(replicate_batches.is_empty());
         assert!(overlap_data.is_empty());
 
         // Non-existent key range forward
         let (replicate_batches, overlap_data) =
-            shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key.clone()), false, None);
-        assert!(replicate_batches.is_empty());
-        assert!(overlap_data.is_empty());
-
-        // Non-existent key range backward
-        let (replicate_batches, overlap_data) =
-            shared_buffer.get_overlap_data(&(large_key.clone()..=keys[3].clone()), true, None);
+            shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key.clone()), None);
         assert!(replicate_batches.is_empty());
         assert!(overlap_data.is_empty());
     }

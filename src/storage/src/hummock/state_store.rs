@@ -78,7 +78,6 @@ impl HummockStorage {
     {
         let read_options = Arc::new(ReadOptions::default());
         let mut overlapped_iters = vec![];
-        let backward = T::direction() == DirectionEnum::Backward;
 
         let (shared_buffer_data, pinned_version) = {
             let read_version = self.local_version_manager.read_version(epoch);
@@ -91,7 +90,7 @@ impl HummockStorage {
             let shared_buffer_data = read_version
                 .shared_buffer
                 .iter()
-                .map(|shared_buffer| shared_buffer.get_overlap_data(&key_range, backward, None))
+                .map(|shared_buffer| shared_buffer.get_overlap_data(&key_range, None))
                 .collect_vec();
 
             (shared_buffer_data, read_version.pinned_version)
@@ -128,8 +127,7 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos =
-                prune_ssts(level.get_table_infos().iter(), &key_range, backward, None);
+            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, None);
             if table_infos.is_empty() {
                 continue;
             }
@@ -145,17 +143,16 @@ impl HummockStorage {
                 assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
                 let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
 
-                let tables = if backward {
-                    matched_table_infos
+                let tables = match T::Direction::direction() {
+                    DirectionEnum::Backward => matched_table_infos
                         .iter()
                         .rev()
                         .map(|&info| info.clone())
-                        .collect_vec()
-                } else {
-                    matched_table_infos
+                        .collect_vec(),
+                    DirectionEnum::Forward => matched_table_infos
                         .iter()
                         .map(|&info| info.clone())
-                        .collect_vec()
+                        .collect_vec(),
                 };
 
                 overlapped_iters.push(Box::new(ConcatIteratorInner::<T::SstableIteratorType>::new(
@@ -182,17 +179,10 @@ impl HummockStorage {
             .iter_merge_sstable_counts
             .observe(overlapped_iters.len() as f64);
 
-        let key_range = if backward {
-            (
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-            )
-        } else {
-            (
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
-            )
-        };
+        let key_range = (
+            key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            key_range.end_bound().map(|b| b.as_ref().to_owned()),
+        );
 
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
@@ -231,7 +221,7 @@ impl HummockStorage {
                 .shared_buffer
                 .into_iter()
                 .map(|shared_buffer| {
-                    shared_buffer.get_overlap_data(&(key..=key), false, vnode_set.as_ref())
+                    shared_buffer.get_overlap_data(&(key..=key), vnode_set.as_ref())
                 })
                 .collect_vec();
             (shared_buffer_data, read_version.pinned_version)
@@ -292,12 +282,8 @@ impl HummockStorage {
                 continue;
             }
             {
-                let table_infos = prune_ssts(
-                    level.table_infos.iter(),
-                    &(key..=key),
-                    false,
-                    vnode_set.as_ref(),
-                );
+                let table_infos =
+                    prune_ssts(level.table_infos.iter(), &(key..=key), vnode_set.as_ref());
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
@@ -417,7 +403,11 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, BackwardIter>(key_range, epoch)
+        let key_range = (
+            key_range.end_bound().map(|v| v.as_ref().to_vec()),
+            key_range.start_bound().map(|v| v.as_ref().to_vec()),
+        );
+        self.iter_inner::<_, _, BackwardIter>(key_range, epoch)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
