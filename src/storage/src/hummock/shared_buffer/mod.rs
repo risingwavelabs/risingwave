@@ -21,7 +21,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::RangeBounds;
 
 use itertools::Itertools;
-#[cfg(test)]
 use risingwave_hummock_sdk::is_remote_sst_id;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_pb::hummock::{KeyRange, SstableInfo, VNodeBitmap};
@@ -226,31 +225,24 @@ impl SharedBuffer {
         }
     }
 
-    #[cfg(test)]
-    pub fn check_committed_shared_buffer(&self) {
-        assert!(self.uploading_tasks.is_empty());
+    pub fn get_ssts_to_commit(&self) -> Vec<SstableInfo> {
+        assert!(
+            self.uploading_tasks.is_empty(),
+            "when committing sst there should not be uploading task"
+        );
+        let mut ret = Vec::new();
         for data in self.uncommitted_data.values() {
             match data {
                 UncommittedData::Batch(_) => {
-                    panic!("there should not be any batch in committed data");
+                    panic!("there should not be any batch when committing sst");
                 }
                 UncommittedData::Sst(sst) => {
                     assert!(
                         is_remote_sst_id(sst.id),
-                        "all sst should be remote when trying to get committed ssts"
+                        "all sst should be remote when trying to get ssts to commit"
                     );
+                    ret.push(sst.clone());
                 }
-            }
-        }
-    }
-
-    #[cfg(test)]
-    pub fn get_remote_ssts(&self) -> Vec<SstableInfo> {
-        self.check_committed_shared_buffer();
-        let mut ret = Vec::new();
-        for data in self.uncommitted_data.values() {
-            if let UncommittedData::Sst(sst) = data {
-                ret.push(sst.clone());
             }
         }
         ret
