@@ -26,10 +26,11 @@ use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::join::hash_join_state::{BuildTable, ProbeTable};
-use crate::executor2::join::JoinType;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
+use crate::executor::join::JoinType;
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::{BatchTaskContext, TaskId};
 
 /// Parameters of equi-join.
@@ -63,11 +64,11 @@ pub(super) struct EquiJoinParams {
     pub cond: Option<BoxedExpression>,
 }
 
-pub(super) struct HashJoinExecutor2<K> {
+pub(super) struct HashJoinExecutor<K> {
     /// Probe side
-    left_child: Option<BoxedExecutor2>,
+    left_child: Option<BoxedExecutor>,
     /// Build side
-    right_child: Option<BoxedExecutor2>,
+    right_child: Option<BoxedExecutor>,
     params: EquiJoinParams,
     schema: Schema,
     identity: String,
@@ -116,7 +117,7 @@ impl EquiJoinParams {
     }
 }
 
-impl<K: HashKey + Send + Sync> Executor2 for HashJoinExecutor2<K> {
+impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -130,7 +131,7 @@ impl<K: HashKey + Send + Sync> Executor2 for HashJoinExecutor2<K> {
     }
 }
 
-impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
+impl<K: HashKey + Send + Sync> HashJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let mut right_child_stream = self.right_child.take().unwrap().execute();
@@ -237,15 +238,15 @@ pub enum HashJoinState {
     Done,
 }
 
-impl<K> HashJoinExecutor2<K> {
+impl<K> HashJoinExecutor<K> {
     fn new(
-        left_child: BoxedExecutor2,
-        right_child: BoxedExecutor2,
+        left_child: BoxedExecutor,
+        right_child: BoxedExecutor,
         params: EquiJoinParams,
         schema: Schema,
         identity: String,
     ) -> Self {
-        HashJoinExecutor2 {
+        HashJoinExecutor {
             left_child: Some(left_child),
             right_child: Some(right_child),
             params,
@@ -256,23 +257,23 @@ impl<K> HashJoinExecutor2<K> {
     }
 }
 
-pub struct HashJoinExecutor2Builder {
+pub struct HashJoinExecutorBuilder {
     params: EquiJoinParams,
-    left_child: BoxedExecutor2,
-    right_child: BoxedExecutor2,
+    left_child: BoxedExecutor,
+    right_child: BoxedExecutor,
     schema: Schema,
     task_id: TaskId,
 }
 
-struct HashJoinExecutor2BuilderDispatcher;
+struct HashJoinExecutorBuilderDispatcher;
 
 /// A dispatcher to help create specialized hash join executor.
-impl HashKeyDispatcher for HashJoinExecutor2BuilderDispatcher {
-    type Input = HashJoinExecutor2Builder;
-    type Output = BoxedExecutor2;
+impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
+    type Input = HashJoinExecutorBuilder;
+    type Output = BoxedExecutor;
 
-    fn dispatch<K: HashKey>(input: HashJoinExecutor2Builder) -> Self::Output {
-        Box::new(HashJoinExecutor2::<K>::new(
+    fn dispatch<K: HashKey>(input: HashJoinExecutorBuilder) -> Self::Output {
+        Box::new(HashJoinExecutor::<K>::new(
             input.left_child,
             input.right_child,
             input.params,
@@ -283,18 +284,18 @@ impl HashKeyDispatcher for HashJoinExecutor2BuilderDispatcher {
 }
 
 /// Hash join executor builder.
-impl BoxedExecutor2Builder for HashJoinExecutor2Builder {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
+    fn new_boxed_executor<C: BatchTaskContext>(
         context: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         ensure!(context.plan_node().get_children().len() == 2);
 
         let left_child = context
             .clone_for_plan(&context.plan_node.get_children()[0])
-            .build2()?;
+            .build()?;
         let right_child = context
             .clone_for_plan(&context.plan_node.get_children()[1])
-            .build2()?;
+            .build()?;
 
         let hash_join_node = try_match_expand!(
             context.plan_node().get_node_body().unwrap(),
@@ -359,7 +360,7 @@ impl BoxedExecutor2Builder for HashJoinExecutor2Builder {
 
         let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
 
-        let builder = HashJoinExecutor2Builder {
+        let builder = HashJoinExecutorBuilder {
             params,
             left_child,
             right_child,
@@ -369,7 +370,7 @@ impl BoxedExecutor2Builder for HashJoinExecutor2Builder {
             task_id: context.task_id.clone(),
         };
 
-        Ok(HashJoinExecutor2BuilderDispatcher::dispatch_by_kind(
+        Ok(HashJoinExecutorBuilderDispatcher::dispatch_by_kind(
             hash_key_kind,
             builder,
         ))
@@ -393,10 +394,10 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
 
+    use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
+    use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor2::join::hash_join::{EquiJoinParams, HashJoinExecutor2};
-    use crate::executor2::join::JoinType;
-    use crate::executor2::BoxedExecutor2;
+    use crate::executor::BoxedExecutor;
     struct DataChunkMerger {
         data_types: Vec<DataType>,
         array_builders: Vec<ArrayBuilderImpl>,
@@ -479,7 +480,7 @@ mod tests {
             }
         }
 
-        fn create_left_executor(&self) -> BoxedExecutor2 {
+        fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -519,7 +520,7 @@ mod tests {
             Box::new(executor)
         }
 
-        fn create_right_executor(&self) -> BoxedExecutor2 {
+        fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -603,7 +604,7 @@ mod tests {
             )
         }
 
-        fn create_join_executor(&self, has_non_equi_cond: bool) -> BoxedExecutor2 {
+        fn create_join_executor(&self, has_non_equi_cond: bool) -> BoxedExecutor {
             let join_type = self.join_type;
 
             let left_child = self.create_left_executor();
@@ -651,13 +652,13 @@ mod tests {
                 fields: schema_fields,
             };
 
-            Box::new(HashJoinExecutor2::<Key32>::new(
+            Box::new(HashJoinExecutor::<Key32>::new(
                 left_child,
                 right_child,
                 params,
                 schema,
                 "HashJoinExecutor2".to_string(),
-            )) as BoxedExecutor2
+            )) as BoxedExecutor
         }
 
         fn select_from_chunk(&self, data_chunk: DataChunk) -> DataChunk {

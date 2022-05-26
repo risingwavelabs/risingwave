@@ -22,17 +22,18 @@ use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk}
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
-pub struct FilterExecutor2 {
+pub struct FilterExecutor {
     expr: BoxedExpression,
-    child: BoxedExecutor2,
+    child: BoxedExecutor,
     identity: String,
 }
 
-impl Executor2 for FilterExecutor2 {
+impl Executor for FilterExecutor {
     fn schema(&self) -> &Schema {
         self.child.schema()
     }
@@ -46,7 +47,7 @@ impl Executor2 for FilterExecutor2 {
     }
 }
 
-impl FilterExecutor2 {
+impl FilterExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let mut data_chunk_builder =
@@ -93,10 +94,10 @@ impl FilterExecutor2 {
     }
 }
 
-impl BoxedExecutor2Builder for FilterExecutor2 {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for FilterExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let filter_node = try_match_expand!(
@@ -107,7 +108,7 @@ impl BoxedExecutor2Builder for FilterExecutor2 {
         let expr_node = filter_node.get_search_condition()?;
         let expr = build_from_prost(expr_node)?;
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build2()?;
+            let child = source.clone_for_plan(child_plan).build()?;
             debug!("Child schema: {:?}", child.schema());
 
             return Ok(Box::new(Self {
@@ -138,7 +139,7 @@ mod tests {
     use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor2::{Executor2, FilterExecutor2};
+    use crate::executor::{Executor, FilterExecutor};
 
     #[tokio::test]
     async fn test_filter_executor() {
@@ -154,7 +155,7 @@ mod tests {
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
         let expr = make_expression(Type::Equal);
-        let filter_executor = Box::new(FilterExecutor2 {
+        let filter_executor = Box::new(FilterExecutor {
             expr: build_from_prost(&expr).unwrap(),
             child: Box::new(mock_executor),
             identity: "FilterExecutor2".to_string(),

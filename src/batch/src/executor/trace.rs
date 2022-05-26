@@ -20,23 +20,23 @@ use risingwave_common::error::RwError;
 use tracing::event;
 use tracing_futures::Instrument;
 
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, Executor2};
+use crate::executor::{BoxedDataChunkStream, BoxedExecutor, Executor};
 
-/// If tracing is enabled, we build a [`TraceExecutor2`] on top of the underlying executor.
+/// If tracing is enabled, we build a [`TraceExecutor`] on top of the underlying executor.
 /// So the duration of performance-critical operations will be traced, such as open/next/close.
-pub struct TraceExecutor2 {
-    child: BoxedExecutor2,
+pub struct TraceExecutor {
+    child: BoxedExecutor,
     /// Description of input executor
     input_desc: String,
 }
 
-impl TraceExecutor2 {
-    pub fn new(child: BoxedExecutor2, input_desc: String) -> Self {
+impl TraceExecutor {
+    pub fn new(child: BoxedExecutor, input_desc: String) -> Self {
         Self { child, input_desc }
     }
 }
 
-impl Executor2 for TraceExecutor2 {
+impl Executor for TraceExecutor {
     fn schema(&self) -> &Schema {
         self.child.schema()
     }
@@ -50,7 +50,7 @@ impl Executor2 for TraceExecutor2 {
     }
 }
 
-impl TraceExecutor2 {
+impl TraceExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let input_desc = self.input_desc.as_str();

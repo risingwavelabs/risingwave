@@ -30,10 +30,10 @@ use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
-pub type ExchangeExecutor2<C> = GenericExchangeExecutor2<DefaultCreateSource, C>;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
+use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 
-pub struct GenericExchangeExecutor2<CS, C> {
+pub struct GenericExchangeExecutor<CS, C> {
     sources: Vec<ProstExchangeSource>,
     context: C,
 
@@ -91,12 +91,12 @@ impl CreateSource for DefaultCreateSource {
     }
 }
 
-pub struct GenericExchangeExecutor2Builder {}
+pub struct GenericExchangeExecutorBuilder {}
 
-impl BoxedExecutor2Builder for GenericExchangeExecutor2Builder {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Exchange
@@ -107,7 +107,7 @@ impl BoxedExecutor2Builder for GenericExchangeExecutor2Builder {
         let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
         let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
         Ok(Box::new(
-            GenericExchangeExecutor2::<DefaultCreateSource, C> {
+            GenericExchangeExecutor::<DefaultCreateSource, C> {
                 sources,
                 context: source.batch_task_context().clone(),
                 source_creator: PhantomData,
@@ -121,9 +121,7 @@ impl BoxedExecutor2Builder for GenericExchangeExecutor2Builder {
     }
 }
 
-impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor2
-    for GenericExchangeExecutor2<CS, C>
-{
+impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor for GenericExchangeExecutor<CS, C> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -137,7 +135,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor2
     }
 }
 
-impl<CS: 'static + CreateSource, C: BatchTaskContext> GenericExchangeExecutor2<CS, C> {
+impl<CS: 'static + CreateSource, C: BatchTaskContext> GenericExchangeExecutor<CS, C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
@@ -229,7 +227,7 @@ mod tests {
         }
 
         let executor = Box::new(
-            GenericExchangeExecutor2::<FakeCreateSource, ComputeNodeContext> {
+            GenericExchangeExecutor::<FakeCreateSource, ComputeNodeContext> {
                 sources,
                 source_idx: 0,
                 current_source: None,

@@ -30,12 +30,13 @@ use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_enc
 use risingwave_common::util::sort_util::{compare_two_row, HeapElem, OrderPair};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
-pub struct OrderByExecutor2 {
-    child: Option<BoxedExecutor2>,
+pub struct OrderByExecutor {
+    child: Option<BoxedExecutor>,
     sorted_indices: Vec<Vec<usize>>,
     chunks: Vec<DataChunk>,
     vis_indices: Vec<usize>,
@@ -50,9 +51,9 @@ pub struct OrderByExecutor2 {
 }
 
 #[allow(clippy::too_many_arguments)]
-impl OrderByExecutor2 {
+impl OrderByExecutor {
     fn new(
-        child: BoxedExecutor2,
+        child: BoxedExecutor,
         sorted_indices: Vec<Vec<usize>>,
         chunks: Vec<DataChunk>,
         vis_indices: Vec<usize>,
@@ -81,10 +82,10 @@ impl OrderByExecutor2 {
         }
     }
 }
-impl BoxedExecutor2Builder for OrderByExecutor2 {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for OrderByExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let order_by_node = try_match_expand!(
@@ -98,8 +99,8 @@ impl BoxedExecutor2Builder for OrderByExecutor2 {
             .map(OrderPair::from_prost)
             .collect();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build2()?;
-            return Ok(Box::new(OrderByExecutor2::new(
+            let child = source.clone_for_plan(child_plan).build()?;
+            return Ok(Box::new(OrderByExecutor::new(
                 child,
                 vec![],
                 vec![],
@@ -117,7 +118,7 @@ impl BoxedExecutor2Builder for OrderByExecutor2 {
     }
 }
 
-impl OrderByExecutor2 {
+impl OrderByExecutor {
     fn push_heap_for_chunk(&mut self, idx: usize) {
         while self.vis_indices[idx] < self.chunks[idx].cardinality() {
             let skip: bool = match self.chunks[idx].visibility() {
@@ -189,7 +190,7 @@ impl OrderByExecutor2 {
     }
 }
 
-impl Executor2 for OrderByExecutor2 {
+impl Executor for OrderByExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -203,7 +204,7 @@ impl Executor2 for OrderByExecutor2 {
     }
 }
 
-impl OrderByExecutor2 {
+impl OrderByExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         if !self.disable_encoding {
@@ -343,7 +344,7 @@ mod tests {
             },
         ];
 
-        let order_by_executor = Box::new(OrderByExecutor2::new(
+        let order_by_executor = Box::new(OrderByExecutor::new(
             Box::new(mock_executor),
             vec![],
             vec![],
@@ -397,7 +398,7 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let order_by_executor = Box::new(OrderByExecutor2::new(
+        let order_by_executor = Box::new(OrderByExecutor::new(
             Box::new(mock_executor),
             vec![],
             vec![],
@@ -461,7 +462,7 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let order_by_executor = Box::new(OrderByExecutor2::new(
+        let order_by_executor = Box::new(OrderByExecutor::new(
             Box::new(mock_executor),
             vec![],
             vec![],
