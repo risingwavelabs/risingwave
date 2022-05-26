@@ -228,6 +228,7 @@ impl PlanRoot {
                 self.required_order = out_col_change
                     .rewrite_required_order(&self.required_order)
                     .unwrap();
+                self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
                 self.schema = plan.schema().clone();
                 plan.to_stream_with_dist_required(&self.required_dist)
             }

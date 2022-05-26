@@ -166,9 +166,10 @@
               BatchProject { exprs: [$1, $2, $0] }
                 BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
                   BatchExchange { order: [], dist: HashShard([0, 1]) }
-                    BatchProject { exprs: [$2, $0] }
-                      BatchHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
-                        BatchScan { table: bid, columns: [auction, dateTime] }
+                    BatchProject { exprs: [$1, $0] }
+                      BatchProject { exprs: [$0, $2] }
+                        BatchHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 output_indices: [0, 1, 2, 3] }
+                          BatchScan { table: bid, columns: [auction, dateTime] }
             BatchProject { exprs: [$1, $0] }
               BatchHashAgg { group_keys: [$0], aggs: [max($1)] }
                 BatchExchange { order: [], dist: HashShard([0]) }
@@ -176,7 +177,7 @@
                     BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
                       BatchExchange { order: [], dist: HashShard([0, 1]) }
                         BatchProject { exprs: [$0, $2] }
-                          BatchHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                          BatchHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 output_indices: [0, 1, 2, 3] }
                             BatchScan { table: bid, columns: [auction, dateTime] }
   stream_plan: |
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
@@ -187,9 +188,10 @@
               StreamProject { exprs: [$1, $3, $0] }
                 StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
                   StreamExchange { dist: HashShard([0, 1]) }
-                    StreamProject { exprs: [$3, $0, $2] }
-                      StreamHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
-                        StreamTableScan { table: bid, columns: [auction, dateTime, _row_id], pk_indices: [2] }
+                    StreamProject { exprs: [$1, $0, $2] }
+                      StreamProject { exprs: [$0, $3, $2] }
+                        StreamHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 output_indices: [0, 1, 2, 3, 4] }
+                          StreamTableScan { table: bid, columns: [auction, dateTime, _row_id], pk_indices: [2] }
             StreamProject { exprs: [$2, $0] }
               StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
                 StreamExchange { dist: HashShard([0]) }
@@ -197,7 +199,7 @@
                     StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
                       StreamExchange { dist: HashShard([0, 1]) }
                         StreamProject { exprs: [$0, $3, $2] }
-                          StreamHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                          StreamHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 output_indices: [0, 1, 2, 3, 4] }
                             StreamTableScan { table: bid, columns: [auction, dateTime, _row_id], pk_indices: [2] }
 - id: nexmark_q6
   before:
