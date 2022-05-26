@@ -30,6 +30,7 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio_retry::strategy::jitter;
+use tracing::error;
 
 use super::local_version::{LocalVersion, PinnedVersion, ReadVersion};
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -161,6 +162,7 @@ impl LocalVersionManager {
     pub fn try_update_pinned_version(&self, newly_pinned_version: HummockVersion) -> bool {
         let new_version_id = newly_pinned_version.id;
         if validate_table_key_range(&newly_pinned_version.levels).is_err() {
+            error!("invalid table key range: {:?}", newly_pinned_version.levels);
             return false;
         }
         let mut guard = self.local_version.write();

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
@@ -20,21 +21,24 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::VNodeBitmap;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
-use super::utils::{can_concat, search_sst_idx, validate_epoch, validate_table_key_range};
+use super::utils::{can_concat, search_sst_idx, validate_epoch};
 use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, BoxedHummockIterator, DirectedUserIteratorBuilder, DirectionEnum, Forward,
     HummockIteratorDirection, ReadOptions,
 };
+use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::utils::prune_ssts;
+use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -79,26 +83,11 @@ impl HummockStorage {
         let read_options = Arc::new(ReadOptions::default());
         let mut overlapped_iters = vec![];
 
-        let (shared_buffer_data, pinned_version) = {
-            let read_version = self.local_version_manager.read_version(epoch);
-
-            // Check epoch validity
-            validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
-            let levels = read_version.pinned_version.levels();
-            validate_table_key_range(levels)?;
-
-            let shared_buffer_data = read_version
-                .shared_buffer
-                .iter()
-                .map(|shared_buffer| shared_buffer.get_overlap_data(&key_range, None))
-                .collect_vec();
-
-            (shared_buffer_data, read_version.pinned_version)
-        };
+        let (shared_buffer_data, pinned_version) = self.read_filter(epoch, &key_range, None)?;
 
         let mut stats = StoreLocalStatistic::default();
 
-        for (replicated_batches, uncommitted_data) in shared_buffer_data {
+        for (replicated_batches, uncommitted_data) in shared_buffer_data.into_values() {
             for batch in replicated_batches {
                 overlapped_iters
                     .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
@@ -211,21 +200,8 @@ impl HummockStorage {
         vnode_set: Option<VNodeBitmap>,
     ) -> StorageResult<Option<Bytes>> {
         let mut stats = StoreLocalStatistic::default();
-        let (shared_buffer_data, pinned_version) = {
-            let read_version = self.local_version_manager.read_version(epoch);
-
-            // check epoch validity
-            validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
-
-            let shared_buffer_data = read_version
-                .shared_buffer
-                .into_iter()
-                .map(|shared_buffer| {
-                    shared_buffer.get_overlap_data(&(key..=key), vnode_set.as_ref())
-                })
-                .collect_vec();
-            (shared_buffer_data, read_version.pinned_version)
-        };
+        let (shared_buffer_data, pinned_version) =
+            self.read_filter(epoch, &(key..=key), vnode_set.as_ref())?;
 
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
@@ -240,17 +216,18 @@ impl HummockStorage {
         // TODO: may want to avoid use Arc in read options
         let read_options = Arc::new(ReadOptions::default());
 
-        // Query shared buffer. Return the value without iterating SSTs if found
-        for (replicated_batches, uncommitted_data) in shared_buffer_data {
+        // Query shared buffer. Return the value without iterating SSTs if found.
+        // We take rev here because we first look for the shared buffer of larger epoch.
+        for (replicated_batches, uncommitted_data) in shared_buffer_data.values().rev() {
             for batch in replicated_batches {
-                if let Some(v) = get_from_batch(&batch) {
+                if let Some(v) = get_from_batch(batch) {
                     return Ok(v);
                 }
             }
             for data in uncommitted_data {
                 match data {
                     UncommittedData::Batch(batch) => {
-                        if let Some(v) = get_from_batch(&batch) {
+                        if let Some(v) = get_from_batch(batch) {
                             return Ok(v);
                         }
                     }
@@ -305,6 +282,36 @@ impl HummockStorage {
             .iter_merge_sstable_counts
             .observe(table_counts as f64);
         Ok(None)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn read_filter<R, B>(
+        &self,
+        epoch: HummockEpoch,
+        key_range: &R,
+        vnode_set: Option<&VNodeBitmap>,
+    ) -> HummockResult<(
+        BTreeMap<HummockEpoch, (Vec<SharedBufferBatch>, Vec<UncommittedData>)>,
+        Arc<PinnedVersion>,
+    )>
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        let read_version = self.local_version_manager.read_version(epoch);
+
+        // Check epoch validity
+        validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
+
+        let shared_buffer_data: BTreeMap<_, _> = read_version
+            .shared_buffer
+            .iter()
+            .map(|(epoch, shared_buffer)| {
+                (*epoch, shared_buffer.get_overlap_data(key_range, vnode_set))
+            })
+            .collect();
+
+        Ok((shared_buffer_data, read_version.pinned_version))
     }
 }
 
