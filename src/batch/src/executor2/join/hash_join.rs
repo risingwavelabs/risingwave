@@ -30,7 +30,7 @@ use crate::executor::ExecutorBuilder;
 use crate::executor2::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor2::join::JoinType;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
-use crate::task::TaskId;
+use crate::task::{BatchTaskContext, TaskId};
 
 /// Parameters of equi-join.
 ///
@@ -207,22 +207,25 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
             }
         }
         // probe_remaining
-        while state == HashJoinState::ProbeRemaining {
-            let output_data_chunk = if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+        if !probe_table.build_data_empty() {
+            while state == HashJoinState::ProbeRemaining {
                 let output_data_chunk =
-                    probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
+                    if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+                        let output_data_chunk =
+                            probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
 
-                probe_table.reset_result_index();
-                output_data_chunk
-            } else {
-                let ret_data_chunk = probe_table.consume_left()?;
-                let output_data_chunk =
-                    probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
+                        probe_table.reset_result_index();
+                        output_data_chunk
+                    } else {
+                        let ret_data_chunk = probe_table.consume_left()?;
+                        let output_data_chunk =
+                            probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
 
-                state = HashJoinState::Done;
-                output_data_chunk
-            };
-            yield output_data_chunk
+                        state = HashJoinState::Done;
+                        output_data_chunk
+                    };
+                yield output_data_chunk
+            }
         }
     }
 }
@@ -281,7 +284,9 @@ impl HashKeyDispatcher for HashJoinExecutor2BuilderDispatcher {
 
 /// Hash join executor builder.
 impl BoxedExecutor2Builder for HashJoinExecutor2Builder {
-    fn new_boxed_executor2(context: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        context: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         ensure!(context.plan_node().get_children().len() == 2);
 
         let left_child = context

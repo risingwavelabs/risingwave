@@ -53,21 +53,13 @@ impl SharedBuffer {
     }
 
     // Gets batches from shared buffer that overlap with the given key range.
-    pub fn get_overlap_batches<R, B>(
-        &self,
-        key_range: &R,
-        backward_range: bool,
-    ) -> Vec<SharedBufferBatch>
+    pub fn get_overlap_batches<R, B>(&self, key_range: &R) -> Vec<SharedBufferBatch>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
         let range = (
-            if backward_range {
-                key_range.end_bound().map(|b| b.as_ref().to_vec())
-            } else {
-                key_range.start_bound().map(|b| b.as_ref().to_vec())
-            },
+            key_range.start_bound().map(|b| b.as_ref().to_vec()),
             std::ops::Bound::Unbounded,
         );
         self.non_upload_batches
@@ -78,14 +70,7 @@ impl SharedBuffer {
                     .values()
                     .flat_map(|batches| batches.range(range.clone())),
             )
-            .filter(|m| {
-                range_overlap(
-                    key_range,
-                    m.1.start_user_key(),
-                    m.1.end_user_key(),
-                    backward_range,
-                )
-            })
+            .filter(|m| range_overlap(key_range, m.1.start_user_key(), m.1.end_user_key()))
             .map(|entry| entry.1.clone())
             .collect()
     }
@@ -211,39 +196,26 @@ mod tests {
         // Get overlap batches and verify
         for key in &keys[0..3] {
             // Single key
-            let overlap_batches =
-                shared_buffer.get_overlap_batches(&(key.clone()..=key.clone()), false);
+            let overlap_batches = shared_buffer.get_overlap_batches(&(key.clone()..=key.clone()));
             assert_eq!(overlap_batches.len(), 2);
             assert_eq!(overlap_batches[0], shared_buffer_batch1);
             assert_eq!(overlap_batches[1], shared_buffer_batch2);
 
             // Forward key range
             let overlap_batches =
-                shared_buffer.get_overlap_batches(&(key.clone()..=keys[3].clone()), false);
-            assert_eq!(overlap_batches.len(), 2);
-            assert_eq!(overlap_batches[0], shared_buffer_batch1);
-            assert_eq!(overlap_batches[1], shared_buffer_batch2);
-
-            // Backward key range
-            let overlap_batches =
-                shared_buffer.get_overlap_batches(&(keys[3].clone()..=key.clone()), true);
+                shared_buffer.get_overlap_batches(&(key.clone()..=keys[3].clone()));
             assert_eq!(overlap_batches.len(), 2);
             assert_eq!(overlap_batches[0], shared_buffer_batch1);
             assert_eq!(overlap_batches[1], shared_buffer_batch2);
         }
         // Non-existent key
         let overlap_batches =
-            shared_buffer.get_overlap_batches(&(large_key.clone()..=large_key.clone()), false);
+            shared_buffer.get_overlap_batches(&(large_key.clone()..=large_key.clone()));
         assert!(overlap_batches.is_empty());
 
         // Non-existent key range forward
         let overlap_batches =
-            shared_buffer.get_overlap_batches(&(keys[3].clone()..=large_key.clone()), false);
-        assert!(overlap_batches.is_empty());
-
-        // Non-existent key range backward
-        let overlap_batches =
-            shared_buffer.get_overlap_batches(&(large_key.clone()..=keys[3].clone()), true);
+            shared_buffer.get_overlap_batches(&(keys[3].clone()..=large_key.clone()));
         assert!(overlap_batches.is_empty());
     }
 }

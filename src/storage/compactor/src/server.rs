@@ -22,11 +22,14 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
+use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::SstableStore;
-use risingwave_storage::monitor::{HummockMetrics, ObjectStoreMetrics, StateStoreMetrics};
+use risingwave_storage::monitor::{
+    monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
+};
 use risingwave_storage::object::{parse_object_store, ObjectStoreImpl};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::rpc::CompactorServiceImpl;
@@ -37,7 +40,7 @@ pub async fn compactor_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
     opts: CompactorOpts,
-) -> (JoinHandle<()>, UnboundedSender<()>) {
+) -> (JoinHandle<()>, Sender<()>) {
     let config = {
         if opts.config_path.is_empty() {
             CompactorConfig::default()
@@ -80,32 +83,33 @@ pub async fn compactor_serve(
     let sstable_store = Arc::new(SstableStore::new(
         object_store,
         storage_config.data_directory.to_string(),
-        state_store_stats.clone(),
-        storage_config.block_cache_capacity,
-        storage_config.meta_cache_capacity,
+        storage_config.block_cache_capacity_mb * (1 << 20),
+        storage_config.meta_cache_capacity_mb * (1 << 20),
     ));
+    monitor_cache(sstable_store.clone(), &registry).unwrap();
 
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval as u64),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             storage_config,
             hummock_meta_client,
             sstable_store,
             state_store_stats,
+            Some(Arc::new(CompactionExecutor::new(None))),
         ),
     ];
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(CompactorServiceServer::new(CompactorServiceImpl {}))
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
-                    _ = shutdown_recv.recv() => {
+                    _ = &mut shutdown_recv => {
                         for (join_handle, shutdown_sender) in sub_tasks {
                             if let Err(err) = shutdown_sender.send(()) {
                                 tracing::warn!("Failed to send shutdown: {:?}", err);

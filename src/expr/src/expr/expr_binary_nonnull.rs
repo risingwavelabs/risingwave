@@ -16,13 +16,12 @@ use risingwave_common::array::{
     Array, BoolArray, DecimalArray, I32Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray,
     Utf8Array,
 };
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
+use crate::for_all_cmp_variants;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
@@ -30,11 +29,6 @@ use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
 use crate::vector_op::tumble::{tumble_start_date, tumble_start_date_time};
-
-/// A placeholder function that returns bool in [`gen_binary_expr_atm`]
-pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
-    Err(InternalError("The function is not supported".to_string()).into())
-}
 
 /// This macro helps create arithmetic expression.
 /// It receive all the combinations of `gen_binary_expr` and generate corresponding match cases
@@ -125,50 +119,7 @@ macro_rules! gen_binary_expr_cmp {
                 ))
             }
             _ => {
-                $macro! {
-                    [$l, $r, $ret],
-                    { int16, int16, int16, $general_f },
-                    { int16, int32, int32, $general_f },
-                    { int16, int64, int64, $general_f },
-                    { int16, float32, float64, $general_f },
-                    { int16, float64, float64, $general_f },
-                    { int32, int16, int32, $general_f },
-                    { int32, int32, int32, $general_f },
-                    { int32, int64, int64, $general_f },
-                    { int32, float32, float64, $general_f },
-                    { int32, float64, float64, $general_f },
-                    { int64, int16,int64, $general_f },
-                    { int64, int32,int64, $general_f },
-                    { int64, int64, int64, $general_f },
-                    { int64, float32, float64 , $general_f},
-                    { int64, float64, float64, $general_f },
-                    { float32, int16, float64, $general_f },
-                    { float32, int32, float64, $general_f },
-                    { float32, int64, float64 , $general_f},
-                    { float32, float32, float32, $general_f },
-                    { float32, float64, float64, $general_f },
-                    { float64, int16, float64, $general_f },
-                    { float64, int32, float64, $general_f },
-                    { float64, int64, float64, $general_f },
-                    { float64, float32, float64, $general_f },
-                    { float64, float64, float64, $general_f },
-                    { decimal, int16, decimal, $general_f },
-                    { decimal, int32, decimal, $general_f },
-                    { decimal, int64, decimal, $general_f },
-                    { decimal, float32, float64, $general_f },
-                    { decimal, float64, float64, $general_f },
-                    { int16, decimal, decimal, $general_f },
-                    { int32, decimal, decimal, $general_f },
-                    { int64, decimal, decimal, $general_f },
-                    { decimal, decimal, decimal, $general_f },
-                    { float32, decimal, float64, $general_f },
-                    { float64, decimal, float64, $general_f },
-                    { timestamp, timestamp, timestamp, $general_f },
-                    { date, date, date, $general_f },
-                    { boolean, boolean, boolean, $general_f },
-                    { timestamp, date, timestamp, $general_f },
-                    { date, timestamp, timestamp, $general_f }
-                }
+                for_all_cmp_variants! {$macro, $l, $r, $ret, $general_f}
             }
         }
     };

@@ -14,7 +14,7 @@
 
 mod state_store_metrics;
 
-use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
+use prometheus::core::{AtomicU64, Collector, GenericCounter, GenericCounterVec, Metric};
 use prometheus::{Histogram, HistogramVec};
 pub use state_store_metrics::*;
 mod monitored_store;
@@ -24,10 +24,13 @@ pub use hummock_metrics::*;
 mod my_stats;
 pub use my_stats::MyHistogram;
 
+mod local_metrics;
+pub use local_metrics::StoreLocalStatistic;
+
 mod object_metrics;
-mod process_linux;
 pub use object_metrics::ObjectStoreMetrics;
 
+mod process_linux;
 pub use self::process_linux::monitor_process;
 
 /// Define extension method `print` used in `print_statistics`.
@@ -60,6 +63,13 @@ impl Print for Histogram {
 }
 
 impl Print for HistogramVec {
+    fn print(&self) {
+        let desc = &self.desc()[0].fq_name;
+        println!("{desc} {:?}", self);
+    }
+}
+
+impl Print for GenericCounterVec<AtomicU64> {
     fn print(&self) {
         let desc = &self.desc()[0].fq_name;
         println!("{desc} {:?}", self);

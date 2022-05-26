@@ -17,7 +17,7 @@ use risingwave_sqlparser::ast::{Query, TableAlias};
 
 use crate::binder::{Binder, BoundQuery, UNNAMED_SUBQUERY};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundSubquery {
     pub query: BoundQuery,
 }

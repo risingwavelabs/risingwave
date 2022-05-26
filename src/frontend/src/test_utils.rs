@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{Session, SessionManager};
+use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_common::catalog::{TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -49,10 +48,9 @@ pub struct LocalFrontend {
 }
 
 impl SessionManager for LocalFrontend {
-    fn connect(
-        &self,
-        _database: &str,
-    ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
+    type Session = SessionImpl;
+
+    fn connect(&self, _database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
     }
 }
@@ -200,7 +198,6 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
-        self.drop_table_or_source_id(table_id.table_id);
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);

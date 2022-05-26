@@ -20,8 +20,8 @@ use async_trait::async_trait;
 use crate::nexmark::config::NexmarkConfig;
 use crate::nexmark::source::event::EventType;
 use crate::nexmark::source::generator::NexmarkEventGenerator;
-use crate::nexmark::NexmarkSplit;
-use crate::{ConnectorStateV2, NexmarkProperties, SourceMessage, SplitImpl, SplitReader};
+use crate::nexmark::{NexmarkProperties, NexmarkSplit};
+use crate::{Column, ConnectorState, SourceMessage, SplitImpl, SplitReader};
 
 #[derive(Clone, Debug)]
 pub struct NexmarkSplitReader {
@@ -33,7 +33,11 @@ pub struct NexmarkSplitReader {
 impl SplitReader for NexmarkSplitReader {
     type Properties = Box<NexmarkProperties>;
 
-    async fn new(properties: Box<NexmarkProperties>, state: ConnectorStateV2) -> Result<Self>
+    async fn new(
+        properties: Box<NexmarkProperties>,
+        state: ConnectorState,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {
@@ -79,29 +83,22 @@ impl SplitReader for NexmarkSplitReader {
 
         let mut assigned_split = NexmarkSplit::default();
 
-        match state {
-            ConnectorStateV2::Splits(splits) => {
-                log::debug!("Splits for nexmark found! {:?}", splits);
-                for split in splits {
-                    // TODO: currently, assume there's only on split in one reader
-                    let split_id = split.id();
-                    if let SplitImpl::Nexmark(n) = split {
-                        generator.split_index = n.split_index;
-                        generator.split_num = n.split_num;
-                        if let Some(s) = n.start_offset {
-                            generator.events_so_far = s;
-                        };
-                        generator.split_id = split_id;
-                        assigned_split = n;
-                        break;
-                    }
+        if let Some(splits) = state {
+            log::debug!("Splits for nexmark found! {:?}", splits);
+            for split in splits {
+                // TODO: currently, assume there's only on split in one reader
+                let split_id = split.id();
+                if let SplitImpl::Nexmark(n) = split {
+                    generator.split_index = n.split_index;
+                    generator.split_num = n.split_num;
+                    if let Some(s) = n.start_offset {
+                        generator.events_so_far = s;
+                    };
+                    generator.split_id = split_id;
+                    assigned_split = n;
+                    break;
                 }
             }
-            ConnectorStateV2::State(cs) => {
-                log::debug!("Splits for nexmark found! {:?}", cs);
-                todo!()
-            }
-            ConnectorStateV2::None => {}
         }
 
         Ok(Self {
@@ -147,8 +144,8 @@ mod tests {
             .map(SplitImpl::Nexmark)
             .collect();
 
-        let state = ConnectorStateV2::Splits(list_splits_resp);
-        let mut reader = NexmarkSplitReader::new(Box::new(props), state).await?;
+        let state = Some(list_splits_resp);
+        let mut reader = NexmarkSplitReader::new(Box::new(props), state, None).await?;
         let chunk = reader.next().await?.unwrap();
         assert_eq!(chunk.len(), 5);
 

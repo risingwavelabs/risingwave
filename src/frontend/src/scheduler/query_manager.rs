@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 use futures::Stream;
 use futures_async_stream::try_stream;
@@ -21,12 +22,14 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
 use risingwave_pb::common::HostAddress;
-use risingwave_rpc_client::{ComputeClient, ExchangeSource};
+use risingwave_rpc_client::{
+    ComputeClient, ComputeClientPool, ComputeClientPoolRef, ExchangeSource,
+};
 use uuid::Uuid;
 
 use super::HummockSnapshotManagerRef;
-use crate::scheduler::execution::QueryExecution;
-use crate::scheduler::plan_fragmenter::Query;
+use crate::scheduler::distributed::QueryExecution;
+use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::ExecutionContextRef;
 
@@ -39,6 +42,7 @@ pub struct QueryResultFetcher {
 
     task_output_id: TaskOutputId,
     task_host: HostAddress,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 /// Manages execution of batch queries.
@@ -46,16 +50,19 @@ pub struct QueryResultFetcher {
 pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 impl QueryManager {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
+        compute_client_pool: ComputeClientPoolRef,
     ) -> Self {
         Self {
             worker_node_manager,
             hummock_snapshot_manager,
+            compute_client_pool,
         }
     }
 
@@ -68,11 +75,18 @@ impl QueryManager {
         plan: BatchPlanProst,
     ) -> Result<impl Stream<Item = Result<DataChunk>>> {
         let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
-        let compute_client: ComputeClient = ComputeClient::new((&worker_node_addr).into()).await?;
+        let compute_client = self
+            .compute_client_pool
+            .get_client_for_addr((&worker_node_addr).into())
+            .await?;
+
+        let query_id = QueryId {
+            id: Uuid::new_v4().to_string(),
+        };
 
         // Build task id and task sink id
         let task_id = TaskId {
-            query_id: Uuid::new_v4().to_string(),
+            query_id: query_id.id.clone(),
             stage_id: 0,
             task_id: 0,
         };
@@ -81,17 +95,27 @@ impl QueryManager {
             output_id: 0,
         };
 
-        let epoch = self.hummock_snapshot_manager.get_epoch().await?;
-
-        compute_client
-            .create_task(task_id.clone(), plan, epoch)
+        let epoch = self
+            .hummock_snapshot_manager
+            .get_epoch(query_id.clone())
             .await?;
+
+        if let Err(e) = compute_client
+            .create_task(task_id.clone(), plan, epoch)
+            .await
+        {
+            self.hummock_snapshot_manager
+                .unpin_snapshot(epoch, &query_id)
+                .await?;
+            return Err(e);
+        }
 
         let query_result_fetcher = QueryResultFetcher::new(
             epoch,
             self.hummock_snapshot_manager.clone(),
             task_output_id,
             worker_node_addr,
+            self.compute_client_pool.clone(),
         );
 
         Ok(query_result_fetcher.run())
@@ -102,17 +126,30 @@ impl QueryManager {
         _context: ExecutionContextRef,
         query: Query,
     ) -> Result<impl DataChunkStream> {
+        let query_id = query.query_id().clone();
         // Cheat compiler to resolve type
-        let epoch = self.hummock_snapshot_manager.get_epoch().await?;
+        let epoch = self
+            .hummock_snapshot_manager
+            .get_epoch(query_id.clone())
+            .await?;
 
         let query_execution = QueryExecution::new(
             query,
             epoch,
             self.worker_node_manager.clone(),
             self.hummock_snapshot_manager.clone(),
+            self.compute_client_pool.clone(),
         );
 
-        let query_result_fetcher = query_execution.start().await?;
+        let query_result_fetcher = match query_execution.start().await {
+            Ok(query_result_fetcher) => query_result_fetcher,
+            Err(e) => {
+                self.hummock_snapshot_manager
+                    .unpin_snapshot(epoch, &query_id)
+                    .await?;
+                return Err(e);
+            }
+        };
 
         Ok(query_result_fetcher.run())
     }
@@ -124,12 +161,14 @@ impl QueryResultFetcher {
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         task_output_id: TaskOutputId,
         task_host: HostAddress,
+        compute_client_pool: ComputeClientPoolRef,
     ) -> Self {
         Self {
             epoch,
             hummock_snapshot_manager,
             task_output_id,
             task_host,
+            compute_client_pool,
         }
     }
 
@@ -139,7 +178,10 @@ impl QueryResultFetcher {
             "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
             self.task_output_id, self.task_host
         );
-        let compute_client: ComputeClient = ComputeClient::new((&self.task_host).into()).await?;
+        let compute_client = self
+            .compute_client_pool
+            .get_client_for_addr((&self.task_host).into())
+            .await?;
 
         let mut source = compute_client.get_data(self.task_output_id).await?;
         while let Some(chunk) = source.take_data().await? {
@@ -147,8 +189,6 @@ impl QueryResultFetcher {
         }
 
         let epoch = self.epoch;
-        // Unpin corresponding snapshot.
-        self.hummock_snapshot_manager.unpin_snapshot(epoch).await?;
     }
 }
 

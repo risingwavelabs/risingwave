@@ -16,7 +16,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
 
-use crate::{ConnectorStateV2, SourceMessage, SplitReader};
+use crate::{Column, ConnectorState, SourceMessage, SplitReader};
 
 /// [`DummySplitReader`] is a placeholder for source executor that is assigned no split. It will
 /// wait forever when calling `next`.
@@ -27,7 +27,11 @@ pub struct DummySplitReader;
 impl SplitReader for DummySplitReader {
     type Properties = ();
 
-    async fn new(_properties: Self::Properties, _state: ConnectorStateV2) -> Result<Self> {
+    async fn new(
+        _properties: Self::Properties,
+        _state: ConnectorState,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self> {
         Ok(Self {})
     }
 

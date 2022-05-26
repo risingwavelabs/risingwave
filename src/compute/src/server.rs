@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,13 +28,16 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
+use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::monitor::{HummockMetrics, ObjectStoreMetrics, StateStoreMetrics};
+use risingwave_storage::monitor::{
+    monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
+};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -43,12 +45,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
 
 fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
-    if opts.config_path.is_empty() {
-        return ComputeNodeConfig::default();
-    }
-
-    let config_path = PathBuf::from(opts.config_path.to_owned());
-    ComputeNodeConfig::init(config_path).unwrap()
+    risingwave_common::config::load_config(&opts.config_path)
 }
 
 fn get_compile_mode() -> &'static str {
@@ -64,7 +61,7 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
     opts: ComputeNodeOpts,
-) -> (JoinHandle<()>, UnboundedSender<()>) {
+) -> (JoinHandle<()>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts);
     info!(
@@ -82,11 +79,10 @@ pub async fn compute_node_serve(
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
 
-    let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
-        vec![MetaClient::start_heartbeat_loop(
-            meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval as u64),
-        )];
+    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![MetaClient::start_heartbeat_loop(
+        meta_client.clone(),
+        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+    )];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
@@ -115,16 +111,18 @@ pub async fn compute_node_serve(
             || opts.state_store.starts_with("hummock+disk")
             || storage_config.disable_remote_compactor
         {
-            tracing::info!("start a compactor for in-memory object store");
+            tracing::info!("start embedded compactor");
             // todo: set shutdown_sender in HummockStorage.
             let (handle, shutdown_sender) = Compactor::start_compactor(
                 storage_config,
                 hummock_meta_client,
                 storage.inner().sstable_store(),
                 state_store_metrics.clone(),
+                Some(Arc::new(CompactionExecutor::new(Some(1)))),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
+        monitor_cache(storage.inner().sstable_store(), &registry).unwrap();
     }
 
     // Initialize the managers.
@@ -133,7 +131,7 @@ pub async fn compute_node_serve(
         client_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
-        config.clone(),
+        config.streaming.clone(),
     ));
     let source_mgr = Arc::new(MemSourceManager::new(worker_id));
 
@@ -164,7 +162,7 @@ pub async fn compute_node_serve(
     let exchange_srv = ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(TaskServiceServer::new(batch_srv))
@@ -173,7 +171,7 @@ pub async fn compute_node_serve(
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
-                    _ = shutdown_recv.recv() => {
+                    _ = &mut shutdown_recv => {
                         for (join_handle, shutdown_sender) in sub_tasks {
                             if let Err(err) = shutdown_sender.send(()) {
                                 tracing::warn!("Failed to send shutdown: {:?}", err);

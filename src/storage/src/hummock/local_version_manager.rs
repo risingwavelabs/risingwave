@@ -70,8 +70,8 @@ impl BufferTracker {
         self.replicate_size.load(Relaxed)
     }
 
-    pub fn can_write(&self, batch_size: usize) -> bool {
-        self.get_upload_size() + self.get_replicate_size() + batch_size <= self.capacity
+    pub fn can_write(&self) -> bool {
+        self.get_upload_size() + self.get_replicate_size() <= self.capacity
     }
 }
 
@@ -121,7 +121,7 @@ impl LocalVersionManager {
                 shared_buffer_uploader_tx,
             },
             buffer_tracker: BufferTracker {
-                capacity: options.shared_buffer_capacity as usize,
+                capacity: (options.shared_buffer_capacity_mb as usize) * (1 << 20),
                 upload_size: global_upload_batches_size,
                 replicate_size: global_replicate_batches_size,
             },
@@ -246,7 +246,7 @@ impl LocalVersionManager {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
 
         let batch_size = SharedBufferBatch::measure_batch_size(&sorted_items);
-        while !self.buffer_tracker.can_write(batch_size) {
+        while !self.buffer_tracker.can_write() {
             self.sync_shared_buffer(None).await?;
         }
 
@@ -379,6 +379,15 @@ impl LocalVersionManager {
 
     pub fn get_pinned_version(&self) -> Arc<PinnedVersion> {
         self.local_version.read().pinned_version().clone()
+    }
+
+    pub fn get_uncommitted_ssts(&self, epoch: HummockEpoch) -> Vec<SstableInfo> {
+        self.local_version
+            .read()
+            .get_uncommitted_ssts()
+            .get(&epoch)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Pin a version with retry.

@@ -32,7 +32,6 @@ impl StreamTopN {
     pub fn new(logical: LogicalTopN) -> Self {
         let ctx = logical.base.ctx.clone();
         let dist = match logical.input().distribution() {
-            Distribution::Any => Distribution::Any,
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };

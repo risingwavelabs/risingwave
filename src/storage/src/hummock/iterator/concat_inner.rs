@@ -13,19 +13,23 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Greater, Less};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectionEnum, HummockIterator, HummockIteratorDirection, ReadOptions,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
+use crate::monitor::StoreLocalStatistic;
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
 pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// The iterator of the current table.
-    sstable_iter: Option<TI::SSTableIterator>,
+    sstable_iter: Option<TI>,
 
     /// Current table index.
     cur_idx: usize,
@@ -34,32 +38,52 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     tables: Vec<SstableInfo>,
 
     sstable_store: SstableStoreRef,
+
+    stats: StoreLocalStatistic,
+    read_options: Arc<ReadOptions>,
 }
 
 impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
-    pub fn new(tables: Vec<SstableInfo>, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        tables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<ReadOptions>,
+    ) -> Self {
         Self {
             sstable_iter: None,
             cur_idx: 0,
             tables,
             sstable_store,
+            stats: StoreLocalStatistic::default(),
+            read_options,
         }
     }
 
     /// Seeks to a table, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         if idx >= self.tables.len() {
-            self.sstable_iter = None;
+            if let Some(old_iter) = self.sstable_iter.take() {
+                old_iter.collect_local_statistic(&mut self.stats);
+            }
         } else {
-            let table = self.sstable_store.sstable(self.tables[idx].id).await?;
-            let mut sstable_iter = TI::new(table, self.sstable_store.clone());
+            let table = self
+                .sstable_store
+                .sstable(self.tables[idx].id, &mut self.stats)
+                .await?;
+            let mut sstable_iter =
+                TI::create(table, self.sstable_store.clone(), self.read_options.clone());
+
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;
             } else {
                 sstable_iter.rewind().await?;
+            }
+
+            if let Some(old_iter) = self.sstable_iter.take() {
+                old_iter.collect_local_statistic(&mut self.stats);
             }
 
             self.sstable_iter = Some(sstable_iter);
@@ -71,7 +95,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
 
 #[async_trait]
 impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
-    type Direction = <TI::SSTableIterator as HummockIterator>::Direction;
+    type Direction = TI::Direction;
 
     async fn next(&mut self) -> HummockResult<()> {
         let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
@@ -128,5 +152,9 @@ impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
             self.seek_idx(table_idx + 1, None).await?;
         }
         Ok(())
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats)
     }
 }

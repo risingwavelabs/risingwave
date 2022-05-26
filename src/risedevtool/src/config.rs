@@ -32,7 +32,15 @@ pub use provide_expander::*;
 pub struct ConfigExpander;
 
 impl ConfigExpander {
-    pub fn expand(config: &str) -> Result<Yaml> {
+    pub fn expand(config: &str, section: &str) -> Result<Yaml> {
+        Self::expand_with_extra_info(config, section, HashMap::new())
+    }
+
+    pub fn expand_with_extra_info(
+        config: &str,
+        section: &str,
+        extra_info: HashMap<String, String>,
+    ) -> Result<Yaml> {
         let mut config = YamlLoader::load_from_str(config)?;
         if config.len() != 1 {
             return Err(anyhow!("expect yaml config to have only one section"));
@@ -52,13 +60,14 @@ impl ConfigExpander {
             .ok_or_else(|| anyhow!("expect `risedev` section"))?;
         let risedev_section: Vec<(Yaml, Yaml)> = risedev_section
             .iter()
+            .filter(|(k, _)| k == &&Yaml::String(section.to_string()))
             .map(|(k, v)| {
                 let k = k
                     .as_str()
                     .ok_or_else(|| anyhow!("expect `risedev` section to use string key"))?;
                 let mut use_expander = UseExpander::new(template_section)?;
                 let v = use_expander.visit(v.clone())?;
-                let mut dollar_expander = DollarExpander::new();
+                let mut dollar_expander = DollarExpander::new(extra_info.clone());
                 let v = dollar_expander.visit(v)?;
                 let mut id_expander = IdExpander::new(&v)?;
                 let v = id_expander.visit(v)?;

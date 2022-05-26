@@ -16,6 +16,7 @@ use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -23,6 +24,7 @@ use risingwave_source::SourceManagerRef;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::task::BatchTaskContext;
 
 /// [`DeleteExecutor2`] implements table deletion with values from its child executor.
 // TODO: concurrent `DELETE` may cause problems. A scheduler might be required.
@@ -109,7 +111,9 @@ impl DeleteExecutor2 {
 }
 
 impl BoxedExecutor2Builder for DeleteExecutor2 {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         let delete_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Delete
@@ -126,7 +130,10 @@ impl BoxedExecutor2Builder for DeleteExecutor2 {
 
         Ok(Box::new(Self::new(
             table_id,
-            source.global_batch_env().source_manager_ref(),
+            source
+                .batch_task_context()
+                .source_manager_ref()
+                .ok_or_else(|| InternalError("Source manager not found".to_string()))?,
             child,
         )))
     }

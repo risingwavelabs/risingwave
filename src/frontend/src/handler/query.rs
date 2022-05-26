@@ -15,15 +15,17 @@
 use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_batch::executor2::BoxedDataChunkStream;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 use tracing::info;
 
 use crate::binder::{Binder, BoundStatement};
+use crate::config::QueryMode;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
-use crate::scheduler::{DataChunkStream, ExecutionContext, ExecutionContextRef};
+use crate::scheduler::{ExecutionContext, ExecutionContextRef, LocalQueryExecution};
 use crate::session::OptimizerContext;
 
 pub static QUERY_MODE: &str = "query_mode";
@@ -40,7 +42,15 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         binder.bind(stmt)?
     };
 
-    let (data_stream, pg_descs) = distribute_execute(context, bound).await?;
+    let query_mode = session
+        .get_config(QUERY_MODE)
+        .map(|entry| entry.get_val(QueryMode::default()))
+        .unwrap_or_default();
+
+    let (data_stream, pg_descs) = match query_mode {
+        QueryMode::Local => local_execute(context, bound).await?,
+        QueryMode::Distributed => distribute_execute(context, bound).await?,
+    };
 
     let mut rows = vec![];
     #[for_await]
@@ -68,7 +78,7 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
 async fn distribute_execute(
     context: OptimizerContext,
     stmt: BoundStatement,
-) -> Result<(impl DataChunkStream, Vec<PgFieldDescriptor>)> {
+) -> Result<(BoxedDataChunkStream, Vec<PgFieldDescriptor>)> {
     let session = context.session_ctx.clone();
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, pg_descs) = {
@@ -97,7 +107,44 @@ async fn distribute_execute(
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = execution_context.session().env().query_manager().clone();
     Ok((
-        query_manager.schedule(execution_context, query).await?,
+        Box::pin(query_manager.schedule(execution_context, query).await?),
         pg_descs,
     ))
+}
+
+async fn local_execute(
+    context: OptimizerContext,
+    stmt: BoundStatement,
+) -> Result<(BoxedDataChunkStream, Vec<PgFieldDescriptor>)> {
+    let session = context.session_ctx.clone();
+
+    // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
+    let (query, pg_descs) = {
+        let root = Planner::new(context.into()).plan(stmt)?;
+
+        let pg_descs = root
+            .schema()
+            .fields()
+            .iter()
+            .map(to_pg_field)
+            .collect::<Vec<PgFieldDescriptor>>();
+
+        let plan = root.gen_batch_local_plan()?;
+
+        info!(
+            "Generated local execution plan: {:?}",
+            plan.explain_to_string()?
+        );
+
+        let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
+        let query = plan_fragmenter.split(plan)?;
+        info!("Generated query after plan fragmenter: {:?}", &query);
+        (query, pg_descs)
+    };
+
+    let hummock_snapshot_manager = session.env().hummock_snapshot_manager().clone();
+
+    // TODO: Passing sql here
+    let execution = LocalQueryExecution::new(query, hummock_snapshot_manager, "");
+    Ok((Box::pin(execution.run()), pg_descs))
 }

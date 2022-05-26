@@ -50,6 +50,7 @@ impl Binder {
             Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
+            Expr::Array(exprs) => self.bind_array(exprs),
             Expr::Function(f) => self.bind_function(f),
             // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
@@ -327,40 +328,13 @@ impl Binder {
     ) -> Result<ExprImpl> {
         let left = self.bind_expr(left)?;
         let right = self.bind_expr(right)?;
-        let both_not_null = FunctionCall::new(
-            ExprType::And,
-            vec![
-                FunctionCall::new(ExprType::IsNotNull, vec![left.clone()])?.into(),
-                FunctionCall::new(ExprType::IsNotNull, vec![right.clone()])?.into(),
-            ],
-        );
 
-        let func_call = FunctionCall::new(
-            ExprType::Or,
-            vec![
-                FunctionCall::new(
-                    ExprType::And,
-                    vec![
-                        FunctionCall::new(ExprType::IsNull, vec![left.clone()])?.into(),
-                        FunctionCall::new(ExprType::IsNull, vec![right.clone()])?.into(),
-                    ],
-                )?
-                .into(),
-                FunctionCall::new(
-                    ExprType::And,
-                    vec![
-                        both_not_null?.into(),
-                        FunctionCall::new(ExprType::Equal, vec![left, right])?.into(),
-                    ],
-                )?
-                .into(),
-            ],
-        );
+        let func_call = FunctionCall::new(ExprType::IsDistinctFrom, vec![left, right]);
 
         if negated {
-            Ok(func_call?.into())
-        } else {
             Ok(FunctionCall::new(ExprType::Not, vec![func_call?.into()])?.into())
+        } else {
+            Ok(func_call?.into())
         }
     }
 

@@ -35,18 +35,12 @@ impl StreamHashAgg {
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
-            Distribution::Any => panic!(),
             Distribution::Single => Distribution::Single,
             Distribution::Broadcast => panic!(),
-            Distribution::AnyShard => panic!(),
-            Distribution::HashShard(_) => {
-                assert!(
-                    input_dist.satisfies(&Distribution::HashShard(logical.group_keys().to_vec()))
-                );
-                logical
-                    .i2o_col_mapping()
-                    .rewrite_provided_distribution(input_dist)
-            }
+            Distribution::HashShard(_) => logical
+                .i2o_col_mapping()
+                .rewrite_provided_distribution(input_dist),
+            Distribution::SomeShard => Distribution::SomeShard,
         };
         // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
@@ -98,7 +92,7 @@ impl ToStreamProst for StreamHashAgg {
             distribution_keys: self
                 .distribution_keys()
                 .iter()
-                .map(|idx| *idx as i32)
+                .map(|idx| *idx as u32)
                 .collect_vec(),
             agg_calls: self
                 .agg_calls()

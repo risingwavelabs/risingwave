@@ -37,6 +37,7 @@ pub enum StatementType {
     DESCRIBE_TABLE,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
+    DROP_INDEX,
     DROP_SOURCE,
     DROP_SCHEMA,
     DROP_DATABASE,

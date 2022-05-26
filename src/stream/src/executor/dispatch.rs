@@ -809,7 +809,7 @@ mod tests {
         }
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_hash_dispatcher_complex() {
         test_hash_dispatcher_complex_inner().await
     }
@@ -916,7 +916,7 @@ mod tests {
         }
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
         let (mut tx, rx) = channel(16);
@@ -996,7 +996,7 @@ mod tests {
         }
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_hash_dispatcher() {
         let num_outputs = 5; // actor id ranges from 1 to 5
         let cardinality = 10;

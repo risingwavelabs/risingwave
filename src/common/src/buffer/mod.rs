@@ -29,7 +29,5 @@
 // specific language governing permissions and limitations
 // under the License.
 
-mod buffer_;
-pub use buffer_::*;
 mod bitmap;
 pub use bitmap::*;

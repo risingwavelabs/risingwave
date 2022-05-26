@@ -368,7 +368,7 @@ mod tests {
         )
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_managed_top_n_bottom_n_state() {
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let order_types = vec![OrderType::Descending, OrderType::Ascending];
