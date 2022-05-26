@@ -109,16 +109,26 @@ impl FunctionCall {
             ExprType::Coalesce => {
                 if inputs.is_empty() {
                     return Err(ErrorCode::BindError(
-                        "Coalesce function must contain at least 1 argument".into(),
+                        (format!(
+                            "Function `Coalesce` takes at least {} arguments ({} given)",
+                            1, 0
+                        ))
+                        .into(),
                     )
                     .into());
                 }
                 align_types(inputs.iter_mut())
             }
             ExprType::ConcatWs => {
-                if inputs.len() < 2 {
+                let expected = 2;
+                let actual = inputs.len();
+                if actual < expected {
                     return Err(ErrorCode::BindError(
-                        "ConcatWs function must contain at least 2 arguments".into(),
+                        format!(
+                            "Function `ConcatWs` takes at least {} arguments ({} given)",
+                            expected, actual
+                        )
+                        .into(),
                     )
                     .into());
                 }
@@ -137,8 +147,14 @@ impl FunctionCall {
             }
 
             ExprType::SplitPart => {
-                if inputs.len() < 2 {
-                    return Err(ErrorCode::BindError(todo!()).into());
+                let expected = 3;
+                let actual = inputs.len();
+                if expected != actual {
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `SplitPart` takes exactly {} arguments ({} given)",
+                        expected, actual
+                    ))
+                    .into());
                 }
 
                 inputs = inputs

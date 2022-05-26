@@ -108,12 +108,12 @@ impl<'a> TryFrom<&'a ExprNode> for SplitPartExpression {
         let delimiter_expr = build_from_prost(&children[1])?;
         let nth_expr = build_from_prost(&children[2])?;
 
-        Ok(SplitPartExpression {
+        Ok(SplitPartExpression::new(
             return_type,
             string_expr,
             delimiter_expr,
             nth_expr,
-        })
+        ))
     }
 }
 
