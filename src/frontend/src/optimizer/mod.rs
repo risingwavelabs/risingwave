@@ -164,6 +164,7 @@ impl PlanRoot {
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
             heuristic_optimizer.optimize(plan)
         };
+        
         plan
     }
 
