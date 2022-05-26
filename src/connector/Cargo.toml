@@ -19,6 +19,7 @@ bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
 crc32fast = "1"
 either = "1"
+enum-as-inner = "0.5.0"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"

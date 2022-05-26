@@ -156,38 +156,7 @@
 - id: nexmark_q5
   before:
     - create_tables
-  sql: |
-    SELECT AuctionBids.auction, AuctionBids.num
-    FROM (
-        SELECT
-            bid.auction,
-            count(*) AS num, 
-            window_start AS starttime
-        FROM 
-            HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
-        GROUP BY
-            window_start, 
-        bid.auction
-    ) AS AuctionBids
-    JOIN (
-        SELECT
-            max(CountBids.num) AS maxn,
-            CountBids.starttime_c
-        FROM (
-            SELECT
-                count(*) AS num,
-                window_start AS starttime_c
-            FROM HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
-            GROUP BY
-                bid.auction,
-                window_start
-            ) AS CountBids
-        GROUP BY 
-            CountBids.starttime_c
-        ) AS MaxBids
-    ON 
-      AuctionBids.starttime = MaxBids.starttime_c AND
-      AuctionBids.num >= MaxBids.maxn;
+  sql: "SELECT AuctionBids.auction, AuctionBids.num\nFROM (\n    SELECT\n        bid.auction,\n        count(*) AS num, \n        window_start AS starttime\n    FROM \n        HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)\n    GROUP BY\n        window_start, \n    bid.auction\n) AS AuctionBids\nJOIN (\n    SELECT\n        max(CountBids.num) AS maxn,\n        CountBids.starttime_c\n    FROM (\n        SELECT\n            count(*) AS num,\n            window_start AS starttime_c\n        FROM HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)\n        GROUP BY\n            bid.auction,\n            window_start\n        ) AS CountBids\n    GROUP BY \n        CountBids.starttime_c\n    ) AS MaxBids\nON \n  AuctionBids.starttime = MaxBids.starttime_c AND\n  AuctionBids.num >= MaxBids.maxn;\n"
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, $1] }
