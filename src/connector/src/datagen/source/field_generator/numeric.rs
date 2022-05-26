@@ -68,8 +68,8 @@ pub struct NumericFieldSequenceConcrete<T> {
     start: T,
     end: T,
     cur: T,
-    split_index: u64,
-    split_num: u64,
+    offset: u64,
+    step: u64,
 }
 
 impl<T> NumericFieldRandomGenerator for NumericFieldRandomConcrete<T>
@@ -102,7 +102,6 @@ where
         json!(result)
     }
 }
-
 impl<T> NumericFieldSequenceGenerator for NumericFieldSequenceConcrete<T>
 where
     T: NumericType,
@@ -111,8 +110,8 @@ where
     fn new(
         star_option: Option<String>,
         end_option: Option<String>,
-        split_index: u64,
-        split_num: u64,
+        offset: u64,
+        step: u64,
     ) -> Result<Self>
     where
         Self: Sized,
@@ -131,16 +130,16 @@ where
         Ok(Self {
             start,
             end,
-            split_index,
-            split_num,
+            offset,
+            step,
             ..Default::default()
         })
     }
 
     fn generate(&mut self) -> serde_json::Value {
         let partition_result = self.start
-            + T::from(self.split_index).unwrap()
-            + T::from(self.split_num).unwrap() * self.cur;
+            + T::from(self.offset).unwrap()
+            + T::from(self.step).unwrap() * self.cur;
         let partition_result = if partition_result > self.end {
             None
         } else {

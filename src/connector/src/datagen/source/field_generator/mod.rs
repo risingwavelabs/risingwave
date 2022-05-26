@@ -50,8 +50,8 @@ pub trait NumericFieldSequenceGenerator {
     fn new(
         start: Option<String>,
         end: Option<String>,
-        split_index: u64,
-        split_num: u64,
+        offset: u64,
+        step: u64,
     ) -> Result<Self>
     where
         Self: Sized;

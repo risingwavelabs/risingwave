@@ -21,15 +21,12 @@ use tokio::time::{sleep, Duration};
 use super::field_generator::FieldGeneratorImpl;
 use crate::SourceMessage;
 
-#[derive(Default)]
 pub struct DatagenEventGenerator {
     pub fields_map: HashMap<String, FieldGeneratorImpl>,
     pub events_so_far: u64,
-    pub batch_chunk_size: u64,
     pub rows_per_second: u64,
     pub split_id: String,
-    pub split_num: u64,
-    pub split_index: u64,
+    pub partition_size:u64
 }
 
 impl DatagenEventGenerator {
@@ -41,25 +38,25 @@ impl DatagenEventGenerator {
         split_num: u64,
         split_index: u64,
     ) -> Result<Self> {
+        let partition_size = if rows_per_second% split_num > split_index {
+            rows_per_second / split_num + 1
+        } else {
+            rows_per_second / split_num
+        };
         Ok(Self {
             fields_map,
             events_so_far,
             rows_per_second,
             split_id,
-            split_num,
-            split_index,
-            ..Default::default()
+            partition_size,
         })
     }
 
     pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         sleep(Duration::from_secs(1)).await;
         let mut res = vec![];
-        let split_index = self.split_index;
-        let split_num = self.split_num;
-        let addition_one = ((self.rows_per_second % split_num) > split_index) as u64;
-        let partition_size = self.rows_per_second / split_num + addition_one;
-        for i in 0..partition_size {
+
+        for i in 0..self.partition_size {
             let map: Map<String, Value> = self
                 .fields_map
                 .iter_mut()
@@ -75,7 +72,7 @@ impl DatagenEventGenerator {
 
             res.push(msg);
         }
-        self.events_so_far += partition_size;
+        self.events_so_far += self.partition_size;
         Ok(Some(res))
     }
 }
