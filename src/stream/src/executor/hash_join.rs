@@ -31,7 +31,7 @@ use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkI
 use crate::common::StreamChunkBuilder;
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
-pub const JOIN_CACHE_SIZE: usize = 1 << 16;
+pub const JOIN_CACHE_SIZE: usize = 1 << 20;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -628,6 +628,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .ht
             .iter_keys(&mut side_match.ht, key_to_rows.keys());
 
+        let now = std::time::Instant::now();
+
         while let Some((key, matched_rows, update_entry)) = entries_iter.next().await {
             let idxes = key_to_rows.get(key).unwrap();
             for idx in idxes {
@@ -738,6 +740,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         if let Some(chunk) = hashjoin_chunk_builder.take()? {
             yield Message::Chunk(chunk);
         }
+        println!("Elapsed HJ: {}us", now.elapsed().as_micros());
     }
 }
 

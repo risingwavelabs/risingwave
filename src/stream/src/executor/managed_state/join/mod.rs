@@ -250,32 +250,61 @@ impl<'a, K: HashKey, S: StateStore> IterJoinEntriesMut<'a, K, S> {
             queue: rx,
         };
 
+        let start = std::time::Instant::now();
+        let mut cache_miss_counter = 0;
+        let mut total_counter = 0;
+
         for key in keys {
+            total_counter += 1;
             let update_entry = new_iter.side_update.pop_cached(key);
-            let match_entry = if !key.has_null() {
-                new_iter.side_match.pop_cached(key)
-            } else {
+            let match_entry = if key.has_null() {
                 None
+            } else {
+                new_iter.side_match.pop_cached(key)
             };
             let key = key.clone();
-            let match_table_info = new_iter.side_match.table_info.clone();
-            let update_table_info = new_iter.side_update.table_info.clone();
-            let tx = tx.clone();
+            let update_table_info = &new_iter.side_update.table_info;
 
-            tokio::spawn(async move {
-                let state = Self::get_key(
-                    key,
-                    match_entry,
-                    update_entry,
-                    match_table_info,
-                    update_table_info,
-                )
-                .await;
-                tx.send(state)
+            let update_entry = update_entry.unwrap_or_else(|| {
+                JoinHashMap::<K, S>::init_without_cache(&key, update_table_info)
+                    .ok()
+                    .unwrap()
+            });
+
+            if key.has_null() {
+                tx.send((key, None, update_entry))
                     .ok()
                     .expect("Failed to send join entries for join key");
-            });
+            } else if match_entry.is_some() {
+                tx.send((key, match_entry, update_entry))
+                    .ok()
+                    .expect("Failed to send join entries for join key");
+            } else {
+                cache_miss_counter += 1;
+                tx.send((key, None, update_entry))
+                    .ok()
+                    .expect("Failed to send join entries for join key");
+                // let match_table_info = new_iter.side_match.table_info.clone();
+                // let tx = tx.clone();
+                // tokio::spawn(async move {
+                //     let match_entry =
+                //         JoinHashMap::<K, S>::fetch_cached_state(&key, &match_table_info)
+                //             .await
+                //             .ok()
+                //             .unwrap();
+                //     tx.send((key, match_entry, update_entry))
+                //         .ok()
+                //         .expect("Failed to send join entries for join key");
+                // });
+            }
         }
+
+        println!(
+            "Elapsed: {}us. Cache miss/total: {}/{}",
+            start.elapsed().as_micros(),
+            cache_miss_counter,
+            total_counter
+        );
 
         new_iter
     }
@@ -289,27 +318,6 @@ impl<'a, K: HashKey, S: StateStore> IterJoinEntriesMut<'a, K, S> {
         }
         self.last_item = self.queue.recv().await;
         self.last_item.as_mut()
-    }
-
-    pub(crate) async fn get_key(
-        key: K,
-        mut match_entry: Option<JoinEntryState<S>>,
-        update_entry: Option<JoinEntryState<S>>,
-        match_table_info: TableInfo<S>,
-        update_table_info: TableInfo<S>,
-    ) -> IterType<K, S> {
-        if !key.has_null() && match_entry.is_none() {
-            match_entry = JoinHashMap::<K, S>::fetch_cached_state(&key, &match_table_info)
-                .await
-                .ok()
-                .unwrap();
-        }
-        let update_entry = update_entry.unwrap_or_else(|| {
-            JoinHashMap::<K, S>::init_without_cache(&key, &update_table_info)
-                .ok()
-                .unwrap()
-        });
-        (key, match_entry, update_entry)
     }
 }
 
