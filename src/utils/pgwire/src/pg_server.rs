@@ -162,4 +162,35 @@ mod tests {
         let value: &str = rows[0].get(0);
         assert_eq!(value, "Hello, World");
     }
+    /*
+    #[tokio::test]
+    // The test is to test the explicit paramter type support
+    async fn test_psql_extended_mode_exlicit() {
+        let session_mgr = Arc::new(MockSessionManager {});
+        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
+
+        // Connect to the database.
+        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
+            .await
+            .unwrap();
+
+        // The connection object performs the actual communication with the database,
+        // so spawn it off to run on its own.
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("connection error: {}", e);
+            }
+        });
+
+        let statement = client.prepare_typed("SELECT $1", &[TEXT]).await.unwrap();
+        let rows = client.query(&statement, &[&"Hello, World"]).await.unwrap();
+        let value: &str = rows[0].get(0);
+        assert_eq!(value, "Hello, World");
+        let rows = client
+            .query(&statement, &[&"Statement is still useful"])
+            .await
+            .unwrap();
+        let value: &str = rows[0].get(0);
+        assert_eq!(value, "Statement is still useful");
+    }*/
 }
