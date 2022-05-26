@@ -41,7 +41,7 @@ use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::{HummockSnapshotManager, QueryManager};
+use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -126,6 +126,7 @@ pub struct FrontendEnv {
     catalog_reader: CatalogReader,
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 impl FrontendEnv {
@@ -148,7 +149,7 @@ impl FrontendEnv {
         let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            hummock_snapshot_manager,
+            hummock_snapshot_manager.clone(),
             compute_client_pool,
         );
         Self {
@@ -157,6 +158,7 @@ impl FrontendEnv {
             catalog_reader,
             worker_node_manager,
             query_manager,
+            hummock_snapshot_manager,
         }
     }
 
@@ -209,7 +211,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
-            hummock_snapshot_manager,
+            hummock_snapshot_manager.clone(),
         )
         .await;
         let observer_join_handle = observer_manager.start().await?;
@@ -223,6 +225,7 @@ impl FrontendEnv {
                 worker_node_manager,
                 meta_client: frontend_meta_client,
                 query_manager,
+                hummock_snapshot_manager,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -258,6 +261,10 @@ impl FrontendEnv {
 
     pub fn query_manager(&self) -> &QueryManager {
         &self.query_manager
+    }
+
+    pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManagerRef {
+        &self.hummock_snapshot_manager
     }
 }
 

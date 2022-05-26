@@ -546,7 +546,7 @@ description = "Compose a docker-compose.yaml deploy directory"
 script = '''
 #!@shell
 set -e
-rm -rf ${PREFIX_DOCKER}/*
+rm -rf "${PREFIX_DOCKER}"/*
 mkdir -p "${PREFIX_DOCKER}"
 cargo run --bin risedev-compose -- -d "${PREFIX_DOCKER}" --deploy "$@"
 echo docker-compose file and deploy.sh generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
@@ -559,5 +559,11 @@ description = "Run deploy.sh"
 script = '''
 #!@shell
 set -e
+
 .risingwave/rw-docker/deploy.sh "$@"
+
+echo
+echo "Deploy finished!"
+
+cat .risingwave/rw-docker/_message.partial.sh
 '''

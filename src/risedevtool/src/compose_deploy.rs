@@ -40,6 +40,16 @@ pub struct ComposeDeployConfig {
     pub risedev_extra_args: HashMap<String, String>,
 }
 
+impl ComposeDeployConfig {
+    pub fn lookup_instance_by_id(&self, id: &str) -> &Ec2Instance {
+        self.instances.iter().find(|i| i.id == id).unwrap()
+    }
+
+    pub fn lookup_instance_by_host(&self, host: &str) -> &Ec2Instance {
+        self.instances.iter().find(|i| i.dns_host == host).unwrap()
+    }
+}
+
 pub fn compose_deploy(
     output_directory: &Path,
     steps: &[String],
@@ -99,7 +109,7 @@ fi
         writeln!(x, r#"if [[ "$DO_SYNC" -eq 1 ]]; then"#)?;
         writeln!(x, "# --- Sync Config ---")?;
         writeln!(x, r#"echo "$(tput setaf 2)(1/4) sync config$(tput sgr0)""#)?;
-        writeln!(x, "echo \"If this step takes too long time, maybe EC2 IP has been changed. You'll need to re-run $(tput setaf 2)terraform apply$(tput sgr0) to get the latest IP, and then $(tput setaf 2)./risedev compose-deploy <profile>$(tput sgr0) again to update the deploy script.\"")?;
+        writeln!(x, "echo -e \"If this step takes too long time, maybe EC2 IP has been changed. You'll need to re-run:\\n* $(tput setaf 2)terraform apply$(tput sgr0) to get the latest IP,\\n* and then $(tput setaf 2)./risedev compose-deploy <profile>$(tput sgr0) again to update the deploy script.\"")?;
         writeln!(x, "parallel --linebuffer bash << EOF")?;
         for instance in ec2_instances {
             let host = &instance.dns_host;
@@ -156,7 +166,7 @@ fi
             } else {
                 ""
             };
-            writeln!(y, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose stop 0 && docker compose down --remove-orphans{down_extra_arg} && docker pull {}'\"",
+            writeln!(y, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose kill && docker compose down --remove-orphans{down_extra_arg} && docker pull {}'\"",
                 compose_config.image.risingwave
             )?;
             if tear_down_volumes {

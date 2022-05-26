@@ -56,6 +56,12 @@ macro_rules! impl_split {
                     .to_string()
             }
 
+            pub fn update(&self, start_offset: String) -> Self {
+                match self {
+                    $( Self::$variant_name(inner) => Self::$variant_name(inner.copy_with_offset(start_offset)), )*
+                }
+            }
+
             pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
                 match split_type.to_lowercase().as_str() {
                     $( $connector_name => <$split>::restore_from_bytes(bytes).map(Self::$variant_name), )*
@@ -78,13 +84,11 @@ macro_rules! impl_split_reader {
 
              pub async fn create(
                 config: ConnectorProperties,
-                state: ConnectorStateV2,
+                state: ConnectorState,
                 columns: Option<Vec<Column>>,
             ) -> Result<Self> {
-                if let ConnectorStateV2::Splits(s) = &state {
-                    if s.is_empty() {
-                        return Ok(Self::Dummy(Box::new(DummySplitReader {})));
-                    }
+                if state.is_none() {
+                    return Ok(Self::Dummy(Box::new(DummySplitReader {})));
                 }
 
                 let connector = match config {

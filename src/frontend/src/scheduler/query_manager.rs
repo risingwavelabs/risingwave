@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 use super::HummockSnapshotManagerRef;
 use crate::scheduler::distributed::QueryExecution;
-use crate::scheduler::plan_fragmenter::Query;
+use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::ExecutionContextRef;
 
@@ -80,9 +80,13 @@ impl QueryManager {
             .get_client_for_addr((&worker_node_addr).into())
             .await?;
 
+        let query_id = QueryId {
+            id: Uuid::new_v4().to_string(),
+        };
+
         // Build task id and task sink id
         let task_id = TaskId {
-            query_id: Uuid::new_v4().to_string(),
+            query_id: query_id.id.clone(),
             stage_id: 0,
             task_id: 0,
         };
@@ -91,11 +95,20 @@ impl QueryManager {
             output_id: 0,
         };
 
-        let epoch = self.hummock_snapshot_manager.get_epoch().await?;
-
-        compute_client
-            .create_task(task_id.clone(), plan, epoch)
+        let epoch = self
+            .hummock_snapshot_manager
+            .get_epoch(query_id.clone())
             .await?;
+
+        if let Err(e) = compute_client
+            .create_task(task_id.clone(), plan, epoch)
+            .await
+        {
+            self.hummock_snapshot_manager
+                .unpin_snapshot(epoch, &query_id)
+                .await?;
+            return Err(e);
+        }
 
         let query_result_fetcher = QueryResultFetcher::new(
             epoch,
@@ -113,8 +126,12 @@ impl QueryManager {
         _context: ExecutionContextRef,
         query: Query,
     ) -> Result<impl DataChunkStream> {
+        let query_id = query.query_id().clone();
         // Cheat compiler to resolve type
-        let epoch = self.hummock_snapshot_manager.get_epoch().await?;
+        let epoch = self
+            .hummock_snapshot_manager
+            .get_epoch(query_id.clone())
+            .await?;
 
         let query_execution = QueryExecution::new(
             query,
@@ -124,7 +141,15 @@ impl QueryManager {
             self.compute_client_pool.clone(),
         );
 
-        let query_result_fetcher = query_execution.start().await?;
+        let query_result_fetcher = match query_execution.start().await {
+            Ok(query_result_fetcher) => query_result_fetcher,
+            Err(e) => {
+                self.hummock_snapshot_manager
+                    .unpin_snapshot(epoch, &query_id)
+                    .await?;
+                return Err(e);
+            }
+        };
 
         Ok(query_result_fetcher.run())
     }
@@ -164,8 +189,6 @@ impl QueryResultFetcher {
         }
 
         let epoch = self.epoch;
-        // Unpin corresponding snapshot.
-        self.hummock_snapshot_manager.unpin_snapshot(epoch).await?;
     }
 }
 

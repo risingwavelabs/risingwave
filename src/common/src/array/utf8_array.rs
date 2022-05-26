@@ -191,7 +191,7 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<Utf8Array> {
+    fn finish(self) -> Result<Utf8Array> {
         Ok(Utf8Array {
             bitmap: (self.bitmap).finish(),
             data: self.data,

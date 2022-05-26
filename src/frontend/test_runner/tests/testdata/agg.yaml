@@ -39,9 +39,10 @@
     select min(v1) + max(v2) * count(v3) as agg from t;
   batch_plan: |
     BatchProject { exprs: [($0 + ($1 * $2))] }
-      BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
+      BatchSimpleAgg { aggs: [min($0), max($1), sum($2)] }
         BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [v1, v2, v3] }
+          BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
+            BatchScan { table: t, columns: [v1, v2, v3] }
   batch_local_plan: |
     BatchProject { exprs: [($0 + ($1 * $2))] }
       BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
@@ -134,10 +135,11 @@
     create table t(v1 int, v2 int);
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;
   batch_plan: |
-    BatchSimpleAgg { aggs: [count($0), sum($0)] }
+    BatchSimpleAgg { aggs: [sum($0), sum($1)] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [($0 + $1)] }
-          BatchScan { table: t, columns: [v1, v2] }
+        BatchSimpleAgg { aggs: [count($0), sum($0)] }
+          BatchProject { exprs: [($0 + $1)] }
+            BatchScan { table: t, columns: [v1, v2] }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [count($0), sum($0)] }
       BatchExchange { order: [], dist: Single }
@@ -178,9 +180,10 @@
     create table t (v1 real not null);
     select count(*) from t;
   batch_plan: |
-    BatchSimpleAgg { aggs: [count] }
+    BatchSimpleAgg { aggs: [sum($0)] }
       BatchExchange { order: [], dist: Single }
-        BatchScan { table: t, columns: [] }
+        BatchSimpleAgg { aggs: [count] }
+          BatchScan { table: t, columns: [] }
 - sql: |
     /* having with agg call */
     create table t (v1 real not null);
@@ -190,7 +193,8 @@
       BatchFilter { predicate: ($0 > 5:Int32) }
         BatchSimpleAgg { aggs: [sum($0)] }
           BatchExchange { order: [], dist: Single }
-            BatchScan { table: t, columns: [v1] }
+            BatchSimpleAgg { aggs: [sum($0)] }
+              BatchScan { table: t, columns: [v1] }
 - sql: |
     /* having with group column */
     create table t (v1 real not null);
@@ -224,3 +228,55 @@
         LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
           LogicalProject { exprs: [$2, $1] }
             LogicalScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    /* arguments out-of-order */
+    create table t(v1 int, v2 int, v3 int);
+    select count(v3), min(v2), max(v1) from t;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0), min($1), max($2)] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [count($0), min($1), max($2)] }
+          BatchProject { exprs: [$2, $1, $0] }
+            BatchScan { table: t, columns: [v1, v2, v3] }
+- sql: |
+    /* simple-agg arguments out-of-order */
+    create table t(v1 int, v2 int, v3 int);
+    select min(v1) + max(v3) * count(v2) as agg from t;
+  batch_plan: |
+    BatchProject { exprs: [($0 + ($1 * $2))] }
+      BatchSimpleAgg { aggs: [min($0), max($1), sum($2)] }
+        BatchExchange { order: [], dist: Single }
+          BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
+            BatchProject { exprs: [$0, $2, $1] }
+              BatchScan { table: t, columns: [v1, v2, v3] }
+- sql: |
+    /* simple-agg with single distribution */
+    create table t(v1 int);
+    select sum(c1) from (select sum(v1) as c1 from t);
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0)] }
+      BatchSimpleAgg { aggs: [sum($0)] }
+        BatchExchange { order: [], dist: Single }
+          BatchSimpleAgg { aggs: [sum($0)] }
+            BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* simple-agg with some shard distribution */
+    create table t(v1 int);
+    select sum(v1) from t;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0)] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [sum($0)] }
+          BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* simple-agg with hash shard distribution */
+    create table t(v1 int, v2 int);
+    select sum(c1) from (select v1, sum(v2) as c1 from t group by v1);
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0)] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [sum($0)] }
+          BatchProject { exprs: [$1] }
+            BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+              BatchExchange { order: [], dist: HashShard([0]) }
+                BatchScan { table: t, columns: [v1, v2] }
