@@ -16,8 +16,6 @@ mod materialize;
 mod state;
 
 #[cfg(test)]
-mod table_state_tests;
-#[cfg(test)]
 pub(crate) mod test_utils;
 
 pub use materialize::*;

@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::enumerate;
-use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
+use prometheus::Histogram;
 use prost::Message;
 use risingwave_pb::hummock::{CompactMetrics, HummockVersion, TableSetStatistics};
 
@@ -27,11 +27,6 @@ pub fn trigger_commit_stat(metrics: &MetaMetrics, current_version: &HummockVersi
     metrics
         .max_committed_epoch
         .set(current_version.max_committed_epoch as i64);
-    let uncommitted_sst_num = current_version
-        .uncommitted_epochs
-        .iter()
-        .fold(0, |accum, elem| accum + elem.tables.len());
-    metrics.uncommitted_sst_num.set(uncommitted_sst_num as i64);
     metrics
         .version_size
         .set(current_version.encoded_len() as i64);
@@ -90,20 +85,24 @@ pub fn trigger_sst_stat(
     }
 }
 
-fn single_level_stat_bytes<T: FnMut(String) -> prometheus::Result<GenericCounter<AtomicF64>>>(
+fn single_level_stat_bytes<T: FnMut(String) -> Histogram>(
     mut metric_vec: T,
     level_stat: &TableSetStatistics,
 ) {
-    let level_label = String::from("L") + &level_stat.level_idx.to_string();
-    metric_vec(level_label).unwrap().inc_by(level_stat.size_gb);
+    if level_stat.size_kb > 0 {
+        let level_label = String::from("L") + &level_stat.level_idx.to_string();
+        metric_vec(level_label).observe(level_stat.size_kb as f64);
+    }
 }
 
-fn single_level_stat_sstn<T: FnMut(String) -> prometheus::Result<GenericCounter<AtomicU64>>>(
+fn single_level_stat_sstn<T: FnMut(String) -> Histogram>(
     mut metric_vec: T,
     level_stat: &TableSetStatistics,
 ) {
-    let level_label = String::from("L") + &level_stat.level_idx.to_string();
-    metric_vec(level_label).unwrap().inc_by(level_stat.cnt);
+    if level_stat.cnt > 0 {
+        let level_label = String::from("L") + &level_stat.level_idx.to_string();
+        metric_vec(level_label).observe(level_stat.cnt as f64);
+    }
 }
 
 pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) {
@@ -120,27 +119,15 @@ pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) 
         .inc();
 
     single_level_stat_bytes(
-        |label| {
-            metrics
-                .level_compact_read_curr
-                .get_metric_with_label_values(&[&label])
-        },
+        |label| metrics.level_compact_read_curr.with_label_values(&[&label]),
         compact_metrics.read_level_n.as_ref().unwrap(),
     );
     single_level_stat_bytes(
-        |label| {
-            metrics
-                .level_compact_read_next
-                .get_metric_with_label_values(&[&label])
-        },
+        |label| metrics.level_compact_read_next.with_label_values(&[&label]),
         compact_metrics.read_level_nplus1.as_ref().unwrap(),
     );
     single_level_stat_bytes(
-        |label| {
-            metrics
-                .level_compact_write
-                .get_metric_with_label_values(&[&label])
-        },
+        |label| metrics.level_compact_write.with_label_values(&[&label]),
         compact_metrics.write.as_ref().unwrap(),
     );
 
@@ -148,7 +135,7 @@ pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) 
         |label| {
             metrics
                 .level_compact_read_sstn_curr
-                .get_metric_with_label_values(&[&label])
+                .with_label_values(&[&label])
         },
         compact_metrics.read_level_n.as_ref().unwrap(),
     );
@@ -156,7 +143,7 @@ pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) 
         |label| {
             metrics
                 .level_compact_read_sstn_next
-                .get_metric_with_label_values(&[&label])
+                .with_label_values(&[&label])
         },
         compact_metrics.read_level_nplus1.as_ref().unwrap(),
     );
@@ -164,7 +151,7 @@ pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) 
         |label| {
             metrics
                 .level_compact_write_sstn
-                .get_metric_with_label_values(&[&label])
+                .with_label_values(&[&label])
         },
         compact_metrics.write.as_ref().unwrap(),
     );

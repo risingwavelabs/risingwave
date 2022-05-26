@@ -21,15 +21,14 @@ use risingwave_hummock_sdk::VersionedComparator;
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator, ReadOptions};
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
+use crate::monitor::StoreLocalStatistic;
 
-pub trait SSTableIteratorType {
-    type SSTableIterator: HummockIterator;
-
-    fn new(
+pub trait SSTableIteratorType: HummockIterator + 'static {
+    fn create(
         table: TableHolder,
         sstable_store: SstableStoreRef,
         read_options: Arc<ReadOptions>,
-    ) -> Self::SSTableIterator;
+    ) -> Self;
 }
 
 /// Iterates on a table.
@@ -44,7 +43,7 @@ pub struct SSTableIterator {
     pub sst: TableHolder,
 
     sstable_store: SstableStoreRef,
-
+    stats: StoreLocalStatistic,
     options: Arc<ReadOptions>,
 }
 
@@ -59,6 +58,7 @@ impl SSTableIterator {
             cur_idx: 0,
             sst: table,
             sstable_store,
+            stats: StoreLocalStatistic::default(),
             options,
         }
     }
@@ -76,7 +76,7 @@ impl SSTableIterator {
         } else {
             let block = if self.options.prefetch {
                 self.sstable_store
-                    .get_with_prefetch(self.sst.value(), idx as u64)
+                    .get_with_prefetch(self.sst.value(), idx as u64, &mut self.stats)
                     .await?
             } else {
                 self.sstable_store
@@ -84,6 +84,7 @@ impl SSTableIterator {
                         self.sst.value(),
                         idx as u64,
                         crate::hummock::CachePolicy::Fill,
+                        &mut self.stats,
                     )
                     .await?
             };
@@ -107,6 +108,7 @@ impl HummockIterator for SSTableIterator {
     type Direction = Forward;
 
     async fn next(&mut self) -> HummockResult<()> {
+        self.stats.scan_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
 
@@ -159,17 +161,19 @@ impl HummockIterator for SSTableIterator {
 
         Ok(())
     }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
+    }
 }
 
 impl SSTableIteratorType for SSTableIterator {
-    type SSTableIterator = SSTableIterator;
-
-    fn new(
+    fn create(
         table: TableHolder,
         sstable_store: SstableStoreRef,
-        read_options: Arc<ReadOptions>,
-    ) -> Self::SSTableIterator {
-        SSTableIterator::new(table, sstable_store, read_options)
+        options: Arc<ReadOptions>,
+    ) -> Self {
+        SSTableIterator::new(table, sstable_store, options)
     }
 }
 
@@ -204,7 +208,7 @@ mod tests {
         let handle = cache.insert(0, 0, 1, Box::new(table));
 
         let mut sstable_iter =
-            SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
+            SSTableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
 
@@ -233,7 +237,7 @@ mod tests {
         let handle = cache.insert(0, 0, 1, Box::new(table));
 
         let mut sstable_iter =
-            SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
+            SSTableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);
@@ -303,8 +307,9 @@ mod tests {
             .await
             .unwrap();
 
-        let mut sstable_iter = SSTableIterator::new(
-            block_on(sstable_store.sstable(table.id)).unwrap(),
+        let mut stats = StoreLocalStatistic::default();
+        let mut sstable_iter = SSTableIterator::create(
+            block_on(sstable_store.sstable(table.id, &mut stats)).unwrap(),
             sstable_store,
             Arc::new(ReadOptions { prefetch: true }),
         );

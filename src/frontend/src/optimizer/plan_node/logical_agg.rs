@@ -29,7 +29,7 @@ use super::{
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Aggregation Call
@@ -64,6 +64,23 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             distinct: self.distinct,
+        }
+    }
+
+    pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
+        let total_agg_kind = match &self.agg_kind {
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::Avg
+            | AggKind::StringAgg
+            | AggKind::SingleValue => self.agg_kind.clone(),
+
+            AggKind::Count | AggKind::RowCount | AggKind::Sum => AggKind::Sum,
+        };
+        PlanAggCall {
+            agg_kind: total_agg_kind,
+            inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
+            ..self.clone()
         }
     }
 
@@ -540,8 +557,9 @@ impl PredicatePushdown for LogicalAgg {
         let num_agg_calls = self.agg_calls.len();
         assert!(num_group_keys + num_agg_calls == self.schema().len());
 
-        // Specially, SimpleAgg should be skipped because the predicate either references agg_calls
+        // SimpleAgg should be skipped because the predicate either references agg_calls
         // or is const.
+        // If the filter references agg_calls, we can not push it.
         // When it is constantly true, pushing is useless and may actually cause more evaulation
         // cost of the predicate.
         // When it is constantly false, pushing is wrong - the old plan returns 0 rows but new one
@@ -590,14 +608,14 @@ impl ToStream for LogicalAgg {
             Ok(StreamSimpleAgg::new(
                 self.clone_with_input(
                     self.input()
-                        .to_stream_with_dist_required(&Distribution::Single)?,
+                        .to_stream_with_dist_required(&RequiredDist::single())?,
                 ),
             )
             .into())
         } else {
             Ok(StreamHashAgg::new(
                 self.clone_with_input(self.input().to_stream_with_dist_required(
-                    &Distribution::HashShard(self.group_keys().to_vec()),
+                    &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
                 )?),
             )
             .into())

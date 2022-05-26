@@ -65,7 +65,7 @@ mod tests {
     use crate::executor::Executor;
 
     #[should_panic]
-    #[madsim::test]
+    #[tokio::test]
     async fn test_not_next_to_each_other() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::from_pretty(
@@ -83,7 +83,7 @@ mod tests {
     }
 
     #[should_panic]
-    #[madsim::test]
+    #[tokio::test]
     async fn test_first_one_update_insert() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::from_pretty(
@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[should_panic]
-    #[madsim::test]
+    #[tokio::test]
     async fn test_last_one_update_delete() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::from_pretty(
@@ -114,7 +114,7 @@ mod tests {
         checked.next().await.unwrap().unwrap(); // should panic
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_empty_chunk() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::default());

@@ -21,7 +21,7 @@ use super::field_generator::FieldGeneratorImpl;
 use super::generator::DatagenEventGenerator;
 use crate::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::datagen::{DatagenProperties, DatagenSplit};
-use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitImpl, SplitReader};
+use crate::{Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitReader};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -36,7 +36,7 @@ impl SplitReader for DatagenSplitReader {
 
     async fn new(
         properties: DatagenProperties,
-        state: ConnectorStateV2,
+        state: ConnectorState,
         columns: Option<Vec<Column>>,
     ) -> Result<Self>
     where
@@ -45,26 +45,19 @@ impl SplitReader for DatagenSplitReader {
         let mut assigned_split = DatagenSplit::default();
         let mut split_id = String::new();
         let mut events_so_far = u64::default();
-        match state {
-            ConnectorStateV2::Splits(splits) => {
-                log::debug!("Splits for datagen found! {:?}", splits);
-                for split in splits {
-                    // TODO: currently, assume there's only on split in one reader
-                    split_id = split.id();
-                    if let SplitImpl::Datagen(n) = split {
-                        if let Some(s) = n.start_offset {
-                            events_so_far = s;
-                        };
-                        assigned_split = n;
-                        break;
-                    }
+        if let Some(splits) = state {
+            log::debug!("Splits for datagen found! {:?}", splits);
+            for split in splits {
+                // TODO: currently, assume there's only on split in one reader
+                split_id = split.id();
+                if let SplitImpl::Datagen(n) = split {
+                    if let Some(s) = n.start_offset {
+                        events_so_far = s;
+                    };
+                    assigned_split = n;
+                    break;
                 }
             }
-            ConnectorStateV2::State(cs) => {
-                log::debug!("Splits for datagen found! {:?}", cs);
-                todo!()
-            }
-            ConnectorStateV2::None => {}
         }
 
         let split_index = assigned_split.split_index as u64;

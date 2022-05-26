@@ -19,6 +19,7 @@ pub use forward_concat::*;
 mod backward_concat;
 mod concat_inner;
 pub use backward_concat::*;
+pub use concat_inner::ConcatIteratorInner;
 mod backward_merge;
 pub use backward_merge::*;
 mod backward_user;
@@ -33,6 +34,8 @@ pub use forward_user::*;
 pub(crate) mod test_utils;
 
 use async_trait::async_trait;
+
+use crate::monitor::StoreLocalStatistic;
 
 /// `HummockIterator` defines the interface of all iterators, including `SSTableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
@@ -103,6 +106,9 @@ pub trait HummockIterator: Send + Sync {
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
+
+    /// take local statistic info from iterator to report metrics.
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
 }
 
 pub trait ForwardHummockIterator = HummockIterator<Direction = Forward>;
@@ -112,12 +118,13 @@ pub type BoxedForwardHummockIterator = Box<dyn ForwardHummockIterator>;
 pub type BoxedBackwardHummockIterator = Box<dyn BackwardHummockIterator>;
 pub type BoxedHummockIterator<D> = Box<dyn HummockIterator<Direction = D>>;
 
+#[derive(PartialEq, Eq, Debug)]
 pub enum DirectionEnum {
     Forward,
     Backward,
 }
 
-pub trait HummockIteratorDirection: Sync + Send {
+pub trait HummockIteratorDirection: Sync + Send + 'static {
     fn direction() -> DirectionEnum;
 }
 

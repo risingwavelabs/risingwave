@@ -23,8 +23,8 @@ use crate::utils::ColIndexMapping;
 /// The trait [`PlanTreeNodeLeaf`], [`PlanTreeNodeUnary`] and [`PlanTreeNodeBinary`], is just
 /// special cases for [`PlanTreeNode`]. as long as you impl these trait for a plan node, we can
 /// easily impl the [`PlanTreeNode`] which is really need by framework with helper macros
-/// [`impl_plan_tree_node_for_leaf`], [`impl_plan_tree_node_for_unary`] and
-/// [`impl_plan_tree_node_for_binary`].
+/// `impl_plan_tree_node_for_leaf`, `impl_plan_tree_node_for_unary` and
+/// `impl_plan_tree_node_for_binary`.
 ///
 /// And due to these three traits need not be used as dyn, it can return `Self` type, which is
 /// useful when implement rules and visitors. So we highly recommend not impl the [`PlanTreeNode`]

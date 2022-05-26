@@ -150,16 +150,11 @@ impl StreamService for StreamServiceImpl {
             .await
             .map_err(|e| e.to_grpc_status())?;
 
-        let finished_create_mviews = collect_result
-            .finished_create_mviews
-            .into_iter()
-            .map(Into::into)
-            .collect();
-
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
-            finished_create_mviews,
             status: None,
+            create_mview_progress: collect_result.create_mview_progress,
+            sycned_sstables: collect_result.synced_sstables,
         }))
     }
 

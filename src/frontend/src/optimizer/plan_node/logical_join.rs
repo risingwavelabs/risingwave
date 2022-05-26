@@ -29,7 +29,7 @@ use crate::optimizer::plan_node::batch_nested_loop_join::BatchNestedLoopJoin;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -243,7 +243,6 @@ impl LogicalJoin {
     ///
     /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
     fn push_down(
-        &self,
         predicate: &mut Condition,
         left_col_num: usize,
         right_col_num: usize,
@@ -286,35 +285,35 @@ impl LogicalJoin {
         (left, right, on)
     }
 
-    fn can_push_left_from_filter(&self, ty: JoinType) -> bool {
+    fn can_push_left_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
         )
     }
 
-    fn can_push_right_from_filter(&self, ty: JoinType) -> bool {
+    fn can_push_right_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
         )
     }
 
-    fn can_push_on_from_filter(&self, ty: JoinType) -> bool {
+    fn can_push_on_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
         )
     }
 
-    fn can_push_left_from_on(&self, ty: JoinType) -> bool {
+    fn can_push_left_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
         )
     }
 
-    fn can_push_right_from_on(&self, ty: JoinType) -> bool {
+    fn can_push_right_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
@@ -325,12 +324,7 @@ impl LogicalJoin {
     ///
     /// now it is just a naive implementation for comparison expression, we can give a more general
     /// implementation with constant folding in future
-    fn simplify_outer(
-        &self,
-        predicate: &Condition,
-        left_col_num: usize,
-        join_type: JoinType,
-    ) -> JoinType {
+    fn simplify_outer(predicate: &Condition, left_col_num: usize, join_type: JoinType) -> JoinType {
         let (mut gen_null_in_left, mut gen_null_in_right) = match join_type {
             JoinType::LeftOuter => (false, true),
             JoinType::RightOuter => (true, false),
@@ -512,24 +506,24 @@ impl PredicatePushdown for LogicalJoin {
     fn predicate_pushdown(&self, mut predicate: Condition) -> PlanRef {
         let left_col_num = self.left.schema().len();
         let right_col_num = self.right.schema().len();
-        let join_type = self.simplify_outer(&predicate, left_col_num, self.join_type);
+        let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type);
 
-        let (left_from_filter, right_from_filter, on) = self.push_down(
+        let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
             &mut predicate,
             left_col_num,
             right_col_num,
-            self.can_push_left_from_filter(join_type),
-            self.can_push_right_from_filter(join_type),
-            self.can_push_on_from_filter(join_type),
+            LogicalJoin::can_push_left_from_filter(join_type),
+            LogicalJoin::can_push_right_from_filter(join_type),
+            LogicalJoin::can_push_on_from_filter(join_type),
         );
 
         let mut new_on = self.on.clone().and(on);
-        let (left_from_on, right_from_on, on) = self.push_down(
+        let (left_from_on, right_from_on, on) = LogicalJoin::push_down(
             &mut new_on,
             left_col_num,
             right_col_num,
-            self.can_push_left_from_on(join_type),
-            self.can_push_right_from_on(join_type),
+            LogicalJoin::can_push_left_from_on(join_type),
+            LogicalJoin::can_push_right_from_on(join_type),
             false,
         );
         assert!(
@@ -590,21 +584,22 @@ impl ToStream for LogicalJoin {
             self.right.schema().len(),
             self.on.clone(),
         );
+
         let right = self
             .right()
-            .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()))?;
+            .to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                self.right().schema().len(),
+                &predicate.right_eq_indexes(),
+            ))?;
 
         let r2l =
             predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
 
-        let left_dist = r2l
-            .rewrite_required_distribution(right.distribution())
-            .unwrap();
+        let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
+            right.distribution().clone(),
+        ));
 
-        let mut left = self.left().to_stream_with_dist_required(&left_dist)?;
-        if left.distribution() != &left_dist {
-            left = left_dist.enforce(left, Order::any());
-        }
+        let left = self.left().to_stream_with_dist_required(&left_dist)?;
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {

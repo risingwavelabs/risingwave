@@ -41,6 +41,7 @@ pub fn default_config_for_test() -> StorageConfig {
         block_size_kb: 64,
         bloom_false_positive: 0.1,
         share_buffers_sync_parallelism: 2,
+        share_buffer_compaction_worker_threads_number: 1,
         shared_buffer_capacity_mb: 64,
         data_directory: "hummock_001".to_string(),
         write_conflict_detection_enabled: true,
@@ -162,5 +163,5 @@ pub async fn count_iter(iter: &mut HummockStateStoreIter) -> usize {
 }
 
 pub fn create_small_table_cache() -> Arc<LruCache<HummockSSTableId, Box<Sstable>>> {
-    Arc::new(LruCache::new(1, 4, 4))
+    Arc::new(LruCache::new(1, 4))
 }

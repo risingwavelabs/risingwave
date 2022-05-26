@@ -47,4 +47,18 @@ impl DatagenSplit {
             start_offset,
         }
     }
+
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        // TODO make sure fail over for generators
+        log::warn!(
+            "DatagenSplit is updated to {:?} but not applied",
+            start_offset
+        );
+
+        Self::new(
+            self.split_index,
+            self.split_num,
+            Some(start_offset.as_str().parse::<u64>().unwrap()),
+        )
+    }
 }
