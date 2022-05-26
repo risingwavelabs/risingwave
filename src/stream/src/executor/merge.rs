@@ -87,6 +87,10 @@ pub struct MergeExecutor {
     actor_id: u32,
 
     info: ExecutorInfo,
+
+    /// Actor context
+    actor_context: ActorContextRef,
+    actor_context_position: usize,
 }
 
 impl MergeExecutor {
@@ -95,7 +99,16 @@ impl MergeExecutor {
         pk_indices: PkIndices,
         actor_id: u32,
         inputs: Vec<Receiver<Message>>,
+        actor_context: ActorContextRef,
+        receiver_id: u64,
     ) -> Self {
+        let actor_context_position = {
+            let mut ctx = actor_context.lock();
+            let actor_context_position = ctx.info.len();
+            ctx.info.push(OperatorInfo::new(receiver_id));
+            actor_context_position
+        };
+
         Self {
             upstreams: inputs,
             actor_id,
@@ -104,6 +117,8 @@ impl MergeExecutor {
                 pk_indices,
                 identity: "MergeExecutor".to_string(),
             },
+            actor_context,
+            actor_context_position,
         }
     }
 }
@@ -165,6 +180,10 @@ impl MergeExecutor {
                     Message::Chunk(_) => {
                         // We may still receive message from this channel.
                         active.push(from.into_future());
+                        {
+                            self.actor_context.lock().info[self.actor_context_position]
+                                .next_message(&message);
+                        }
                         yield message;
                     }
                     Message::Barrier(barrier) => {
@@ -189,7 +208,11 @@ impl MergeExecutor {
             // 2. Yield the barrier to downstream once all barriers collected from upstream.
             let barrier = current_barrier.unwrap();
             let to_stop = barrier.is_to_stop_actor(self.actor_id);
-            yield Message::Barrier(barrier);
+            let message = Message::Barrier(barrier);
+            {
+                self.actor_context.lock().info[self.actor_context_position].next_message(&message);
+            }
+            yield message;
 
             // 3. Put back the upstreams, or close the stream.
             if to_stop {
@@ -245,7 +268,8 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::new(Schema::default(), vec![], 0, rxs);
+        let merger =
+            MergeExecutor::new(Schema::default(), vec![], 0, rxs, ActorContext::create(), 0);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
