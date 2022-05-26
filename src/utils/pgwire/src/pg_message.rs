@@ -21,7 +21,6 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
-use crate::pg_message::FeMessage::Bind;
 use crate::pg_response::StatementType;
 use crate::pg_server::BoxedError;
 use crate::types::Row;

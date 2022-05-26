@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::io;
-use std::io::{Bytes, ErrorKind};
+use std::io::ErrorKind;
 use std::result::Result;
 use std::sync::Arc;
 
@@ -92,7 +92,7 @@ mod tests {
     use std::error::Error;
     use std::sync::Arc;
 
-    use tokio_postgres::{Client, NoTls};
+    use tokio_postgres::NoTls;
 
     use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
@@ -106,7 +106,7 @@ mod tests {
 
         fn connect(
             &self,
-            database: &str,
+            _database: &str,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
         }
@@ -118,7 +118,7 @@ mod tests {
     impl Session for MockSession {
         async fn run_statement(
             self: Arc<Self>,
-            sql: &str,
+            _sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
             Ok(PgResponse::new(
                 StatementType::SELECT,
@@ -136,7 +136,7 @@ mod tests {
     /// The test below is copied from tokio-postgres doc.
     async fn test_psql_extended_mode_connect() {
         let session_mgr = Arc::new(MockSessionManager {});
-        let future = tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
+        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
 
         // Connect to the database.
         let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
