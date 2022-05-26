@@ -48,6 +48,30 @@ macro_rules! boolean {
 pub(crate) use boolean;
 
 #[macro_export]
+macro_rules! struct_type {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Struct{fields:_},
+            risingwave_common::array::StructArray
+        }
+    };
+}
+
+pub(crate) use struct_type;
+
+#[macro_export]
+macro_rules! list {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::List{datatype:_},
+            risingwave_common::array::ListArray
+        }
+    };
+}
+
+pub(crate) use list;
+
+#[macro_export]
 macro_rules! int16 {
     ($macro:ident) => {
         $macro! {
