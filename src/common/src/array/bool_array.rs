@@ -152,7 +152,7 @@ impl ArrayBuilder for BoolArrayBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<BoolArray> {
+    fn finish(self) -> Result<BoolArray> {
         Ok(BoolArray {
             bitmap: self.bitmap.finish(),
             data: self.data.finish(),

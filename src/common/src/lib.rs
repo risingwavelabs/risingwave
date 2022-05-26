@@ -42,7 +42,6 @@ pub mod error;
 pub mod array;
 #[macro_use]
 pub mod util;
-mod alloc;
 pub mod buffer;
 pub mod catalog;
 pub mod collection;
