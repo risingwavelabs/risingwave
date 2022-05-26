@@ -18,6 +18,7 @@ use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
+use madsim::rand::prelude::SliceRandom;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
@@ -131,6 +132,9 @@ impl MergeExecutor {
     async fn execute_inner(self) {
         let mut upstreams = self.upstreams;
 
+        use madsim::rand::SeedableRng;
+        let mut rng = madsim::rand::rngs::StdRng::from_entropy();
+
         loop {
             // Futures of all active upstreams.
             let mut active = upstreams
@@ -144,6 +148,7 @@ impl MergeExecutor {
 
             // 1. Align the barriers.
             while !active.is_empty() {
+                active.shuffle(&mut rng);
                 // Poll upstreams and get a message from the ready one.
                 let ((message, from), _id, remainings) = select_all(active)
                     .instrument(tracing::trace_span!("idle"))
