@@ -363,7 +363,7 @@ impl LocalVersionManager {
     }
 
     #[cfg(test)]
-    pub fn get_remote_ssts(&self, epoch: HummockEpoch) -> Vec<SstableInfo> {
+    pub fn get_uncommitted_ssts(&self, epoch: HummockEpoch) -> Vec<SstableInfo> {
         self.local_version
             .read()
             .get_shared_buffer(epoch)
