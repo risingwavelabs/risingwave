@@ -143,7 +143,7 @@ enum NextOutcome {
     MemTable,
     Storage,
     Both,
-    Neither,
+    End,
 }
 impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     async fn new(
@@ -168,84 +168,112 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     }
 
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
-        let next_flag;
-        let mut res = None;
-        let cell_based_item = self.cell_based_item.take();
-        match (cell_based_item, self.mem_table_iter.peek()) {
-            (None, None) => {
-                next_flag = NextOutcome::Neither;
-                res = None;
-            }
-            (Some((_, row)), None) => {
-                res = Some(row);
-                next_flag = NextOutcome::Storage;
-            }
-            (None, Some((_, row_op))) => {
-                next_flag = NextOutcome::MemTable;
-                match row_op {
-                    RowOp::Insert(row) => res = Some(row.clone()),
-                    RowOp::Delete(_) => {}
-                    RowOp::Update((_, new_row)) => res = Some(new_row.clone()),
+        loop {
+            let next_flag;
+            let res;
+            let cell_based_item = self.cell_based_item.take();
+            match (cell_based_item, self.mem_table_iter.peek()) {
+                (None, None) => {
+                    next_flag = NextOutcome::End;
+                    res = None;
                 }
-            }
-            (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
-                let mem_table_pk_bytes =
-                    serialize_pk(mem_table_pk, &self.pk_serializer).map_err(err)?;
-                match cell_based_pk.cmp(&mem_table_pk_bytes) {
-                    Ordering::Less => {
-                        // cell_based_table_item will be return
-                        res = Some(cell_based_row);
-                        next_flag = NextOutcome::Storage;
-                    }
-                    Ordering::Equal => {
-                        // mem_table_item will be return, while both cell_based_streaming_iter and
-                        // mem_table_iter need to execute next() once.
-
-                        next_flag = NextOutcome::Both;
-                        match mem_table_row_op {
-                            RowOp::Insert(row) => {
-                                res = Some(row.clone());
-                            }
-                            RowOp::Delete(_) => {}
-                            RowOp::Update((old_row, new_row)) => {
-                                debug_assert!(old_row == &cell_based_row);
-                                res = Some(new_row.clone());
-                            }
+                (Some((_, row)), None) => {
+                    res = Some(row);
+                    next_flag = NextOutcome::Storage;
+                }
+                (None, Some((_, row_op))) => {
+                    next_flag = NextOutcome::MemTable;
+                    match row_op {
+                        RowOp::Insert(row) => {
+                            res = Some(row.clone());
+                        }
+                        RowOp::Delete(_) => {
+                            res = None;
+                        }
+                        RowOp::Update((_, new_row)) => {
+                            res = Some(new_row.clone());
                         }
                     }
-                    Ordering::Greater => {
-                        // mem_table_item will be return
-                        next_flag = NextOutcome::MemTable;
-
-                        match mem_table_row_op {
-                            RowOp::Insert(row) => res = Some(row.clone()),
-                            RowOp::Delete(_) => {}
-                            RowOp::Update(_) => {
-                                panic!(
+                }
+                (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
+                    let mem_table_pk_bytes =
+                        serialize_pk(mem_table_pk, &self.pk_serializer).map_err(err)?;
+                    match cell_based_pk.cmp(&mem_table_pk_bytes) {
+                        Ordering::Less => {
+                            // cell_based_table_item will be return
+                            res = Some(cell_based_row);
+                            next_flag = NextOutcome::Storage;
+                        }
+                        Ordering::Equal => {
+                            // mem_table_item will be return, while both cell_based_streaming_iter
+                            // and mem_table_iter need to execute next()
+                            // once.
+                            next_flag = NextOutcome::Both;
+                            match mem_table_row_op {
+                                RowOp::Insert(row) => {
+                                    res = Some(row.clone());
+                                }
+                                RowOp::Delete(_) => {
+                                    res = None;
+                                }
+                                RowOp::Update((old_row, new_row)) => {
+                                    debug_assert!(old_row == &cell_based_row);
+                                    res = Some(new_row.clone());
+                                }
+                            }
+                        }
+                        Ordering::Greater => {
+                            // mem_table_item will be return
+                            next_flag = NextOutcome::MemTable;
+                            match mem_table_row_op {
+                                RowOp::Insert(row) => {
+                                    res = Some(row.clone());
+                                }
+                                RowOp::Delete(_) => {
+                                    res = None;
+                                }
+                                RowOp::Update(_) => {
+                                    panic!(
                                     "There must be a record in shared storage, so this case is unreachable.",
                                 );
+                                }
                             }
+                            self.cell_based_item = Some((cell_based_pk, cell_based_row));
                         }
-                        self.cell_based_item = Some((cell_based_pk, cell_based_row));
                     }
                 }
             }
-        }
-        match next_flag {
-            NextOutcome::MemTable => {
-                self.mem_table_iter.next();
-            }
-            NextOutcome::Storage => {
-                self.cell_based_item = self.cell_based_streaming_iter.next().await.map_err(err)?;
-            }
-            NextOutcome::Both => {
-                self.mem_table_iter.next();
-                self.cell_based_item = self.cell_based_streaming_iter.next().await.map_err(err)?
-            }
-            NextOutcome::Neither => {}
-        }
 
-        Ok(res)
+            // If a pk exist in both shared storage(cell_based_table) and memory(mem_table), and
+            // mem_table stores a delete record, state table iter need to next again.
+            match next_flag {
+                NextOutcome::MemTable => {
+                    self.mem_table_iter.next();
+                    if res.is_some() {
+                        return Ok(res);
+                    }
+                }
+                NextOutcome::Storage => {
+                    self.cell_based_item =
+                        self.cell_based_streaming_iter.next().await.map_err(err)?;
+
+                    if res.is_some() {
+                        return Ok(res);
+                    }
+                }
+                NextOutcome::Both => {
+                    self.mem_table_iter.next();
+                    self.cell_based_item =
+                        self.cell_based_streaming_iter.next().await.map_err(err)?;
+                    if res.is_some() {
+                        return Ok(res);
+                    }
+                }
+                NextOutcome::End => {
+                    return Ok(res);
+                }
+            }
+        }
     }
 }
 
