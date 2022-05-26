@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
-use futures::future::select_all;
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
-use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
-use tracing_futures::Instrument;
 
 use super::error::StreamExecutorError;
 use super::*;
@@ -126,72 +126,85 @@ impl Executor for MergeExecutor {
     }
 }
 
-impl MergeExecutor {
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
-        let mut upstreams = self.upstreams;
+pub struct SelectReceivers {
+    blocks: Vec<Receiver<Message>>,
+    upstreams: Vec<Receiver<Message>>,
+    barrier: Option<Barrier>,
+    last_base: usize,
+    actor_id: u32,
+}
 
-        loop {
-            // Futures of all active upstreams.
-            let mut active = upstreams
-                .into_iter()
-                .map(|ch| ch.into_future())
-                .collect_vec();
-            // Channels that're blocked by the barrier to align.
-            let mut blocked = Vec::with_capacity(active.len());
-            // The current barrier to align.
-            let mut current_barrier = None;
+impl SelectReceivers {
+    fn new(actor_id: u32, upstreams: Vec<Receiver<Message>>) -> Self {
+        Self {
+            blocks: Vec::with_capacity(upstreams.len()),
+            upstreams,
+            last_base: 0,
+            actor_id,
+            barrier: None,
+        }
+    }
+}
 
-            // 1. Align the barriers.
-            while !active.is_empty() {
-                // Poll upstreams and get a message from the ready one.
-                let ((message, from), _id, remainings) = select_all(active)
-                    .instrument(tracing::trace_span!("idle"))
-                    .await;
+impl Unpin for SelectReceivers {}
 
-                // Panic on channel close.
-                let message = message.expect(
-                    "upstream channel closed unexpectedly, please check error in upstream executors"
-                );
-                // Put back the remainings.
-                active = remainings;
+impl Stream for SelectReceivers {
+    type Item = Message;
 
-                match message {
-                    Message::Chunk(_) => {
-                        // We may still receive message from this channel.
-                        active.push(from.into_future());
-                        yield message;
-                    }
-                    Message::Barrier(barrier) => {
-                        // Align the barrier.
-                        if let Some(current_barrier) = current_barrier.as_ref() {
-                            if &barrier != current_barrier {
-                                return Err(StreamExecutorError::align_barrier(
-                                    current_barrier.clone(),
-                                    barrier,
-                                ));
-                            }
-                            assert_eq!(&barrier, current_barrier);
-                        } else {
-                            current_barrier = Some(barrier);
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut poll_count = 0;
+        while poll_count < self.upstreams.len() {
+            let idx = (poll_count + self.last_base) % self.upstreams.len();
+            match self.upstreams[idx].poll_next_unpin(cx) {
+                Poll::Pending => {
+                    poll_count += 1;
+                    continue;
+                }
+                Poll::Ready(item) => {
+                    let message = item.expect(
+                        "upstream channel closed unexpectedly, please check error in upstream executors"
+                    );
+                    match message {
+                        Message::Barrier(barrier) => {
+                            let rc = self.upstreams.swap_remove(idx);
+                            self.blocks.push(rc);
+                            self.barrier = Some(barrier);
+                            poll_count = 0;
                         }
-                        // We'll not receive message from this channel during this epoch.
-                        blocked.push(from);
+                        Message::Chunk(chunk) => {
+                            self.last_base = (idx + 1) % self.upstreams.len();
+                            return Poll::Ready(Some(Message::Chunk(chunk)));
+                        }
                     }
                 }
             }
-
-            // 2. Yield the barrier to downstream once all barriers collected from upstream.
-            let barrier = current_barrier.unwrap();
-            let to_stop = barrier.is_to_stop_actor(self.actor_id);
-            yield Message::Barrier(barrier);
-
-            // 3. Put back the upstreams, or close the stream.
-            if to_stop {
-                break;
+        }
+        if self.upstreams.is_empty() {
+            assert!(self.barrier.is_some());
+            let upstreams = std::mem::replace(&mut self.blocks, vec![]);
+            self.upstreams = upstreams;
+            let barrier = self.barrier.take().unwrap();
+            if barrier.is_to_stop_actor(self.actor_id) {
+                Poll::Ready(None)
             } else {
-                upstreams = blocked;
+                Poll::Ready(Some(Message::Barrier(barrier)))
             }
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+impl MergeExecutor {
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(self) {
+        let upstreams = self.upstreams;
+
+        // Futures of all active upstreams.
+        let mut select_all = SelectReceivers::new(self.actor_id, upstreams);
+        // Channels that're blocked by the barrier to align.
+        for message in select_all.next().await {
+            yield message;
         }
     }
 }
