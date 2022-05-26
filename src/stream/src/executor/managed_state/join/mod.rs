@@ -281,21 +281,21 @@ impl<'a, K: HashKey, S: StateStore> IterJoinEntriesMut<'a, K, S> {
                     .expect("Failed to send join entries for join key");
             } else {
                 cache_miss_counter += 1;
-                tx.send((key, None, update_entry))
-                    .ok()
-                    .expect("Failed to send join entries for join key");
-                // let match_table_info = new_iter.side_match.table_info.clone();
-                // let tx = tx.clone();
-                // tokio::spawn(async move {
-                //     let match_entry =
-                //         JoinHashMap::<K, S>::fetch_cached_state(&key, &match_table_info)
-                //             .await
-                //             .ok()
-                //             .unwrap();
-                //     tx.send((key, match_entry, update_entry))
-                //         .ok()
-                //         .expect("Failed to send join entries for join key");
-                // });
+                // tx.send((key, None, update_entry))
+                //     .ok()
+                //     .expect("Failed to send join entries for join key");
+                let match_table_info = new_iter.side_match.table_info.clone();
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let match_entry =
+                        JoinHashMap::<K, S>::fetch_cached_state(&key, &match_table_info)
+                            .await
+                            .ok()
+                            .unwrap();
+                    tx.send((key, match_entry, update_entry))
+                        .ok()
+                        .expect("Failed to send join entries for join key");
+                });
             }
         }
 
