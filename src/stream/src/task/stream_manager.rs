@@ -548,13 +548,14 @@ impl LocalStreamManagerCore {
                         let up_id = *up_id;
 
                         let pool = self.compute_client_pool.clone();
-
+                        let metrics = self.streaming_metrics.clone();
                         tokio::spawn(async move {
                             let init_client = async move {
                                 let remote_input = RemoteInput::create(
                                     pool.get_client_for_addr(upstream_addr).await?,
                                     (up_id, actor_id),
                                     sender,
+                                    metrics,
                                 )
                                 .await?;
                                 Ok::<_, RwError>(remote_input)

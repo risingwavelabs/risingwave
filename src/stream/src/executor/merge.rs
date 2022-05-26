@@ -27,12 +27,15 @@ use tracing_futures::Instrument;
 
 use super::error::StreamExecutorError;
 use super::*;
+use crate::executor::monitor::StreamingMetrics;
 use crate::task::UpDownActorIds;
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
     stream: Streaming<GetStreamResponse>,
     sender: Sender<Message>,
+    up_down_ids: UpDownActorIds,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl RemoteInput {
@@ -42,9 +45,15 @@ impl RemoteInput {
         client: ComputeClient,
         up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
+        metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
         let stream = client.get_stream(up_down_ids.0, up_down_ids.1).await?;
-        Ok(Self { stream, sender })
+        Ok(Self {
+            stream,
+            sender,
+            up_down_ids,
+            metrics,
+        })
     }
 
     pub async fn run(mut self) {
@@ -52,11 +61,19 @@ impl RemoteInput {
         for data_res in self.stream {
             match data_res {
                 Ok(stream_msg) => {
+                    let bytes = Message::get_encoded_len(&stream_msg);
                     let msg_res = Message::from_protobuf(
                         stream_msg
                             .get_message()
                             .expect("no message in stream response!"),
                     );
+                    self.metrics
+                        .exchange_recv_size
+                        .with_label_values(&[
+                            &self.up_down_ids.0.to_string(),
+                            &self.up_down_ids.1.to_string(),
+                        ])
+                        .inc_by(bytes as u64);
                     match msg_res {
                         Ok(msg) => {
                             self.sender.send(msg).await.unwrap();
@@ -372,10 +389,14 @@ mod tests {
         assert!(server_run.load(Ordering::SeqCst));
         let (tx, mut rx) = channel(16);
         let input_handle = tokio::spawn(async move {
-            let remote_input =
-                RemoteInput::create(ComputeClient::new(addr.into()).await.unwrap(), (0, 0), tx)
-                    .await
-                    .unwrap();
+            let remote_input = RemoteInput::create(
+                ComputeClient::new(addr.into()).await.unwrap(),
+                (0, 0),
+                tx,
+                Arc::new(StreamingMetrics::unused()),
+            )
+            .await
+            .unwrap();
             remote_input.run().await
         });
         assert_matches!(rx.next().await.unwrap(), Message::Chunk(chunk) => {

@@ -40,6 +40,7 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
@@ -88,6 +89,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
+    let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
     let storage_config = Arc::new(config.storage.clone());
@@ -159,7 +161,8 @@ pub async fn compute_node_serve(
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
-    let exchange_srv = ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone());
+    let exchange_srv =
+        ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
