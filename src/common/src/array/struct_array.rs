@@ -107,7 +107,7 @@ impl ArrayBuilder for StructArrayBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<StructArray> {
+    fn finish(self) -> Result<StructArray> {
         let children = self
             .children_array
             .into_iter()

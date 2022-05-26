@@ -58,22 +58,22 @@ impl LocalQueryExecution {
 
         let context = FrontendBatchTaskContext::default();
 
+        let query_id = self.query.query_id().clone();
+
         let task_id = TaskId {
             query_id: self.query.query_id.id,
             stage_id: 0,
             task_id: 0,
         };
 
-        let epoch = self.hummock_snapshot_manager.get_epoch().await?;
-        let executor = ExecutorBuilder::new(&plan_fragment.root.unwrap(), &task_id, context, epoch)
-            .build2()?;
+        let epoch = self.hummock_snapshot_manager.get_epoch(query_id).await?;
+        let executor =
+            ExecutorBuilder::new(&plan_fragment.root.unwrap(), &task_id, context, epoch).build()?;
 
         #[for_await]
         for chunk in executor.execute() {
             yield chunk?;
         }
-
-        self.hummock_snapshot_manager.unpin_snapshot(epoch).await?
     }
 
     /// Convert query to plan fragment.

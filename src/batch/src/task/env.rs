@@ -19,7 +19,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
-use crate::executor2::monitor::BatchMetrics;
+use crate::executor::monitor::BatchMetrics;
 use crate::task::BatchManager;
 
 pub(crate) type WorkerNodeId = u32;

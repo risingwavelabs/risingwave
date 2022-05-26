@@ -27,19 +27,19 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_rpc_client::ExchangeSource;
 
-use crate::executor2::{
-    BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, CreateSource, DefaultCreateSource,
-    Executor2, ExecutorBuilder,
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource,
+    Executor, ExecutorBuilder,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
-pub type MergeSortExchangeExecutor2<C> = MergeSortExchangeExecutor2Impl<DefaultCreateSource, C>;
+pub type MergeSortExchangeExecutor<C> = MergeSortExchangeExecutorImpl<DefaultCreateSource, C>;
 
 /// `MergeSortExchangeExecutor2` takes inputs from multiple sources and
 /// The outputs of all the sources have been sorted in the same way.
 ///
 /// The size of the output is determined both by `K_PROCESSING_WINDOW_SIZE`.
-pub struct MergeSortExchangeExecutor2Impl<CS, C> {
+pub struct MergeSortExchangeExecutorImpl<CS, C> {
     context: C,
     /// keeps one data chunk of each source if any
     source_inputs: Vec<Option<DataChunk>>,
@@ -55,7 +55,7 @@ pub struct MergeSortExchangeExecutor2Impl<CS, C> {
     identity: String,
 }
 
-impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutor2Impl<CS, C> {
+impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
     /// We assume that the source would always send `Some(chunk)` with cardinality > 0
     /// or `None`, but never `Some(chunk)` with cardinality == 0.
     async fn get_source_chunk(&mut self, source_idx: usize) -> Result<()> {
@@ -88,8 +88,8 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutor2
     }
 }
 
-impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor2
-    for MergeSortExchangeExecutor2Impl<CS, C>
+impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor
+    for MergeSortExchangeExecutorImpl<CS, C>
 {
     fn schema(&self) -> &Schema {
         &self.schema
@@ -106,7 +106,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor2
 /// Everytime `execute` is called, it tries to produce a chunk of size
 /// `K_PROCESSING_WINDOW_SIZE`. It is possible that the chunk's size is smaller than the
 /// `K_PROCESSING_WINDOW_SIZE` as the executor runs out of input from `sources`.
-impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutor2Impl<CS, C> {
+impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         // If this is the first time execution, we first get one chunk from each source
@@ -187,12 +187,12 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutor2
     }
 }
 
-pub struct MergeSortExchangeExecutor2Builder {}
+pub struct MergeSortExchangeExecutorBuilder {}
 
-impl BoxedExecutor2Builder for MergeSortExchangeExecutor2Builder {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         let sort_merge_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::MergeSortExchange
@@ -215,7 +215,7 @@ impl BoxedExecutor2Builder for MergeSortExchangeExecutor2Builder {
             .collect::<Vec<Field>>();
 
         let num_sources = proto_sources.len();
-        Ok(Box::new(MergeSortExchangeExecutor2::<C> {
+        Ok(Box::new(MergeSortExchangeExecutor::<C> {
             context: source.batch_task_context().clone(),
             source_inputs: vec![None; num_sources],
             order_pairs,
@@ -290,7 +290,7 @@ mod tests {
             order_type: OrderType::Ascending,
         }]);
 
-        let executor = Box::new(MergeSortExchangeExecutor2Impl::<
+        let executor = Box::new(MergeSortExchangeExecutorImpl::<
             FakeCreateSource,
             ComputeNodeContext,
         > {

@@ -25,9 +25,9 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 
-use crate::executor2::join::chunked_data::{ChunkedData, RowId};
-use crate::executor2::join::hash_join::EquiJoinParams;
-use crate::executor2::join::JoinType;
+use crate::executor::join::chunked_data::{ChunkedData, RowId};
+use crate::executor::join::hash_join::EquiJoinParams;
+use crate::executor::join::JoinType;
 
 const MAX_BUILD_ROW_COUNT: usize = u32::MAX as usize;
 

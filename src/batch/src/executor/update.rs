@@ -24,8 +24,9 @@ use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
 /// [`UpdateExecutor`] implements table updation with values from its child executor and given
@@ -36,7 +37,7 @@ pub struct UpdateExecutor {
     /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
-    child: BoxedExecutor2,
+    child: BoxedExecutor,
     exprs: Vec<BoxedExpression>,
     schema: Schema,
     identity: String,
@@ -46,7 +47,7 @@ impl UpdateExecutor {
     pub fn new(
         table_id: TableId,
         source_manager: SourceManagerRef,
-        child: BoxedExecutor2,
+        child: BoxedExecutor,
         exprs: Vec<BoxedExpression>,
     ) -> Self {
         assert_eq!(
@@ -69,7 +70,7 @@ impl UpdateExecutor {
     }
 }
 
-impl Executor2 for UpdateExecutor {
+impl Executor for UpdateExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -161,10 +162,10 @@ impl UpdateExecutor {
     }
 }
 
-impl BoxedExecutor2Builder for UpdateExecutor {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for UpdateExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         let update_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Update
@@ -183,7 +184,7 @@ impl BoxedExecutor2Builder for UpdateExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child = source.clone_for_plan(proto_child).build2()?;
+        let child = source.clone_for_plan(proto_child).build()?;
 
         Ok(Box::new(Self::new(
             table_id,

@@ -19,6 +19,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use console::style;
 use risedev::{
     compose_deploy, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile, ComposeService,
     ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
@@ -115,8 +116,12 @@ fn main() -> Result<()> {
     let mut service_on_node: BTreeMap<String, String> = BTreeMap::new();
     let mut volumes = BTreeMap::new();
 
+    let mut log_buffer = String::new();
+    use std::fmt::Write;
+
     for step in &steps {
         let service = services.get(step).unwrap();
+        let compose_deploy_config = compose_deploy_config.as_ref();
         let (address, mut compose) = match service {
             ServiceConfig::Minio(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
@@ -128,10 +133,60 @@ fn main() -> Result<()> {
                 (c.address.clone(), c.compose(&compose_config)?)
             }
             ServiceConfig::ComputeNode(c) => (c.address.clone(), c.compose(&compose_config)?),
-            ServiceConfig::MetaNode(c) => (c.address.clone(), c.compose(&compose_config)?),
-            ServiceConfig::FrontendV2(c) => (c.address.clone(), c.compose(&compose_config)?),
+            ServiceConfig::MetaNode(c) => {
+                if opts.deploy {
+                    let public_ip = &compose_deploy_config
+                        .unwrap()
+                        .lookup_instance_by_host(&c.address)
+                        .public_ip;
+                    writeln!(
+                        log_buffer,
+                        "-- Dashboard --\nuse VSCode to forward {} from {}\nor use {}\n",
+                        style(format!("{}", c.dashboard_port)).green(),
+                        style(format!("ubuntu@{}", public_ip)).green(),
+                        style(format!(
+                            "ssh -N -L {}:localhost:{} ubuntu@{}",
+                            c.dashboard_port, c.dashboard_port, public_ip
+                        ))
+                        .green()
+                    )?;
+                }
+                (c.address.clone(), c.compose(&compose_config)?)
+            }
+            ServiceConfig::FrontendV2(c) => {
+                if opts.deploy {
+                    writeln!(
+                        log_buffer,
+                        "-- Frontend --\nAccess inside cluster: {}\ntpch-bench args: {}\n",
+                        style(format!("psql -d dev -h {} -p {}", c.address, c.port)).green(),
+                        style(format!(
+                            "--frontend {} --frontend-port {}",
+                            c.address, c.port
+                        ))
+                        .green()
+                    )?;
+                }
+                (c.address.clone(), c.compose(&compose_config)?)
+            }
             ServiceConfig::Compactor(c) => (c.address.clone(), c.compose(&compose_config)?),
             ServiceConfig::Grafana(c) => {
+                if opts.deploy {
+                    let public_ip = &compose_deploy_config
+                        .unwrap()
+                        .lookup_instance_by_host(&c.address)
+                        .public_ip;
+                    writeln!(
+                        log_buffer,
+                        "-- Grafana --\nuse VSCode to forward {} from {}\nor use {}\n",
+                        style(format!("{}", c.port)).green(),
+                        style(format!("ubuntu@{}", public_ip)).green(),
+                        style(format!(
+                            "ssh -N -L {}:localhost:{} ubuntu@{}",
+                            c.port, c.port, public_ip
+                        ))
+                        .green()
+                    )?;
+                }
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
@@ -144,6 +199,13 @@ fn main() -> Result<()> {
             }
             ServiceConfig::AwsS3(_) => continue,
             ServiceConfig::RedPanda(c) => {
+                if opts.deploy {
+                    writeln!(
+                        log_buffer,
+                        "-- Redpanda --\ntpch-bench: {}\n",
+                        style(format!("--kafka-addr {}:{}", c.address, c.internal_port)).green()
+                    )?;
+                }
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
@@ -181,15 +243,22 @@ fn main() -> Result<()> {
                 Path::new(&opts.directory).join(format!("{}.yml", node)),
                 yaml,
             )?;
-
-            compose_deploy(
-                Path::new(&opts.directory),
-                &steps,
-                &compose_deploy_config.as_ref().unwrap().instances,
-                &compose_config,
-                &service_on_node,
-            )?;
         }
+
+        compose_deploy(
+            Path::new(&opts.directory),
+            &steps,
+            &compose_deploy_config.as_ref().unwrap().instances,
+            &compose_config,
+            &service_on_node,
+        )?;
+
+        println!("\n{}", log_buffer);
+
+        std::fs::write(
+            Path::new(&opts.directory).join("_message.partial.sh"),
+            log_buffer,
+        )?;
     } else {
         let mut services = BTreeMap::new();
         for (_, s) in compose_services {

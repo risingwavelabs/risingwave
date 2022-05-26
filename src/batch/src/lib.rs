@@ -37,7 +37,6 @@
 
 pub mod execution;
 pub mod executor;
-pub mod executor2;
 pub mod rpc;
 pub mod task;
 #[macro_use]
