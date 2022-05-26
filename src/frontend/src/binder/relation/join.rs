@@ -56,8 +56,6 @@ impl Binder {
     fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
-            let right_table_name = get_table_name(&join.relation);
-            let right = self.bind_table_factor(join.relation)?;
             let (constraint, join_type) = match join.join_operator {
                 JoinOperator::Inner(constraint) => (constraint, JoinType::Inner),
                 JoinOperator::LeftOuter(constraint) => (constraint, JoinType::LeftOuter),
@@ -66,8 +64,16 @@ impl Binder {
                 // Cross join equals to inner join with with no constraint.
                 JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
             };
-            let cond =
-                self.bind_join_constraint(constraint, &right_table_name)?;
+            let right: Relation;
+            let cond: ExprImpl;
+            if let JoinConstraint::Using(_col) = constraint.clone() {
+                let option_rel: Option<Relation>;
+                (cond, option_rel) = self.bind_join_constraint(constraint, Some(join.relation))?;
+                right = option_rel.unwrap();
+            } else {
+                right = self.bind_table_factor(join.relation)?;
+                (cond, _) = self.bind_join_constraint(constraint, None)?;
+            }
             let join = BoundJoin {
                 join_type,
                 left: root,
@@ -83,10 +89,10 @@ impl Binder {
     fn bind_join_constraint(
         &mut self,
         constraint: JoinConstraint,
-        right_table: &Option<Ident>,
-    ) -> Result<ExprImpl> {
+        table_factor: Option<TableFactor>,
+    ) -> Result<(ExprImpl, Option<Relation>)> {
         Ok(match constraint {
-            JoinConstraint::None => ExprImpl::literal_bool(true),
+            JoinConstraint::None => (ExprImpl::literal_bool(true), None),
             JoinConstraint::Natural => {
                 return Err(ErrorCode::NotImplemented("Natural join".into(), 1633.into()).into())
             }
@@ -99,9 +105,11 @@ impl Binder {
                     ))
                     .into());
                 }
-                bound_expr
+                (bound_expr, None)
             }
             JoinConstraint::Using(columns) => {
+                let table_factor = table_factor.unwrap();
+                let right_table = get_table_name(&table_factor);
                 let mut columns_iter = columns.into_iter();
                 let first_column = columns_iter.next().unwrap();
                 let column_index = self.context.get_index(&first_column.value)?;
@@ -118,7 +126,9 @@ impl Binder {
                     ])),
                 };
                 for column in columns_iter {
-                    left_table = self.context.columns[self.context.get_index(&column.value)?].table_name.clone();
+                    left_table = self.context.columns[self.context.get_index(&column.value)?]
+                        .table_name
+                        .clone();
                     binary_expr = Expr::BinaryOp {
                         left: Box::new(binary_expr),
                         op: BinaryOperator::Eq,
@@ -135,7 +145,9 @@ impl Binder {
                         }),
                     }
                 }
-                self.bind_expr(binary_expr)?
+                // We cannot move this into ret expression since it should be done before bind_expr
+                let relation = self.bind_table_factor(table_factor)?;
+                (self.bind_expr(binary_expr)?, Some(relation))
             }
         })
     }
@@ -143,14 +155,10 @@ impl Binder {
 
 fn get_table_name(table_factor: &TableFactor) -> Option<Ident> {
     match table_factor {
-        TableFactor::Table {
-            name,
-            ..
-        } => Some(name.0[0].clone()),
-        TableFactor::Derived {
-            alias,
-            ..
-        } => alias.as_ref().map(|table_alias| table_alias.name.clone()),
+        TableFactor::Table { name, .. } => Some(name.0[0].clone()),
+        TableFactor::Derived { alias, .. } => {
+            alias.as_ref().map(|table_alias| table_alias.name.clone())
+        }
         TableFactor::TableFunction { expr: _, alias } => {
             alias.as_ref().map(|table_alias| table_alias.name.clone())
         }
