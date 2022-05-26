@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8ArrayBuilder,
 };
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -46,7 +46,7 @@ impl Expression for SplitPartExpression {
         let delimiter_columns = delimiter_columns.as_utf8();
 
         let nth_columns = self.nth_expr.eval(input)?;
-        let nth_columns = nth_columns.as_int64();
+        let nth_columns = nth_columns.as_int32();
 
         let row_len = input.cardinality();
         let mut builder = Utf8ArrayBuilder::new(row_len)?;
@@ -56,21 +56,27 @@ impl Expression for SplitPartExpression {
             let delimiter_column = delimiter_columns.value_at(i);
             let nth_column = nth_columns.value_at(i);
 
-            // FIXME
-            let string_column = string_column.unwrap();
-            let delimiter_column = delimiter_column.unwrap();
-            let nth_column = nth_column.unwrap();
-
-            let mut split = string_column.split(delimiter_column);
-            let nth_value = match nth_column.cmp(&0) {
-                std::cmp::Ordering::Equal => None,
-                std::cmp::Ordering::Greater => split.nth(nth_column as usize - 1),
-                std::cmp::Ordering::Less => {
-                    let split = split.collect::<Vec<_>>();
-                    let nth_column = (split.len() as i64 + nth_column) as usize;
-                    split.get(nth_column).map(<&str>::clone)
+            let nth_value = if let (Some(string_column), Some(delimiter_column), Some(nth_column)) =
+                (string_column, delimiter_column, nth_column)
+            {
+                let mut split = string_column.split(delimiter_column);
+                match nth_column.cmp(&0) {
+                    std::cmp::Ordering::Equal => {
+                        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                            "field position must not be zero".into(),
+                        )));
+                    }
+                    std::cmp::Ordering::Greater => split.nth(nth_column as usize - 1),
+                    std::cmp::Ordering::Less => {
+                        let split = split.collect::<Vec<_>>();
+                        let nth_column = (split.len() as i32 + nth_column) as usize;
+                        split.get(nth_column).map(<&str>::clone)
+                    }
                 }
+            } else {
+                None
             };
+
             builder.append(nth_value)?;
         }
 
