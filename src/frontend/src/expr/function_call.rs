@@ -108,13 +108,10 @@ impl FunctionCall {
             }
             ExprType::Coalesce => {
                 if inputs.is_empty() {
-                    return Err(ErrorCode::BindError(
-                        (format!(
-                            "Function `Coalesce` takes at least {} arguments ({} given)",
-                            1, 0
-                        ))
-                        .into(),
-                    )
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `Coalesce` takes at least {} arguments ({} given)",
+                        1, 0
+                    ))
                     .into());
                 }
                 align_types(inputs.iter_mut())
@@ -123,13 +120,10 @@ impl FunctionCall {
                 let expected = 2;
                 let actual = inputs.len();
                 if actual < expected {
-                    return Err(ErrorCode::BindError(
-                        format!(
-                            "Function `ConcatWs` takes at least {} arguments ({} given)",
-                            expected, actual
-                        )
-                        .into(),
-                    )
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `ConcatWs` takes at least {} arguments ({} given)",
+                        expected, actual
+                    ))
                     .into());
                 }
 
