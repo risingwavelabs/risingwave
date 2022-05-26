@@ -171,8 +171,8 @@ impl Planner {
         } else {
             JoinType::LeftSemi
         };
-        let subquery = expr.into_subquery().unwrap();
-        let correlated_inputs = subquery.get_correlated_inputs();
+        let mut subquery = expr.into_subquery().unwrap();
+        let correlated_inputs = subquery.get_and_change_correlated_input_ref();
         let output_column_type = subquery.query.data_types()[0].clone();
         let right_plan = self.plan_query(subquery.query)?.as_subplan();
         let on = match subquery.kind {
@@ -229,8 +229,8 @@ impl Planner {
             .map(|e| rewriter.rewrite_expr(e))
             .collect();
 
-        for subquery in rewriter.subqueries {
-            let is_correlated = subquery.get_correlated_inputs();
+        for mut subquery in rewriter.subqueries {
+            let correlated_inputs = subquery.get_and_change_correlated_input_ref();
             let mut right = self.plan_query(subquery.query)?.as_subplan();
 
             match subquery.kind {
@@ -248,7 +248,7 @@ impl Planner {
             }
 
             root = Self::create_join(
-                is_correlated,
+                correlated_inputs,
                 root,
                 right,
                 ExprImpl::literal_bool(true),

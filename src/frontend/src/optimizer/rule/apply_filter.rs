@@ -3,9 +3,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{
-    LogicalApply, LogicalFilter, PlanTreeNodeUnary,
-};
+use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
@@ -16,8 +14,6 @@ impl Rule for ApplyFilter {
         let (left, right, on, join_type) = apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let filter = right.as_logical_filter()?;
-
-        // println!("ApplyFilter begin");
 
         let mut rewriter = Rewriter {
             offset: left.schema().len(),
@@ -30,7 +26,7 @@ impl Rule for ApplyFilter {
                 .clone()
                 .into_iter()
                 .partition_map(|expr| {
-                    if !expr.get_correlated_inputs().is_empty() {
+                    if expr.has_correlated_input_ref() {
                         Either::Left(rewriter.rewrite_expr(expr))
                     } else {
                         Either::Right(expr)
@@ -47,7 +43,7 @@ impl Rule for ApplyFilter {
                 conjunctions: uncor_exprs,
             },
         );
-        Some(new_filter.into())
+        Some(new_filter)
     }
 }
 
@@ -68,12 +64,11 @@ impl ExprRewriter for Rewriter {
     ) -> ExprImpl {
         // Convert correlated_input_ref to input_ref.
         // TODO: use LiftCorrelatedInputRef here.
-        // InputRef::new(
-        //     correlated_input_ref.index(),
-        //     correlated_input_ref.return_type(),
-        // )
-        // .into()
-        InputRef::new(0, correlated_input_ref.return_type()).into()
+        InputRef::new(
+            correlated_input_ref.index(),
+            correlated_input_ref.return_type(),
+        )
+        .into()
     }
 
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {

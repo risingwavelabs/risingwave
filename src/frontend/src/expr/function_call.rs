@@ -23,7 +23,7 @@ use crate::expr::ExprType;
 pub struct FunctionCall {
     func_type: ExprType,
     return_type: DataType,
-    inputs: Vec<ExprImpl>,
+    pub inputs: Vec<ExprImpl>,
 }
 
 fn debug_binary_op(

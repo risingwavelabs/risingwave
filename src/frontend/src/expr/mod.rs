@@ -27,6 +27,7 @@ mod input_ref;
 mod literal;
 mod subquery;
 
+mod expr_changer;
 mod expr_rewriter;
 mod expr_visitor;
 mod type_inference;
@@ -41,6 +42,7 @@ pub use subquery::{Subquery, SubqueryKind};
 
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
+pub use expr_changer::ExprChanger;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{align_types, cast_ok, infer_type, least_restrictive, CastContext};
@@ -151,20 +153,63 @@ macro_rules! impl_has_variant {
 impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
 
 impl ExprImpl {
-    // We need to traverse inside subqueries.
-    pub fn get_correlated_inputs(&self) -> Vec<InputRef> {
-        struct Has {
+    pub fn get_and_change_correlated_input_ref(&mut self) -> Vec<InputRef> {
+        struct Changer {
             correlated_inputs: Vec<InputRef>,
+            depth: usize,
+            index: usize,
+        }
+        impl ExprChanger for Changer {
+            fn change_correlated_input_ref(
+                &mut self,
+                correlated_input_ref: &mut CorrelatedInputRef,
+            ) {
+                if correlated_input_ref.depth() >= self.depth {
+                    self.correlated_inputs.push(InputRef::new(
+                        correlated_input_ref.index(),
+                        correlated_input_ref.return_type(),
+                    ));
+                    correlated_input_ref.index = self.index;
+                    self.index += 1;
+                }
+            }
+
+            fn change_subquery(&mut self, subquery: &mut Subquery) {
+                use crate::binder::BoundSetExpr;
+
+                self.depth += 1;
+                match &mut subquery.query.body {
+                    BoundSetExpr::Select(select) => select
+                        .select_items
+                        .iter_mut()
+                        .chain(select.group_by.iter_mut())
+                        .chain(select.where_clause.iter_mut())
+                        .for_each(|expr| self.change_expr(expr)),
+                    BoundSetExpr::Values(_) => {}
+                }
+                self.depth -= 1;
+            }
+        }
+        let mut changer = Changer {
+            correlated_inputs: vec![],
+            depth: 1,
+            index: 0,
+        };
+        changer.change_expr(self);
+        changer.correlated_inputs
+    }
+
+    /// Used to check whether the expression has [`CorrelatedInputRef`].
+    pub fn has_correlated_input_ref(&self) -> bool {
+        struct Has {
+            has: bool,
             depth: usize,
         }
 
         impl ExprVisitor for Has {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
                 if correlated_input_ref.depth() >= self.depth {
-                    self.correlated_inputs.push(InputRef::new(
-                        correlated_input_ref.index(),
-                        correlated_input_ref.return_type(),
-                    ));
+                    self.has = true;
                 }
             }
 
@@ -186,11 +231,11 @@ impl ExprImpl {
         }
 
         let mut visitor = Has {
-            correlated_inputs: vec![],
+            has: false,
             depth: 1,
         };
         visitor.visit_expr(self);
-        visitor.correlated_inputs
+        visitor.has
     }
 
     /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.

@@ -16,25 +16,20 @@ impl Rule for ApplyScan {
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
         let scan = right.as_logical_scan()?;
-        // println!("ApplyScan begin.");
 
         let mut column_mapping = HashMap::new();
-        on.conjunctions.iter().for_each(|expr| match expr {
-            ExprImpl::FunctionCall(func_call) => {
-                if let Some((left, right, data_type)) = Self::check(func_call, apply_left_len) {
-                    column_mapping.insert(left, (right, data_type));
-                }
+        on.conjunctions.iter().for_each(|expr| if let ExprImpl::FunctionCall(func_call) = expr {
+            if let Some((left, right, data_type)) = Self::check(func_call, apply_left_len) {
+                column_mapping.insert(left, (right, data_type));
             }
-            _ => {}
         });
         if column_mapping.len() == apply_left_len {
-            // println!("apply_left_len: {}", apply_left_len);
             // We can eliminate join now!
             let mut exprs: Vec<ExprImpl> = (0..apply_left_len)
                 .into_iter()
                 .map(|left| {
                     let (right, data_type) = column_mapping.get(&left).unwrap();
-                    InputRef::new(*right, data_type.clone()).into()
+                    InputRef::new(*right - apply_left_len, data_type.clone()).into()
                 })
                 .collect();
             exprs.extend(

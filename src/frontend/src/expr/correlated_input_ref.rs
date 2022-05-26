@@ -26,9 +26,9 @@ use super::Expr;
 ///
 /// `index` is the index in the refered relation.
 pub struct CorrelatedInputRef {
-    index: usize,
-    data_type: DataType,
-    depth: usize,
+    pub index: usize,
+    pub data_type: DataType,
+    pub depth: usize,
 }
 
 impl CorrelatedInputRef {
@@ -47,6 +47,10 @@ impl CorrelatedInputRef {
 
     pub fn depth(&self) -> usize {
         self.depth
+    }
+
+    pub fn decompose(self) -> (usize, DataType, usize) {
+        (self.index, self.data_type, self.depth)
     }
 }
 

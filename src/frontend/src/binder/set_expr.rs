@@ -37,9 +37,16 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn get_correlated_inputs(&self) -> Vec<InputRef> {
+    pub fn has_correlated_input_ref(&self) -> bool {
         match self {
-            BoundSetExpr::Select(s) => s.get_correlated_inputs(),
+            BoundSetExpr::Select(s) => s.has_correlated_input_ref(),
+            BoundSetExpr::Values(_) => false,
+        }
+    }
+
+    pub fn get_and_change_correlated_input_ref(&mut self) -> Vec<InputRef> {
+        match self {
+            BoundSetExpr::Select(s) => s.get_and_change_correlated_input_ref(),
             BoundSetExpr::Values(_) => vec![],
         }
     }
