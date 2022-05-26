@@ -1,7 +1,7 @@
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{ExprImpl, ExprRewriter, InputRef, Expr};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeBinary};
 use crate::optimizer::PlanRef;
 

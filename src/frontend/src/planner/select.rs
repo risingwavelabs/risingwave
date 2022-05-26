@@ -277,7 +277,12 @@ impl Planner {
             );
             let group_exprs = (0..correlated_inputs.len()).collect();
             let logical_agg = LogicalAgg::new(vec![], group_exprs, logical_project);
-            let logical_apply = LogicalApply::create(logical_agg.into(), right, JoinType::Inner);
+            let logical_apply = LogicalApply::create(
+                logical_agg.into(),
+                right,
+                JoinType::Inner,
+                Condition::true_cond(),
+            );
 
             let mut shifted_inputs = correlated_inputs.clone();
             shifted_inputs

@@ -135,6 +135,17 @@ impl PlanRoot {
             heuristic_optimizer.optimize(plan)
         };
 
+        plan = {
+            let rules = vec![
+                ApplyAgg::create(),
+                ApplyFilter::create(),
+                ApplyProj::create(),
+                ApplyScan::create(),
+            ];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
         // Predicate Push-down
         plan = plan.predicate_pushdown(Condition::true_cond());
 

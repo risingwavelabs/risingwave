@@ -45,7 +45,7 @@ impl fmt::Display for LogicalApply {
 }
 
 impl LogicalApply {
-    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType) -> Self {
+    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         // assert!(
         //     matches!(
         //         join_type,
@@ -69,8 +69,6 @@ impl LogicalApply {
             &output_indices,
         );
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
-        // TODO: Remove on from LogicalApply.
-        let on = Condition::true_cond();
         LogicalApply {
             base,
             left,
@@ -80,8 +78,8 @@ impl LogicalApply {
         }
     }
 
-    pub fn create(left: PlanRef, right: PlanRef, join_type: JoinType) -> PlanRef {
-        Self::new(left, right, join_type).into()
+    pub fn create(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> PlanRef {
+        Self::new(left, right, join_type, on).into()
     }
 
     /// Get the join type of the logical apply.
@@ -104,7 +102,7 @@ impl PlanTreeNodeBinary for LogicalApply {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(left, right, self.join_type)
+        Self::new(left, right, self.join_type, self.on.clone())
     }
 }
 
