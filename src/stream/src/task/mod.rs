@@ -31,7 +31,7 @@ pub use env::*;
 pub use stream_manager::*;
 
 /// Default capacity of channel if two actors are on the same node
-pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 4;
+pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
@@ -99,27 +99,6 @@ impl SharedContext {
     #[inline]
     fn lock_channel_map(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
         self.channel_map.lock()
-    }
-
-    /// Create a notifier for Create MV DDL finish. When an executor/actor (essentially a
-    /// [`crate::executor::ChainExecutor`]) finishes its DDL job, it can report that using this
-    /// notifier. Note that a DDL of MV always corresponds to an epoch in our system.
-    ///
-    /// Creation of an MV may last for several epochs to finish.
-    /// Therefore, when the [`crate::executor::ChainExecutor`] finds that the creation is
-    /// finished, it will send the DDL epoch using this notifier, which can be collected by the
-    /// barrier manager and reported to the meta service soon.
-    pub fn register_finish_create_mview_notifier(
-        &self,
-        actor_id: ActorId,
-    ) -> FinishCreateMviewNotifier {
-        debug!("register finish create mview notifier: {}", actor_id);
-
-        let barrier_manager = self.barrier_manager.clone();
-        FinishCreateMviewNotifier {
-            barrier_manager,
-            actor_id,
-        }
     }
 
     pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {

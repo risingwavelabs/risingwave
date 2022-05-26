@@ -27,14 +27,20 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     )
     .unwrap();
     writeln!(s, "Compaction watermark: {:?} ", compact_task.watermark).unwrap();
+    writeln!(
+        s,
+        "Compaction vnodemap size: {:?} ",
+        compact_task.vnode_mappings.len()
+    )
+    .unwrap();
     writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
     writeln!(s, "Compaction task status: {:?} ", compact_task.task_status).unwrap();
     s.push_str("Compaction SSTables structure: \n");
     for level_entry in &compact_task.input_ssts {
-        let tables: Vec<HummockSSTableId> = level_entry
+        let tables: Vec<(HummockSSTableId, String)> = level_entry
             .table_infos
             .iter()
-            .map(|table| table.id)
+            .map(|table| (table.id, format!("{}MB", table.file_size / 1024 / 1024)))
             .collect();
         writeln!(s, "Level {:?}: {:?} ", level_entry.level_idx, tables).unwrap();
     }

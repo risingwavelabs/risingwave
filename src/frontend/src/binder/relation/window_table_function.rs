@@ -43,7 +43,7 @@ impl FromStr for WindowTableFunctionKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundWindowTableFunction {
     pub(crate) input: Relation,
     pub(crate) kind: WindowTableFunctionKind,
@@ -93,49 +93,29 @@ impl Binder {
             .into());
         };
 
+        let base_columns = std::mem::take(&mut self.context.columns);
+
         self.pop_context();
 
-        let table_catalog =
-            self.catalog
-                .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
-
-        let columns = table_catalog.columns().to_vec();
-        if columns.iter().any(|col| {
-            col.name().eq_ignore_ascii_case("window_start")
-                || col.name().eq_ignore_ascii_case("window_end")
-        }) {
-            return Err(ErrorCode::BindError(
-                "column names `window_start` and `window_end` are not allowed in window table function's input."
-                .into())
-            .into());
-        }
-
-        let columns = columns
-            .iter()
-            .map(|c| (c.is_hidden, (&c.column_desc).into()))
+        let columns = base_columns
+            .into_iter()
+            .map(|c| {
+                if c.field.name == "window_start" || c.field.name == "window_end" {
+                    Err(ErrorCode::BindError(
+                        "column names `window_start` and `window_end` are not allowed in window table function's input."
+                        .into())
+                    .into())
+                } else {
+                    Ok((c.is_hidden, c.field))
+                }
+            })
             .chain(
                 [
-                    (
-                        false,
-                        Field {
-                            data_type: DataType::Timestamp,
-                            name: "window_start".to_string(),
-                            sub_fields: vec![],
-                            type_name: "".to_string(),
-                        },
-                    ),
-                    (
-                        false,
-                        Field {
-                            data_type: DataType::Timestamp,
-                            name: "window_end".to_string(),
-                            sub_fields: vec![],
-                            type_name: "".to_string(),
-                        },
-                    ),
+                    Ok((false, Field::with_name(DataType::Timestamp, "window_start"))),
+                    Ok((false, Field::with_name(DataType::Timestamp, "window_end"))),
                 ]
                 .into_iter(),
-            );
+            ).collect::<Result<Vec<_>>>()?;
 
         self.bind_context(columns, table_name.clone(), alias)?;
 

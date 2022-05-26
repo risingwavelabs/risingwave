@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
     AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, CreateTaskResponse, GetTaskInfoRequest,
-    GetTaskInfoResponse,
+    GetTaskInfoResponse, RemoveTaskRequest, RemoveTaskResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -70,8 +70,36 @@ impl TaskService for BatchServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn abort_task(
         &self,
-        _: Request<AbortTaskRequest>,
+        req: Request<AbortTaskRequest>,
     ) -> Result<Response<AbortTaskResponse>, Status> {
-        todo!()
+        let req = req.into_inner();
+        let res = self
+            .mgr
+            .abort_task(req.get_task_id().expect("no task id found"));
+        match res {
+            Ok(_) => Ok(Response::new(AbortTaskResponse { status: None })),
+            Err(e) => {
+                error!("failed to abort task {}", e);
+                Err(e.to_grpc_status())
+            }
+        }
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn remove_task(
+        &self,
+        req: Request<RemoveTaskRequest>,
+    ) -> Result<Response<RemoveTaskResponse>, Status> {
+        let req = req.into_inner();
+        let res = self
+            .mgr
+            .remove_task(req.get_task_id().expect("no task id found"));
+        match res {
+            Ok(_) => Ok(Response::new(RemoveTaskResponse { status: None })),
+            Err(e) => {
+                error!("failed to remove task {}", e);
+                Err(e.to_grpc_status())
+            }
+        }
     }
 }

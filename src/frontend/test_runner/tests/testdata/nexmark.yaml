@@ -156,40 +156,49 @@
 - id: nexmark_q5
   before:
     - create_tables
-  sql: |
-    SELECT AuctionBids.auction, AuctionBids.num
-    FROM (
-      SELECT
-        B1.auction,
-        count(*) AS num,
-        HOP_START(B1.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS starttime,
-        HOP_END(B1.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS endtime
-      FROM bid B1
-      GROUP BY
-        B1.auction,
-        HOP(B1.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
-    ) AS AuctionBids
-    JOIN (
-      SELECT
-        max(CountBids.num) AS maxn,
-        CountBids.starttime,
-        CountBids.endtime
-      FROM (
-        SELECT
-          count(*) AS num,
-          HOP_START(B2.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS starttime,
-          HOP_END(B2.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS endtime
-        FROM bid B2
-        GROUP BY
-          B2.auction,
-          HOP(B2.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
-        ) AS CountBids
-      GROUP BY CountBids.starttime, CountBids.endtime
-    ) AS MaxBids
-    ON AuctionBids.starttime = MaxBids.starttime AND
-        AuctionBids.endtime = MaxBids.endtime AND
-        AuctionBids.num >= MaxBids.maxn;
-  binder_error: 'Feature is not yet implemented: unsupported function: "hop", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  sql: "SELECT AuctionBids.auction, AuctionBids.num\nFROM (\n    SELECT\n        bid.auction,\n        count(*) AS num, \n        window_start AS starttime\n    FROM \n        HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)\n    GROUP BY\n        window_start, \n    bid.auction\n) AS AuctionBids\nJOIN (\n    SELECT\n        max(CountBids.num) AS maxn,\n        CountBids.starttime_c\n    FROM (\n        SELECT\n            count(*) AS num,\n            window_start AS starttime_c\n        FROM HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)\n        GROUP BY\n            bid.auction,\n            window_start\n        ) AS CountBids\n    GROUP BY \n        CountBids.starttime_c\n    ) AS MaxBids\nON \n  AuctionBids.starttime = MaxBids.starttime_c AND\n  AuctionBids.num >= MaxBids.maxn;\n"
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $1] }
+        BatchFilter { predicate: ($1 >= $3) }
+          BatchHashJoin { type: Inner, predicate: $2 = $4 }
+            BatchExchange { order: [], dist: HashShard([2]) }
+              BatchProject { exprs: [$1, $2, $0] }
+                BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
+                  BatchExchange { order: [], dist: HashShard([0, 1]) }
+                    BatchProject { exprs: [$2, $0] }
+                      BatchHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                        BatchScan { table: bid, columns: [auction, dateTime] }
+            BatchProject { exprs: [$1, $0] }
+              BatchHashAgg { group_keys: [$0], aggs: [max($1)] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchProject { exprs: [$1, $2] }
+                    BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
+                      BatchExchange { order: [], dist: HashShard([0, 1]) }
+                        BatchProject { exprs: [$0, $2] }
+                          BatchHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                            BatchScan { table: bid, columns: [auction, dateTime] }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
+      StreamProject { exprs: [$0, $1, $2, $4] }
+        StreamFilter { predicate: ($1 >= $3) }
+          StreamHashJoin { type: Inner, predicate: $2 = $4 }
+            StreamExchange { dist: HashShard([2]) }
+              StreamProject { exprs: [$1, $3, $0] }
+                StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
+                  StreamExchange { dist: HashShard([0, 1]) }
+                    StreamProject { exprs: [$3, $0, $2] }
+                      StreamHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                        StreamTableScan { table: bid, columns: [auction, dateTime, _row_id], pk_indices: [2] }
+            StreamProject { exprs: [$2, $0] }
+              StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamProject { exprs: [$1, $3, $0] }
+                    StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
+                      StreamExchange { dist: HashShard([0, 1]) }
+                        StreamProject { exprs: [$0, $3, $2] }
+                          StreamHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                            StreamTableScan { table: bid, columns: [auction, dateTime, _row_id], pk_indices: [2] }
 - id: nexmark_q6
   before:
     - create_tables

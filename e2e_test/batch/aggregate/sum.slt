@@ -1,0 +1,54 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (v1 int not null, v2 numeric not null, v3 double not null)
+
+statement ok
+insert into t values (1,2,3), (4,5,6), (7,8,9)
+
+query I
+select sum(v3), sum(v2), sum(v1) from t
+----
+18 15 12
+
+query I
+select sum(v3)::numeric + sum(v2) + sum(v1)::numeric from t;
+----
+45
+
+statement ok
+drop table t
+
+statement ok
+create table t(v1 int)
+
+statement ok
+insert into t values (1), (2), (3)
+
+query I
+select sum(c1) from (select sum(v1) as c1 from t)
+----
+6
+
+query I
+select sum(v1) from t
+----
+6
+
+statement ok
+drop table t
+
+statement ok
+create table t(v1 int, v2 int)
+
+statement ok
+insert into t values (1, 2), (3, 4), (5, 6)
+
+query I
+select sum(c1) from (select v1, sum(v2) as c1 from t group by v1)
+----
+12
+
+statement ok
+drop table t

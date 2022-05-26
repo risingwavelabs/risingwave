@@ -381,6 +381,15 @@ impl LocalVersionManager {
         self.local_version.read().pinned_version().clone()
     }
 
+    pub fn get_uncommitted_ssts(&self, epoch: HummockEpoch) -> Vec<SstableInfo> {
+        self.local_version
+            .read()
+            .get_uncommitted_ssts()
+            .get(&epoch)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// Pin a version with retry.
     ///
     /// Return:

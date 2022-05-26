@@ -91,12 +91,12 @@ mod tests {
 
     use async_stream::try_stream;
     use futures::TryStreamExt;
-    use madsim::time::sleep;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use tokio::time::sleep;
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_barrier_align() {
         let left = try_stream! {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
@@ -127,7 +127,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     #[should_panic]
     async fn left_barrier_right_end_1() {
         let left = try_stream! {
@@ -143,7 +143,7 @@ mod tests {
         let _output: Vec<_> = barrier_align(left, right).try_collect().await.unwrap();
     }
 
-    #[madsim::test]
+    #[tokio::test]
     #[should_panic]
     async fn left_barrier_right_end_2() {
         let left = try_stream! {
