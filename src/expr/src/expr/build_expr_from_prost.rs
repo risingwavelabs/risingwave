@@ -222,6 +222,67 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_array_access_expr() {
+        let values = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Varchar as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue {
+                        body: "foo".as_bytes().to_vec()
+                    }))
+                },
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Varchar as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue {
+                        body: "bar".as_bytes().to_vec()
+                    }))
+                }
+            ]
+        };
+        let array = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::Array as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::List as i32,
+                        field_type: vec![
+                            ProstDataType {
+                                type_name: TypeName::Varchar as i32,
+                                ..Default::default()
+                            }
+                        ],
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::FuncCall(values))
+                }
+            ]
+        };
+        let access = ExprNode {
+            expr_type: Type::ArrayAccess as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::List as i32,
+                field_type: vec![
+                    ProstDataType {
+                        type_name: TypeName::Varchar as i32,
+                        ..Default::default()
+                    }
+                ],
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::FuncCall(array))
+        };
+        assert!(build_unary_expr_prost(&access).is_ok());
+    }
+
+    #[test]
     fn test_build_in_expr() {
         let input_ref = InputRefExpr { column_idx: 0 };
         let input_ref_expr_node = ExprNode {
