@@ -25,7 +25,7 @@ pub use nested_loop_join::*;
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 pub use sort_merge_join::*;
 
-use crate::executor2::join::JoinType::Inner;
+use crate::executor::join::JoinType::Inner;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(super) enum JoinType {
     Inner,

@@ -15,7 +15,7 @@
 use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_batch::executor2::BoxedDataChunkStream;
+use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 use tracing::info;

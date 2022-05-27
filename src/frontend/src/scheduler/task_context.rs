@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_batch::executor2::BatchMetrics;
+use risingwave_batch::executor::BatchMetrics;
 use risingwave_batch::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::addr::HostAddr;
