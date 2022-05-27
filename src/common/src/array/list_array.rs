@@ -329,22 +329,19 @@ impl<'a> ListRef<'a> {
         }
     }
 
-    //TODO(nanderstabel): fix
     pub fn value_at(&self, index: usize) -> Result<DatumRef<'a>> {
         match self {
             ListRef::Indexed { arr, .. } => Ok(arr.value.value_at(index - 1)),
             ListRef::ValueRef { val } => {
-                if let Some(temp) = val
+                if let Some(datum) = val
                 .values()
                 .into_iter()
                 .nth(index - 1) {
-                    Ok(to_datum_ref(temp))
+                    Ok(to_datum_ref(datum))
                 } else {
                     Ok(None)
                 }
             }
-            // _ => unimplemented!()
-            // ListRef::ValueRef { val } => Ok(val.values().into_iter().nth(index)),
         }
     }
 }
