@@ -23,11 +23,13 @@ use madsim::collections::HashMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::{
@@ -35,7 +37,8 @@ use super::{
     StreamExecutorResult,
 };
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
+    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, get_key_len, AggCall,
+    AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -83,6 +86,8 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
+
+    state_tables: Vec<StateTable<S>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -115,6 +120,21 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
+        let mut state_tables = Vec::with_capacity(agg_calls.len());
+        for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
+            let state_table = StateTable::new(
+                ks.clone(),
+                vec![ColumnDesc::unnamed(
+                    ColumnId::new(0),
+                    agg_call.return_type.clone(),
+                )],
+                // Primary key includes group key.
+                vec![OrderType::Descending; key_indices.len() + get_key_len(agg_call)],
+                Some(key_indices.clone()),
+            );
+            state_tables.push(state_table);
+        }
+
         Ok(Self {
             input,
             extra: HashAggExecutorExtra {
@@ -126,6 +146,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 keyspace,
                 agg_calls,
                 key_indices,
+                state_tables,
             },
             _phantom: PhantomData,
         })
@@ -190,6 +211,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref input_schema,
             ref keyspace,
             ref schema,
+            ref state_tables,
             ..
         }: &HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
@@ -259,6 +281,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 input_pk_data_types.clone(),
                                 epoch,
                                 Some(hash_code),
+                                state_tables,
                             )
                             .await?,
                         ),
@@ -297,12 +320,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn flush_data<'a>(
-        &HashAggExecutorExtra::<S> {
+        &mut HashAggExecutorExtra::<S> {
             ref key_indices,
             ref keyspace,
             ref schema,
+            ref mut state_tables,
             ..
-        }: &'a HashAggExecutorExtra<S>,
+        }: &'a mut HashAggExecutorExtra<S>,
         state_map: &'a mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         epoch: u64,
     ) {
@@ -318,13 +342,26 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             for states in state_map.values_mut() {
                 if states.as_ref().unwrap().is_dirty() {
                     dirty_cnt += 1;
-                    for state in &mut states.as_mut().unwrap().managed_states {
+                    for (state, state_table) in states
+                        .as_mut()
+                        .unwrap()
+                        .managed_states
+                        .iter_mut()
+                        .zip_eq(state_tables.iter_mut())
+                    {
                         state
-                            .flush(&mut write_batch)
+                            .flush(&mut write_batch, state_table)
+                            .await
                             .map_err(StreamExecutorError::agg_state_error)?;
                     }
                 }
             }
+
+            // Batch commit state table.
+            for state_table in state_tables.iter_mut() {
+                state_table.commit(epoch).await?;
+            }
+
             (write_batch, dirty_cnt)
         };
 
@@ -390,7 +427,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let HashAggExecutor { input, extra, .. } = self;
+        let HashAggExecutor {
+            input, mut extra, ..
+        } = self;
 
         // The cached states. `HashKey -> (prev_value, value)`.
         let mut state_map = EvictableHashMap::new(1 << 16);
@@ -412,7 +451,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     assert_eq!(epoch, barrier.epoch.prev);
 
                     #[for_await]
-                    for chunk in Self::flush_data(&extra, &mut state_map, epoch) {
+                    for chunk in Self::flush_data(&mut extra, &mut state_map, epoch) {
                         yield Message::Chunk(chunk?);
                     }
 
