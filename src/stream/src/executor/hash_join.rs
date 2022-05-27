@@ -31,7 +31,7 @@ use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkI
 use crate::common::StreamChunkBuilder;
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
-pub const JOIN_CACHE_SIZE: usize = 1 << 20;
+pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
