@@ -328,6 +328,15 @@ impl<'a> ListRef<'a> {
             ListRef::ValueRef { val } => val.values.iter().map(to_datum_ref).collect(),
         }
     }
+
+    //TODO(nanderstabel): fix
+    pub fn value_at(&self, index: usize) -> Result<DatumRef<'a>> {
+        match self {
+            ListRef::Indexed { arr, idx } => Ok(arr.value.value_at(index)),
+            _ => unimplemented!()
+            // ListRef::ValueRef { val } => Ok(val.values().into_iter().nth(index)),
+        }
+    }
 }
 
 impl Hash for ListRef<'_> {
