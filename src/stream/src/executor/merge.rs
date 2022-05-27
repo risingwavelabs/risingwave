@@ -149,7 +149,7 @@ impl SelectReceivers {
 impl Unpin for SelectReceivers {}
 
 impl Stream for SelectReceivers {
-    type Item = Message;
+    type Item = std::result::Result<Message, StreamExecutorError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut poll_count = 0;
@@ -168,12 +168,23 @@ impl Stream for SelectReceivers {
                         Message::Barrier(barrier) => {
                             let rc = self.upstreams.swap_remove(idx);
                             self.blocks.push(rc);
-                            self.barrier = Some(barrier);
+                            if let Some(current_barrier) = self.barrier.as_ref() {
+                                if current_barrier.epoch != barrier.epoch {
+                                    return Poll::Ready(Some(Err(
+                                        StreamExecutorError::align_barrier(
+                                            current_barrier.clone(),
+                                            barrier,
+                                        ),
+                                    )));
+                                }
+                            } else {
+                                self.barrier = Some(barrier);
+                            }
                             poll_count = 0;
                         }
                         Message::Chunk(chunk) => {
                             self.last_base = (idx + 1) % self.upstreams.len();
-                            return Poll::Ready(Some(Message::Chunk(chunk)));
+                            return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
                         }
                     }
                 }
@@ -181,13 +192,12 @@ impl Stream for SelectReceivers {
         }
         if self.upstreams.is_empty() {
             assert!(self.barrier.is_some());
-            let upstreams = std::mem::replace(&mut self.blocks, vec![]);
-            self.upstreams = upstreams;
+            self.upstreams = std::mem::take(&mut self.blocks);
             let barrier = self.barrier.take().unwrap();
             if barrier.is_to_stop_actor(self.actor_id) {
                 Poll::Ready(None)
             } else {
-                Poll::Ready(Some(Message::Barrier(barrier)))
+                Poll::Ready(Some(Ok(Message::Barrier(barrier))))
             }
         } else {
             Poll::Pending
@@ -201,9 +211,11 @@ impl MergeExecutor {
         let upstreams = self.upstreams;
 
         // Futures of all active upstreams.
-        let mut select_all = SelectReceivers::new(self.actor_id, upstreams);
+        let select_all = SelectReceivers::new(self.actor_id, upstreams);
         // Channels that're blocked by the barrier to align.
-        for message in select_all.next().await {
+        #[for_await]
+        for ret in select_all {
+            let message = ret?;
             yield message;
         }
     }
