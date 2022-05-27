@@ -30,7 +30,10 @@ use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{pk_input_arrays, Executor, PkDataTypes, PkIndicesRef, StreamExecutorResult};
+use super::{
+    expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
+    StreamExecutorResult,
+};
 use crate::executor::aggregation::{
     agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
@@ -393,10 +396,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let mut state_map = EvictableHashMap::new(1 << 16);
 
         let mut input = input.execute();
-        let first_msg = input.next().await.unwrap()?;
-        let barrier = first_msg
-            .into_barrier()
-            .expect("the first message received by agg executor must be a barrier");
+        let barrier = expect_first_barrier(&mut input).await?;
         let mut epoch = barrier.epoch.curr;
         yield Message::Barrier(barrier);
 
