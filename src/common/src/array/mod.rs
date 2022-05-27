@@ -125,10 +125,10 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 /// `Array` must be built with an `ArrayBuilder`. The array trait provides several
 /// unified interface on an array, like `len`, `value_at` and `iter`.
 ///
-/// The `Builder` associated type is the builder for this array. The `Iter` associated
-/// type is the iterator of this array. And the `RefItem` is the item you could
-/// retrieve from this array.
+/// The `Builder` associated type is the builder for this array.
 ///
+/// The `Iter` associated type is the iterator of this array. And the `RefItem` is
+/// the item you could retrieve from this array.
 /// For example, `PrimitiveArray` could return an `Option<u32>`, and `Utf8Array` will
 /// return an `Option<&str>`.
 ///

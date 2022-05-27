@@ -189,8 +189,9 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
 
 pub struct MergeSortExchangeExecutorBuilder {}
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         let sort_merge_node = try_match_expand!(
@@ -237,9 +238,8 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, DataChunk, I32Array};
-    use risingwave_common::array_nonnull;
+    use risingwave_common::array::{Array, DataChunk};
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
@@ -271,11 +271,12 @@ mod tests {
                 _: &ProstExchangeSource,
                 _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
-                let chunk = DataChunk::builder()
-                    .columns(vec![Column::new(Arc::new(
-                        array_nonnull! { I32Array, [1, 2, 3] }.into(),
-                    ))])
-                    .build();
+                let chunk = DataChunk::from_pretty(
+                    "i
+                     1
+                     2
+                     3",
+                );
                 Ok(Box::new(FakeExchangeSource { chunk: Some(chunk) }))
             }
         }
