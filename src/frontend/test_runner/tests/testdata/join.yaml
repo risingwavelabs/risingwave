@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
@@ -138,6 +140,33 @@
             StreamTableScan { table: t2, columns: [v3, v4, v5, _row_id], pk_indices: [3] }
   with_config_map:
     RW_FORCE_DELTA_JOIN: "true"
+- sql: |
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v3 int);
+    select * from t1 join t2 using(v1);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchHashJoin { type: Inner, predicate: $0 = $2 }
+        BatchExchange { order: [], dist: HashShard([0]) }
+          BatchScan { table: t1, columns: [v1, v2] }
+        BatchExchange { order: [], dist: HashShard([0]) }
+          BatchScan { table: t2, columns: [v1, v3] }
+- sql: |
+    create table ab (a int, b int);
+    create table bc (b int, c int);
+    create table ca (c int, a int);
+    select * from ab join bc using(b) join ca using(c);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchHashJoin { type: Inner, predicate: $3 = $4 }
+        BatchExchange { order: [], dist: HashShard([3]) }
+          BatchHashJoin { type: Inner, predicate: $1 = $2 }
+            BatchExchange { order: [], dist: HashShard([1]) }
+              BatchScan { table: ab, columns: [a, b] }
+            BatchExchange { order: [], dist: HashShard([0]) }
+              BatchScan { table: bc, columns: [b, c] }
+        BatchExchange { order: [], dist: HashShard([0]) }
+          BatchScan { table: ca, columns: [c, a] }
 - sql: |
     /* Only push to left */
     create table t1 (v1 int, v2 int);

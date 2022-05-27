@@ -24,6 +24,8 @@ use lazy_static::lazy_static;
 use parking_lot::RwLock;
 use risingwave_common::hash::VirtualNode;
 
+use crate::error::{StorageError, StorageResult};
+use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -40,6 +42,8 @@ type KeyWithEpoch = (Bytes, Reverse<u64>);
 pub struct MemoryStateStore {
     /// Stores (key, epoch) -> user value. We currently don't consider value meta here.
     inner: Arc<RwLock<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
+    /// current largest committed epoch,
+    epoch: Option<u64>,
 }
 
 impl Default for MemoryStateStore {
@@ -70,6 +74,7 @@ impl MemoryStateStore {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(BTreeMap::new())),
+            epoch: None,
         }
     }
 
@@ -78,6 +83,25 @@ impl MemoryStateStore {
             static ref STORE: MemoryStateStore = MemoryStateStore::new();
         }
         STORE.clone()
+    }
+
+    pub fn commit_epoch(&mut self, epoch: u64) -> StorageResult<()> {
+        match self.epoch {
+            None => {
+                self.epoch = Some(epoch);
+                Ok(())
+            }
+            Some(current_epoch) => {
+                if current_epoch > epoch {
+                    Err(StorageError::Hummock(HummockError::expired_epoch(
+                        current_epoch,
+                        epoch,
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 }
 
@@ -248,7 +272,10 @@ impl StateStoreIter for MemoryStateStoreIter {
         impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
-        async move { Ok(self.inner.next()) }
+        async move {
+            let item = self.inner.next();
+            Ok(item)
+        }
     }
 }
 
