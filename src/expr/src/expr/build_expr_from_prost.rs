@@ -247,7 +247,7 @@ mod tests {
                 }
             ]
         };
-        let array = FunctionCall {
+        let array_index = FunctionCall {
             children: vec![
                 ExprNode {
                     expr_type: Type::Array as i32,
@@ -262,6 +262,16 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::FuncCall(values))
+                },
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue {
+                        body: vec![0, 0, 0, 1]
+                    }))
                 }
             ]
         };
@@ -277,9 +287,9 @@ mod tests {
                 ],
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::FuncCall(array))
+            rex_node: Some(RexNode::FuncCall(array_index))
         };
-        assert!(build_unary_expr_prost(&access).is_ok());
+        assert!(build_nullable_binary_expr_prost(&access).is_ok());
     }
 
     #[test]

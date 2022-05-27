@@ -82,18 +82,18 @@ pub fn new_nullable_binary_expr(
 
 //TODO(nanderstabel): fix
 fn build_array_access_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
-    println!("build_array_access_expr1 {:?}", r.return_type());
-    match r.return_type() {
-        // DataType::List { .. } => Box::new(
-        //     BinaryExpression::<ListArray, I32Array, I32Array, _>::new(
-        //         l,
-        //         r,
-        //         ret,
-        //         array_access,
-        //     ),
-        // ),
-        _ => Box::new(
+    println!("build_array_access_expr1 {:?}", l.return_type());
+    match l.return_type() {
+        DataType::Int32 => Box::new(
             BinaryNullableExpression::<ListArray, I32Array, I32Array, _>::new(
+                l,
+                r,
+                ret,
+                array_access,
+            ),
+        ),
+        _ => Box::new(
+            BinaryNullableExpression::<ListArray, I32Array, Utf8Array, _>::new(
                 l,
                 r,
                 ret,
