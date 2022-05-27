@@ -273,7 +273,6 @@ impl ToStream for LogicalProject {
         };
         let new_input = self.input().to_stream_with_dist_required(&input_required)?;
         let new_logical = self.clone_with_input(new_input);
-        dbg!("test2");
         let stream_plan = StreamProject::new(new_logical);
         required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
     }

@@ -85,6 +85,8 @@ impl LogicalHopWindow {
                         .unwrap(),
                 )
             } else {
+                // If neither `window_start` or `window_end` is in `output_indices`, pk cannot be
+                // derived. In this situation, return empty vec.
                 return Vec::new();
             };
             input_pk.chain(window_pk).collect_vec()
@@ -116,9 +118,8 @@ impl LogicalHopWindow {
         time_col: InputRef,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
-        output_indices: Option<Vec<usize>>,
     ) -> PlanRef {
-        Self::new(input, time_col, window_slide, window_size, output_indices).into()
+        Self::new(input, time_col, window_slide, window_size, None).into()
     }
 
     fn window_start_col_idx(&self) -> usize {
@@ -205,22 +206,22 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
     ) -> (Self, ColIndexMapping) {
         let mut time_col = self.time_col.clone();
         time_col.index = input_col_change.map(time_col.index);
-        let mut kept_column = Vec::new();
+        let mut columns_to_be_kept = Vec::new();
         let new_output_indices = self
             .output_indices
             .iter()
             .enumerate()
             .filter_map(|(i, &idx)| match input_col_change.try_map(idx) {
                 Some(new_idx) => {
-                    kept_column.push(i);
+                    columns_to_be_kept.push(i);
                     Some(new_idx)
                 }
                 None => {
                     if idx == self.window_start_col_idx() {
-                        kept_column.push(i);
+                        columns_to_be_kept.push(i);
                         Some(input.schema().len())
                     } else if idx == self.window_end_col_idx() {
-                        kept_column.push(i);
+                        columns_to_be_kept.push(i);
                         Some(input.schema().len() + 1)
                     } else {
                         None
@@ -237,7 +238,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
         );
         (
             new_hop,
-            ColIndexMapping::with_remaining_columns(&kept_column, self.output_indices.len()),
+            ColIndexMapping::with_remaining_columns(&columns_to_be_kept, self.output_indices.len()),
         )
     }
 }
@@ -321,9 +322,10 @@ impl ToBatch for LogicalHopWindow {
         let new_output_indices = new_logical.output_indices.clone();
         let new_internal_column_num = new_logical.internal_column_num();
 
-        let default_indices = (0..new_logical.internal_column_num()).collect_vec();
         // remove output indices
+        let default_indices = (0..new_logical.internal_column_num()).collect_vec();
         let new_logical = new_logical.clone_with_output_indices(default_indices.clone());
+
         let plan = BatchHopWindow::new(new_logical).into();
         if self.output_indices != default_indices {
             let logical_project = LogicalProject::with_mapping(
@@ -347,11 +349,7 @@ impl ToStream for LogicalHopWindow {
         let new_output_indices = new_logical.output_indices.clone();
         let new_internal_column_num = new_logical.internal_column_num();
         let new_pk = {
-            let mapping = ColIndexMapping::with_remaining_columns(
-                &new_logical.output_indices,
-                new_logical.input.schema().len() + 2,
-            )
-            .inverse();
+            let mapping = new_logical.output2internal_col_mapping();
             new_logical
                 .pk_indices()
                 .iter()
@@ -384,8 +382,8 @@ impl ToStream for LogicalHopWindow {
         let (input, time_col, window_slide, window_size, mut output_indices) = hop.decompose();
         if !output_indices.contains(&input.schema().len())
             && !output_indices.contains(&(input.schema().len() + 1))
-        // When both `window_start` and `window_end` is not in `output_indices`,
-        // we add `window_start` so ensure we can derive pk.
+        // When both `window_start` and `window_end` are not in `output_indices`,
+        // we add `window_start` to ensure we can derive pk.
         {
             output_indices.push(input.schema().len());
         }

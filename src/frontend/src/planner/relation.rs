@@ -177,7 +177,6 @@ impl Planner {
             time_col,
             window_slide,
             window_size,
-            None,
         ))
     }
 }
