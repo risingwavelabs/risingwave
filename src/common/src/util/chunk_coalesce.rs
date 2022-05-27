@@ -260,9 +260,8 @@ impl SlicedDataChunk {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{DataChunk, I32Array, I64Array};
-    use crate::buffer::Bitmap;
-    use crate::column;
+    use crate::array::DataChunk;
+    use crate::test_prelude::DataChunkTestExt;
     use crate::types::DataType;
     use crate::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 
@@ -271,19 +270,12 @@ mod tests {
         let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
 
         // Append a chunk with 2 rows
-        let input = {
-            let column1 = column! {
-                I32Array, [Some(3), None]
-            };
-
-            let column2 = column! {
-                I64Array, [None, Some(7i64)]
-            };
-
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            SlicedDataChunk::new_checked(chunk).expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7",
+        ))
+        .expect("Failed to create sliced data chunk");
 
         let (returned_input, output) = builder
             .append_chunk(input)
@@ -292,15 +284,14 @@ mod tests {
         assert!(output.is_none());
 
         // Append a chunk with 4 rows
-        let input = {
-            let column1 = column! {I32Array, [Some(3), None, Some(4), None]};
-
-            let column2 = column! {I64Array, [None, Some(7i64), Some(8i64), Some(9i64)]};
-
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            SlicedDataChunk::new_checked(chunk).expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7
+             4 8
+             . 9",
+        ))
+        .expect("Failed to create sliced data chunk");
         let (returned_input, output) = builder
             .append_chunk(input)
             .expect("Failed to append chunk!");
@@ -324,16 +315,12 @@ mod tests {
         let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
 
         // Append a chunk with 2 rows
-        let input = {
-            let column1 = column! {I32Array, [Some(3), None]};
-            let column2 = column! {I64Array, [None, Some(7i64)]};
-
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            let bitmap = Bitmap::try_from(vec![true, false]).expect("Failed to create bitmap");
-            SlicedDataChunk::new_checked(chunk.with_visibility(bitmap))
-                .expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7 D",
+        ))
+        .expect("Failed to create sliced data chunk");
 
         let (returned_input, output) = builder
             .append_chunk(input)
@@ -343,18 +330,14 @@ mod tests {
         assert_eq!(1, builder.buffered_count());
 
         // Append a chunk with 4 rows
-        let input = {
-            let column1 = column! { I32Array, [Some(3), None, Some(4), None] };
-
-            let column2 = column! { I64Array, [None, Some(7i64), Some(8i64), Some(9i64)]};
-
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            let bitmap =
-                Bitmap::try_from(vec![false, true, true, false]).expect("Failed to create bitmap!");
-            SlicedDataChunk::new_checked(chunk.with_visibility(bitmap))
-                .expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 . D
+             . 7
+             4 8
+             . 9 D",
+        ))
+        .expect("Failed to create sliced data chunk");
         let (returned_input, output) = builder
             .append_chunk(input)
             .expect("Failed to append chunk!");
@@ -381,13 +364,12 @@ mod tests {
         assert!(builder.consume_all().unwrap().is_none());
 
         // Append a chunk with 2 rows
-        let input = {
-            let column1 = column! {I32Array, [Some(3), None]};
-            let column2 = column! {I64Array, [None, Some(7i64)] };
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            SlicedDataChunk::new_checked(chunk).expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7",
+        ))
+        .expect("Failed to create sliced data chunk");
 
         let (returned_input, output) = builder
             .append_chunk(input)
