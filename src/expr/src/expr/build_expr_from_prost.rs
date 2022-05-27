@@ -24,13 +24,15 @@ use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
 use crate::expr::expr_in::InExpression;
-use crate::expr::expr_ternary_bytes::{new_replace_expr, new_substr_start_end, new_translate_expr};
+use crate::expr::expr_ternary_bytes::{
+    new_replace_expr, new_split_part_expr, new_substr_start_end, new_translate_expr,
+};
 use crate::expr::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 
-fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
+fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
     let ret_type = DataType::from(prost.get_return_type()?);
     if let RexNode::FuncCall(func_call) = prost.get_rex_node()? {
         Ok((func_call.get_children().to_vec(), ret_type))
@@ -42,14 +44,14 @@ fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, Data
 }
 
 pub fn build_unary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 1);
     let child_expr = expr_build_from_prost(&children[0])?;
     new_unary_expr(prost.get_expr_type()?, ret_type, child_expr)
 }
 
 pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
     let left_expr = expr_build_from_prost(&children[0])?;
     let right_expr = expr_build_from_prost(&children[1])?;
@@ -62,7 +64,7 @@ pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
     let left_expr = expr_build_from_prost(&children[0])?;
     let right_expr = expr_build_from_prost(&children[1])?;
@@ -75,7 +77,7 @@ pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpress
 }
 
 pub fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     let child = expr_build_from_prost(&children[0])?;
     ensure!(children.len() == 2 || children.len() == 3);
     if children.len() == 2 {
@@ -91,7 +93,7 @@ pub fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_trim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     // TODO: add expr with the delimiter parameter
     ensure!(children.len() == 1);
     let child = expr_build_from_prost(&children[0])?;
@@ -99,7 +101,7 @@ pub fn build_trim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_ltrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     // TODO: add expr with the delimiter parameter
     ensure!(children.len() == 1);
     let child = expr_build_from_prost(&children[0])?;
@@ -107,7 +109,7 @@ pub fn build_ltrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_rtrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     // TODO: add expr with the delimiter parameter
     ensure!(children.len() == 1);
     let child = expr_build_from_prost(&children[0])?;
@@ -115,7 +117,7 @@ pub fn build_rtrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_replace_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 3);
     let s = expr_build_from_prost(&children[0])?;
     let from_str = expr_build_from_prost(&children[1])?;
@@ -124,7 +126,7 @@ pub fn build_replace_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     // TODO: add encoding length expr
     ensure!(children.len() == 1);
     let child = expr_build_from_prost(&children[0])?;
@@ -132,7 +134,7 @@ pub fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
     let expr_ia1 = expr_build_from_prost(&children[0])?;
     let expr_ia2 = expr_build_from_prost(&children[1])?;
@@ -140,7 +142,7 @@ pub fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_in_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(ret_type == DataType::Boolean);
     let left_expr = expr_build_from_prost(&children[0])?;
     let mut data = Vec::new();
@@ -161,7 +163,7 @@ pub fn build_in_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     // children: (when, then)+, (else_clause)?
     let len = children.len();
     let else_clause = if len % 2 == 1 {
@@ -202,7 +204,7 @@ pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_translate_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
+    let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 3);
     let s = expr_build_from_prost(&children[0])?;
     let match_str = expr_build_from_prost(&children[1])?;
@@ -211,7 +213,17 @@ pub fn build_translate_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_split_part_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    todo!()
+    let (children, ret_type) = get_children_and_return_type(prost)?;
+    ensure!(children.len() == 3);
+    let string_expr = expr_build_from_prost(&children[0])?;
+    let delimiter_expr = expr_build_from_prost(&children[1])?;
+    let nth_expr = expr_build_from_prost(&children[2])?;
+    Ok(new_split_part_expr(
+        string_expr,
+        delimiter_expr,
+        nth_expr,
+        ret_type,
+    ))
 }
 
 #[cfg(test)]
