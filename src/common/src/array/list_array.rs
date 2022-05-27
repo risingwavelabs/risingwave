@@ -676,6 +676,6 @@ mod tests {
     fn test_list_ref_display() {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
-        assert_eq!("{1,NULL}".to_string(), format!("{}", r));
+        assert_eq!("[1,NULL]".to_string(), format!("{}", r));
     }
 }

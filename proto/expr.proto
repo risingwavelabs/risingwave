@@ -106,7 +106,6 @@ message ListValue {
   repeated bytes fields = 1;
 }
 
-
 message FunctionCall {
   repeated ExprNode children = 1;
 }
