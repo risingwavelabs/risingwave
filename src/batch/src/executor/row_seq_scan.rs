@@ -22,13 +22,14 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::monitor::BatchMetrics;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::monitor::BatchMetrics;
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
-pub struct RowSeqScanExecutor2<S: StateStore> {
+pub struct RowSeqScanExecutor<S: StateStore> {
     table: CellBasedTable<S>,
     primary: bool,
     chunk_size: usize,
@@ -38,7 +39,7 @@ pub struct RowSeqScanExecutor2<S: StateStore> {
     stats: Arc<BatchMetrics>,
 }
 
-impl<S: StateStore> RowSeqScanExecutor2<S> {
+impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
         table: CellBasedTable<S>,
         chunk_size: usize,
@@ -68,17 +69,17 @@ impl<S: StateStore> RowSeqScanExecutor2<S> {
     }
 }
 
-pub struct RowSeqScanExecutor2Builder {}
+pub struct RowSeqScanExecutorBuilder {}
 
-impl RowSeqScanExecutor2Builder {
+impl RowSeqScanExecutorBuilder {
     // TODO: decide the chunk size for row seq scan
     pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 }
 
-impl BoxedExecutor2Builder for RowSeqScanExecutor2Builder {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         let seq_scan_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::RowSeqScan
@@ -100,9 +101,9 @@ impl BoxedExecutor2Builder for RowSeqScanExecutor2Builder {
                 let storage_stats = state_store.stats();
                 let batch_stats = source.batch_task_context().stats();
                 let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-                Ok(Box::new(RowSeqScanExecutor2::new(
+                Ok(Box::new(RowSeqScanExecutor::new(
                     table,
-                    RowSeqScanExecutor2Builder::DEFAULT_CHUNK_SIZE,
+                    RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
                     source.task_id.task_id == 0,
                     source.plan_node().get_identity().clone(),
                     source.epoch(),
@@ -113,7 +114,7 @@ impl BoxedExecutor2Builder for RowSeqScanExecutor2Builder {
     }
 }
 
-impl<S: StateStore> Executor2 for RowSeqScanExecutor2<S> {
+impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -127,7 +128,7 @@ impl<S: StateStore> Executor2 for RowSeqScanExecutor2<S> {
     }
 }
 
-impl<S: StateStore> RowSeqScanExecutor2<S> {
+impl<S: StateStore> RowSeqScanExecutor<S> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         if !self.should_ignore() {

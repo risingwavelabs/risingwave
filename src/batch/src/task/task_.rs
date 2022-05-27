@@ -27,8 +27,7 @@ use risingwave_pb::task_service::GetDataResponse;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tracing_futures::Instrument;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::BoxedExecutor2;
+use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
 use crate::task::BatchTaskContext;
@@ -231,7 +230,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             self.context.clone(),
             self.epoch,
         )
-        .build2()?;
+        .build()?;
 
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
@@ -276,7 +275,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub async fn try_execute(
         &self,
-        root: BoxedExecutor2,
+        root: BoxedExecutor,
         sender: &mut ChanSenderImpl,
         mut shutdown_rx: Receiver<u64>,
     ) -> Result<()> {

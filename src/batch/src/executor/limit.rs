@@ -22,13 +22,14 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
 /// Limit executor.
-pub struct LimitExecutor2 {
-    child: BoxedExecutor2,
+pub struct LimitExecutor {
+    child: BoxedExecutor,
     /// limit parameter
     limit: usize,
     /// offset parameter
@@ -37,10 +38,10 @@ pub struct LimitExecutor2 {
     identity: String,
 }
 
-impl BoxedExecutor2Builder for LimitExecutor2 {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for LimitExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let limit_node =
@@ -50,7 +51,7 @@ impl BoxedExecutor2Builder for LimitExecutor2 {
         let offset = limit_node.get_offset() as usize;
 
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build2()?;
+            let child = source.clone_for_plan(child_plan).build()?;
             return Ok(Box::new(Self {
                 child,
                 limit,
@@ -62,7 +63,7 @@ impl BoxedExecutor2Builder for LimitExecutor2 {
     }
 }
 
-impl LimitExecutor2 {
+impl LimitExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         // the number of rows have been skipped due to offset
@@ -115,7 +116,7 @@ impl LimitExecutor2 {
     }
 }
 
-impl Executor2 for LimitExecutor2 {
+impl Executor for LimitExecutor {
     fn schema(&self) -> &Schema {
         self.child.schema()
     }
@@ -173,7 +174,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .for_each(|x| mock_executor.add(x));
-        let limit_executor = Box::new(LimitExecutor2 {
+        let limit_executor = Box::new(LimitExecutor {
             child: Box::new(mock_executor),
             limit,
             offset,
@@ -309,7 +310,7 @@ mod tests {
                 )
             });
 
-        let limit_executor = Box::new(LimitExecutor2 {
+        let limit_executor = Box::new(LimitExecutor {
             child: Box::new(mock_executor),
             limit,
             offset,

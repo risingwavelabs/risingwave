@@ -18,13 +18,13 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 
-use crate::executor2::join::chunked_data::{ChunkedData, RowId};
-use crate::executor2::BoxedExecutor2;
+use crate::executor::join::chunked_data::{ChunkedData, RowId};
+use crate::executor::BoxedExecutor;
 
 /// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table`
 /// without call executor. The executor is only called when building `inner_table`.
 pub(crate) struct RowLevelIter {
-    data_source: Option<BoxedExecutor2>,
+    data_source: Option<BoxedExecutor>,
     /// Buffering of inner table. TODO: Spill to disk or more fine-grained memory management to
     /// avoid OOM.
     data: Vec<DataChunk>,
@@ -42,7 +42,7 @@ pub(crate) struct RowLevelIter {
 }
 
 impl RowLevelIter {
-    pub fn new(data_source: BoxedExecutor2) -> Self {
+    pub fn new(data_source: BoxedExecutor) -> Self {
         let schema = data_source.schema().clone();
         Self {
             data_source: Some(data_source),

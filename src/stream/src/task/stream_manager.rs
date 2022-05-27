@@ -110,7 +110,11 @@ pub struct ExecutorParams {
     /// Id of the actor.
     pub actor_id: ActorId,
 
+    /// Metrics
     pub executor_stats: Arc<StreamingMetrics>,
+
+    // Actor context
+    pub actor_context: ActorContextRef,
 }
 
 impl Debug for ExecutorParams {
@@ -443,6 +447,7 @@ impl LocalStreamManagerCore {
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
+    #[allow(clippy::too_many_arguments)]
     fn create_nodes_inner(
         &mut self,
         fragment_id: u32,
@@ -451,6 +456,7 @@ impl LocalStreamManagerCore {
         input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
+        actor_context: &ActorContextRef,
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -467,6 +473,7 @@ impl LocalStreamManagerCore {
                     input_pos,
                     env.clone(),
                     store.clone(),
+                    actor_context,
                 )
             })
             .try_collect()?;
@@ -491,6 +498,7 @@ impl LocalStreamManagerCore {
             input,
             actor_id,
             executor_stats: self.streaming_metrics.clone(),
+            actor_context: actor_context.clone(),
         };
 
         let executor = create_executor(executor_params, self, node, store)?;
@@ -510,9 +518,10 @@ impl LocalStreamManagerCore {
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
+        actor_context: &ActorContextRef,
     ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
+            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store, actor_context)
         })
     }
 
@@ -588,11 +597,24 @@ impl LocalStreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor =
-                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
+            let actor_context = Arc::new(Mutex::new(ActorContext::default()));
+
+            let executor = self.create_nodes(
+                actor.fragment_id,
+                actor_id,
+                actor.get_nodes()?,
+                env.clone(),
+                &actor_context,
+            )?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
-            let actor = Actor::new(dispatcher, actor_id, self.context.clone());
+            let actor = Actor::new(
+                dispatcher,
+                actor_id,
+                self.context.clone(),
+                self.streaming_metrics.clone(),
+                actor_context,
+            );
             self.handles.insert(
                 actor_id,
                 tokio::spawn(async move {

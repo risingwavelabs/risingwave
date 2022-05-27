@@ -42,7 +42,7 @@ impl CompactionExecutor {
                 let runtime = builder.enable_all().build().unwrap();
                 runtime.block_on(async {
                     while let Some(request) = rx.recv().await {
-                        request.await;
+                        tokio::spawn(request);
                     }
                 });
             }),

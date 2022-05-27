@@ -25,16 +25,16 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::OrderType as OrderTypeProst;
 
-use crate::executor2::join::row_level_iter::RowLevelIter;
-use crate::executor2::join::JoinType;
-use crate::executor2::{
-    BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2, ExecutorBuilder,
+use crate::executor::join::row_level_iter::RowLevelIter;
+use crate::executor::join::JoinType;
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
 
-/// [`SortMergeJoinExecutor2`] will not sort the data. If the join key is not sorted, optimizer
+/// [`SortMergeJoinExecutor`] will not sort the data. If the join key is not sorted, optimizer
 /// should insert a sort executor above the data source.
-pub struct SortMergeJoinExecutor2 {
+pub struct SortMergeJoinExecutor {
     /// Ascending or descending. Note that currently the sort order of probe side and build side
     /// should be the same.
     sort_order: OrderType,
@@ -61,7 +61,7 @@ pub struct SortMergeJoinExecutor2 {
     identity: String,
 }
 
-impl Executor2 for SortMergeJoinExecutor2 {
+impl Executor for SortMergeJoinExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -75,7 +75,7 @@ impl Executor2 for SortMergeJoinExecutor2 {
     }
 }
 
-impl SortMergeJoinExecutor2 {
+impl SortMergeJoinExecutor {
     /// The code logic:
     /// For each loop, only process one tuple from probe side and one tuple from build side. After
     /// one loop, either probe side or build side will advance to next tuple and start a new
@@ -197,7 +197,7 @@ impl SortMergeJoinExecutor2 {
     }
 }
 
-impl SortMergeJoinExecutor2 {
+impl SortMergeJoinExecutor {
     pub(super) fn new(
         join_type: JoinType,
         schema: Schema,
@@ -233,10 +233,10 @@ impl SortMergeJoinExecutor2 {
     }
 }
 
-impl BoxedExecutor2Builder for SortMergeJoinExecutor2 {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for SortMergeJoinExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> risingwave_common::error::Result<BoxedExecutor2> {
+    ) -> risingwave_common::error::Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 2);
 
         let sort_merge_join_node = try_match_expand!(
@@ -254,8 +254,8 @@ impl BoxedExecutor2Builder for SortMergeJoinExecutor2 {
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
             (Some(left_plan), Some(right_plan)) => {
-                let left_child = source.clone_for_plan(left_plan).build2()?;
-                let right_child = source.clone_for_plan(right_plan).build2()?;
+                let left_child = source.clone_for_plan(left_plan).build()?;
+                let right_child = source.clone_for_plan(right_plan).build()?;
 
                 let fields = left_child
                     .schema()
@@ -314,10 +314,10 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
+    use crate::executor::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor};
+    use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
-    use crate::executor2::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor2};
-    use crate::executor2::join::JoinType;
-    use crate::executor2::BoxedExecutor2;
+    use crate::executor::BoxedExecutor;
 
     struct TestFixture {
         left_types: Vec<DataType>,
@@ -349,7 +349,7 @@ mod tests {
             }
         }
 
-        fn create_left_executor(&self) -> BoxedExecutor2 {
+        fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -390,7 +390,7 @@ mod tests {
             Box::new(executor)
         }
 
-        fn create_right_executor(&self) -> BoxedExecutor2 {
+        fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -445,7 +445,7 @@ mod tests {
             Box::new(executor)
         }
 
-        fn create_join_executor(&self) -> BoxedExecutor2 {
+        fn create_join_executor(&self) -> BoxedExecutor {
             let join_type = self.join_type;
 
             let left_child = self.create_left_executor();
@@ -460,7 +460,7 @@ mod tests {
                 .collect();
             let schema = Schema { fields };
 
-            Box::new(SortMergeJoinExecutor2::new(
+            Box::new(SortMergeJoinExecutor::new(
                 join_type,
                 schema,
                 RowLevelIter::new(left_child),
