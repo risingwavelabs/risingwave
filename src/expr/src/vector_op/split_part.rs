@@ -23,19 +23,32 @@ pub fn split_part(
     writer: BytesWriter,
 ) -> Result<BytesGuard> {
     let mut split = string_expr.split(delimiter_expr);
-    let nth_val = match nth_expr.cmp(&0) {
-        std::cmp::Ordering::Equal => {
-            return Err(RwError::from(ErrorCode::InvalidParameterValue(
-                "field position must not be zero".into(),
-            )));
+    let nth_val = if string_expr.is_empty() {
+        // postgres: return empty string for empty input string
+        Default::default()
+    } else if delimiter_expr.is_empty() {
+        // postgres: handle empty field separator
+        //           if first or last field, return input string, else empty string
+        if nth_expr == 1 || nth_expr == -1 {
+            string_expr
+        } else {
+            Default::default()
         }
-        std::cmp::Ordering::Greater => split.nth(nth_expr as usize - 1).unwrap_or_default(),
-        std::cmp::Ordering::Less => {
-            let split = split.collect::<Vec<_>>();
-            let nth_expr = (split.len() as i32 + nth_expr) as usize;
-            split
-                .get(nth_expr)
-                .map_or(Default::default(), <&str>::clone)
+    } else {
+        match nth_expr.cmp(&0) {
+            std::cmp::Ordering::Equal => {
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                    "field position must not be zero".into(),
+                )));
+            }
+            std::cmp::Ordering::Greater => split.nth(nth_expr as usize - 1).unwrap_or_default(),
+            std::cmp::Ordering::Less => {
+                let split = split.collect::<Vec<_>>();
+                let nth_expr = (split.len() as i32 + nth_expr) as usize;
+                split
+                    .get(nth_expr)
+                    .map_or(Default::default(), <&str>::clone)
+            }
         }
     };
 
@@ -47,7 +60,7 @@ pub fn split_part(
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-    use risingwave_common::error::Result;
+    use risingwave_common::error::{ErrorCode, Result, RwError};
 
     use super::split_part;
 
@@ -60,7 +73,14 @@ mod tests {
             ("joeuser@mydatabase", "", 2, Ok("")),
             ("joeuser@mydatabase", "", -1, Ok("joeuser@mydatabase")),
             ("joeuser@mydatabase", "", -2, Ok("")),
-            ("joeuser@mydatabase", "@", 0, Ok("an error")),
+            (
+                "joeuser@mydatabase",
+                "@",
+                0,
+                Err(RwError::from(ErrorCode::InvalidParameterValue(
+                    "field position must not be zero".into(),
+                ))),
+            ),
             ("joeuser@mydatabase", "@@", 1, Ok("joeuser@mydatabase")),
             ("joeuser@mydatabase", "@@", 2, Ok("")),
             ("joeuser@mydatabase", "@", 1, Ok("joeuser")),
@@ -73,7 +93,9 @@ mod tests {
             ("@joeuser@mydatabase@", "@", -2, Ok("mydatabase")),
         ];
 
-        for (i, (string_expr, delimiter_expr, nth_expr, expected)) in cases.iter().enumerate() {
+        for (i, case @ (string_expr, delimiter_expr, nth_expr, expected)) in
+            cases.iter().enumerate()
+        {
             let builder = Utf8ArrayBuilder::new(1).unwrap();
             let writer = builder.writer();
             let actual = split_part(string_expr, delimiter_expr, *nth_expr, writer);
@@ -85,12 +107,12 @@ mod tests {
                     let array = guard.into_inner().finish().unwrap();
                     let actual = array.value_at(0).clone().unwrap();
 
-                    assert_eq!(expected, actual, "at case {i}")
+                    assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)
                 }
                 Err(err) => {
-                    let expected = expected.clone();
-                    let actual = Err(err);
-                    assert_eq!(expected, actual, "at case {i}")
+                    let expected = expected.clone().unwrap_err().to_string();
+                    let actual = err.to_string();
+                    assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)
                 }
             };
         }
