@@ -488,7 +488,7 @@ mod tests {
                 lhs[i].map(|int| int.to_scalar_value()),
                 rhs[i].map(|int| int.to_scalar_value()),
             ]);
-            let result = vec_executor.eval_row_ref(&row).unwrap();
+            let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
@@ -546,7 +546,7 @@ mod tests {
                 lhs[i].map(|date| date.to_scalar_value()),
                 rhs[i].map(|date| date.to_scalar_value()),
             ]);
-            let result = vec_executor.eval_row_ref(&row).unwrap();
+            let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
@@ -607,7 +607,7 @@ mod tests {
                 lhs[i].map(|dec| dec.to_scalar_value()),
                 rhs[i].map(|dec| dec.to_scalar_value()),
             ]);
-            let result = vec_executor.eval_row_ref(&row).unwrap();
+            let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }

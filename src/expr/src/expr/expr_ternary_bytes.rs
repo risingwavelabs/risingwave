@@ -108,7 +108,7 @@ mod tests {
             assert_eq!(res.unwrap().to_datum(), expected);
         }
 
-        let res = expr.eval_row_ref(&Row::new(vec![]));
+        let res = expr.eval_row(&Row::new(vec![]));
         if is_negative_len {
             assert!(res.is_err());
         } else {

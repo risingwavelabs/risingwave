@@ -72,7 +72,7 @@ mod tests {
         let res = expr.eval(&DataChunk::new_dummy(1)).unwrap();
         assert_eq!(res.to_datum(), expected);
 
-        let res = expr.eval_row_ref(&Row::new(vec![])).unwrap();
+        let res = expr.eval_row(&Row::new(vec![])).unwrap();
         assert_eq!(res, expected);
     }
 

@@ -63,7 +63,7 @@ impl Expression for LiteralExpression {
         array_builder.finish().map(Arc::new)
     }
 
-    fn eval_row_ref(&self, _input: &Row) -> Result<Datum> {
+    fn eval_row(&self, _input: &Row) -> Result<Datum> {
         Ok(self.literal.as_ref().cloned())
     }
 }
@@ -316,9 +316,9 @@ mod tests {
     }
 
     #[test]
-    fn test_literal_eval_row_ref_dummy_chunk() {
+    fn test_literal_eval_row_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
-        let result = literal.eval_row_ref(&Row::new(vec![])).unwrap();
+        let result = literal.eval_row(&Row::new(vec![])).unwrap();
         assert_eq!(result, Some(1.into()))
     }
 }

@@ -45,7 +45,7 @@ impl Expression for FieldExpression {
         }
     }
 
-    fn eval_row_ref(&self, _input: &Row) -> Result<Datum> {
+    fn eval_row(&self, _input: &Row) -> Result<Datum> {
         Err(internal_error("expects a struct array ref"))
     }
 }

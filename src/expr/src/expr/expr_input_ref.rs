@@ -55,7 +55,7 @@ impl Expression for InputRefExpression {
         }
     }
 
-    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
         let cell = input.index(self.idx).as_ref().cloned();
         Ok(cell)
     }
@@ -99,13 +99,13 @@ mod tests {
     use crate::expr::{Expression, InputRefExpression};
 
     #[test]
-    fn test_eval_row_ref_input_ref() {
+    fn test_eval_row_input_ref() {
         let datums: Vec<Datum> = vec![Some(1.into()), Some(2.into()), None];
         let input_row = Row::new(datums.clone());
 
         for (i, expected) in datums.iter().enumerate() {
             let expr = InputRefExpression::new(DataType::Int32, i);
-            let result = expr.eval_row_ref(&input_row).unwrap();
+            let result = expr.eval_row(&input_row).unwrap();
             assert_eq!(*expected, result);
         }
     }

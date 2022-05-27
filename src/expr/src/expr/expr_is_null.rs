@@ -68,8 +68,8 @@ impl Expression for IsNullExpression {
         Ok(Arc::new(ArrayImpl::Bool(builder.finish()?)))
     }
 
-    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
-        let result = self.child.eval_row_ref(input)?;
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
+        let result = self.child.eval_row(input)?;
         let is_null = result.is_none();
         Ok(Some(is_null.to_scalar_value()))
     }
@@ -91,8 +91,8 @@ impl Expression for IsNotNullExpression {
         Ok(Arc::new(ArrayImpl::Bool(builder.finish()?)))
     }
 
-    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
-        let result = self.child.eval_row_ref(input)?;
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
+        let result = self.child.eval_row(input)?;
         let is_not_null = result.is_some();
         Ok(Some(is_not_null.to_scalar_value()))
     }
@@ -114,7 +114,7 @@ mod tests {
     fn do_test(
         expr: BoxedExpression,
         expected_eval_result: Vec<bool>,
-        expected_eval_row_ref_result: Vec<bool>,
+        expected_eval_row_result: Vec<bool>,
     ) -> Result<()> {
         let input_array = {
             let mut builder = DecimalArrayBuilder::new(3)?;
@@ -142,8 +142,8 @@ mod tests {
         ];
 
         for (i, row) in rows.iter().enumerate() {
-            let result = expr.eval_row_ref(row).unwrap().unwrap();
-            assert_eq!(expected_eval_row_ref_result[i], result.into_bool());
+            let result = expr.eval_row(row).unwrap().unwrap();
+            assert_eq!(expected_eval_row_result[i], result.into_bool());
         }
 
         Ok(())

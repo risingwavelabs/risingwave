@@ -63,7 +63,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// * `input` - input data of the Project Executor
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
 
-    fn eval_row_ref(&self, input: &Row) -> Result<Datum>;
+    fn eval_row(&self, input: &Row) -> Result<Datum>;
 
     fn boxed(self) -> BoxedExpression
     where

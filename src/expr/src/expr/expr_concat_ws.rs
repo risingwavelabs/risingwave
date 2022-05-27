@@ -86,8 +86,8 @@ impl Expression for ConcatWsExpression {
         Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
     }
 
-    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
-        let sep = self.sep_expr.eval_row_ref(input)?;
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
+        let sep = self.sep_expr.eval_row(input)?;
         let sep = match sep {
             Some(sep) => sep,
             None => return Ok(None),
@@ -96,7 +96,7 @@ impl Expression for ConcatWsExpression {
         let strings = self
             .string_exprs
             .iter()
-            .map(|c| c.eval_row_ref(input))
+            .map(|c| c.eval_row(input))
             .collect::<Result<Vec<_>>>()?;
         let mut final_string = String::new();
 
@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn test_eval_row_ref_concat_ws_expr() {
+    fn test_eval_row_concat_ws_expr() {
         let input_node1 = make_input_ref(0, TypeName::Varchar);
         let input_node2 = make_input_ref(1, TypeName::Varchar);
         let input_node3 = make_input_ref(2, TypeName::Varchar);
@@ -236,7 +236,7 @@ mod tests {
                 .collect();
             let row = Row::new(datum_vec);
 
-            let result = concat_ws_expr.eval_row_ref(&row).unwrap();
+            let result = concat_ws_expr.eval_row(&row).unwrap();
             let expected = expected[i].map(|s| s.to_string().to_scalar_value());
 
             assert_eq!(result, expected);

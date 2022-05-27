@@ -80,8 +80,8 @@ impl Expression for InExpression {
         Ok(Arc::new(output_array.finish()?.into()))
     }
 
-    fn eval_row_ref(&self, input: &Row) -> risingwave_common::error::Result<Datum> {
-        let data = self.left.eval_row_ref(input)?;
+    fn eval_row(&self, input: &Row) -> risingwave_common::error::Result<Datum> {
+        let data = self.left.eval_row(input)?;
         let ret = self.exists(&data);
         Ok(Some(ret.to_scalar_value()))
     }
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn test_eval_row_ref_search_expr() {
+    fn test_eval_row_search_expr() {
         let input_ref = Box::new(InputRefExpression::new(DataType::Varchar, 0));
         let data = vec![
             Some(ScalarImpl::Utf8("abc".to_string())),
@@ -132,7 +132,7 @@ mod tests {
 
         for (i, row_input) in row_inputs.iter().enumerate() {
             let row = Row::new(vec![Some(row_input.to_string().to_scalar_value())]);
-            let result = search_expr.eval_row_ref(&row).unwrap().unwrap().into_bool();
+            let result = search_expr.eval_row(&row).unwrap().unwrap().into_bool();
             assert_eq!(result, expected[i]);
         }
     }

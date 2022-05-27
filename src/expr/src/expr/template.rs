@@ -78,14 +78,14 @@ macro_rules! gen_eval {
             }
         }
 
-        // Currently, eval_row_ref() first calls eval_row_ref() on the inner expressions. The
-        // resulting datums are placed in their own arrays. The arrays are then handled in the same
-        // way as in eval(). This could be optimized to work on the datums directly
-        // instead of placing them in arrays.
-        fn eval_row_ref(&self, row: &Row) -> Result<Datum> {
+        /// Currently, `eval_row()` first calls `eval_row()` on the inner expressions and the
+        /// resulting datums are placed in their own arrays. The arrays are then handled in the same
+        /// way as in `eval()`. This could be optimized to work on the datums directly
+        /// instead of placing them in arrays.
+        fn eval_row(&self, row: &Row) -> Result<Datum> {
             paste! {
                 $(
-                    let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row_ref(row)?;
+                    let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;
 
                     let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1)?;
                     let [<ref_ $arg:lower>] = &mut [<builder_ $arg:lower>];

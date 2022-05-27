@@ -63,11 +63,11 @@ impl Expression for ArrayExpression {
         builder.finish().map(|a| Arc::new(ArrayImpl::List(a)))
     }
 
-    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
         let datums = self
             .elements
             .iter()
-            .map(|e| e.eval_row_ref(input))
+            .map(|e| e.eval_row(input))
             .collect::<Result<Vec<Datum>>>()?;
         Ok(Some(ListValue::new(datums).to_scalar_value()))
     }
@@ -123,13 +123,13 @@ mod tests {
     }
 
     #[test]
-    fn test_eval_row_ref_array_expr() {
+    fn test_eval_row_array_expr() {
         let expr = ArrayExpression {
             element_type: Box::new(DataType::Int32),
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
-        let scalar_impl = expr.eval_row_ref(&Row::new(vec![])).unwrap().unwrap();
+        let scalar_impl = expr.eval_row(&Row::new(vec![])).unwrap().unwrap();
         let expected = ListValue::new(vec![Some(1.into()), Some(2.into())]).to_scalar_value();
         assert_eq!(expected, scalar_impl);
     }

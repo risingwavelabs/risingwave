@@ -58,11 +58,11 @@ impl Expression for CoalesceExpression {
         Ok(Arc::new(builder.finish()?))
     }
 
-    fn eval_row_ref(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
         let children_array = self
             .children
             .iter()
-            .map(|c| c.eval_row_ref(input))
+            .map(|c| c.eval_row(input))
             .collect::<Result<Vec<_>>>()?;
         for datum in children_array {
             if datum.is_some() {
@@ -104,10 +104,9 @@ impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{DataChunk, PrimitiveArray, Row};
-    use risingwave_common::types::{Scalar, ScalarImpl};
+    use risingwave_common::array::{DataChunk, Row};
     use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::types::{Scalar, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -156,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn test_eval_row_ref_coalesce_expr() {
+    fn test_eval_row_coalesce_expr() {
         let input_node1 = make_input_ref(0, TypeName::Int32);
         let input_node2 = make_input_ref(1, TypeName::Int32);
         let input_node3 = make_input_ref(2, TypeName::Int32);
@@ -188,7 +187,7 @@ mod tests {
                 .collect();
             let row = Row::new(datum_vec);
 
-            let result = nullif_expr.eval_row_ref(&row).unwrap();
+            let result = nullif_expr.eval_row(&row).unwrap();
             assert_eq!(result, expected[i]);
         }
     }
