@@ -324,7 +324,7 @@ impl TierCompactionPicker {
             if select_compaction_bytes < self.config.min_compaction_bytes
                 && select_level_ssts.len() < self.config.level0_trigger_number
             {
-                return (vec![], vec![]);
+                continue;
             }
             target_level_ssts.tables.sort_by(|a, b| {
                 let r1 = KeyRange::from(a.key_range.as_ref().unwrap());
