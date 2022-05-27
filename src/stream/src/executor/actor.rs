@@ -30,7 +30,6 @@ pub struct OperatorInfo {
     pub operator_id: u64,
     pub source_barrier_at: VecDeque<(u64, Instant)>,
     pub source_first_chunk_at: VecDeque<(u64, Instant)>,
-    pub last_barrier_curr_epoch: Option<u64>,
 }
 
 impl OperatorInfo {
@@ -39,20 +38,46 @@ impl OperatorInfo {
             operator_id,
             source_barrier_at: VecDeque::new(),
             source_first_chunk_at: VecDeque::new(),
+        }
+    }
+}
+
+pub struct OperatorInfoStatus {
+    last_barrier_curr_epoch: Option<u64>,
+    ctx: ActorContextRef,
+    actor_context_position: usize,
+}
+
+impl OperatorInfoStatus {
+    pub fn new(ctx: ActorContextRef, receiver_id: u64) -> Self {
+        let actor_context_position = {
+            let mut ctx = ctx.lock();
+            let actor_context_position = ctx.info.len();
+            ctx.info.push(OperatorInfo::new(receiver_id));
+            actor_context_position
+        };
+
+        Self {
             last_barrier_curr_epoch: None,
+            ctx,
+            actor_context_position,
         }
     }
 
     pub fn next_message(&mut self, msg: &Message) {
         match msg {
             Message::Barrier(barrier) => {
-                self.source_barrier_at
+                let mut ctx = self.ctx.lock();
+                let info = &mut ctx.info[self.actor_context_position];
+                info.source_barrier_at
                     .push_back((barrier.epoch.prev, Instant::now()));
                 self.last_barrier_curr_epoch = Some(barrier.epoch.curr);
             }
             Message::Chunk(_) => {
                 if let Some(epoch) = self.last_barrier_curr_epoch.take() {
-                    self.source_first_chunk_at
+                    let mut ctx = self.ctx.lock();
+                    let info = &mut ctx.info[self.actor_context_position];
+                    info.source_first_chunk_at
                         .push_back((epoch, Instant::now()))
                 }
             }

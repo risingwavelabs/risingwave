@@ -88,9 +88,8 @@ pub struct MergeExecutor {
 
     info: ExecutorInfo,
 
-    /// Actor context
-    actor_context: ActorContextRef,
-    actor_context_position: usize,
+    /// Actor operator context
+    status: OperatorInfoStatus,
 }
 
 impl MergeExecutor {
@@ -102,13 +101,6 @@ impl MergeExecutor {
         actor_context: ActorContextRef,
         receiver_id: u64,
     ) -> Self {
-        let actor_context_position = {
-            let mut ctx = actor_context.lock();
-            let actor_context_position = ctx.info.len();
-            ctx.info.push(OperatorInfo::new(receiver_id));
-            actor_context_position
-        };
-
         Self {
             upstreams: inputs,
             actor_id,
@@ -117,8 +109,7 @@ impl MergeExecutor {
                 pk_indices,
                 identity: "MergeExecutor".to_string(),
             },
-            actor_context,
-            actor_context_position,
+            status: OperatorInfoStatus::new(actor_context, receiver_id),
         }
     }
 }
@@ -144,7 +135,7 @@ impl Executor for MergeExecutor {
 
 impl MergeExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         let mut upstreams = self.upstreams;
 
         use madsim::rand::SeedableRng;
@@ -180,10 +171,7 @@ impl MergeExecutor {
                     Message::Chunk(_) => {
                         // We may still receive message from this channel.
                         active.push(from.into_future());
-                        {
-                            self.actor_context.lock().info[self.actor_context_position]
-                                .next_message(&message);
-                        }
+                        self.status.next_message(&message);
                         yield message;
                     }
                     Message::Barrier(barrier) => {
@@ -209,9 +197,7 @@ impl MergeExecutor {
             let barrier = current_barrier.unwrap();
             let to_stop = barrier.is_to_stop_actor(self.actor_id);
             let message = Message::Barrier(barrier);
-            {
-                self.actor_context.lock().info[self.actor_context_position].next_message(&message);
-            }
+            self.status.next_message(&message);
             yield message;
 
             // 3. Put back the upstreams, or close the stream.

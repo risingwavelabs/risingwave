@@ -73,7 +73,7 @@ mod integration_tests;
 #[cfg(test)]
 mod test_utils;
 
-pub use actor::{Actor, ActorContext, ActorContextRef, OperatorInfo};
+pub use actor::{Actor, ActorContext, ActorContextRef, OperatorInfo, OperatorInfoStatus};
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use debug::DebugExecutor;
