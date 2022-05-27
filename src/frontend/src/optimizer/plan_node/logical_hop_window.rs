@@ -358,7 +358,7 @@ impl ToStream for LogicalHopWindow {
                 .map(|&pk| mapping.map(pk))
                 .collect_vec()
         };
-        
+
         // remove output indices
         let default_indices = (0..new_logical.internal_column_num()).collect_vec();
         let new_logical = new_logical.clone_with_output_indices(default_indices.clone());
