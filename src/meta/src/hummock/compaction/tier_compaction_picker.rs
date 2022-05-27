@@ -322,10 +322,13 @@ impl TierCompactionPicker {
                 select_compaction_bytes += other.file_size;
             }
             if select_compaction_bytes < self.config.min_compaction_bytes
-                && select_level_ssts.len() < self.config.level0_trigger_number
+                && (select_level_ssts.len() < self.config.level0_trigger_number
+                    || target_level_ssts.compaction_bytes * 2
+                        > select_compaction_bytes * self.config.max_bytes_for_level_multiplier)
             {
                 continue;
             }
+
             target_level_ssts.tables.sort_by(|a, b| {
                 let r1 = KeyRange::from(a.key_range.as_ref().unwrap());
                 let r2 = KeyRange::from(b.key_range.as_ref().unwrap());

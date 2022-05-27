@@ -479,33 +479,35 @@ where
                         .flat_map(|v| v.snapshot_id.clone())
                         .fold(max_committed_epoch, std::cmp::min)
                 };
-                let table_ids = compact_task
-                    .input_ssts
-                    .iter()
-                    .flat_map(|level| {
-                        level
-                            .table_infos
-                            .iter()
-                            .flat_map(|sst_info| {
-                                sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
-                            })
-                            .collect_vec()
-                    })
-                    .collect::<HashSet<u32>>();
-                compact_task.vnode_mappings.reserve_exact(table_ids.len());
-                for table_id in table_ids {
-                    if let Some(vnode_mapping) = self
-                        .env
-                        .hash_mapping_manager()
-                        .get_table_hash_mapping(&table_id)
-                    {
-                        let (original_indices, compressed_data) = compress_data(&vnode_mapping);
-                        let compressed_mapping = ParallelUnitMapping {
-                            table_id,
-                            original_indices,
-                            data: compressed_data,
-                        };
-                        compact_task.vnode_mappings.push(compressed_mapping);
+                if compact_task.target_level != 0 {
+                    let table_ids = compact_task
+                        .input_ssts
+                        .iter()
+                        .flat_map(|level| {
+                            level
+                                .table_infos
+                                .iter()
+                                .flat_map(|sst_info| {
+                                    sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
+                                })
+                                .collect_vec()
+                        })
+                        .collect::<HashSet<u32>>();
+                    compact_task.vnode_mappings.reserve_exact(table_ids.len());
+                    for table_id in table_ids {
+                        if let Some(vnode_mapping) = self
+                            .env
+                            .hash_mapping_manager()
+                            .get_table_hash_mapping(&table_id)
+                        {
+                            let (original_indices, compressed_data) = compress_data(&vnode_mapping);
+                            let compressed_mapping = ParallelUnitMapping {
+                                table_id,
+                                original_indices,
+                                data: compressed_data,
+                            };
+                            compact_task.vnode_mappings.push(compressed_mapping);
+                        }
                     }
                 }
 
