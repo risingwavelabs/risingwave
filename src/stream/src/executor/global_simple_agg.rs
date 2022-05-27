@@ -242,10 +242,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             key_indices: _,
         } = self;
         let mut input = input.execute();
-        let first_msg = input.next().await.unwrap()?;
-        let barrier = first_msg
-            .into_barrier()
-            .expect("the first message received by agg executor must be a barrier");
+
+        let barrier = expect_first_barrier(&mut input).await?;
         let mut epoch = barrier.epoch.curr;
         yield Message::Barrier(barrier);
 
