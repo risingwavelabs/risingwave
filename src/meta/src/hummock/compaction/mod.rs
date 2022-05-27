@@ -49,7 +49,6 @@ const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4GB
 const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
 const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
 const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 24;
-const SCORE_BASE: u64 = 100;
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
 const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 8;

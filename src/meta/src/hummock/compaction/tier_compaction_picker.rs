@@ -26,8 +26,8 @@ use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::{
     HashStrategy, OverlapStrategy, RangeOverlapStrategy,
 };
+use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
-use crate::hummock::compaction::{CompactionConfig, SCORE_BASE};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -95,21 +95,14 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
         if levels[select_level].table_infos.len() > self.config.level0_max_file_number {
-            let mut idle_file_count = 0;
             let mut idle_file_size = 0;
             for table in &levels[select_level].table_infos {
                 if !level_handlers[select_level].is_pending_compact(&table.id) {
-                    idle_file_count += 1;
                     idle_file_size += table.file_size;
                 }
             }
 
-            let too_many_dile_files =
-                idle_file_count * SCORE_BASE / self.config.level0_max_file_number as u64;
-            let too_much_bytes = idle_file_size * SCORE_BASE / self.config.min_compaction_bytes;
-            if too_many_dile_files > too_much_bytes
-                && idle_file_size < self.config.min_compaction_bytes
-            {
+            if idle_file_size < self.config.min_compaction_bytes {
                 return self.pick_intra_l0_compaction(
                     &levels[select_level],
                     &mut level_handlers[select_level],
@@ -240,9 +233,7 @@ impl TierCompactionPicker {
                 next_offset += 1;
             }
 
-            if compaction_bytes < self.config.min_compaction_bytes
-                && select_level_inputs.len() < self.config.level0_trigger_number
-            {
+            if select_level_inputs.len() < self.config.level0_trigger_number {
                 idx = next_offset;
                 continue;
             }
@@ -345,7 +336,8 @@ impl TierCompactionPicker {
                 select_compaction_bytes += other.file_size;
             }
             if select_compaction_bytes < self.config.min_compaction_bytes
-                && select_level_ssts.len() < self.config.level0_trigger_number
+                && select_compaction_bytes * self.config.max_bytes_for_level_multiplier
+                    < target_level_ssts.compaction_bytes
             {
                 continue;
             }
