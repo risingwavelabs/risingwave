@@ -22,6 +22,12 @@ pub fn split_part(
     nth_expr: i32,
     writer: BytesWriter,
 ) -> Result<BytesGuard> {
+    if nth_expr == 0 {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+            "field position must not be zero".into(),
+        )));
+    };
+
     let mut split = string_expr.split(delimiter_expr);
     let nth_val = if string_expr.is_empty() {
         // postgres: return empty string for empty input string
@@ -37,8 +43,9 @@ pub fn split_part(
     } else {
         match nth_expr.cmp(&0) {
             std::cmp::Ordering::Equal => {
-                return Err(RwError::from(ErrorCode::InvalidParameterValue(
-                    "field position must not be zero".into(),
+                return Err(RwError::from(ErrorCode::InternalError(
+                    "Impossible happened, field position must not be zero already had been checked."
+                        .into(),
                 )));
             }
             std::cmp::Ordering::Greater => split.nth(nth_expr as usize - 1).unwrap_or_default(),
