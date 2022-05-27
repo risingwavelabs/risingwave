@@ -14,13 +14,14 @@
 
 //! For expression that only accept two nullable arguments as input.
 
-use risingwave_common::array::{Array, BoolArray, Utf8Array};
+use risingwave_common::array::{Array, BoolArray, I32Array, ListArray, Utf8Array};
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::BoxedExpression;
 use crate::expr::template::BinaryNullableExpression;
 use crate::for_all_cmp_variants;
+use crate::vector_op::array_access::array_access;
 use crate::vector_op::cmp::{general_is_distinct_from, str_is_distinct_from};
 use crate::vector_op::conjunction::{and, or};
 
@@ -62,6 +63,7 @@ pub fn new_nullable_binary_expr(
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
+        Type::ArrayAccess => build_array_access_expr(ret, l, r),
         Type::And => Box::new(
             BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, and),
         ),
@@ -75,6 +77,32 @@ pub fn new_nullable_binary_expr(
                 tp
             )
         }
+    }
+}
+
+//TODO(nanderstabel): fix
+fn build_array_access_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
+    println!("build_array_access_expr1 {:?}", r.return_type());
+    match r.return_type() {
+        // DataType::List { .. } => Box::new(
+        //     BinaryExpression::<ListArray, I32Array, I32Array, _>::new(
+        //         l,
+        //         r,
+        //         ret,
+        //         array_access,
+        //     ),
+        // ),
+        _ => Box::new(
+            BinaryNullableExpression::<ListArray, I32Array, I32Array, _>::new(
+                l,
+                r,
+                ret,
+                array_access,
+            ),
+        ),
+        // _ => {
+        //     unimplemented!("Extract ( {:?} ) is not supported yet!", r.return_type())
+        // }
     }
 }
 

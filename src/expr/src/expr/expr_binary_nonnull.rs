@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{
-    Array, BoolArray, DecimalArray, I32Array, IntervalArray, ListArray, NaiveDateArray, NaiveDateTimeArray,
+    Array, BoolArray, DecimalArray, I32Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray,
     Utf8Array,
 };
 use risingwave_common::error::ErrorCode::InternalError;
@@ -25,7 +25,6 @@ use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::for_all_cmp_variants;
 use crate::vector_op::arithmetic_op::*;
-use crate::vector_op::array_access::array_access;
 use crate::vector_op::cmp::*;
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
@@ -305,7 +304,6 @@ pub fn new_binary_expr(
                 },
             }
         }
-        Type::ArrayAccess => build_array_access_expr(ret, l, r),
         Type::Extract => build_extract_expr(ret, l, r),
         Type::RoundDigit => Box::new(
             BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
@@ -325,23 +323,6 @@ pub fn new_binary_expr(
                 tp
             )
         }
-    }
-}
-
-//TODO(nanderstabel): fix
-fn build_array_access_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
-    match r.return_type() {
-        _ => Box::new(
-            BinaryExpression::<ListArray, I32Array, Utf8Array, _>::new(
-                l,
-                r,
-                ret,
-                array_access,
-            ),
-        ),
-        // _ => {
-        //     unimplemented!("Extract ( {:?} ) is not supported yet!", r.return_type())
-        // }
     }
 }
 

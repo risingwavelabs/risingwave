@@ -19,10 +19,13 @@ use risingwave_common::types::{Scalar, ScalarImpl, ScalarRef, Datum, DatumRef, T
 
 // TODO(nanderstabel): Clean
 #[inline(always)]
-pub fn array_access<'a, T: Scalar>(l: ListRef, index: i32) -> Result<T> {
-    let temp = l.value_at(index as usize)?;
-    let temp = temp.to_owned_datum().unwrap();
-    temp.try_into()
+pub fn array_access<'a, T: Scalar>(l: Option<ListRef>, index: Option<i32>) -> Result<Option<T>> {
+    let temp = l.unwrap().value_at(index.unwrap() as usize)?;
+    if let Some(temp) = temp.to_owned_datum() {
+        Ok(Some(temp.try_into()?))
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -31,6 +34,19 @@ mod tests {
     use super::*;
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::array::ListValue;
+
+    #[test]
+    fn test_int32_array_access() {
+        let v1 = ListValue::new(vec![
+            Some(ScalarImpl::Int32(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int32(3)),
+        ]);
+        let l1 = ListRef::ValueRef { val: &v1 };
+
+        assert_eq!(array_access::<i32>(Some(l1), Some(1)), Ok(Some(1))); 
+        assert_eq!(array_access::<i32>(Some(l1), Some(4)), Ok(None));  
+    }
 
     #[test]
     fn test_utf8_array_access() {
@@ -54,8 +70,8 @@ mod tests {
         let l2 = ListRef::ValueRef { val: &v2 };
         let l3 = ListRef::ValueRef { val: &v3 };
 
-        assert_eq!(array_access::<String>(l1, 0), Ok("来自".into()));
-        assert_eq!(array_access::<String>(l2, 1), Ok("荷兰".into()));
-        assert_eq!(array_access::<String>(l3, 2), Ok("的爱".into()));
+        assert_eq!(array_access::<String>(Some(l1), Some(1)), Ok(Some("来自".into())));
+        assert_eq!(array_access::<String>(Some(l2), Some(2)), Ok(Some("荷兰".into())));
+        assert_eq!(array_access::<String>(Some(l3), Some(3)), Ok(Some("的爱".into())));
     }
 }
