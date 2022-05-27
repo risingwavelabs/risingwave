@@ -64,6 +64,5 @@ impl<S: Stream + Unpin> Stream for MergeStream<S> {
 }
 
 pub fn select_all<S: Stream + Unpin>(streams: Vec<S>) -> MergeStream<S> {
-    let set = MergeStream::new(streams);
-    set
+    MergeStream::new(streams)
 }
