@@ -26,7 +26,6 @@ use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::Keyspace;
-// use risingwave_stream::executor_v2::ManagedMViewState;
 
 #[tokio::test]
 async fn test_row_seq_scan() -> Result<()> {
