@@ -32,6 +32,7 @@ pub mod translate;
 pub mod trim;
 pub mod tumble;
 pub mod upper;
+pub mod md5;
 
 #[cfg(test)]
 mod tests;
