@@ -274,52 +274,14 @@ impl OrderByExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use itertools::Itertools;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{BoolArray, DataChunk, PrimitiveArray, Utf8Array};
+    use risingwave_common::array::DataChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{DataType, OrderedF32, OrderedF64};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-
-    fn create_column_i32(vec: &[Option<i32>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
-    }
-
-    fn create_column_i16(vec: &[Option<i16>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
-    }
-
-    fn create_column_bool(vec: &[Option<bool>]) -> Result<Column> {
-        let array = BoolArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
-    }
-
-    fn create_column_f32(vec: &[Option<f32>]) -> Result<Column> {
-        let vec = vec.iter().map(|o| o.map(OrderedF32::from)).collect_vec();
-        let array = PrimitiveArray::from_slice(&vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
-    }
-
-    fn create_column_f64(vec: &[Option<f64>]) -> Result<Column> {
-        let vec = vec.iter().map(|o| o.map(OrderedF64::from)).collect_vec();
-        let array = PrimitiveArray::from_slice(&vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
-    }
-
-    fn create_column_string(vec: &[Option<String>]) -> Result<Column> {
-        let str_vec = vec
-            .iter()
-            .map(|s| s.as_ref().map(|s| s.as_str()))
-            .collect_vec();
-        let array = Utf8Array::from_slice(&str_vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
-    }
 
     #[tokio::test]
     async fn test_simple_order_by_executor() {
