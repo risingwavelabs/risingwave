@@ -94,8 +94,9 @@ impl FilterExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for FilterExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
@@ -108,7 +109,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
         let expr_node = filter_node.get_search_condition()?;
         let expr = build_from_prost(expr_node)?;
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build()?;
+            let child = source.clone_for_plan(child_plan).build().await?;
             debug!("Child schema: {:?}", child.schema());
 
             return Ok(Box::new(Self {

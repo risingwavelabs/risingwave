@@ -49,8 +49,9 @@ pub struct SortAggExecutor {
     output_size_limit: usize, // make unit test easy
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortAggExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
@@ -58,7 +59,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             source.plan_node().get_children().get(0).ok_or_else(|| {
                 ErrorCode::InternalError("SortAgg must have child node".to_string())
             })?;
-        let child = source.clone_for_plan(proto_child).build()?;
+        let child = source.clone_for_plan(proto_child).build().await?;
 
         let sort_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),

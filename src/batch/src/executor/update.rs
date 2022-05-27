@@ -162,8 +162,9 @@ impl UpdateExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for UpdateExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         let update_node = try_match_expand!(
@@ -184,7 +185,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child = source.clone_for_plan(proto_child).build()?;
+        let child = source.clone_for_plan(proto_child).build().await?;
 
         Ok(Box::new(Self::new(
             table_id,
