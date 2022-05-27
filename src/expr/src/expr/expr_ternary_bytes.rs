@@ -76,11 +76,27 @@ pub fn new_translate_expr(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::types::{Datum, ScalarImpl};
 
     use super::*;
     use crate::expr::LiteralExpression;
+
+    fn test_evals_dummy(expr: BoxedExpression, expected: Datum, is_negative_len: bool) {
+        let res = expr.eval(&DataChunk::new_dummy(1));
+        if is_negative_len {
+            assert!(res.is_err());
+        } else {
+            assert_eq!(res.unwrap().to_datum(), expected);
+        }
+
+        let res = expr.eval_row_ref(&Row::new(vec![]));
+        if is_negative_len {
+            assert!(res.is_err());
+        } else {
+            assert_eq!(res.unwrap(), expected);
+        }
+    }
 
     #[test]
     fn test_substr_start_end() {
@@ -132,12 +148,8 @@ mod tests {
                 Box::new(LiteralExpression::new(DataType::Int32, len)),
                 DataType::Varchar,
             );
-            let res = expr.eval(&DataChunk::new_dummy(1));
-            if is_negative_len {
-                assert!(res.is_err());
-            } else {
-                assert_eq!(res.unwrap().to_datum(), expected);
-            }
+
+            test_evals_dummy(expr, expected, is_negative_len);
         }
     }
 
@@ -174,11 +186,8 @@ mod tests {
                 )),
                 DataType::Varchar,
             );
-            let res = expr.eval(&DataChunk::new_dummy(1)).unwrap();
-            assert_eq!(
-                res.to_datum(),
-                Some(ScalarImpl::from(String::from(expected)))
-            );
+
+            test_evals_dummy(expr, Some(ScalarImpl::from(String::from(expected))), false);
         }
     }
 }

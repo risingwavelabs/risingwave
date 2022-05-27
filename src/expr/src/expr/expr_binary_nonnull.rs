@@ -471,6 +471,16 @@ mod tests {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
         }
+
+        for i in 0..lhs.len() {
+            let row = Row::new(vec![
+                lhs[i].map(|int| int.to_scalar_value()),
+                rhs[i].map(|int| int.to_scalar_value()),
+            ]);
+            let result = vec_executor.eval_row_ref(&row).unwrap();
+            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
+            assert_eq!(result, expected);
+        }
     }
 
     fn test_binary_interval<A, F>(f: F, kind: Type)
@@ -518,6 +528,16 @@ mod tests {
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
+        }
+
+        for i in 0..lhs.len() {
+            let row = Row::new(vec![
+                lhs[i].map(|date| date.to_scalar_value()),
+                rhs[i].map(|date| date.to_scalar_value()),
+            ]);
+            let result = vec_executor.eval_row_ref(&row).unwrap();
+            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
+            assert_eq!(result, expected);
         }
     }
 
@@ -569,6 +589,16 @@ mod tests {
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
+        }
+
+        for i in 0..lhs.len() {
+            let row = Row::new(vec![
+                lhs[i].map(|dec| dec.to_scalar_value()),
+                rhs[i].map(|dec| dec.to_scalar_value()),
+            ]);
+            let result = vec_executor.eval_row_ref(&row).unwrap();
+            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
+            assert_eq!(result, expected);
         }
     }
 }
