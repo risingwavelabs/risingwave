@@ -526,6 +526,13 @@ impl DataChunkTestExt for DataChunk {
                             .map_err(|_| panic!("invalid int64: {s:?}"))
                             .unwrap(),
                     )),
+                    s if matches!(builder, ArrayBuilderImpl::Float32(_)) => {
+                        Some(ScalarImpl::Float32(
+                            s.parse()
+                                .map_err(|_| panic!("invalid float32: {s:?}"))
+                                .unwrap(),
+                        ))
+                    }
                     s if matches!(builder, ArrayBuilderImpl::Float64(_)) => {
                         Some(ScalarImpl::Float64(
                             s.parse()

@@ -92,8 +92,9 @@ pub struct TopNExecutor {
     offset: usize,
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for TopNExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
@@ -107,7 +108,7 @@ impl BoxedExecutorBuilder for TopNExecutor {
             .map(OrderPair::from_prost)
             .collect();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build()?;
+            let child = source.clone_for_plan(child_plan).build().await?;
             return Ok(Box::new(Self::new(
                 child,
                 order_pairs,
@@ -180,8 +181,9 @@ impl TopNExecutor {
 mod tests {
     use futures::stream::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::{Array, DataChunk, I32Array};
+    use risingwave_common::array::{Array, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
@@ -190,9 +192,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_top_n_executor() {
-        let col0 = column_nonnull! { I32Array, [1, 2, 3, 4, 5] };
-        let col1 = column_nonnull! { I32Array, [5, 4, 3, 2, 1] };
-        let data_chunk = DataChunk::builder().columns(vec![col0, col1]).build();
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int32),
@@ -200,7 +199,14 @@ mod tests {
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
-        mock_executor.add(data_chunk);
+        mock_executor.add(DataChunk::from_pretty(
+            "i i
+             1 5
+             2 4
+             3 3
+             4 2
+             5 1",
+        ));
         let order_pairs = vec![
             OrderPair {
                 column_idx: 1,

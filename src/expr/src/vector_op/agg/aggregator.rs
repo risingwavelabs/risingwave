@@ -96,9 +96,11 @@ impl AggStateFactory {
                 ))
                 .into()),
             },
-            _ => Err(
-                ErrorCode::InternalError("Agg with more than 1 input not supported.".into()).into(),
-            ),
+            _ => Err(ErrorCode::NotImplemented(
+                "Agg with more than 1 input not supported.".into(),
+                2868.into(),
+            )
+            .into()),
         }
     }
 
