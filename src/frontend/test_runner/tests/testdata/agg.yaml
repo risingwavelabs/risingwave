@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     values(sum(1));
   binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
