@@ -239,6 +239,24 @@ fn main() -> Result<()> {
 
             let yaml = serde_yaml::to_string(&compose_file)?;
 
+            let ec2_instance = compose_deploy_config
+                .as_ref()
+                .unwrap()
+                .lookup_instance_by_host(node);
+            if ec2_instance.r#type == "meta" {
+                let public_ip = &ec2_instance.public_ip;
+                writeln!(
+                    log_buffer,
+                    "-- Meta Node --\nLogin to meta node by {}\nor using VSCode {}",
+                    style(format!("ssh ubuntu@{}", public_ip)).green(),
+                    style(format!(
+                        "code --remote ssh-remote+ubuntu@{} <path>",
+                        public_ip
+                    ))
+                    .green()
+                )?;
+            }
+
             fs::write(
                 Path::new(&opts.directory).join(format!("{}.yml", node)),
                 yaml,

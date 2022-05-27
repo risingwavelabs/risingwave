@@ -135,14 +135,16 @@ where
                 let mut ctx = self.actor_context.lock();
                 for (idx, operator) in ctx.info.iter_mut().enumerate() {
                     let operator_id_string = &operator_id_string[idx];
-                    if !operator.source_first_chunk_at.is_empty() {
-                        let (op_prev_epoch, time) =
-                            operator.source_first_chunk_at.pop_front().unwrap();
-                        assert_eq!(op_prev_epoch, prev_epoch);
-                        self.metrics
-                            .actor_processing_time
-                            .with_label_values(&[&actor_id_string, operator_id_string])
-                            .set(time.elapsed().as_secs_f64());
+                    if let Some(&(op_prev_epoch, _)) = operator.source_first_chunk_at.front() {
+                        if op_prev_epoch <= prev_epoch {
+                            let (op_prev_epoch, time) =
+                                operator.source_first_chunk_at.pop_front().unwrap();
+                            assert_eq!(op_prev_epoch, prev_epoch);
+                            self.metrics
+                                .actor_processing_time
+                                .with_label_values(&[&actor_id_string, operator_id_string])
+                                .set(time.elapsed().as_secs_f64());
+                        }
                     }
                     let (op_prev_epoch, time) = operator.source_barrier_at.pop_front().unwrap();
                     assert_eq!(op_prev_epoch, prev_epoch);
