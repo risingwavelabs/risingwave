@@ -87,9 +87,12 @@ mod tests {
             Some(ScalarImpl::from(String::from(text))),
             Some(ScalarImpl::Int32(start_pos)),
         );
-        test_evals_dummy(&substr_start_normal, Some(ScalarImpl::from(String::from(
-            &text[start_pos as usize - 1..]
-        ))));
+        test_evals_dummy(
+            &substr_start_normal,
+            Some(ScalarImpl::from(String::from(
+                &text[start_pos as usize - 1..],
+            ))),
+        );
 
         let substr_start_i32_none = create_str_i32_binary_expr(
             new_substr_start,
@@ -103,11 +106,13 @@ mod tests {
             Some(ScalarImpl::from(String::from(text))),
             Some(ScalarImpl::Int32(for_pos)),
         );
-        test_evals_dummy(&substr_for_normal, Some(ScalarImpl::from(String::from(&text[..for_pos as usize]))));
+        test_evals_dummy(
+            &substr_for_normal,
+            Some(ScalarImpl::from(String::from(&text[..for_pos as usize]))),
+        );
 
         let substr_for_str_none =
             create_str_i32_binary_expr(new_substr_for, None, Some(ScalarImpl::Int32(for_pos)));
         test_evals_dummy(&substr_for_str_none, None);
-
     }
 }

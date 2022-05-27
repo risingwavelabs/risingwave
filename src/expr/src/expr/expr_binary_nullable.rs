@@ -106,14 +106,45 @@ mod tests {
     use risingwave_common::types::Scalar;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type;
+
     use crate::expr::build_from_prost;
     use crate::expr::test_utils::make_expression;
 
     #[test]
     fn test_and() {
-        let lhs = vec![Some(true), Some(true), Some(true), Some(false), Some(false), Some(false), None, None, None];
-        let rhs = vec![Some(true), Some(false), None, Some(true), Some(false), None, Some(true), Some(false), None];
-        let target = vec![Some(true), Some(false), None, Some(false), Some(false), Some(false), None, Some(false), None];
+        let lhs = vec![
+            Some(true),
+            Some(true),
+            Some(true),
+            Some(false),
+            Some(false),
+            Some(false),
+            None,
+            None,
+            None,
+        ];
+        let rhs = vec![
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            Some(false),
+            None,
+        ];
+        let target = vec![
+            Some(true),
+            Some(false),
+            None,
+            Some(false),
+            Some(false),
+            Some(false),
+            None,
+            Some(false),
+            None,
+        ];
 
         let expr = make_expression(Type::And, &[TypeName::Boolean, TypeName::Boolean], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -131,9 +162,39 @@ mod tests {
 
     #[test]
     fn test_or() {
-        let lhs = vec![Some(true), Some(true), Some(true), Some(false), Some(false), Some(false), None, None, None];
-        let rhs = vec![Some(true), Some(false), None, Some(true), Some(false), None, Some(true), Some(false), None];
-        let target = vec![Some(true), Some(true), Some(true), Some(true), Some(false), None, Some(true), None, None];
+        let lhs = vec![
+            Some(true),
+            Some(true),
+            Some(true),
+            Some(false),
+            Some(false),
+            Some(false),
+            None,
+            None,
+            None,
+        ];
+        let rhs = vec![
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            Some(false),
+            None,
+        ];
+        let target = vec![
+            Some(true),
+            Some(true),
+            Some(true),
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            None,
+            None,
+        ];
 
         let expr = make_expression(Type::Or, &[TypeName::Boolean, TypeName::Boolean], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -155,7 +216,11 @@ mod tests {
         let rhs = vec![None, Some(1), None, Some(2), Some(4)];
         let target = vec![Some(false), Some(true), Some(true), Some(false), Some(true)];
 
-        let expr = make_expression(Type::IsDistinctFrom, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
+        let expr = make_expression(
+            Type::IsDistinctFrom,
+            &[TypeName::Int32, TypeName::Int32],
+            &[0, 1],
+        );
         let vec_executor = build_from_prost(&expr).unwrap();
 
         for i in 0..lhs.len() {

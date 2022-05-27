@@ -490,7 +490,10 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i].as_ref().cloned().map(|str| str.to_scalar_value())]);
+            let row = Row::new(vec![input[i]
+                .as_ref()
+                .cloned()
+                .map(|str| str.to_scalar_value())]);
             let result = vec_executor.eval_row_ref(&row).unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
