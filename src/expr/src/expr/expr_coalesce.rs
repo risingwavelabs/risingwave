@@ -104,11 +104,10 @@ impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, PrimitiveArray, Row};
     use risingwave_common::types::{Scalar, ScalarImpl};
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -136,20 +135,13 @@ mod tests {
         let input_node2 = make_input_ref(1, TypeName::Int32);
         let input_node3 = make_input_ref(2, TypeName::Int32);
 
-        let array = PrimitiveArray::<i32>::from_slice(&[Some(1), None, None, None])
-            .map(|x| Arc::new(x.into()))
-            .unwrap();
-        let col1 = Column::new(array);
-        let array = PrimitiveArray::<i32>::from_slice(&[None, Some(2), None, None])
-            .map(|x| Arc::new(x.into()))
-            .unwrap();
-        let col2 = Column::new(array);
-        let array = PrimitiveArray::<i32>::from_slice(&[None, None, Some(3), None])
-            .map(|x| Arc::new(x.into()))
-            .unwrap();
-        let col3 = Column::new(array);
-
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2, col3]).build();
+        let data_chunk = DataChunk::from_pretty(
+            "i i i
+             1 . .
+             . 2 .
+             . . 3
+             . . .",
+        );
 
         let nullif_expr = CoalesceExpression::try_from(&make_coalesce_function(
             vec![input_node1, input_node2, input_node3],

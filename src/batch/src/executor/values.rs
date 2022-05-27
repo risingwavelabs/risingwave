@@ -111,8 +111,10 @@ impl ValuesExecutor {
         }
     }
 }
+
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for ValuesExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         let value_node = try_match_expand!(

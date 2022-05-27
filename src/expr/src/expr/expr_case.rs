@@ -128,16 +128,12 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::PrimitiveArray;
     use risingwave_common::types::Scalar;
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::expr::expr_binary_nonnull::new_binary_expr;
     use crate::expr::{InputRefExpression, LiteralExpression};
-
-    fn create_column_i32(vec: &[Option<i32>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
-    }
 
     fn test_eval_row_ref(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
         for (i, row_input) in row_inputs.iter().enumerate() {
@@ -170,8 +166,14 @@ mod tests {
             Some(4.1f32.into()),
         ));
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
-        let col = create_column_i32(&[Some(1), Some(2), Some(3), Some(4), Some(5)]).unwrap();
-        let input = DataChunk::builder().columns([col].to_vec()).build();
+        let input = DataChunk::from_pretty(
+            "i
+             1
+             2
+             3
+             4
+             5",
+        );
         let output = searched_case_expr.eval(&input).unwrap();
         assert_eq!(output.datum_at(0), Some(3.1f32.into()));
         assert_eq!(output.datum_at(1), Some(3.1f32.into()));
@@ -197,8 +199,13 @@ mod tests {
             )),
         )];
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
-        let col = create_column_i32(&[Some(3), Some(4), Some(3), Some(4)]).unwrap();
-        let input = DataChunk::builder().columns([col].to_vec()).build();
+        let input = DataChunk::from_pretty(
+            "i
+             3
+             4
+             3
+             4",
+        );
         let output = searched_case_expr.eval(&input).unwrap();
         assert_eq!(output.datum_at(0), Some(3.1f32.into()));
         assert_eq!(output.datum_at(1), None);

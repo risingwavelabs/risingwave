@@ -27,7 +27,7 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::Keyspace;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_row_seq_scan() -> Result<()> {
     // In this test we test if the memtable can be correctly scanned for K-V pair insertions.
     let memory_state_store = MemoryStateStore::new();
@@ -58,16 +58,8 @@ async fn test_row_seq_scan() -> Result<()> {
         Arc::new(StateStoreMetrics::unused()),
     );
 
-    let executor = Box::new(RowSeqScanExecutor::new(
-        table,
-        1,
-        true,
-        "RowSeqScanExecutor2".to_string(),
-        u64::MAX,
-        Arc::new(BatchMetrics::unused()),
-    ));
-
     let epoch: u64 = 0;
+
     state
         .insert(
             Row(vec![Some(1_i32.into())]),
@@ -89,6 +81,15 @@ async fn test_row_seq_scan() -> Result<()> {
         )
         .unwrap();
     state.commit(epoch).await.unwrap();
+
+    let executor = Box::new(RowSeqScanExecutor::new(
+        table.schema().clone(),
+        table.iter(u64::MAX).await.unwrap(),
+        1,
+        true,
+        "RowSeqScanExecutor2".to_string(),
+        Arc::new(BatchMetrics::unused()),
+    ));
 
     assert_eq!(executor.schema().fields().len(), 3);
 
