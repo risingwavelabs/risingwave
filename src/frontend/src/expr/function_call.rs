@@ -88,9 +88,9 @@ impl std::fmt::Debug for FunctionCall {
 impl FunctionCall {
     /// Create a `FunctionCall` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
-    /// The functions listed here are all variadic.  Type signatures of functions that take a fixed
-    /// number of arguments are checked
-    /// [elsewhere](crate::expr::type_inference::build_type_derive_map).
+    // The functions listed here are all variadic.  Type signatures of functions that take a fixed
+    // number of arguments are checked
+    // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> Result<Self> {
         let return_type = match func_type {
             ExprType::Case => {
