@@ -206,6 +206,18 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(state)
     }
 
+    /// Create a [`JoinEntryState`] without cached state. Should only be called if the key
+    /// does not exist in memory or remote storage.
+    fn init_with_empty_cache(key: &K, table_info: &TableInfo<S>) -> RwResult<JoinEntryState<S>> {
+        let keyspace = Self::get_state_keyspace(key, table_info)?;
+        let state = JoinEntryState::new_with_empty_cache(
+            keyspace,
+            table_info.data_types.clone(),
+            table_info.pk_data_types.clone(),
+        );
+        Ok(state)
+    }
+
     pub fn pop_cached(&mut self, key: &K) -> Option<JoinEntryState<S>> {
         self.inner.pop(key)
     }
@@ -220,7 +232,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         side_match: &'a mut Self,
         keys: impl Iterator<Item = &'a K>,
     ) -> IterJoinEntriesMut<'a, K, S> {
-        IterJoinEntriesMut::<'a>::new(side_match, self, keys)
+        IterJoinEntriesMut::<'a>::new(self.table_info.current_epoch, side_match, self, keys)
     }
 }
 
@@ -238,6 +250,7 @@ pub(crate) struct IterJoinEntriesMut<'a, K: HashKey, S: StateStore> {
 
 impl<'a, K: HashKey, S: StateStore> IterJoinEntriesMut<'a, K, S> {
     pub(crate) fn new(
+        epoch: u64,
         side_match: &'a mut JoinHashMap<K, S>,
         side_update: &'a mut JoinHashMap<K, S>,
         keys: impl Iterator<Item = &'a K>,
@@ -266,19 +279,27 @@ impl<'a, K: HashKey, S: StateStore> IterJoinEntriesMut<'a, K, S> {
             let update_table_info = &new_iter.side_update.table_info;
 
             let update_entry = update_entry.unwrap_or_else(|| {
-                JoinHashMap::<K, S>::init_without_cache(&key, update_table_info)
+                JoinHashMap::<K, S>::init_with_empty_cache(&key, update_table_info)
                     .ok()
                     .unwrap()
             });
 
             if key.has_null() {
-                tx.send((key, None, update_entry))
-                    .ok()
-                    .expect("Failed to send join entries for join key");
-            } else if match_entry.is_some() {
-                tx.send((key, match_entry, update_entry))
-                    .ok()
-                    .expect("Failed to send join entries for join key");
+                tx.send((key, None, update_entry)).ok().unwrap()
+            } else if let Some(mut maybe_cached) = match_entry {
+                if maybe_cached.has_cached() {
+                    tx.send((key, Some(maybe_cached), update_entry))
+                        .ok()
+                        .unwrap()
+                } else {
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        maybe_cached.populate_cache(epoch).await.ok().unwrap();
+                        tx.send((key, Some(maybe_cached), update_entry))
+                            .ok()
+                            .unwrap()
+                    });
+                }
             } else {
                 cache_miss_counter += 1;
                 // tx.send((key, None, update_entry))
@@ -292,9 +313,7 @@ impl<'a, K: HashKey, S: StateStore> IterJoinEntriesMut<'a, K, S> {
                             .await
                             .ok()
                             .unwrap();
-                    tx.send((key, match_entry, update_entry))
-                        .ok()
-                        .expect("Failed to send join entries for join key");
+                    tx.send((key, match_entry, update_entry)).ok().unwrap()
                 });
             }
         }
