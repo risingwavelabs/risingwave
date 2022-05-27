@@ -29,7 +29,7 @@ impl Rule for ApplyFilter {
                     if expr.has_correlated_input_ref() {
                         Either::Left(rewriter.rewrite_expr(expr))
                     } else {
-                        Either::Right(expr)
+                        Either::Right(rewriter.rewrite_expr(expr))
                     }
                 });
 

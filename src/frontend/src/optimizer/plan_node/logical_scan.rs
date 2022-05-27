@@ -259,6 +259,24 @@ impl LogicalScan {
             self.predicate.clone(),
         )
     }
+
+    pub fn rewrtie_scan(&self, required_col_idx: Vec<usize>) -> Option<PlanRef> {
+        for i in &required_col_idx {
+            if *i >= self.schema().len() {
+                return None;
+            }
+        }
+        Some(
+            Self::new(
+                self.table_name.clone(),
+                required_col_idx,
+                self.table_desc.clone(),
+                self.indexes.clone(),
+                self.base.ctx.clone(),
+            )
+            .into(),
+        )
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}

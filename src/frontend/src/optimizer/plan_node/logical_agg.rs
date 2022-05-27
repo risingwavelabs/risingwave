@@ -404,6 +404,18 @@ impl LogicalAgg {
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
         (self.agg_calls, self.group_keys, self.input)
     }
+
+    pub fn rewrite_agg(&self) -> Option<PlanRef> {
+        if !self.agg_calls.is_empty() {
+            return None;
+        }
+        if let Some(project) = self.input.as_logical_project() {
+            let new_input = project.rewrite_project()?;
+            Some(self.clone_with_input(new_input).into())
+        } else {
+            None
+        }
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalAgg {

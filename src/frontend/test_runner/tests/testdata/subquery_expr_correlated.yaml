@@ -5,39 +5,52 @@
     select * from t1 where x > (select 1.5 * min(x) from t2 where t1.y=t2.y and t2.y = 1000)
   logical_plan: |
     LogicalProject { exprs: [$1, $2] }
-      LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter, on: true }
+      LogicalFilter { predicate: ($1 > $4) }
+        LogicalJoin { type: LeftOuter, on: ($2 = $3) }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
-          LogicalProject { exprs: [(1.5:Decimal * $0)] }
-            LogicalAgg { group_keys: [], agg_calls: [min($0)] }
-              LogicalProject { exprs: [$1] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) AND ($2 = 1000:Int32) }
-                  LogicalScan { table: t2, columns: [_row_id, x, y] }
+          LogicalApply { type: Inner, on: true }
+            LogicalAgg { group_keys: [0], agg_calls: [] }
+              LogicalProject { exprs: [$2] }
+                LogicalScan { table: t1, columns: [_row_id, x, y] }
+            LogicalProject { exprs: [(1.5:Decimal * $0)] }
+              LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+                LogicalProject { exprs: [$1] }
+                  LogicalFilter { predicate: (CorrelatedInputRef { index: 0, depth: 1 } = $2) AND ($2 = 1000:Int32) }
+                    LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1] }
-      LogicalFilter { predicate: ($0 > (1.5:Decimal * $2)) }
-        LogicalProject { exprs: [$1, $2, $3] }
-          LogicalAgg { group_keys: [0, 1, 2], agg_calls: [min($3)] }
-            LogicalJoin { type: LeftOuter, on: ($2 = $4), output_indices: [0, 1, 2, 3] }
-              LogicalScan { table: t1, columns: [_row_id, x, y] }
-              LogicalScan { table: t2, output_columns: [x, y], required_columns: [$1:x, $2:y], predicate: ($2 = 1000:Int32) }
+      LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 > $3) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$0, (1.5:Decimal * $1)] }
+          LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
+            LogicalProject { exprs: [$1, $0] }
+              LogicalFilter { predicate: ($1 = 1000:Int32) }
+                LogicalScan { table: t2, columns: [x, y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     select * from t1 where x>(select min(x) from t2 where t2.y = (select t1.y))
   logical_plan: |
     LogicalProject { exprs: [$1, $2] }
-      LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter, on: true }
+      LogicalFilter { predicate: ($1 > $4) }
+        LogicalJoin { type: LeftOuter, on: ($2 = $3) }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
-          LogicalProject { exprs: [$0] }
-            LogicalAgg { group_keys: [], agg_calls: [min($0)] }
-              LogicalProject { exprs: [$1] }
-                LogicalFilter { predicate: ($2 = $3) }
-                  LogicalApply { type: LeftOuter, on: true }
-                    LogicalScan { table: t2, columns: [_row_id, x, y] }
-                    LogicalProject { exprs: [CorrelatedInputRef { index: 2, depth: 2 }] }
-                      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+          LogicalApply { type: Inner, on: true }
+            LogicalAgg { group_keys: [0], agg_calls: [] }
+              LogicalProject { exprs: [$2] }
+                LogicalScan { table: t1, columns: [_row_id, x, y] }
+            LogicalProject { exprs: [$0] }
+              LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+                LogicalProject { exprs: [$1] }
+                  LogicalFilter { predicate: ($2 = $4) }
+                    LogicalJoin { type: LeftOuter, on: ($0 = $3) }
+                      LogicalScan { table: t2, columns: [_row_id, x, y] }
+                      LogicalApply { type: Inner, on: true }
+                        LogicalAgg { group_keys: [0], agg_calls: [] }
+                          LogicalProject { exprs: [$0] }
+                            LogicalScan { table: t2, columns: [_row_id, x, y] }
+                        LogicalProject { exprs: [CorrelatedInputRef { index: 0, depth: 2 }] }
+                          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -45,34 +58,46 @@
     select * from t1 where x>(select min(x) from t2 where t1.y=t2.y and t1.x=(select max(x) from t3, (select 1) as dummy where t3.y=t1.y))
   logical_plan: |
     LogicalProject { exprs: [$1, $2] }
-      LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter, on: true }
+      LogicalFilter { predicate: ($1 > $6) }
+        LogicalJoin { type: LeftOuter, on: ($2 = $3) AND ($1 = $4) AND ($2 = $5) }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
-          LogicalProject { exprs: [$0] }
-            LogicalAgg { group_keys: [], agg_calls: [min($0)] }
-              LogicalProject { exprs: [$1] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) AND (CorrelatedInputRef { index: 1, depth: 1 } = $3) }
-                  LogicalApply { type: LeftOuter, on: true }
-                    LogicalScan { table: t2, columns: [_row_id, x, y] }
-                    LogicalProject { exprs: [$0] }
-                      LogicalAgg { group_keys: [], agg_calls: [max($0)] }
-                        LogicalProject { exprs: [$1] }
-                          LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 2, depth: 2 }) }
-                            LogicalJoin { type: Inner, on: true, output_indices: all }
-                              LogicalScan { table: t3, columns: [_row_id, x, y] }
-                              LogicalProject { exprs: [1:Int32] }
-                                LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+          LogicalApply { type: Inner, on: true }
+            LogicalAgg { group_keys: [0, 1, 2], agg_calls: [] }
+              LogicalProject { exprs: [$2, $1, $2] }
+                LogicalScan { table: t1, columns: [_row_id, x, y] }
+            LogicalProject { exprs: [$0] }
+              LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+                LogicalProject { exprs: [$1] }
+                  LogicalFilter { predicate: (CorrelatedInputRef { index: 0, depth: 1 } = $2) AND (CorrelatedInputRef { index: 1, depth: 1 } = $4) }
+                    LogicalJoin { type: LeftOuter, on: ($2 = $3) }
+                      LogicalScan { table: t2, columns: [_row_id, x, y] }
+                      LogicalApply { type: Inner, on: true }
+                        LogicalAgg { group_keys: [0], agg_calls: [] }
+                          LogicalProject { exprs: [$2] }
+                            LogicalScan { table: t2, columns: [_row_id, x, y] }
+                        LogicalProject { exprs: [$0] }
+                          LogicalAgg { group_keys: [], agg_calls: [max($0)] }
+                            LogicalProject { exprs: [$1] }
+                              LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 0, depth: 2 }) }
+                                LogicalJoin { type: Inner, on: true }
+                                  LogicalScan { table: t3, columns: [_row_id, x, y] }
+                                  LogicalProject { exprs: [1:Int32] }
+                                    LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     select * from t1 where exists(select * from t2 where y = 100 and t1.x = t2.x and x = 1000 and t1.y = t2.y);
   logical_plan: |
     LogicalProject { exprs: [$1, $2] }
-      LogicalApply { type: LeftSemi, on: true }
+      LogicalJoin { type: LeftSemi, on: ($1 = $3) AND ($2 = $4) }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
-        LogicalProject { exprs: [$1, $2] }
-          LogicalFilter { predicate: ($2 = 100:Int32) AND (CorrelatedInputRef { index: 1, depth: 1 } = $1) AND ($1 = 1000:Int32) AND (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
-            LogicalScan { table: t2, columns: [_row_id, x, y] }
+        LogicalApply { type: Inner, on: true }
+          LogicalAgg { group_keys: [0, 1], agg_calls: [] }
+            LogicalProject { exprs: [$1, $2] }
+              LogicalScan { table: t1, columns: [_row_id, x, y] }
+          LogicalProject { exprs: [$1, $2] }
+            LogicalFilter { predicate: ($2 = 100:Int32) AND (CorrelatedInputRef { index: 0, depth: 1 } = $1) AND ($1 = 1000:Int32) AND (CorrelatedInputRef { index: 1, depth: 1 } = $2) }
+              LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: ($0 = $2) AND ($1 = $3), output_indices: all }
       LogicalScan { table: t1, columns: [x, y] }
@@ -83,21 +108,25 @@
     select * from t1 where x > (select 1.5 * min(x) from t2 where t1.y = t2.y);
   logical_plan: |
     LogicalProject { exprs: [$1, $2] }
-      LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter, on: true }
+      LogicalFilter { predicate: ($1 > $4) }
+        LogicalJoin { type: LeftOuter, on: ($2 = $3) }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
-          LogicalProject { exprs: [(1.5:Decimal * $0)] }
-            LogicalAgg { group_keys: [], agg_calls: [min($0)] }
-              LogicalProject { exprs: [$1] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
-                  LogicalScan { table: t2, columns: [_row_id, x, y] }
+          LogicalApply { type: Inner, on: true }
+            LogicalAgg { group_keys: [0], agg_calls: [] }
+              LogicalProject { exprs: [$2] }
+                LogicalScan { table: t1, columns: [_row_id, x, y] }
+            LogicalProject { exprs: [(1.5:Decimal * $0)] }
+              LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+                LogicalProject { exprs: [$1] }
+                  LogicalFilter { predicate: (CorrelatedInputRef { index: 0, depth: 1 } = $2) }
+                    LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1] }
-      LogicalFilter { predicate: ($0 > (1.5:Decimal * $2)) }
-        LogicalProject { exprs: [$1, $2, $3] }
-          LogicalAgg { group_keys: [0, 1, 2], agg_calls: [min($3)] }
-            LogicalJoin { type: LeftOuter, on: ($2 = $4), output_indices: [0, 1, 2, 3] }
-              LogicalScan { table: t1, columns: [_row_id, x, y] }
+      LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 > $3) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$0, (1.5:Decimal * $1)] }
+          LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
+            LogicalProject { exprs: [$1, $0] }
               LogicalScan { table: t2, columns: [x, y] }
 - sql: |
     create table t1(x int, y int);
@@ -105,62 +134,69 @@
     select * from t1 where x > (select count(*) from t2 where t1.y = t2.y);
   logical_plan: |
     LogicalProject { exprs: [$1, $2] }
-      LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter, on: true }
+      LogicalFilter { predicate: ($1 > $4) }
+        LogicalJoin { type: LeftOuter, on: ($2 = $3) }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
-          LogicalProject { exprs: [$0] }
-            LogicalAgg { group_keys: [], agg_calls: [count] }
-              LogicalProject { exprs: [] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
-                  LogicalScan { table: t2, columns: [_row_id, x, y] }
+          LogicalApply { type: Inner, on: true }
+            LogicalAgg { group_keys: [0], agg_calls: [] }
+              LogicalProject { exprs: [$2] }
+                LogicalScan { table: t1, columns: [_row_id, x, y] }
+            LogicalProject { exprs: [$0] }
+              LogicalAgg { group_keys: [], agg_calls: [count] }
+                LogicalProject { exprs: [] }
+                  LogicalFilter { predicate: (CorrelatedInputRef { index: 0, depth: 1 } = $2) }
+                    LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1] }
-      LogicalFilter { predicate: ($0 > $2) }
-        LogicalProject { exprs: [$1, $2, $3] }
-          LogicalAgg { group_keys: [0, 1, 2], agg_calls: [count($3)] }
-            LogicalJoin { type: LeftOuter, on: ($2 = $4), output_indices: [0, 1, 2, 3] }
-              LogicalScan { table: t1, columns: [_row_id, x, y] }
-              LogicalProject { exprs: [1:Int32, $0] }
-                LogicalScan { table: t2, columns: [y] }
+      LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 > $3) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalAgg { group_keys: [0], agg_calls: [count] }
+          LogicalScan { table: t2, columns: [y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     select * from t1 where x > (select count(*) + count(*) from t2 where t1.y = t2.y);
   logical_plan: |
     LogicalProject { exprs: [$1, $2] }
-      LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter, on: true }
+      LogicalFilter { predicate: ($1 > $4) }
+        LogicalJoin { type: LeftOuter, on: ($2 = $3) }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
-          LogicalProject { exprs: [($0 + $1)] }
-            LogicalAgg { group_keys: [], agg_calls: [count, count] }
-              LogicalProject { exprs: [] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
-                  LogicalScan { table: t2, columns: [_row_id, x, y] }
+          LogicalApply { type: Inner, on: true }
+            LogicalAgg { group_keys: [0], agg_calls: [] }
+              LogicalProject { exprs: [$2] }
+                LogicalScan { table: t1, columns: [_row_id, x, y] }
+            LogicalProject { exprs: [($0 + $1)] }
+              LogicalAgg { group_keys: [], agg_calls: [count, count] }
+                LogicalProject { exprs: [] }
+                  LogicalFilter { predicate: (CorrelatedInputRef { index: 0, depth: 1 } = $2) }
+                    LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1] }
-      LogicalFilter { predicate: ($0 > ($2 + $3)) }
-        LogicalProject { exprs: [$1, $2, $3, $4] }
-          LogicalAgg { group_keys: [0, 1, 2], agg_calls: [count($3), count($3)] }
-            LogicalJoin { type: LeftOuter, on: ($2 = $4), output_indices: [0, 1, 2, 3] }
-              LogicalScan { table: t1, columns: [_row_id, x, y] }
-              LogicalProject { exprs: [1:Int32, $0] }
-                LogicalScan { table: t2, columns: [y] }
+      LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 > $3) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$0, ($1 + $2)] }
+          LogicalAgg { group_keys: [0], agg_calls: [count, count] }
+            LogicalScan { table: t2, columns: [y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     select x from t1 where y in (select y from t2 where t1.x = t2.x);
   logical_plan: |
     LogicalProject { exprs: [$1] }
-      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+      LogicalJoin { type: LeftSemi, on: ($2 = $3) AND ($1 = $3) }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
-        LogicalProject { exprs: [$2] }
-          LogicalFilter { predicate: (CorrelatedInputRef { index: 1, depth: 1 } = $1) }
-            LogicalScan { table: t2, columns: [_row_id, x, y] }
+        LogicalApply { type: Inner, on: true }
+          LogicalAgg { group_keys: [0], agg_calls: [] }
+            LogicalProject { exprs: [$1] }
+              LogicalScan { table: t1, columns: [_row_id, x, y] }
+          LogicalProject { exprs: [$2] }
+            LogicalFilter { predicate: (CorrelatedInputRef { index: 0, depth: 1 } = $1) }
+              LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: ($1 = $2) AND ($0 = $3), output_indices: [0] }
-      LogicalScan { table: t1, columns: [x, y] }
-      LogicalProject { exprs: [$1, $0] }
-        LogicalScan { table: t2, columns: [x, y] }
+    LogicalProject { exprs: [$0] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND ($0 = $2) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalScan { table: t2, columns: [x] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -171,32 +207,49 @@
     select x from t1 where y in (select y from t2 where t1.x + t2.x = 100 and t1.y = 1000);
   logical_plan: |
     LogicalProject { exprs: [$1] }
-      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+      LogicalJoin { type: LeftSemi, on: ($2 = $3) AND ($1 = $3) AND ($2 = $4) }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
-        LogicalProject { exprs: [$2] }
-          LogicalFilter { predicate: ((CorrelatedInputRef { index: 1, depth: 1 } + $1) = 100:Int32) AND (CorrelatedInputRef { index: 2, depth: 1 } = 1000:Int32) }
-            LogicalScan { table: t2, columns: [_row_id, x, y] }
+        LogicalApply { type: Inner, on: true }
+          LogicalAgg { group_keys: [0, 1], agg_calls: [] }
+            LogicalProject { exprs: [$1, $2] }
+              LogicalScan { table: t1, columns: [_row_id, x, y] }
+          LogicalProject { exprs: [$2] }
+            LogicalFilter { predicate: ((CorrelatedInputRef { index: 0, depth: 1 } + $1) = 100:Int32) AND (CorrelatedInputRef { index: 1, depth: 1 } = 1000:Int32) }
+              LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: ($1 = $2) AND (($0 + $3) = 100:Int32), output_indices: [0] }
-      LogicalScan { table: t1, output_columns: [x, y], required_columns: [$1:x, $2:y], predicate: ($2 = 1000:Int32) }
-      LogicalProject { exprs: [$1, $0] }
-        LogicalScan { table: t2, columns: [x, y] }
+    LogicalProject { exprs: [$0] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND ($0 = $2) AND ($1 = $3) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$0, $1] }
+          LogicalJoin { type: Inner, on: (($0 + $2) = 100:Int32) }
+            LogicalAgg { group_keys: [0, 1], agg_calls: [] }
+              LogicalFilter { predicate: ($1 = 1000:Int32) }
+                LogicalScan { table: t1, columns: [x, y] }
+            LogicalScan { table: t2, columns: [x] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     select x from t1 where y in (select y from t2 where t1.x > t2.x + 1000);
   logical_plan: |
     LogicalProject { exprs: [$1] }
-      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+      LogicalJoin { type: LeftSemi, on: ($2 = $3) AND ($1 = $3) }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
-        LogicalProject { exprs: [$2] }
-          LogicalFilter { predicate: (CorrelatedInputRef { index: 1, depth: 1 } > ($1 + 1000:Int32)) }
-            LogicalScan { table: t2, columns: [_row_id, x, y] }
+        LogicalApply { type: Inner, on: true }
+          LogicalAgg { group_keys: [0], agg_calls: [] }
+            LogicalProject { exprs: [$1] }
+              LogicalScan { table: t1, columns: [_row_id, x, y] }
+          LogicalProject { exprs: [$2] }
+            LogicalFilter { predicate: (CorrelatedInputRef { index: 0, depth: 1 } > ($1 + 1000:Int32)) }
+              LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: ($1 = $2) AND ($0 > ($3 + 1000:Int32)), output_indices: [0] }
-      LogicalScan { table: t1, columns: [x, y] }
-      LogicalProject { exprs: [$1, $0] }
-        LogicalScan { table: t2, columns: [x, y] }
+    LogicalProject { exprs: [$0] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND ($0 = $2) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$0] }
+          LogicalJoin { type: Inner, on: ($0 > ($1 + 1000:Int32)) }
+            LogicalAgg { group_keys: [0], agg_calls: [] }
+              LogicalScan { table: t1, columns: [x] }
+            LogicalScan { table: t2, columns: [x] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -210,16 +263,20 @@
     select x from t1 where y in (select x from t2 where t2.y = t1.y and x > (select min(x) from t3));
   logical_plan: |
     LogicalProject { exprs: [$1] }
-      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+      LogicalJoin { type: LeftSemi, on: ($2 = $3) }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
-        LogicalProject { exprs: [$1] }
-          LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 2, depth: 1 }) AND ($1 > $3) }
-            LogicalJoin { type: LeftOuter, on: true, output_indices: all }
-              LogicalScan { table: t2, columns: [_row_id, x, y] }
-              LogicalProject { exprs: [$0] }
-                LogicalAgg { group_keys: [], agg_calls: [min($0)] }
-                  LogicalProject { exprs: [$1] }
-                    LogicalScan { table: t3, columns: [_row_id, x, y] }
+        LogicalApply { type: Inner, on: true }
+          LogicalAgg { group_keys: [0], agg_calls: [] }
+            LogicalProject { exprs: [$2] }
+              LogicalScan { table: t1, columns: [_row_id, x, y] }
+          LogicalProject { exprs: [$1] }
+            LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 0, depth: 1 }) AND ($1 > $3) }
+              LogicalJoin { type: LeftOuter, on: true }
+                LogicalScan { table: t2, columns: [_row_id, x, y] }
+                LogicalProject { exprs: [$0] }
+                  LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+                    LogicalProject { exprs: [$1] }
+                      LogicalScan { table: t3, columns: [_row_id, x, y] }
 - sql: |
     /* correlated inner subquery with depth = 2 */
     create table t1(x int, y int);
@@ -228,14 +285,22 @@
     select x from t1 where y in (select x from t2 where y in (select y from t3 where t1.y = t3.y));
   logical_plan: |
     LogicalProject { exprs: [$1] }
-      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+      LogicalJoin { type: LeftSemi, on: ($2 = $3) }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
-        LogicalProject { exprs: [$1] }
-          LogicalApply { type: LeftSemi, on: ($2 = $3) }
-            LogicalScan { table: t2, columns: [_row_id, x, y] }
+        LogicalApply { type: Inner, on: true }
+          LogicalAgg { group_keys: [0], agg_calls: [] }
             LogicalProject { exprs: [$2] }
-              LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 2 } = $2) }
-                LogicalScan { table: t3, columns: [_row_id, x, y] }
+              LogicalScan { table: t1, columns: [_row_id, x, y] }
+          LogicalProject { exprs: [$1] }
+            LogicalJoin { type: LeftSemi, on: ($2 = $3) AND ($0 = $3) }
+              LogicalScan { table: t2, columns: [_row_id, x, y] }
+              LogicalApply { type: Inner, on: true }
+                LogicalAgg { group_keys: [0], agg_calls: [] }
+                  LogicalProject { exprs: [$0] }
+                    LogicalScan { table: t2, columns: [_row_id, x, y] }
+                LogicalProject { exprs: [$2] }
+                  LogicalFilter { predicate: (CorrelatedInputRef { index: 0, depth: 2 } = $2) }
+                    LogicalScan { table: t3, columns: [_row_id, x, y] }
 - sql: |
     /* uncorrelated outer subquery with a correlated inner subquery */
     create table t1(x int, y int);
@@ -247,11 +312,15 @@
       LogicalJoin { type: LeftSemi, on: ($2 = $3), output_indices: all }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
         LogicalProject { exprs: [$1] }
-          LogicalApply { type: LeftSemi, on: ($2 = $3) }
+          LogicalJoin { type: LeftSemi, on: ($2 = $3) }
             LogicalScan { table: t2, columns: [_row_id, x, y] }
-            LogicalProject { exprs: [$2] }
-              LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
-                LogicalScan { table: t3, columns: [_row_id, x, y] }
+            LogicalApply { type: Inner, on: true }
+              LogicalAgg { group_keys: [0], agg_calls: [] }
+                LogicalProject { exprs: [$2] }
+                  LogicalScan { table: t2, columns: [_row_id, x, y] }
+              LogicalProject { exprs: [$2] }
+                LogicalFilter { predicate: (CorrelatedInputRef { index: 0, depth: 1 } = $2) }
+                  LogicalScan { table: t3, columns: [_row_id, x, y] }
 - sql: |
     /* correlated agg column in SELECT */
     create table t (v1 int, v2 int);
@@ -298,10 +367,40 @@
   logical_plan: |
     LogicalProject { exprs: [$0, $1] }
       LogicalTopN { order: [$2 ASC], limit: 100, offset: 0 }
-        LogicalProject { exprs: [$1, $3, $1] }
-          LogicalApply { type: LeftOuter, on: true }
+        LogicalProject { exprs: [$1, $4, $1] }
+          LogicalJoin { type: LeftOuter, on: ($2 = $3) }
             LogicalFilter { predicate: ($1 > 100:Int32) }
               LogicalScan { table: t2, columns: [_row_id, x, y] }
-            LogicalProject { exprs: [$1] }
-              LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 2, depth: 1 }) }
-                LogicalScan { table: t1, columns: [_row_id, x, y] }
+            LogicalApply { type: Inner, on: true }
+              LogicalAgg { group_keys: [0], agg_calls: [] }
+                LogicalProject { exprs: [$2] }
+                  LogicalFilter { predicate: ($1 > 100:Int32) }
+                    LogicalScan { table: t2, columns: [_row_id, x, y] }
+              LogicalProject { exprs: [$1] }
+                LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 0, depth: 1 }) }
+                  LogicalScan { table: t1, columns: [_row_id, x, y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1 where exists(select x from t2 where t1.x = t2.x and t1.y = t2.y)
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: ($0 = $2) AND ($1 = $3) }
+      LogicalScan { table: t1, columns: [x, y] }
+      LogicalScan { table: t2, columns: [x, y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    create table t3(x int, y int);
+    select * from t1, t2 where exists(select x from t3 where t3.x = t1.x and t3.y <> t2.y);
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: ($0 = $4) AND ($3 = $5) }
+      LogicalJoin { type: Inner, on: true }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalScan { table: t2, columns: [x, y] }
+      LogicalProject { exprs: [$0, $1] }
+        LogicalJoin { type: Inner, on: ($2 = $0) AND ($3 <> $1) }
+          LogicalAgg { group_keys: [0, 1], agg_calls: [] }
+            LogicalJoin { type: Inner, on: true }
+              LogicalScan { table: t1, columns: [x] }
+              LogicalScan { table: t2, columns: [y] }
+          LogicalScan { table: t3, columns: [x, y] }

@@ -209,13 +209,21 @@ impl Planner {
         struct SubstituteSubQueries {
             input_col_num: usize,
             subqueries: Vec<Subquery>,
+            correlated_inputs_collection: Vec<Vec<InputRef>>,
         }
 
+        // TODO: consider the multi-subquery case for normal predicate.
         impl ExprRewriter for SubstituteSubQueries {
-            fn rewrite_subquery(&mut self, subquery: Subquery) -> ExprImpl {
-                let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
+            fn rewrite_subquery(&mut self, mut subquery: Subquery) -> ExprImpl {
+                let correlated_inputs = subquery.get_and_change_correlated_input_ref();
+                let input_ref = InputRef::new(
+                    self.input_col_num + correlated_inputs.len(),
+                    subquery.return_type(),
+                )
+                .into();
+                self.input_col_num += 1 + correlated_inputs.len();
+                self.correlated_inputs_collection.push(correlated_inputs);
                 self.subqueries.push(subquery);
-                self.input_col_num += 1;
                 input_ref
             }
         }
@@ -223,14 +231,18 @@ impl Planner {
         let mut rewriter = SubstituteSubQueries {
             input_col_num: root.schema().len(),
             subqueries: vec![],
+            correlated_inputs_collection: vec![],
         };
         exprs = exprs
             .into_iter()
             .map(|e| rewriter.rewrite_expr(e))
             .collect();
 
-        for mut subquery in rewriter.subqueries {
-            let correlated_inputs = subquery.get_and_change_correlated_input_ref();
+        for (subquery, correlated_inputs) in rewriter
+            .subqueries
+            .into_iter()
+            .zip_eq(rewriter.correlated_inputs_collection)
+        {
             let mut right = self.plan_query(subquery.query)?.as_subplan();
 
             match subquery.kind {
@@ -284,10 +296,18 @@ impl Planner {
                 Condition::true_cond(),
             );
 
-            let mut shifted_inputs = correlated_inputs.clone();
-            shifted_inputs
-                .iter_mut()
-                .for_each(|input| input.shift_with_offset(left.schema().len() as isize));
+            // let mut shifted_inputs = correlated_inputs.clone();
+            // shifted_inputs
+            //     .iter_mut()
+            //     .for_each(|input| input.shift_with_offset(left.schema().len() as isize));
+            let apply_left_len = left.schema().len();
+            // let shifted_input = (apply_left_len..apply_left_len +
+            // correlated_inputs.len()).into_iter().map(|index| InputRef::new())
+            let shifted_inputs: Vec<InputRef> = correlated_inputs
+                .iter()
+                .enumerate()
+                .map(|(index, input)| InputRef::new(index + apply_left_len, input.return_type()))
+                .collect();
             correlated_inputs
                 .into_iter()
                 .zip_eq(shifted_inputs.into_iter())

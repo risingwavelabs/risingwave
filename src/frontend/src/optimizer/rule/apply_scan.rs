@@ -15,12 +15,17 @@ impl Rule for ApplyScan {
         let (left, right, on, join_type) = apply.clone().decompose();
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
-        let scan = right.as_logical_scan()?;
+        match (right.as_logical_scan(), right.as_logical_join()) {
+            (None, None) => return None,
+            _ => {}
+        }
 
         let mut column_mapping = HashMap::new();
-        on.conjunctions.iter().for_each(|expr| if let ExprImpl::FunctionCall(func_call) = expr {
-            if let Some((left, right, data_type)) = Self::check(func_call, apply_left_len) {
-                column_mapping.insert(left, (right, data_type));
+        on.conjunctions.iter().for_each(|expr| {
+            if let ExprImpl::FunctionCall(func_call) = expr {
+                if let Some((left, right, data_type)) = Self::check(func_call, apply_left_len) {
+                    column_mapping.insert(left, (right, data_type));
+                }
             }
         });
         if column_mapping.len() == apply_left_len {
@@ -33,7 +38,8 @@ impl Rule for ApplyScan {
                 })
                 .collect();
             exprs.extend(
-                scan.schema()
+                right
+                    .schema()
                     .data_types()
                     .into_iter()
                     .enumerate()
@@ -43,7 +49,13 @@ impl Rule for ApplyScan {
             // TODO: add LogicalFilter here to do null-check.
             Some(project)
         } else {
-            let join = LogicalJoin::new(apply.left(), right, join_type, on);
+            let left = apply.left();
+            let new_left = if let Some(agg) = left.as_logical_agg() {
+                agg.rewrite_agg()
+            } else {
+                None
+            };
+            let join = LogicalJoin::new(new_left.unwrap(), right, join_type, on);
             Some(join.into())
         }
     }

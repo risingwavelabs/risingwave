@@ -444,6 +444,36 @@ impl LogicalJoin {
             (false, false) => JoinType::Inner,
         }
     }
+
+    pub fn rewrite_join(&self, required_col_idx: Vec<usize>) -> Option<PlanRef> {
+        let left_len = self.left().schema().len();
+        let (left_idxs, right_idxs): (Vec<_>, Vec<_>) = required_col_idx
+            .into_iter()
+            .partition(|idx| *idx < left_len);
+        let rewrite = |plan: PlanRef, mut indices: Vec<usize>, is_right: bool| -> Option<PlanRef> {
+            if is_right {
+                indices.iter_mut().for_each(|index| *index -= left_len);
+            }
+            if let Some(join) = plan.as_logical_join() {
+                join.rewrite_join(indices)
+            } else if let Some(scan) = plan.as_logical_scan() {
+                scan.rewrtie_scan(indices)
+            } else {
+                None
+            }
+        };
+        match (left_idxs.is_empty(), right_idxs.is_empty()) {
+            (true, false) => rewrite(self.right(), right_idxs, true),
+            (false, true) => rewrite(self.left(), left_idxs, false),
+            (false, false) => {
+                let left = rewrite(self.left(), left_idxs, false)?;
+                let right = rewrite(self.right(), right_idxs, true)?;
+                let new_join = self.clone_with_left_right(left, right);
+                Some(new_join.into())
+            }
+            _ => None,
+        }
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
