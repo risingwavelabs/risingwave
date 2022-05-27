@@ -48,11 +48,19 @@ pub fn split_part(
                         .into(),
                 )));
             }
+
+            // Since `nth_expr` can not be 0, so the `abs()` of it can not be smaller than 1
+            // (that's `abs(1)` or `abs(-1)`).  Hence the result of sub 1 can not be less than 0.
+            // postgres: if nonexistent field, return empty string
             std::cmp::Ordering::Greater => split.nth(nth_expr as usize - 1).unwrap_or_default(),
             std::cmp::Ordering::Less => {
                 let split = split.collect::<Vec<_>>();
-                let nth_expr = (split.len() as i32 + nth_expr) as usize;
-                split.get(nth_expr).cloned().unwrap_or_default()
+                split
+                    .iter()
+                    .rev()
+                    .nth(nth_expr.unsigned_abs() as usize - 1)
+                    .cloned()
+                    .unwrap_or_default()
             }
         }
     };
@@ -70,6 +78,7 @@ mod tests {
     #[test]
     fn test_split_part() {
         let cases: Vec<(&str, &str, i32, Result<&str>)> = vec![
+            // postgres cases
             ("", "@", 1, Ok("")),
             ("", "@", -1, Ok("")),
             ("joeuser@mydatabase", "", 1, Ok("joeuser@mydatabase")),
@@ -94,6 +103,10 @@ mod tests {
             ("joeuser@mydatabase", "@", -2, Ok("joeuser")),
             ("joeuser@mydatabase", "@", -3, Ok("")),
             ("@joeuser@mydatabase@", "@", -2, Ok("mydatabase")),
+            // other cases
+
+            // makes sure that `rsplit` is not used internally when `nth` is negative
+            ("@@@", "@@", -1, Ok("@")),
         ];
 
         for (i, case @ (string_expr, delimiter_expr, nth_expr, expected)) in
