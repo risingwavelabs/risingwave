@@ -27,10 +27,8 @@ use crate::hummock::compaction::overlap_strategy::{
 };
 use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
-use crate::hummock::compaction::{CompactionConfig, SearchResult};
+use crate::hummock::compaction::{CompactionConfig, SearchResult, SCORE_BASE};
 use crate::hummock::level_handler::LevelHandler;
-
-const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
     fn need_compaction(&self, levels: &[Level], level_handlers: &mut [LevelHandler]) -> bool;
