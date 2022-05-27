@@ -45,9 +45,7 @@ pub fn split_part(
             std::cmp::Ordering::Less => {
                 let split = split.collect::<Vec<_>>();
                 let nth_expr = (split.len() as i32 + nth_expr) as usize;
-                split
-                    .get(nth_expr)
-                    .map_or(Default::default(), <&str>::clone)
+                split.get(nth_expr).cloned().unwrap_or_default()
             }
         }
     };
