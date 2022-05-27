@@ -53,6 +53,7 @@ pub struct JoinEntryState<S: StateStore> {
 }
 
 impl<S: StateStore> JoinEntryState<S> {
+#[allow(unused)]
     pub fn new(
         keyspace: Keyspace<S>,
         data_types: Arc<[DataType]>,
@@ -67,20 +68,19 @@ impl<S: StateStore> JoinEntryState<S> {
         }
     }
 
-
-        pub fn new_with_empty_cache(
-            keyspace: Keyspace<S>,
-            data_types: Arc<[DataType]>,
-            pk_data_types: Arc<[DataType]>,
-        ) -> Self {
-            Self {
-                cached: Some(BTreeMap::new()),
-                flush_buffer: BTreeMap::new(),
-                data_types,
-                pk_data_types,
-                keyspace,
-            }
+    pub fn new_with_empty_cache(
+        keyspace: Keyspace<S>,
+        data_types: Arc<[DataType]>,
+        pk_data_types: Arc<[DataType]>,
+    ) -> Self {
+        Self {
+            cached: Some(BTreeMap::new()),
+            flush_buffer: BTreeMap::new(),
+            data_types,
+            pk_data_types,
+            keyspace,
         }
+    }
 
     pub async fn with_cached_state(
         keyspace: Keyspace<S>,

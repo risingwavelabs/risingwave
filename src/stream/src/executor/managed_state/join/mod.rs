@@ -196,6 +196,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Create a [`JoinEntryState`] without cached state. Should only be called if the key
     /// does not exist in memory or remote storage.
+    #[allow(unused)]
     fn init_without_cache(key: &K, table_info: &TableInfo<S>) -> RwResult<JoinEntryState<S>> {
         let keyspace = Self::get_state_keyspace(key, table_info)?;
         let state = JoinEntryState::new(
