@@ -106,7 +106,6 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::*;
-    use risingwave_common::{column, column_nonnull};
 
     use super::*;
 
@@ -123,14 +122,12 @@ mod tests {
 
     #[test]
     fn test_to_pg_rows() {
-        let chunk = DataChunk::new(
-            vec![
-                column_nonnull!(I32Array, [1, 2, 3, 4]),
-                column!(I64Array, [Some(6), None, Some(7), None]),
-                column!(F32Array, [Some(6.01), None, Some(7.01), None]),
-                column!(Utf8Array, [Some("aaa"), None, Some("vvv"), None]),
-            ],
-            None,
+        let chunk = DataChunk::from_pretty(
+            "i I f    T
+             1 6 6.01 aaa
+             2 . .    .
+             3 7 7.01 vvv
+             4 . .    .  ",
         );
         let rows = to_pg_rows(chunk);
         let expected = vec![
