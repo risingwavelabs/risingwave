@@ -215,7 +215,6 @@ impl<S: StateStore> JoinEntryState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::*;
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -231,15 +230,15 @@ mod tests {
             vec![DataType::Int64].into(),
         );
         assert!(!managed_state.is_dirty());
-        let columns = vec![
-            column_nonnull! { I64Array, [3, 2, 1] },
-            column_nonnull! { I64Array, [4, 5, 6] },
-        ];
         let pk_indices = [0];
         let col1 = [1, 2, 3];
         let col2 = [6, 5, 4];
-        let data_chunk_builder = DataChunk::builder().columns(columns);
-        let data_chunk = data_chunk_builder.build();
+        let data_chunk = DataChunk::from_pretty(
+            "I I
+             3 4
+             2 5
+             1 6",
+        );
 
         for row_ref in data_chunk.rows() {
             let row: Row = row_ref.into();

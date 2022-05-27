@@ -32,5 +32,52 @@ select ARRAY[1, v1*2] from t;
 {1,4}
 {1,6}
 
+query I
+select * from t where Array[1,v1*2] < Array[1,6];
+----
+1
+2
+
+query I
+select * from t where Array[1,v1*2] <= Array[1,6];
+----
+1
+2
+3
+
+query I
+select * from t where Array[1,v1*2] > Array[1,2];
+----
+2
+3
+
+query I
+select * from t where Array[1,v1*2] >= Array[1,2];
+----
+1
+2
+3
+
+query I
+select * from t where Array[1,v1*2] = Array[1,6];
+----
+3
+
+query I
+select * from t where Array[1,v1*2] != Array[1,6];
+----
+1
+2
+
+query T
+select min(ARRAY[1, v1*2]) from t;
+----
+{1,2}
+
+query T
+select max(ARRAY[1, v1*2]) from t;
+----
+{1,6}
+
 statement ok
 drop table t;

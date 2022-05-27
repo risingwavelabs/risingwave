@@ -83,8 +83,8 @@ impl Expression for InExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, Utf8Array};
-    use risingwave_common::column;
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use crate::expr::expr_in::InExpression;
@@ -98,8 +98,13 @@ mod tests {
             Some(ScalarImpl::Utf8("def".to_string())),
         ];
         let search_expr = InExpression::new(input_ref, data.into_iter(), DataType::Boolean);
-        let column = column! {Utf8Array, [Some("abc"), Some("a"), Some("def"), Some("abc")]};
-        let data_chunk = DataChunk::builder().columns(vec![column]).build();
+        let data_chunk = DataChunk::from_pretty(
+            "T
+             abc
+             a
+             def
+             abc",
+        );
         let res = search_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Bool(true)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Bool(false)));

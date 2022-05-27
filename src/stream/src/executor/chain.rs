@@ -18,7 +18,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
+use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -80,11 +80,8 @@ impl ChainExecutor {
         let mut upstream = self.upstream.execute();
 
         // 1. Poll the upstream to get the first barrier.
-        let first_msg = upstream.next().await.unwrap()?;
-        let barrier = first_msg
-            .as_barrier()
-            .expect("the first message received by chain must be a barrier");
-        let epoch = barrier.epoch;
+        let barrier = expect_first_barrier(&mut upstream).await?;
+        let prev_epoch = barrier.epoch.prev;
 
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
         // and begin to consume the snapshot.
@@ -92,13 +89,13 @@ impl ChainExecutor {
         let to_consume_snapshot = barrier.is_to_add_output(self.actor_id);
 
         // The first barrier message should be propagated.
-        yield first_msg;
+        yield Message::Barrier(barrier);
 
         // 2. Consume the snapshot if needed. Note that the snapshot is already projected, so
         // there's no mapping required.
         if to_consume_snapshot {
             // Init the snapshot with reading epoch.
-            let snapshot = self.snapshot.execute_with_epoch(epoch.prev);
+            let snapshot = self.snapshot.execute_with_epoch(prev_epoch);
 
             #[for_await]
             for msg in snapshot {
