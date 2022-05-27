@@ -254,9 +254,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{I32Array, I64Array};
-    use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -267,21 +266,21 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let key1_col = Arc::new(array_nonnull! { I32Array, [0,1,0,1,1,0,1,0] }.into());
-        let key2_col = Arc::new(array_nonnull! { I32Array, [1,1,0,1,0,0,1,1] }.into());
-        let sum_col = Arc::new(array_nonnull! { I32Array,  [1,1,1,2,1,2,3,2] }.into());
-
         let t32 = DataType::Int32;
         let t64 = DataType::Int64;
 
         let src_exec = MockExecutor::with_chunk(
-            DataChunk::builder()
-                .columns(vec![
-                    Column::new(key1_col),
-                    Column::new(key2_col),
-                    Column::new(sum_col),
-                ])
-                .build(),
+            DataChunk::from_pretty(
+                "i i i
+                 0 1 1
+                 1 1 1
+                 0 0 1
+                 1 1 2
+                 1 0 1
+                 0 0 2
+                 1 1 3
+                 0 1 2",
+            ),
             Schema {
                 fields: vec![
                     Field::unnamed(t32.clone()),
@@ -329,18 +328,14 @@ mod tests {
         };
 
         // TODO: currently the order is fixed
-        let group1_col = Arc::new(array_nonnull! { I32Array, [0,1,0,1] }.into());
-        let group2_col = Arc::new(array_nonnull! { I32Array, [0,1,1,0] }.into());
-        let anssum_col = Arc::new(array_nonnull! { I64Array, [3,6,3,1] }.into());
-
         let expect_exec = MockExecutor::with_chunk(
-            DataChunk::builder()
-                .columns(vec![
-                    Column::new(group1_col),
-                    Column::new(group2_col),
-                    Column::new(anssum_col),
-                ])
-                .build(),
+            DataChunk::from_pretty(
+                "i i I
+                 0 0 3
+                 1 1 6
+                 0 1 3
+                 1 0 1",
+            ),
             schema,
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;
@@ -348,10 +343,19 @@ mod tests {
 
     #[tokio::test]
     async fn execute_count_star() {
-        let col = Arc::new(array_nonnull! { I32Array, [0,1,0,1,1,0,1,0] }.into());
         let t32 = DataType::Int32;
         let src_exec = MockExecutor::with_chunk(
-            DataChunk::builder().columns(vec![Column::new(col)]).build(),
+            DataChunk::from_pretty(
+                "i
+                 0
+                 1
+                 0
+                 1
+                 1
+                 0
+                 1
+                 0",
+            ),
             Schema {
                 fields: vec![Field::unnamed(t32.clone())],
             },
@@ -382,10 +386,12 @@ mod tests {
         let schema = Schema {
             fields: vec![Field::unnamed(t32)],
         };
-        let res = Arc::new(array_nonnull! { I64Array, [8] }.into());
 
         let expect_exec = MockExecutor::with_chunk(
-            DataChunk::builder().columns(vec![Column::new(res)]).build(),
+            DataChunk::from_pretty(
+                "I
+                 8",
+            ),
             schema,
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;

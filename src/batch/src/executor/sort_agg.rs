@@ -268,8 +268,7 @@ impl SortAggExecutor {
 mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use risingwave_common::array::{Array as _, I32Array, I64Array};
-    use risingwave_common::array_nonnull;
+    use risingwave_common::array::{Array as _, I64Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
@@ -515,13 +514,23 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]
     async fn execute_sum_int32() -> Result<()> {
-        let a = Arc::new(array_nonnull! { I32Array, [1,2,3,4,5,6,7,8,9,10] }.into());
-        let chunk = DataChunk::builder().columns(vec![Column::new(a)]).build();
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int32)],
         };
         let mut child = MockExecutor::new(schema);
-        child.add(chunk);
+        child.add(DataChunk::from_pretty(
+            " i
+              1
+              2
+              3
+              4
+              5
+              6
+              7
+              8
+              9
+             10",
+        ));
 
         let prost = AggCall {
             r#type: Type::Sum as i32,

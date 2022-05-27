@@ -28,6 +28,7 @@ use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
@@ -166,8 +167,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     //
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
-    let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
-    let chunk = DataChunk::builder().columns(columns.clone()).build();
+    let chunk = DataChunk::from_pretty(
+        "F
+         1.14
+         5.14",
+    );
     let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
     let insert = Box::new(InsertExecutor::new(
         source_table_id,

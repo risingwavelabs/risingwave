@@ -123,14 +123,11 @@ impl BoxedExecutorBuilder for FilterExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use assert_matches::assert_matches;
     use futures::stream::StreamExt;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
+    use risingwave_common::array::{Array, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::error::Result;
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_pb::data::data_type::TypeName;
@@ -143,9 +140,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_executor() {
-        let col1 = create_column(&[Some(2), Some(2), Some(4), Some(3)]).unwrap();
-        let col2 = create_column(&[Some(1), Some(2), Some(1), Some(3)]).unwrap();
-        let data_chunk = DataChunk::builder().columns([col1, col2].to_vec()).build();
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int32),
@@ -153,7 +147,13 @@ mod tests {
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
-        mock_executor.add(data_chunk);
+        mock_executor.add(DataChunk::from_pretty(
+            "i i
+             2 1
+             2 2
+             4 1
+             3 3",
+        ));
         let expr = make_expression(Type::Equal);
         let filter_executor = Box::new(FilterExecutor {
             expr: build_from_prost(&expr).unwrap(),
@@ -204,10 +204,5 @@ mod tests {
             }),
             rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
         }
-    }
-
-    fn create_column(vec: &[Option<i32>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
     }
 }
