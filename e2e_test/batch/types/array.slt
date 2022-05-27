@@ -83,15 +83,15 @@ statement ok
 drop table t;
 
 statement ok
-create table t (v1 int[]);
+create table t1 (v1 int[]);
 
 statement ok
-insert into t values(Array[1,2,3]);
+insert into t1 values(Array[1,2,3]);
 
 query T
-select * from t;
+select * from t1;
 ----
 [1,2,3]
 
 statement ok
-drop table t;
+drop table t1;
