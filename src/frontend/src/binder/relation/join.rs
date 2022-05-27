@@ -15,7 +15,9 @@
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_sqlparser::ast::{JoinConstraint, JoinOperator, TableWithJoins};
+use risingwave_sqlparser::ast::{
+    BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
+};
 
 use crate::binder::{Binder, Relation};
 use crate::expr::{Expr as _, ExprImpl};
@@ -54,7 +56,6 @@ impl Binder {
     fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
-            let right = self.bind_table_factor(join.relation)?;
             let (constraint, join_type) = match join.join_operator {
                 JoinOperator::Inner(constraint) => (constraint, JoinType::Inner),
                 JoinOperator::LeftOuter(constraint) => (constraint, JoinType::LeftOuter),
@@ -63,7 +64,16 @@ impl Binder {
                 // Cross join equals to inner join with with no constraint.
                 JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
             };
-            let cond = self.bind_join_constraint(constraint)?;
+            let right: Relation;
+            let cond: ExprImpl;
+            if let JoinConstraint::Using(_col) = constraint.clone() {
+                let option_rel: Option<Relation>;
+                (cond, option_rel) = self.bind_join_constraint(constraint, Some(join.relation))?;
+                right = option_rel.unwrap();
+            } else {
+                right = self.bind_table_factor(join.relation)?;
+                (cond, _) = self.bind_join_constraint(constraint, None)?;
+            }
             let join = BoundJoin {
                 join_type,
                 left: root,
@@ -76,9 +86,13 @@ impl Binder {
         Ok(root)
     }
 
-    fn bind_join_constraint(&mut self, constraint: JoinConstraint) -> Result<ExprImpl> {
+    fn bind_join_constraint(
+        &mut self,
+        constraint: JoinConstraint,
+        table_factor: Option<TableFactor>,
+    ) -> Result<(ExprImpl, Option<Relation>)> {
         Ok(match constraint {
-            JoinConstraint::None => ExprImpl::literal_bool(true),
+            JoinConstraint::None => (ExprImpl::literal_bool(true), None),
             JoinConstraint::Natural => {
                 return Err(ErrorCode::NotImplemented("Natural join".into(), 1633.into()).into())
             }
@@ -91,11 +105,56 @@ impl Binder {
                     ))
                     .into());
                 }
-                bound_expr
+                (bound_expr, None)
             }
-            JoinConstraint::Using(_columns) => {
-                return Err(ErrorCode::NotImplemented("USING".into(), 1636.into()).into())
+            JoinConstraint::Using(columns) => {
+                let table_factor = table_factor.unwrap();
+                let right_table = get_table_name(&table_factor);
+                let mut binary_expr = Expr::Value(Value::Boolean(true));
+                for column in columns {
+                    let left_table = self.context.columns[self.context.get_index(&column.value)?]
+                        .table_name
+                        .clone();
+                    binary_expr = Expr::BinaryOp {
+                        left: Box::new(binary_expr),
+                        op: BinaryOperator::And,
+                        right: Box::new(Expr::BinaryOp {
+                            left: Box::new(Expr::CompoundIdentifier(vec![
+                                Ident::new(left_table.clone()),
+                                column.clone(),
+                            ])),
+                            op: BinaryOperator::Eq,
+                            right: Box::new(Expr::CompoundIdentifier({
+                                let mut right_table_clone = right_table.clone().unwrap();
+                                right_table_clone.push(column.clone());
+                                right_table_clone
+                            })),
+                        }),
+                    }
+                }
+                // We cannot move this into ret expression since it should be done before bind_expr
+                let relation = self.bind_table_factor(table_factor)?;
+                (self.bind_expr(binary_expr)?, Some(relation))
             }
         })
+    }
+}
+
+fn get_table_name(table_factor: &TableFactor) -> Option<Vec<Ident>> {
+    match table_factor {
+        TableFactor::Table { name, alias, .. } => {
+            if let Some(table_alias) = alias {
+                Some(vec![table_alias.name.clone()])
+            } else {
+                Some(name.0.clone())
+            }
+        }
+        TableFactor::Derived { alias, .. } => alias
+            .as_ref()
+            .map(|table_alias| vec![table_alias.name.clone()]),
+        TableFactor::TableFunction { expr: _, alias } => alias
+            .as_ref()
+            .map(|table_alias| vec![table_alias.name.clone()]),
+        TableFactor::NestedJoin(table_with_joins) => get_table_name(&table_with_joins.relation),
     }
 }

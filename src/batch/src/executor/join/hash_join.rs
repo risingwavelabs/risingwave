@@ -284,18 +284,21 @@ impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
 }
 
 /// Hash join executor builder.
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         context: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         ensure!(context.plan_node().get_children().len() == 2);
 
         let left_child = context
             .clone_for_plan(&context.plan_node.get_children()[0])
-            .build()?;
+            .build()
+            .await?;
         let right_child = context
             .clone_for_plan(&context.plan_node.get_children()[1])
-            .build()?;
+            .build()
+            .await?;
 
         let hash_join_node = try_match_expand!(
             context.plan_node().get_node_body().unwrap(),

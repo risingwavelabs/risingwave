@@ -15,13 +15,13 @@
 use std::sync::Arc;
 
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_source::SourceManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 use crate::executor::BatchMetrics;
-use crate::task::{BatchEnvironment, TaskId, TaskOutput, TaskOutputId};
+use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
 /// Context for batch task execution.
 ///
@@ -30,13 +30,10 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     /// Get task output identified by `task_output_id`.
     ///
     /// Returns error if the task of `task_output_id` doesn't run in same worker as current task.
-    fn get_task_output(&self, task_output_id: TaskOutputId) -> Result<TaskOutput<Self>>;
+    fn get_task_output(&self, task_output_id: TaskOutputId) -> Result<TaskOutput>;
 
     /// Whether `peer_addr` is in same as current task.
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool;
-
-    /// Get task error identified by `task_id`.
-    fn get_task_error(&self, task_id: TaskId) -> Result<Option<RwError>>;
 
     fn source_manager_ref(&self) -> Option<SourceManagerRef>;
 
@@ -55,9 +52,6 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     }
 
     fn stats(&self) -> Arc<BatchMetrics>;
-
-    /// Returns error when `task_id` doesn't belong to current task runtime.
-    fn try_get_error(&self, task_id: &TaskId) -> Result<Option<RwError>>;
 }
 
 /// Batch task context on compute node.
@@ -67,7 +61,7 @@ pub struct ComputeNodeContext {
 }
 
 impl BatchTaskContext for ComputeNodeContext {
-    fn get_task_output(&self, task_output_id: TaskOutputId) -> Result<TaskOutput<Self>> {
+    fn get_task_output(&self, task_output_id: TaskOutputId) -> Result<TaskOutput> {
         self.env
             .task_manager()
             .take_output(&task_output_id.to_prost())
@@ -75,10 +69,6 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
         is_local_address(self.env.server_address(), peer_addr)
-    }
-
-    fn get_task_error(&self, task_id: TaskId) -> Result<Option<RwError>> {
-        self.env.task_manager().get_error(&task_id)
     }
 
     fn source_manager_ref(&self) -> Option<SourceManagerRef> {
@@ -91,10 +81,6 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn stats(&self) -> Arc<BatchMetrics> {
         self.env.stats()
-    }
-
-    fn try_get_error(&self, task_id: &TaskId) -> Result<Option<RwError>> {
-        self.env.task_manager().get_error(task_id)
     }
 }
 

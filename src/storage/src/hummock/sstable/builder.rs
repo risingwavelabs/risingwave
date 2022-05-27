@@ -69,7 +69,7 @@ impl Default for SSTableBuilderOptions {
     }
 }
 
-pub const VNODE_BITS: usize = 8;
+pub const VNODE_BITS: usize = 11;
 pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
 pub struct SSTableBuilder {
     /// Options.

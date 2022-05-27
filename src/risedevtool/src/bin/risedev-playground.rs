@@ -367,7 +367,7 @@ fn main() -> Result<()> {
 
     match task_result {
         Ok((stat, log_buffer)) => {
-            println!("--- summary of startup time ---");
+            println!("---- summary of startup time ----");
             for (task_name, duration) in stat {
                 println!("{}: {:.2}s", task_name, duration.as_secs_f64());
             }
