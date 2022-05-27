@@ -116,6 +116,6 @@ select split_part('abc~@~def~@~ghi', '~@~', 2);
 def
 
 query T
-split_part('abc,def,ghi,jkl', ',', -2)
+select split_part('abc,def,ghi,jkl', ',', -2);
 ----
 ghi
