@@ -19,12 +19,17 @@ use risingwave_common::types::{Scalar, ScalarImpl, ScalarRef, Datum, DatumRef, T
 
 // TODO(nanderstabel): Clean
 #[inline(always)]
-pub fn array_access<'a, T: Scalar>(l: Option<ListRef>, index: Option<i32>) -> Result<Option<T>> {
-    let temp = l.unwrap().value_at(index.unwrap() as usize)?;
-    if let Some(temp) = temp.to_owned_datum() {
-        Ok(Some(temp.try_into()?))
-    } else {
-        Ok(None)
+pub fn array_access<'a, T: Scalar>(l: Option<ListRef>, r: Option<i32>) -> Result<Option<T>> {
+    match (l, r) {
+        (Some(list), Some(index)) if index > 0 => {
+            let temp = list.value_at(index as usize)?;
+            if let Some(temp) = temp.to_owned_datum() {
+                Ok(Some(temp.try_into()?))
+            } else {
+                Ok(None)
+            }
+        },
+        _ => Ok(None)
     }
 }
 
@@ -46,6 +51,7 @@ mod tests {
 
         assert_eq!(array_access::<i32>(Some(l1), Some(1)), Ok(Some(1)));
         assert_eq!(array_access::<i32>(Some(l1), Some(-1)), Ok(None));  
+        assert_eq!(array_access::<i32>(Some(l1), Some(0)), Ok(None));  
         assert_eq!(array_access::<i32>(Some(l1), Some(4)), Ok(None));  
     }
 
