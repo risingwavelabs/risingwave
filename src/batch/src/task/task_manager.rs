@@ -13,16 +13,21 @@
 // limitations under the License.
 
 use std::collections::{hash_map, HashMap};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::{
-    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
+    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
+use risingwave_pb::task_service::GetDataResponse;
+use tokio::sync::mpsc::Sender;
+use tonic::Status;
 
-use crate::task::{BatchTaskExecution, ComputeNodeContext, TaskId, TaskOutput};
+use crate::rpc::service::exchange::GrpcExchangeWriter;
+use crate::task::{BatchTaskExecution, ComputeNodeContext, TaskId, TaskOutput, TaskOutputId};
 
 /// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
@@ -63,7 +68,36 @@ impl BatchManager {
         }
     }
 
-    pub fn take_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput<ComputeNodeContext>> {
+    pub fn get_data(
+        &self,
+        tx: Sender<std::result::Result<GetDataResponse, Status>>,
+        peer_addr: SocketAddr,
+        pb_task_output_id: &ProstTaskOutputId,
+    ) -> Result<()> {
+        let task_id = TaskOutputId::try_from(pb_task_output_id)?;
+        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
+        let mut task_output = self.take_output(pb_task_output_id)?;
+        tokio::spawn(async move {
+            let mut writer = GrpcExchangeWriter::new(tx.clone());
+            match task_output.take_data(&mut writer).await {
+                Ok(_) => {
+                    tracing::debug!(
+                        from = ?task_id,
+                        "exchanged {} chunks",
+                        writer.written_chunks(),
+                    );
+                    Ok(())
+                }
+                Err(e) => tx.send(Err(e.to_grpc_status())).await,
+            }
+        });
+        Ok(())
+    }
+
+    pub fn take_output(
+        &self,
+        output_id: &ProstTaskOutputId,
+    ) -> Result<TaskOutput<ComputeNodeContext>> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         debug!("Trying to take output of: {:?}", output_id);
         self.tasks

@@ -29,7 +29,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
 use risingwave_sqlparser::parser::Parser;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -41,7 +41,7 @@ use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::{HummockSnapshotManager, QueryManager};
+use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -126,12 +126,13 @@ pub struct FrontendEnv {
     catalog_reader: CatalogReader,
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 impl FrontendEnv {
     pub async fn init(
         opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
         Self::with_meta_client(meta_client, opts).await
     }
@@ -148,7 +149,7 @@ impl FrontendEnv {
         let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            hummock_snapshot_manager,
+            hummock_snapshot_manager.clone(),
             compute_client_pool,
         );
         Self {
@@ -157,13 +158,14 @@ impl FrontendEnv {
             catalog_reader,
             worker_node_manager,
             query_manager,
+            hummock_snapshot_manager,
         }
     }
 
     pub async fn with_meta_client(
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
         let config = load_config(opts);
         tracing::info!("Starting frontend node with config {:?}", config);
 
@@ -209,7 +211,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
-            hummock_snapshot_manager,
+            hummock_snapshot_manager.clone(),
         )
         .await;
         let observer_join_handle = observer_manager.start().await?;
@@ -223,6 +225,7 @@ impl FrontendEnv {
                 worker_node_manager,
                 meta_client: frontend_meta_client,
                 query_manager,
+                hummock_snapshot_manager,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -258,6 +261,10 @@ impl FrontendEnv {
 
     pub fn query_manager(&self) -> &QueryManager {
         &self.query_manager
+    }
+
+    pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManagerRef {
+        &self.hummock_snapshot_manager
     }
 }
 
@@ -346,7 +353,7 @@ pub struct SessionManagerImpl {
     env: FrontendEnv,
     observer_join_handle: JoinHandle<()>,
     heartbeat_join_handle: JoinHandle<()>,
-    _heartbeat_shutdown_sender: UnboundedSender<()>,
+    _heartbeat_shutdown_sender: Sender<()>,
 }
 
 impl SessionManager for SessionManagerImpl {

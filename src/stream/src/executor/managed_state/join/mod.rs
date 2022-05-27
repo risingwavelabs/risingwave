@@ -173,7 +173,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
     #[allow(dead_code)]
-    pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType<S>> {
+    pub async fn get<'a, 'b>(&'a mut self, key: &'b K) -> Option<&'a HashValueType<S>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -190,9 +190,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
-    /// FIXME(lmatz): Lifetime 'b is added due to some weird errors, possibly compiler error. May
-    /// double check after bumping the toolchain.
-    pub async fn get_mut<'a, 'b>(&'a mut self, key: &'b K) -> Option<&'a mut HashValueType<S>> {
+    pub async fn get_mut<'a>(&'a mut self, key: &K) -> Option<&'a mut HashValueType<S>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -210,9 +208,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return the [`JoinEntryState`] without cached state, if still not
     /// exist, return None.
-    pub async fn get_mut_without_cached<'a>(
+    pub async fn get_mut_without_cached<'a, 'b: 'a>(
         &'a mut self,
-        key: &K,
+        key: &'b K,
     ) -> RwResult<Option<&'a mut HashValueType<S>>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
@@ -282,9 +280,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Get or create a [`JoinEntryState`] without cached state. Should only be called if the key
     /// does not exist in memory or remote storage.
-    pub async fn get_or_init_without_cache<'a>(
+    pub async fn get_or_init_without_cache<'a, 'b: 'a>(
         &'a mut self,
-        key: &K,
+        key: &'b K,
     ) -> RwResult<&'a mut JoinEntryState<S>> {
         // TODO: we should probably implement a entry function for `LruCache`
         let contains = self.inner.contains(key);

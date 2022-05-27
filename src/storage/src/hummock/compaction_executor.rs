@@ -24,10 +24,12 @@ type CompactionRequest = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 pub struct CompactionExecutor {
     requests: tokio::sync::mpsc::UnboundedSender<CompactionRequest>,
     // TODO: graceful shutdown
+    #[cfg(not(madsim))]
     _runtime_thread: std::thread::JoinHandle<()>,
 }
 
 impl CompactionExecutor {
+    #[cfg(not(madsim))]
     pub fn new(worker_threads_num: Option<usize>) -> Self {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
@@ -40,11 +42,24 @@ impl CompactionExecutor {
                 let runtime = builder.enable_all().build().unwrap();
                 runtime.block_on(async {
                     while let Some(request) = rx.recv().await {
-                        request.await;
+                        tokio::spawn(request);
                     }
                 });
             }),
         }
+    }
+
+    // FIXME: simulation doesn't support new thread or tokio runtime.
+    //        this is a workaround to make it compile.
+    #[cfg(madsim)]
+    pub fn new(_worker_threads_num: Option<usize>) -> Self {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(request) = rx.recv().await {
+                request.await;
+            }
+        });
+        Self { requests: tx }
     }
 
     pub fn send_request<T>(

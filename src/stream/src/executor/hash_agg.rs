@@ -498,22 +498,22 @@ mod tests {
 
     // --- Test HashAgg with in-memory KeyedState ---
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_local_hash_aggregation_count_in_memory() {
         test_local_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_global_hash_aggregation_count_in_memory() {
         test_global_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_local_hash_aggregation_min_in_memory() {
         test_local_hash_aggregation_min(create_in_memory_keyspace_agg(2)).await
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_local_hash_aggregation_min_append_only_in_memory() {
         test_local_hash_aggregation_min_append_only(create_in_memory_keyspace_agg(2)).await
     }

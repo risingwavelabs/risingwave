@@ -24,8 +24,10 @@ use risingwave_common::types::*;
 use risingwave_expr::expr::*;
 
 use super::*;
+use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::dispatch::*;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::create_in_memory_keyspace_agg;
 use crate::executor::{
@@ -36,14 +38,14 @@ use crate::task::SharedContext;
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,
 /// and do this again and again.
-#[madsim::test]
+#[tokio::test]
 async fn test_merger_sum_aggr() {
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = ReceiverExecutor::new(schema, vec![], input_rx);
+        let input = ReceiverExecutor::new(schema, vec![], input_rx, ActorContext::create(), 0);
         let append_only = false;
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
@@ -72,7 +74,13 @@ async fn test_merger_sum_aggr() {
             channel: Box::new(LocalOutput::new(233, tx)),
         };
         let context = SharedContext::for_test().into();
-        let actor = Actor::new(consumer, 0, context);
+        let actor = Actor::new(
+            consumer,
+            0,
+            context,
+            StreamingMetrics::unused().into(),
+            ActorContext::create(),
+        );
         (actor, rx)
     };
 
@@ -90,7 +98,7 @@ async fn test_merger_sum_aggr() {
         let (tx, rx) = channel(16);
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
-        handles.push(madsim::task::spawn(actor.run()));
+        handles.push(tokio::spawn(actor.run()));
         inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
 
@@ -99,7 +107,13 @@ async fn test_merger_sum_aggr() {
     let schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
-    let receiver_op = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
+    let receiver_op = Box::new(ReceiverExecutor::new(
+        schema.clone(),
+        vec![],
+        rx,
+        ActorContext::create(),
+        0,
+    ));
     let dispatcher = DispatchExecutor::new(
         receiver_op,
         vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
@@ -109,11 +123,17 @@ async fn test_merger_sum_aggr() {
         ctx,
     );
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(dispatcher, 0, context);
-    handles.push(madsim::task::spawn(actor.run()));
+    let actor = Actor::new(
+        dispatcher,
+        0,
+        context,
+        StreamingMetrics::unused().into(),
+        ActorContext::create(),
+    );
+    handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema, vec![], 0, outputs);
+    let merger = MergeExecutor::new(schema, vec![], 0, outputs, ActorContext::create(), 0);
 
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;
@@ -156,8 +176,14 @@ async fn test_merger_sum_aggr() {
         data: items.clone(),
     };
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(consumer, 0, context);
-    handles.push(madsim::task::spawn(actor.run()));
+    let actor = Actor::new(
+        consumer,
+        0,
+        context,
+        StreamingMetrics::unused().into(),
+        ActorContext::create(),
+    );
+    handles.push(tokio::spawn(actor.run()));
 
     let mut epoch = 1;
     input
@@ -195,7 +221,7 @@ async fn test_merger_sum_aggr() {
 
     // wait for all actors
     for handle in handles {
-        handle.await.unwrap();
+        handle.await.unwrap().unwrap();
     }
 
     let data = items.lock().unwrap();

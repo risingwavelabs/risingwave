@@ -26,7 +26,7 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundSelect {
     pub distinct: bool,
     pub select_items: Vec<ExprImpl>,

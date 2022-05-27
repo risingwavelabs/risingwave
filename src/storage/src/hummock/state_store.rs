@@ -76,7 +76,6 @@ impl HummockStorage {
     {
         let read_options = Arc::new(ReadOptions::default());
         let mut overlapped_iters = vec![];
-        let backward = T::direction() == DirectionEnum::Backward;
 
         let (uncommitted_ssts, pinned_version) = {
             let read_version = self.local_version_manager.read_version(epoch);
@@ -88,7 +87,7 @@ impl HummockStorage {
 
             // Generate shared buffer iterators
             for shared_buffer in read_version.shared_buffer {
-                for batch in shared_buffer.get_overlap_batches(&key_range, backward) {
+                for batch in shared_buffer.get_overlap_batches(&key_range) {
                     overlapped_iters
                         .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
                 }
@@ -100,7 +99,7 @@ impl HummockStorage {
         // Generate iterators for uncommitted ssts by filter out ssts that do not overlap with given
         // `key_range`
         let mut stats = StoreLocalStatistic::default();
-        let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, backward, None);
+        let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, None);
         for table_info in table_infos.into_iter().rev() {
             let table = self
                 .sstable_store
@@ -116,8 +115,7 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos =
-                prune_ssts(level.get_table_infos().iter(), &key_range, backward, None);
+            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, None);
             if table_infos.is_empty() {
                 continue;
             }
@@ -133,17 +131,16 @@ impl HummockStorage {
                 assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
                 let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
 
-                let tables = if backward {
-                    matched_table_infos
+                let tables = match T::Direction::direction() {
+                    DirectionEnum::Backward => matched_table_infos
                         .iter()
                         .rev()
                         .map(|&info| info.clone())
-                        .collect_vec()
-                } else {
-                    matched_table_infos
+                        .collect_vec(),
+                    DirectionEnum::Forward => matched_table_infos
                         .iter()
                         .map(|&info| info.clone())
-                        .collect_vec()
+                        .collect_vec(),
                 };
 
                 overlapped_iters.push(Box::new(ConcatIteratorInner::<T::SstableIteratorType>::new(
@@ -170,17 +167,10 @@ impl HummockStorage {
             .iter_merge_sstable_counts
             .observe(overlapped_iters.len() as f64);
 
-        let key_range = if backward {
-            (
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-            )
-        } else {
-            (
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
-            )
-        };
+        let key_range = (
+            key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            key_range.end_bound().map(|b| b.as_ref().to_owned()),
+        );
 
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
@@ -216,7 +206,7 @@ impl HummockStorage {
 
             // Query shared buffer. Return the value without iterating SSTs if found
             for shared_buffer in read_version.shared_buffer {
-                for batch in shared_buffer.get_overlap_batches(&(key..=key), false) {
+                for batch in shared_buffer.get_overlap_batches(&(key..=key)) {
                     match batch.get(key) {
                         Some(v) => {
                             self.stats.get_shared_buffer_hit_counts.inc();
@@ -234,12 +224,7 @@ impl HummockStorage {
         let internal_key = key_with_epoch(key.to_vec(), epoch);
 
         // Query uploaded but uncommitted SSTs. Return the value if found.
-        let table_infos = prune_ssts(
-            uncommitted_ssts.iter(),
-            &(key..=key),
-            false,
-            vnode_set.as_ref(),
-        );
+        let table_infos = prune_ssts(uncommitted_ssts.iter(), &(key..=key), vnode_set.as_ref());
         let read_options = Arc::new(ReadOptions::default());
         for table_info in table_infos.into_iter().rev() {
             let table = self
@@ -263,7 +248,6 @@ impl HummockStorage {
                     let table_infos = prune_ssts(
                         level.table_infos.iter(),
                         &(key..=key),
-                        false,
                         vnode_set.as_ref(),
                     );
                     for table_info in table_infos.into_iter().rev() {
@@ -402,7 +386,11 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, BackwardIter>(key_range, epoch)
+        let key_range = (
+            key_range.end_bound().map(|v| v.as_ref().to_vec()),
+            key_range.start_bound().map(|v| v.as_ref().to_vec()),
+        );
+        self.iter_inner::<_, _, BackwardIter>(key_range, epoch)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {

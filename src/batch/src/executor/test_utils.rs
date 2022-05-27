@@ -21,7 +21,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, Executor2};
+use crate::executor::{BoxedDataChunkStream, BoxedExecutor, Executor};
 
 /// Mock the input of executor.
 /// You can bind one or more `MockExecutor` as the children of the executor to test,
@@ -52,7 +52,7 @@ impl MockExecutor {
     }
 }
 
-impl Executor2 for MockExecutor {
+impl Executor for MockExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -81,7 +81,7 @@ impl MockExecutor {
 ///
 /// if want diff ignoring order, add a `order_by` executor in manual currently, when the `schema`
 /// method of `executor` is ready, an order-ignored version will be added.
-pub async fn diff_executor_output(actual: BoxedExecutor2, expect: BoxedExecutor2) {
+pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) {
     let mut expect_cardinality = 0;
     let mut actual_cardinality = 0;
     let mut expects = vec![];

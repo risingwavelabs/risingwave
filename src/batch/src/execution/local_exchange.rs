@@ -126,7 +126,7 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
 
         // Start a server.
-        let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+        let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
         let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
             rpc_called: rpc_called.clone(),
         });
@@ -136,7 +136,7 @@ mod tests {
             tonic::transport::Server::builder()
                 .add_service(exchange_svc)
                 .serve_with_shutdown(addr, async move {
-                    shutdown_recv.recv().await;
+                    shutdown_recv.await.unwrap();
                 })
                 .await
                 .unwrap();

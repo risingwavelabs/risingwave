@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::executor2::monitor::BatchMetrics;
+use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
@@ -37,7 +37,7 @@ use risingwave_storage::monitor::{
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -61,7 +61,7 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
     opts: ComputeNodeOpts,
-) -> (JoinHandle<()>, UnboundedSender<()>) {
+) -> (JoinHandle<()>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts);
     info!(
@@ -79,11 +79,10 @@ pub async fn compute_node_serve(
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
 
-    let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
-        vec![MetaClient::start_heartbeat_loop(
-            meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-        )];
+    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![MetaClient::start_heartbeat_loop(
+        meta_client.clone(),
+        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+    )];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
@@ -163,7 +162,7 @@ pub async fn compute_node_serve(
     let exchange_srv = ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(TaskServiceServer::new(batch_srv))
@@ -172,7 +171,7 @@ pub async fn compute_node_serve(
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
-                    _ = shutdown_recv.recv() => {
+                    _ = &mut shutdown_recv => {
                         for (join_handle, shutdown_sender) in sub_tasks {
                             if let Err(err) = shutdown_sender.send(()) {
                                 tracing::warn!("Failed to send shutdown: {:?}", err);

@@ -21,7 +21,7 @@ use risingwave_sqlparser::ast::FunctionArg;
 use super::{Binder, Result};
 use crate::expr::{Expr, ExprImpl};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundGenerateSeriesFunction {
     pub(crate) args: Vec<ExprImpl>,
     pub(crate) data_type: DataType,

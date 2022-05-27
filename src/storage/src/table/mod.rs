@@ -16,6 +16,9 @@ pub mod cell_based_table;
 pub mod mem_table;
 pub mod state_table;
 
+#[cfg(test)]
+pub mod test_relational_table;
+
 use risingwave_common::array::Row;
 
 use crate::error::StorageResult;

@@ -28,7 +28,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
 use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
 use smallvec::SmallVec;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::{oneshot, watch, RwLock};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -196,10 +196,8 @@ where
         }
     }
 
-    pub async fn start(
-        barrier_manager: BarrierManagerRef<S>,
-    ) -> (JoinHandle<()>, UnboundedSender<()>) {
-        let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    pub async fn start(barrier_manager: BarrierManagerRef<S>) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             barrier_manager.run(shutdown_rx).await;
         });
@@ -208,7 +206,7 @@ where
     }
 
     /// Start an infinite loop to take scheduled barriers and send them.
-    async fn run(&self, mut shutdown_rx: UnboundedReceiver<()>) {
+    async fn run(&self, mut shutdown_rx: Receiver<()>) {
         let mut tracker = CreateMviewProgressTracker::default();
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
 
@@ -223,11 +221,7 @@ where
                 self.recovery(state.prev_epoch).await;
             tracker.add(new_epoch, actors_to_track, vec![]);
             for progress in create_mview_progress {
-                tracker.update(
-                    progress.chain_actor_id,
-                    progress.consumed_epoch.into(),
-                    new_epoch,
-                );
+                tracker.update(progress);
             }
             state.prev_epoch = new_epoch;
             state.update(self.env.meta_store()).await.unwrap();
@@ -239,7 +233,7 @@ where
             tokio::select! {
                 biased;
                 // Shutdown
-                _ = shutdown_rx.recv() => {
+                _ = &mut shutdown_rx => {
                     tracing::info!("Barrier manager is shutting down");
                     return;
                 }
@@ -282,11 +276,7 @@ where
                     let actors_to_track = command_ctx.actors_to_track();
                     tracker.add(new_epoch, actors_to_track, notifiers);
                     for progress in responses.into_iter().flat_map(|r| r.create_mview_progress) {
-                        tracker.update(
-                            progress.chain_actor_id,
-                            progress.consumed_epoch.into(),
-                            new_epoch,
-                        );
+                        tracker.update(progress);
                     }
 
                     state.prev_epoch = new_epoch;
@@ -302,11 +292,7 @@ where
                         tracker = CreateMviewProgressTracker::default(); // Reset progress tracker
                         tracker.add(new_epoch, actors_to_track, vec![]);
                         for progress in create_mview_progress {
-                            tracker.update(
-                                progress.chain_actor_id,
-                                progress.consumed_epoch.into(),
-                                new_epoch,
-                            );
+                            tracker.update(progress);
                         }
 
                         state.prev_epoch = new_epoch;

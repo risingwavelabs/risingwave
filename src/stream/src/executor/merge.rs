@@ -86,6 +86,9 @@ pub struct MergeExecutor {
     actor_id: u32,
 
     info: ExecutorInfo,
+
+    /// Actor operator context
+    status: OperatorInfoStatus,
 }
 
 impl MergeExecutor {
@@ -94,6 +97,8 @@ impl MergeExecutor {
         pk_indices: PkIndices,
         actor_id: u32,
         inputs: Vec<Receiver<Message>>,
+        actor_context: ActorContextRef,
+        receiver_id: u64,
     ) -> Self {
         Self {
             upstreams: inputs,
@@ -103,6 +108,7 @@ impl MergeExecutor {
                 pk_indices,
                 identity: "MergeExecutor".to_string(),
             },
+            status: OperatorInfoStatus::new(actor_context, receiver_id),
         }
     }
 }
@@ -125,6 +131,7 @@ impl Executor for MergeExecutor {
         &self.info.identity
     }
 }
+
 
 pub struct SelectReceivers {
     blocks: Vec<Receiver<Message>>,
@@ -234,7 +241,6 @@ mod tests {
     use futures::SinkExt;
     use itertools::Itertools;
     use madsim::collections::HashSet;
-    use madsim::time::sleep;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_pb::data::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
@@ -244,6 +250,7 @@ mod tests {
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
     };
     use risingwave_rpc_client::ComputeClient;
+    use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
 
@@ -257,7 +264,7 @@ mod tests {
         StreamChunk::new(ops, vec![], None)
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_merger() {
         const CHANNEL_NUMBER: usize = 10;
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
@@ -267,14 +274,15 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::new(Schema::default(), vec![], 0, rxs);
+        let merger =
+            MergeExecutor::new(Schema::default(), vec![], 0, rxs, ActorContext::create(), 0);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
 
         for mut tx in txs {
             let epochs = epochs.clone();
-            let handle = madsim::task::spawn(async move {
+            let handle = tokio::spawn(async move {
                 for epoch in epochs {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
@@ -316,7 +324,7 @@ mod tests {
         );
 
         for handle in handles {
-            handle.await;
+            handle.await.unwrap();
         }
     }
 
@@ -372,24 +380,24 @@ mod tests {
         }
     }
 
-    #[madsim::test(flavor = "multi_thread")]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_stream_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
 
         // Start a server.
-        let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+        let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
         let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
             rpc_called: rpc_called.clone(),
         });
         let cp_server_run = server_run.clone();
-        let join_handle = madsim::task::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             cp_server_run.store(true, Ordering::SeqCst);
             tonic::transport::Server::builder()
                 .add_service(exchange_svc)
                 .serve_with_shutdown(addr, async move {
-                    shutdown_recv.recv().await;
+                    shutdown_recv.await.unwrap();
                 })
                 .await
                 .unwrap();
@@ -398,7 +406,7 @@ mod tests {
         sleep(Duration::from_secs(1)).await;
         assert!(server_run.load(Ordering::SeqCst));
         let (tx, mut rx) = channel(16);
-        let input_handle = madsim::task::spawn(async move {
+        let input_handle = tokio::spawn(async move {
             let remote_input =
                 RemoteInput::create(ComputeClient::new(addr.into()).await.unwrap(), (0, 0), tx)
                     .await
@@ -415,8 +423,8 @@ mod tests {
             assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));
-        input_handle.await;
+        input_handle.await.unwrap();
         shutdown_send.send(()).unwrap();
-        join_handle.await;
+        join_handle.await.unwrap();
     }
 }

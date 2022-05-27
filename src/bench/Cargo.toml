@@ -11,6 +11,7 @@ env_logger = "0.9"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 log = "0.4"
+madsim = "=0.2.0-alpha.3"
 moka = { version = "0.8", features = ["future"] }
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
@@ -21,7 +22,7 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = [
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "fs",
     "rt",
     "rt-multi-thread",

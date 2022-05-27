@@ -492,7 +492,7 @@ mod tests {
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
@@ -657,22 +657,22 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_replicated_value_min() {
         test_replicated_value_not_null::<{ variants::EXTREME_MIN }>().await
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_replicated_value_max() {
         test_replicated_value_not_null::<{ variants::EXTREME_MAX }>().await
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_replicated_value_min_with_null() {
         test_replicated_value_with_null::<{ variants::EXTREME_MIN }>().await
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_replicated_value_max_with_null() {
         test_replicated_value_with_null::<{ variants::EXTREME_MAX }>().await
     }
@@ -865,7 +865,7 @@ mod tests {
         assert_eq!(managed_state.get_output(epoch).await.unwrap(), extreme);
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_same_group_of_value() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
@@ -931,12 +931,12 @@ mod tests {
         }
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn chaos_test_min() {
         chaos_test::<{ variants::EXTREME_MIN }>().await;
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn chaos_test_max() {
         chaos_test::<{ variants::EXTREME_MAX }>().await;
     }
@@ -1038,7 +1038,7 @@ mod tests {
         write_batch.ingest(epoch).await.unwrap();
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_same_value_delete() {
         // In this test, we test this case:
         //
