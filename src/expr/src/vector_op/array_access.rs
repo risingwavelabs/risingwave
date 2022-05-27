@@ -16,15 +16,14 @@ use risingwave_common::error::Result;
 use risingwave_common::array::ListRef;
 use risingwave_common::types::{Scalar, ScalarImpl, ScalarRef, Datum, DatumRef, ToOwnedDatum};
 
-
-// TODO(nanderstabel): Clean
 #[inline(always)]
 pub fn array_access<'a, T: Scalar>(l: Option<ListRef>, r: Option<i32>) -> Result<Option<T>> {
     match (l, r) {
+        // index must be greater than 0 following a one-based numbering convention for arrays
         (Some(list), Some(index)) if index > 0 => {
-            let temp = list.value_at(index as usize)?;
-            if let Some(temp) = temp.to_owned_datum() {
-                Ok(Some(temp.try_into()?))
+            let datumref = list.value_at(index as usize)?;
+            if let Some(scalar) = datumref.to_owned_datum() {
+                Ok(Some(scalar.try_into()?))
             } else {
                 Ok(None)
             }
