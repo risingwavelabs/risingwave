@@ -355,6 +355,7 @@ pub mod tests {
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+    use crate::hummock::compaction::CompactionMode;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     pub fn generate_table(
@@ -488,6 +489,7 @@ pub mod tests {
         let config = Arc::new(CompactionConfig {
             level0_tier_compact_file_number: 2,
             min_compaction_bytes: 0,
+            compaction_mode: CompactionMode::RangeMode,
             ..Default::default()
         });
         let picker =

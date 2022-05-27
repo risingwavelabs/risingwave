@@ -196,9 +196,7 @@ impl CompactStatus {
             sorted_output_ssts: vec![],
             task_id,
             target_level: target_level_id,
-            is_target_ultimate_and_leveling: target_level_id as usize
-                == self.level_handlers.len() - 1
-                && select_level_id > 0,
+            is_target_ultimate_and_leveling: false,
             metrics: Some(CompactMetrics {
                 read_level_n: Some(TableSetStatistics {
                     level_idx: select_level_id,
