@@ -232,8 +232,8 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: "foo".as_bytes().to_vec()
-                    }))
+                        body: "foo".as_bytes().to_vec(),
+                    })),
                 },
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
@@ -242,10 +242,10 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: "bar".as_bytes().to_vec()
-                    }))
-                }
-            ]
+                        body: "bar".as_bytes().to_vec(),
+                    })),
+                },
+            ],
         };
         let array_index = FunctionCall {
             children: vec![
@@ -253,15 +253,13 @@ mod tests {
                     expr_type: Type::Array as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::List as i32,
-                        field_type: vec![
-                            ProstDataType {
-                                type_name: TypeName::Varchar as i32,
-                                ..Default::default()
-                            }
-                        ],
+                        field_type: vec![ProstDataType {
+                            type_name: TypeName::Varchar as i32,
+                            ..Default::default()
+                        }],
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::FuncCall(values))
+                    rex_node: Some(RexNode::FuncCall(values)),
                 },
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
@@ -270,24 +268,22 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: vec![0, 0, 0, 1]
-                    }))
-                }
-            ]
+                        body: vec![0, 0, 0, 1],
+                    })),
+                },
+            ],
         };
         let access = ExprNode {
             expr_type: Type::ArrayAccess as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::List as i32,
-                field_type: vec![
-                    ProstDataType {
-                        type_name: TypeName::Varchar as i32,
-                        ..Default::default()
-                    }
-                ],
+                field_type: vec![ProstDataType {
+                    type_name: TypeName::Varchar as i32,
+                    ..Default::default()
+                }],
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::FuncCall(array_index))
+            rex_node: Some(RexNode::FuncCall(array_index)),
         };
         assert!(build_nullable_binary_expr_prost(&access).is_ok());
     }

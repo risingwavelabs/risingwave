@@ -80,8 +80,11 @@ pub fn new_nullable_binary_expr(
     }
 }
 
-fn build_array_access_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
-
+fn build_array_access_expr(
+    ret: DataType,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> BoxedExpression {
     macro_rules! array_access_expression {
         ($array:ty) => {
             Box::new(
@@ -92,7 +95,7 @@ fn build_array_access_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression
                     array_access,
                 ),
             )
-        }
+        };
     }
 
     match ret {

@@ -131,27 +131,24 @@ impl Binder {
         .into();
         Ok(expr)
     }
-    
-    pub(super) fn bind_array_index(&mut self, obj: Box<Expr>, indexs: Vec<Expr>) -> Result<ExprImpl> {
 
-        let obj = self.bind_expr(*obj)?;
+    pub(super) fn bind_array_index(&mut self, obj: Expr, indexs: Vec<Expr>) -> Result<ExprImpl> {
+        let obj = self.bind_expr(obj)?;
         match obj.return_type() {
-            DataType::List { datatype: return_type } => {
+            DataType::List {
+                datatype: return_type,
+            } => {
                 let mut indexs = indexs
                     .into_iter()
                     .map(|e| self.bind_expr(e))
                     .collect::<Result<Vec<ExprImpl>>>()?;
                 indexs.insert(0, obj);
-                
-                let expr: ExprImpl = FunctionCall::new_unchecked(
-                    ExprType::ArrayAccess,
-                    indexs,
-                    *return_type
-                )
-                .into();
+
+                let expr: ExprImpl =
+                    FunctionCall::new_unchecked(ExprType::ArrayAccess, indexs, *return_type).into();
                 Ok(expr)
-            },
-            _ => panic!("Should be a List")
+            }
+            _ => panic!("Should be a List"),
         }
     }
 }
@@ -228,7 +225,7 @@ mod tests {
             _ => panic!("unexpected type"),
         };
     }
-        
+
     #[test]
     fn test_array_index_expr() {
         let array_expr = FunctionCall::new_unchecked(
@@ -243,7 +240,7 @@ mod tests {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::ArrayAccess,
             vec![array_expr, ExprImpl::literal_int(1)],
-            DataType::Int32
+            DataType::Int32,
         )
         .into();
 

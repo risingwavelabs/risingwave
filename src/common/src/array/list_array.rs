@@ -333,10 +333,7 @@ impl<'a> ListRef<'a> {
         match self {
             ListRef::Indexed { arr, .. } => Ok(arr.value.value_at(index - 1)),
             ListRef::ValueRef { val } => {
-                if let Some(datum) = val
-                .values()
-                .into_iter()
-                .nth(index - 1) {
+                if let Some(datum) = val.values().iter().nth(index - 1) {
                     Ok(to_datum_ref(datum))
                 } else {
                     Ok(None)
