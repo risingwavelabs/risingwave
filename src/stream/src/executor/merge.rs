@@ -191,13 +191,15 @@ impl Stream for SelectReceivers {
             }
         }
         if self.upstreams.is_empty() {
-            assert!(self.barrier.is_some());
-            self.upstreams = std::mem::take(&mut self.blocks);
-            let barrier = self.barrier.take().unwrap();
-            if barrier.is_to_stop_actor(self.actor_id) {
-                Poll::Ready(None)
-            } else {
+            if let Some(barrier) = self.barrier.take() {
+                // If this barrier acquire the executor stop, we do not reset the upstreams
+                // so that the next call would return `Poll::Ready(None)`.
+                if !barrier.is_to_stop_actor(self.actor_id) {
+                    self.upstreams = std::mem::take(&mut self.blocks);
+                }
                 Poll::Ready(Some(Ok(Message::Barrier(barrier))))
+            } else {
+                Poll::Ready(None)
             }
         } else {
             Poll::Pending
