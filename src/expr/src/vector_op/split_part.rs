@@ -121,7 +121,7 @@ mod tests {
                     let expected = expected.clone().unwrap();
 
                     let array = guard.into_inner().finish().unwrap();
-                    let actual = array.value_at(0).clone().unwrap();
+                    let actual = array.value_at(0).unwrap();
 
                     assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)
                 }
