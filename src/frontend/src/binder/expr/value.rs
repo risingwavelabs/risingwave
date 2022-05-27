@@ -135,20 +135,24 @@ impl Binder {
     pub(super) fn bind_array_index(&mut self, obj: Box<Expr>, indexs: Vec<Expr>) -> Result<ExprImpl> {
 
         let obj = self.bind_expr(*obj)?;
-        let return_type = obj.return_type();
-        let mut indexs = indexs
-            .into_iter()
-            .map(|e| self.bind_expr(e))
-            .collect::<Result<Vec<ExprImpl>>>()?;
-        indexs.insert(0, obj);
-        
-        let expr: ExprImpl = FunctionCall::new_unchecked(
-            ExprType::ArrayAccess,
-            indexs,
-            return_type
-        )
-        .into();
-        Ok(expr)
+        match obj.return_type() {
+            DataType::List { datatype: return_type } => {
+                let mut indexs = indexs
+                    .into_iter()
+                    .map(|e| self.bind_expr(e))
+                    .collect::<Result<Vec<ExprImpl>>>()?;
+                indexs.insert(0, obj);
+                
+                let expr: ExprImpl = FunctionCall::new_unchecked(
+                    ExprType::ArrayAccess,
+                    indexs,
+                    *return_type
+                )
+                .into();
+                Ok(expr)
+            },
+            _ => panic!("Should be a List")
+        }
     }
 }
 

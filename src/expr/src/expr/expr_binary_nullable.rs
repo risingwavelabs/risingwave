@@ -14,7 +14,7 @@
 
 //! For expression that only accept two nullable arguments as input.
 
-use risingwave_common::array::{Array, BoolArray, I32Array, ListArray, Utf8Array};
+use risingwave_common::array::*;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 
@@ -80,29 +80,37 @@ pub fn new_nullable_binary_expr(
     }
 }
 
-//TODO(nanderstabel): fix
 fn build_array_access_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
-    println!("build_array_access_expr1 {:?}", l.return_type());
-    match l.return_type() {
-        DataType::Int32 => Box::new(
-            BinaryNullableExpression::<ListArray, I32Array, I32Array, _>::new(
-                l,
-                r,
-                ret,
-                array_access,
-            ),
-        ),
-        _ => Box::new(
-            BinaryNullableExpression::<ListArray, I32Array, Utf8Array, _>::new(
-                l,
-                r,
-                ret,
-                array_access,
-            ),
-        ),
-        // _ => {
-        //     unimplemented!("Extract ( {:?} ) is not supported yet!", r.return_type())
-        // }
+
+    macro_rules! array_access_expression {
+        ($array:ty) => {
+            Box::new(
+                BinaryNullableExpression::<ListArray, I32Array, $array, _>::new(
+                    l,
+                    r,
+                    ret,
+                    array_access,
+                ),
+            )
+        }
+    }
+
+    match ret {
+        DataType::Boolean => array_access_expression!(BoolArray),
+        DataType::Int16 => array_access_expression!(I16Array),
+        DataType::Int32 => array_access_expression!(I32Array),
+        DataType::Int64 => array_access_expression!(I64Array),
+        DataType::Float32 => array_access_expression!(F32Array),
+        DataType::Float64 => array_access_expression!(F64Array),
+        DataType::Decimal => array_access_expression!(DecimalArray),
+        DataType::Date => array_access_expression!(NaiveDateArray),
+        DataType::Varchar => array_access_expression!(Utf8Array),
+        DataType::Time => array_access_expression!(NaiveTimeArray),
+        DataType::Timestamp => array_access_expression!(NaiveDateTimeArray),
+        DataType::Timestampz => array_access_expression!(PrimitiveArray::<i64>),
+        DataType::Interval => array_access_expression!(IntervalArray),
+        DataType::Struct { .. } => array_access_expression!(StructArray),
+        DataType::List { .. } => array_access_expression!(Utf8Array),
     }
 }
 
