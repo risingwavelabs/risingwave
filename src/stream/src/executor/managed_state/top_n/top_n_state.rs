@@ -330,7 +330,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         let mut local = write_batch.prefixify(&self.keyspace);
         for (pk, cells) in iterator {
             let row = cells.into_option();
-            println!("---1 flush inner write pk = {:?}", pk);
             let pk_buf = match TOP_N_TYPE {
                 TOP_N_MIN => pk.serialize(),
                 TOP_N_MAX => pk.reverse_serialize(),
@@ -340,7 +339,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 .map(ColumnId::from)
                 .collect::<Vec<_>>();
             let bytes = serialize_pk_and_row_state(&pk_buf, &row, &column_ids)?;
-            println!("--- 2flush inner write pk = {:?}", pk_buf);
             for (key, value) in bytes {
                 match value {
                     // TODO(Yuanxin): Implement value meta
