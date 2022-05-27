@@ -47,6 +47,7 @@ impl LogicalHopWindow {
         window_size: IntervalUnit,
         output_indices: Option<Vec<usize>>,
     ) -> Self {
+        // if output_indices is not specified, use default output_indices
         let output_indices = output_indices
             .unwrap_or_else(|| (0..input.schema().len() + 2).into_iter().collect_vec());
         let ctx = input.ctx();
@@ -64,21 +65,30 @@ impl LogicalHopWindow {
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
-        let mut pk_indices = Vec::new();
-        if output_indices.contains(&input.schema().len()) {
-            pk_indices.extend(
-                input
-                    .pk_indices()
-                    .iter()
-                    .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx)),
-            );
-            pk_indices.push(
-                output_indices
-                    .iter()
-                    .position(|&idx| idx == input.schema().len())
-                    .unwrap(),
-            );
-        }
+        let pk_indices = (|| {
+            let input_pk = input
+                .pk_indices()
+                .iter()
+                .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx));
+            let window_pk = if output_indices.contains(&input.schema().len()) {
+                std::iter::once(
+                    output_indices
+                        .iter()
+                        .position(|&idx| idx == input.schema().len())
+                        .unwrap(),
+                )
+            } else if output_indices.contains(&(input.schema().len() + 1)) {
+                std::iter::once(
+                    output_indices
+                        .iter()
+                        .position(|&idx| idx == input.schema().len() + 1)
+                        .unwrap(),
+                )
+            } else {
+                return Vec::new();
+            };
+            input_pk.chain(window_pk).collect_vec()
+        })();
         let base = PlanBase::new_logical(ctx, actual_schema, pk_indices);
         LogicalHopWindow {
             base,
@@ -336,11 +346,24 @@ impl ToStream for LogicalHopWindow {
         let new_logical = self.clone_with_input(new_input);
         let new_output_indices = new_logical.output_indices.clone();
         let new_internal_column_num = new_logical.internal_column_num();
-
-        let default_indices = (0..new_logical.internal_column_num()).collect_vec();
+        let new_pk = {
+            let mapping = ColIndexMapping::with_remaining_columns(
+                &new_logical.output_indices,
+                new_logical.input.schema().len() + 2,
+            )
+            .inverse();
+            new_logical
+                .pk_indices()
+                .iter()
+                .map(|&pk| mapping.map(pk))
+                .collect_vec()
+        };
+        
         // remove output indices
+        let default_indices = (0..new_logical.internal_column_num()).collect_vec();
         let new_logical = new_logical.clone_with_output_indices(default_indices.clone());
-        let plan = StreamHopWindow::new(new_logical).into();
+
+        let plan = StreamHopWindow::new(new_logical, new_pk).into();
         if self.output_indices != default_indices {
             let logical_project = LogicalProject::with_mapping(
                 plan,
@@ -359,18 +382,21 @@ impl ToStream for LogicalHopWindow {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (hop, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         let (input, time_col, window_slide, window_size, mut output_indices) = hop.decompose();
-        let i2o = self.i2o_col_mapping();
         if !output_indices.contains(&input.schema().len())
-        // we should add window_start so ensure we can derive pk
+            && !output_indices.contains(&(input.schema().len() + 1))
+        // When both `window_start` and `window_end` is not in `output_indices`,
+        // we add `window_start` so ensure we can derive pk.
         {
             output_indices.push(input.schema().len());
         }
-        let new_pk_cols_to_add = input
-            .pk_indices()
-            .iter()
-            .cloned()
-            .filter(|i| i2o.try_map(*i).is_none());
-        output_indices.extend(new_pk_cols_to_add);
+        let i2o = self.i2o_col_mapping();
+        output_indices.extend(
+            input
+                .pk_indices()
+                .iter()
+                .cloned()
+                .filter(|i| i2o.try_map(*i).is_none()),
+        );
         let new_hop = Self::new(
             input,
             time_col,

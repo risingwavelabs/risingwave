@@ -148,7 +148,7 @@
         BatchHopWindow { time_col: $1 slide: 00:15:00 size: 00:30:00 output_indices: [0, 1, 2, 3] }
           BatchScan { table: t1, columns: [a, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [a, window_end, window_start(hidden), _row_id(hidden)], pk_columns: [_row_id, window_start] }
-      StreamProject { exprs: [$0, $4, $3, $2] }
+    StreamMaterialize { columns: [a, window_end, _row_id(hidden)], pk_columns: [_row_id, window_end] }
+      StreamProject { exprs: [$0, $4, $2] }
         StreamHopWindow { time_col: $1 slide: 00:15:00 size: 00:30:00 output_indices: [0, 1, 2, 3, 4] }
           StreamTableScan { table: t1, columns: [a, created_at, _row_id], pk_indices: [2] }

@@ -67,8 +67,8 @@
       LogicalHopWindow { time_col: $2 slide: 1 day 00:00:00 size: 3 days 00:00:00 output_indices: [0, 1, 2, 3, 4] }
         LogicalScan { table: t1, columns: [_row_id, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_end, window_start(hidden), _row_id(hidden)], pk_columns: [_row_id, window_start] }
-      StreamProject { exprs: [$0, $1, $4, $3, $2] }
+    StreamMaterialize { columns: [id, created_at, window_end, _row_id(hidden)], pk_columns: [_row_id, window_end] }
+      StreamProject { exprs: [$0, $1, $4, $2] }
         StreamHopWindow { time_col: $1 slide: 1 day 00:00:00 size: 3 days 00:00:00 output_indices: [0, 1, 2, 3, 4] }
           StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
 - sql: |
