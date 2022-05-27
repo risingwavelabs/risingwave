@@ -27,7 +27,7 @@ pub enum KinesisOffset {
     None,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct KinesisSplit {
     pub(crate) shard_id: String,
     pub(crate) start_position: KinesisOffset,
