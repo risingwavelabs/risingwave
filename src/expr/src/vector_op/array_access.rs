@@ -44,7 +44,8 @@ mod tests {
         ]);
         let l1 = ListRef::ValueRef { val: &v1 };
 
-        assert_eq!(array_access::<i32>(Some(l1), Some(1)), Ok(Some(1))); 
+        assert_eq!(array_access::<i32>(Some(l1), Some(1)), Ok(Some(1)));
+        assert_eq!(array_access::<i32>(Some(l1), Some(-1)), Ok(None));  
         assert_eq!(array_access::<i32>(Some(l1), Some(4)), Ok(None));  
     }
 
