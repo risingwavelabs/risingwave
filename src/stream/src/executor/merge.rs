@@ -18,7 +18,7 @@ use std::task::{Context, Poll};
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::{SinkExt, Stream, StreamExt};
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::for_await;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
@@ -116,7 +116,12 @@ impl MergeExecutor {
 #[async_trait]
 impl Executor for MergeExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
+        let upstreams = self.upstreams;
+        // Futures of all active upstreams.
+        let status = self.status;
+        let select_all = SelectReceivers::new(self.actor_id, status, upstreams);
+        // Channels that're blocked by the barrier to align.
+        select_all.boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -132,22 +137,23 @@ impl Executor for MergeExecutor {
     }
 }
 
-
 pub struct SelectReceivers {
     blocks: Vec<Receiver<Message>>,
     upstreams: Vec<Receiver<Message>>,
     barrier: Option<Barrier>,
     last_base: usize,
+    status: OperatorInfoStatus,
     actor_id: u32,
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, upstreams: Vec<Receiver<Message>>) -> Self {
+    fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Receiver<Message>>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
             upstreams,
             last_base: 0,
             actor_id,
+            status,
             barrier: None,
         }
     }
@@ -190,8 +196,10 @@ impl Stream for SelectReceivers {
                             poll_count = 0;
                         }
                         Message::Chunk(chunk) => {
+                            let message = Message::Chunk(chunk);
+                            self.status.next_message(&message);
                             self.last_base = (idx + 1) % self.upstreams.len();
-                            return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
+                            return Poll::Ready(Some(Ok(message)));
                         }
                     }
                 }
@@ -204,28 +212,14 @@ impl Stream for SelectReceivers {
                 if !barrier.is_to_stop_actor(self.actor_id) {
                     self.upstreams = std::mem::take(&mut self.blocks);
                 }
-                Poll::Ready(Some(Ok(Message::Barrier(barrier))))
+                let message = Message::Barrier(barrier);
+                self.status.next_message(&message);
+                Poll::Ready(Some(Ok(message)))
             } else {
                 Poll::Ready(None)
             }
         } else {
             Poll::Pending
-        }
-    }
-}
-
-impl MergeExecutor {
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
-        let upstreams = self.upstreams;
-
-        // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(self.actor_id, upstreams);
-        // Channels that're blocked by the barrier to align.
-        #[for_await]
-        for ret in select_all {
-            let message = ret?;
-            yield message;
         }
     }
 }
