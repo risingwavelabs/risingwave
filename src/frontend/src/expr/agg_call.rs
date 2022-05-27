@@ -103,6 +103,7 @@ impl AggCall {
 
             // SingleValue
             (AggKind::SingleValue, [input]) => input.clone(),
+            (AggKind::SingleValue, _) => return invalid(),
 
             // Others
             _ => return unsupported(),
