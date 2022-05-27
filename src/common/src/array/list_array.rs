@@ -19,7 +19,9 @@ use std::hash::{Hash, Hasher};
 
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
+use prost::Message;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
+use risingwave_pb::expr::ListValue as ProstListValue;
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, RowRef,
@@ -310,6 +312,22 @@ impl ListValue {
 
     pub fn values(&self) -> &[Datum] {
         &self.values
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        let value = ProstListValue {
+            fields: self
+                .values
+                .iter()
+                .map(|f| match f {
+                    None => {
+                        vec![]
+                    }
+                    Some(s) => s.to_protobuf(),
+                })
+                .collect_vec(),
+        };
+        value.encode_to_vec()
     }
 }
 
