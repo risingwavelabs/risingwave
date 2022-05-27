@@ -27,8 +27,9 @@ use risingwave_expr::vector_op::agg::{
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
 /// `SortAggExecutor` implements the sort aggregate algorithm, which assumes
@@ -38,26 +39,26 @@ use crate::task::BatchTaskContext;
 ///
 /// As a special case, simple aggregate without groups satisfies the requirement
 /// automatically because all tuples should be aggregated together.
-pub struct SortAggExecutor2 {
+pub struct SortAggExecutor {
     agg_states: Vec<BoxedAggState>,
     group_keys: Vec<BoxedExpression>,
     sorted_groupers: Vec<BoxedSortedGrouper>,
-    child: BoxedExecutor2,
+    child: BoxedExecutor,
     schema: Schema,
     identity: String,
     output_size_limit: usize, // make unit test easy
 }
 
-impl BoxedExecutor2Builder for SortAggExecutor2 {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for SortAggExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_child =
             source.plan_node().get_children().get(0).ok_or_else(|| {
                 ErrorCode::InternalError("SortAgg must have child node".to_string())
             })?;
-        let child = source.clone_for_plan(proto_child).build2()?;
+        let child = source.clone_for_plan(proto_child).build()?;
 
         let sort_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -100,7 +101,7 @@ impl BoxedExecutor2Builder for SortAggExecutor2 {
     }
 }
 
-impl Executor2 for SortAggExecutor2 {
+impl Executor for SortAggExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -114,12 +115,12 @@ impl Executor2 for SortAggExecutor2 {
     }
 }
 
-impl SortAggExecutor2 {
+impl SortAggExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let mut left_capacity = self.output_size_limit;
         let (mut group_builders, mut agg_builders) =
-            SortAggExecutor2::create_builders(&self.group_keys, &self.agg_states);
+            SortAggExecutor::create_builders(&self.group_keys, &self.agg_states);
 
         #[for_await]
         for child_chunk in self.child.execute() {
@@ -151,14 +152,14 @@ impl SortAggExecutor2 {
                 };
                 groups.set_limit(limit);
 
-                SortAggExecutor2::build_sorted_groups(
+                SortAggExecutor::build_sorted_groups(
                     &mut self.sorted_groupers,
                     &group_columns,
                     &mut group_builders,
                     &groups,
                 )?;
 
-                SortAggExecutor2::build_agg_states(
+                SortAggExecutor::build_agg_states(
                     &mut self.agg_states,
                     &child_chunk,
                     &mut agg_builders,
@@ -178,7 +179,7 @@ impl SortAggExecutor2 {
 
                     // reset builders and capactiy to build next output chunk
                     (group_builders, agg_builders) =
-                        SortAggExecutor2::create_builders(&self.group_keys, &self.agg_states);
+                        SortAggExecutor::create_builders(&self.group_keys, &self.agg_states);
 
                     left_capacity = self.output_size_limit;
                 }
@@ -348,7 +349,7 @@ mod tests {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        let executor = Box::new(SortAggExecutor2 {
+        let executor = Box::new(SortAggExecutor {
             agg_states,
             group_keys: group_exprs,
             sorted_groupers,
@@ -474,7 +475,7 @@ mod tests {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        let executor = Box::new(SortAggExecutor2 {
+        let executor = Box::new(SortAggExecutor {
             agg_states,
             group_keys: group_exprs,
             sorted_groupers,
@@ -573,7 +574,7 @@ mod tests {
             .chain(agg_states.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
-        let executor = Box::new(SortAggExecutor2 {
+        let executor = Box::new(SortAggExecutor {
             agg_states,
             group_keys: vec![],
             sorted_groupers: vec![],
@@ -686,7 +687,7 @@ mod tests {
             .collect::<Vec<Field>>();
 
         let output_size_limit = anchor.len();
-        let executor = Box::new(SortAggExecutor2 {
+        let executor = Box::new(SortAggExecutor {
             agg_states,
             group_keys: group_exprs,
             sorted_groupers,
@@ -814,7 +815,7 @@ mod tests {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        let executor = Box::new(SortAggExecutor2 {
+        let executor = Box::new(SortAggExecutor {
             agg_states,
             group_keys: group_exprs,
             sorted_groupers,

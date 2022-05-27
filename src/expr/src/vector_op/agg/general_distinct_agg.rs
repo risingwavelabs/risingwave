@@ -215,6 +215,8 @@ impl_aggregator! { DecimalArray, Decimal, I64Array, Int64 }
 impl_aggregator! { Utf8Array, Utf8, I64Array, Int64 }
 impl_aggregator! { BoolArray, Bool, I64Array, Int64 }
 impl_aggregator! { I64Array, Int64, DecimalArray, Decimal }
+impl_aggregator! { StructArray, Struct, StructArray, Struct }
+impl_aggregator! { ListArray, List, ListArray, List }
 
 #[cfg(test)]
 mod tests {

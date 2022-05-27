@@ -20,7 +20,7 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_source::SourceManagerRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::executor2::BatchMetrics;
+use crate::executor::BatchMetrics;
 use crate::task::{BatchEnvironment, TaskId, TaskOutput, TaskOutputId};
 
 /// Context for batch task execution.

@@ -26,12 +26,13 @@ use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::expr::expr_node;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
 use crate::task::BatchTaskContext;
 
-pub struct HopWindowExecutor2 {
-    child: BoxedExecutor2,
+pub struct HopWindowExecutor {
+    child: BoxedExecutor,
     identity: String,
     schema: Schema,
     time_col_idx: usize,
@@ -39,10 +40,10 @@ pub struct HopWindowExecutor2 {
     window_size: IntervalUnit,
 }
 
-impl BoxedExecutor2Builder for HopWindowExecutor2 {
-    fn new_boxed_executor2<C: BatchTaskContext>(
+impl BoxedExecutorBuilder for HopWindowExecutor {
+    fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
+    ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
         let hop_window_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -52,7 +53,7 @@ impl BoxedExecutor2Builder for HopWindowExecutor2 {
         let window_slide = hop_window_node.get_window_slide()?.into();
         let window_size = hop_window_node.get_window_size()?.into();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build2()?;
+            let child = source.clone_for_plan(child_plan).build()?;
             let schema = child
                 .schema()
                 .clone()
@@ -63,7 +64,7 @@ impl BoxedExecutor2Builder for HopWindowExecutor2 {
                     Field::with_name(DataType::Timestamp, "window_end"),
                 ])
                 .collect();
-            return Ok(Box::new(HopWindowExecutor2::new(
+            return Ok(Box::new(HopWindowExecutor::new(
                 child,
                 schema,
                 time_col,
@@ -76,9 +77,9 @@ impl BoxedExecutor2Builder for HopWindowExecutor2 {
     }
 }
 
-impl HopWindowExecutor2 {
+impl HopWindowExecutor {
     fn new(
-        child: BoxedExecutor2,
+        child: BoxedExecutor,
         schema: Schema,
         time_col_idx: usize,
         window_slide: IntervalUnit,
@@ -96,7 +97,7 @@ impl HopWindowExecutor2 {
     }
 }
 
-impl Executor2 for HopWindowExecutor2 {
+impl Executor for HopWindowExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -110,7 +111,7 @@ impl Executor2 for HopWindowExecutor2 {
     }
 }
 
-impl HopWindowExecutor2 {
+impl HopWindowExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let Self {
@@ -265,7 +266,7 @@ mod tests {
 
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
-        let executor = Box::new(HopWindowExecutor2::new(
+        let executor = Box::new(HopWindowExecutor::new(
             Box::new(mock_executor),
             schema,
             2,
