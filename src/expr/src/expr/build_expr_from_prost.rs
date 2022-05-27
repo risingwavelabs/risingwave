@@ -210,6 +210,10 @@ pub fn build_translate_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_translate_expr(s, match_str, replace_str, ret_type))
 }
 
+pub fn build_split_part_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    todo!()
+}
+
 #[cfg(test)]
 mod tests {
     use std::vec;

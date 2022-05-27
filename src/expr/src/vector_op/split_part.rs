@@ -1,0 +1,98 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use risingwave_common::array::{BytesGuard, BytesWriter};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+
+#[inline(always)]
+pub fn split_part(
+    string_expr: &str,
+    delimiter_expr: &str,
+    nth_expr: i32,
+    writer: BytesWriter,
+) -> Result<BytesGuard> {
+    let mut split = string_expr.split(delimiter_expr);
+    let nth_val = match nth_expr.cmp(&0) {
+        std::cmp::Ordering::Equal => {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                "field position must not be zero".into(),
+            )));
+        }
+        std::cmp::Ordering::Greater => split.nth(nth_expr as usize - 1).unwrap_or_default(),
+        std::cmp::Ordering::Less => {
+            let split = split.collect::<Vec<_>>();
+            let nth_expr = (split.len() as i32 + nth_expr) as usize;
+            split
+                .get(nth_expr)
+                .map_or(Default::default(), <&str>::clone)
+        }
+    };
+
+    let mut writer = writer.begin();
+    writer.write_ref(nth_val).unwrap();
+    Ok(writer.finish().unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
+    use risingwave_common::error::Result;
+
+    use super::split_part;
+
+    #[test]
+    fn test_split_part() {
+        let cases: Vec<(&str, &str, i32, Result<&str>)> = vec![
+            ("", "@", 1, Ok("")),
+            ("", "@", -1, Ok("")),
+            ("joeuser@mydatabase", "", 1, Ok("joeuser@mydatabase")),
+            ("joeuser@mydatabase", "", 2, Ok("")),
+            ("joeuser@mydatabase", "", -1, Ok("joeuser@mydatabase")),
+            ("joeuser@mydatabase", "", -2, Ok("")),
+            ("joeuser@mydatabase", "@", 0, Ok("an error")),
+            ("joeuser@mydatabase", "@@", 1, Ok("joeuser@mydatabase")),
+            ("joeuser@mydatabase", "@@", 2, Ok("")),
+            ("joeuser@mydatabase", "@", 1, Ok("joeuser")),
+            ("joeuser@mydatabase", "@", 2, Ok("mydatabase")),
+            ("joeuser@mydatabase", "@", 3, Ok("")),
+            ("@joeuser@mydatabase@", "@", 2, Ok("joeuser")),
+            ("joeuser@mydatabase", "@", -1, Ok("mydatabase")),
+            ("joeuser@mydatabase", "@", -2, Ok("joeuser")),
+            ("joeuser@mydatabase", "@", -3, Ok("")),
+            ("@joeuser@mydatabase@", "@", -2, Ok("mydatabase")),
+        ];
+
+        for (i, (string_expr, delimiter_expr, nth_expr, expected)) in cases.iter().enumerate() {
+            let builder = Utf8ArrayBuilder::new(1).unwrap();
+            let writer = builder.writer();
+            let actual = split_part(string_expr, delimiter_expr, *nth_expr, writer);
+
+            match actual {
+                Ok(guard) => {
+                    let expected = expected.clone().unwrap();
+
+                    let array = guard.into_inner().finish().unwrap();
+                    let actual = array.value_at(0).clone().unwrap();
+
+                    assert_eq!(expected, actual, "at case {i}")
+                }
+                Err(err) => {
+                    let expected = expected.clone();
+                    let actual = Err(err);
+                    assert_eq!(expected, actual, "at case {i}")
+                }
+            };
+        }
+    }
+}
