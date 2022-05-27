@@ -16,7 +16,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins,
+    BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
 };
 
 use crate::binder::{Binder, Relation};
@@ -110,38 +110,25 @@ impl Binder {
             JoinConstraint::Using(columns) => {
                 let table_factor = table_factor.unwrap();
                 let right_table = get_table_name(&table_factor);
-                let mut columns_iter = columns.into_iter();
-                let first_column = columns_iter.next().unwrap();
-                let column_index = self.context.get_index(&first_column.value)?;
-                let mut left_table = self.context.columns[column_index].table_name.clone();
-                let mut binary_expr = Expr::BinaryOp {
-                    left: Box::new(Expr::CompoundIdentifier(vec![
-                        Ident::new(left_table.clone()),
-                        first_column.clone(),
-                    ])),
-                    op: BinaryOperator::Eq,
-                    right: Box::new(Expr::CompoundIdentifier(vec![
-                        right_table.clone().unwrap(),
-                        first_column,
-                    ])),
-                };
-                for column in columns_iter {
-                    left_table = self.context.columns[self.context.get_index(&column.value)?]
+                let mut binary_expr = Expr::Value(Value::Boolean(true));
+                for column in columns {
+                    let left_table = self.context.columns[self.context.get_index(&column.value)?]
                         .table_name
                         .clone();
                     binary_expr = Expr::BinaryOp {
                         left: Box::new(binary_expr),
-                        op: BinaryOperator::Eq,
+                        op: BinaryOperator::And,
                         right: Box::new(Expr::BinaryOp {
                             left: Box::new(Expr::CompoundIdentifier(vec![
                                 Ident::new(left_table.clone()),
                                 column.clone(),
                             ])),
-                            op: BinaryOperator::And,
-                            right: Box::new(Expr::CompoundIdentifier(vec![
-                                right_table.clone().unwrap(),
-                                column.clone(),
-                            ])),
+                            op: BinaryOperator::Eq,
+                            right: Box::new(Expr::CompoundIdentifier({
+                                let mut right_table_clone = right_table.clone().unwrap();
+                                right_table_clone.push(column.clone());
+                                right_table_clone
+                            })),
                         }),
                     }
                 }
@@ -153,15 +140,21 @@ impl Binder {
     }
 }
 
-fn get_table_name(table_factor: &TableFactor) -> Option<Ident> {
+fn get_table_name(table_factor: &TableFactor) -> Option<Vec<Ident>> {
     match table_factor {
-        TableFactor::Table { name, .. } => Some(name.0[0].clone()),
-        TableFactor::Derived { alias, .. } => {
-            alias.as_ref().map(|table_alias| table_alias.name.clone())
+        TableFactor::Table { name, alias, .. } => {
+            if let Some(table_alias) = alias {
+                Some(vec![table_alias.name.clone()])
+            } else {
+                Some(name.0.clone())
+            }
         }
-        TableFactor::TableFunction { expr: _, alias } => {
-            alias.as_ref().map(|table_alias| table_alias.name.clone())
-        }
+        TableFactor::Derived { alias, .. } => alias
+            .as_ref()
+            .map(|table_alias| vec![table_alias.name.clone()]),
+        TableFactor::TableFunction { expr: _, alias } => alias
+            .as_ref()
+            .map(|table_alias| vec![table_alias.name.clone()]),
         TableFactor::NestedJoin(table_with_joins) => get_table_name(&table_with_joins.relation),
     }
 }
