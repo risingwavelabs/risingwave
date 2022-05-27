@@ -103,16 +103,15 @@ impl TaskOutputId {
     }
 }
 
-pub struct TaskOutput<C> {
+pub struct TaskOutput {
     receiver: ChanReceiverImpl,
     output_id: TaskOutputId,
-    context: C,
+    failure: Arc<Mutex<Option<RwError>>>,
 }
 
-impl<C: BatchTaskContext> TaskOutput<C> {
+impl TaskOutput {
     /// Writes the data in serialized format to `ExchangeWriter`.
     pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
-        let task_id = self.output_id.task_id.clone();
         loop {
             match self.receiver.recv().await {
                 // Received some data
@@ -136,7 +135,7 @@ impl<C: BatchTaskContext> TaskOutput<C> {
                 }
                 // Error happened
                 Err(e) => {
-                    let possible_err = self.context.try_get_error(&task_id)?;
+                    let possible_err = self.failure.lock().clone();
                     return if let Some(err) = possible_err {
                         // Task error
                         Err(err)
@@ -154,9 +153,7 @@ impl<C: BatchTaskContext> TaskOutput<C> {
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
         self.receiver.recv().await
     }
-}
 
-impl<C> TaskOutput<C> {
     pub fn id(&self) -> &TaskOutputId {
         &self.output_id
     }
@@ -325,7 +322,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         })
     }
 
-    pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput<C>> {
+    pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         let receiver = self.receivers.lock()[output_id.get_output_id() as usize]
             .take()
@@ -339,7 +336,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let task_output = TaskOutput {
             receiver,
             output_id: output_id.try_into()?,
-            context: self.context.clone(),
+            failure: self.failure.clone(),
         };
         Ok(task_output)
     }
