@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
 
@@ -296,7 +297,12 @@ impl StateStore for HummockStorage {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        epoch: u64,
+        _vnode: Option<VirtualNode>,
+    ) -> Self::GetFuture<'_> {
         async move { self.get_with_vnode_set(key, epoch, None).await }
     }
 
@@ -305,12 +311,18 @@ impl StateStore for HummockStorage {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
+        vnodes: Vec<VirtualNode>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move { self.iter(key_range, epoch).await?.collect(limit).await }
+        async move {
+            self.iter(key_range, epoch, vnodes)
+                .await?
+                .collect(limit)
+                .await
+        }
     }
 
     fn backward_scan<R, B>(
@@ -318,13 +330,14 @@ impl StateStore for HummockStorage {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
+        vnodes: Vec<VirtualNode>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.backward_iter(key_range, epoch)
+            self.backward_iter(key_range, epoch, vnodes)
                 .await?
                 .collect(limit)
                 .await
@@ -371,7 +384,12 @@ impl StateStore for HummockStorage {
 
     /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(
+        &self,
+        key_range: R,
+        epoch: u64,
+        _vnodes: Vec<VirtualNode>,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -381,7 +399,12 @@ impl StateStore for HummockStorage {
 
     /// Returns a backward iterator that scans from the end key to the begin key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(
+        &self,
+        key_range: R,
+        epoch: u64,
+        _vnodes: Vec<VirtualNode>,
+    ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,

@@ -16,6 +16,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::error::StorageResult;
@@ -78,7 +79,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_>;
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        epoch: u64,
+        vnode: Option<VirtualNode>,
+    ) -> Self::GetFuture<'_>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -90,6 +96,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
+        vnodes: Vec<VirtualNode>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -100,6 +107,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
+        vnodes: Vec<VirtualNode>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -130,7 +138,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Opens and returns an iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.
-    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(
+        &self,
+        key_range: R,
+        epoch: u64,
+        vnodes: Vec<VirtualNode>,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
@@ -138,7 +151,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Opens and returns a backward iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
-    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(
+        &self,
+        key_range: R,
+        epoch: u64,
+        vnodes: Vec<VirtualNode>,
+    ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;

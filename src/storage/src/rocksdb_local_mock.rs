@@ -19,6 +19,7 @@ use std::ops::RangeBounds;
 
 use bytes::Bytes;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::hash::VirtualNode;
 
 use super::{StateStore, StateStoreIter};
 use crate::define_state_store_associated_type;
@@ -39,7 +40,12 @@ impl StateStore for RocksDBStateStore {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, _key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
+    fn get<'a>(
+        &'a self,
+        _key: &'a [u8],
+        _epoch: u64,
+        _vnode: Option<VirtualNode>,
+    ) -> Self::GetFuture<'_> {
         async move { unimplemented!() }
     }
 
@@ -48,6 +54,7 @@ impl StateStore for RocksDBStateStore {
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
+        _vnodes: Vec<VirtualNode>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -61,6 +68,7 @@ impl StateStore for RocksDBStateStore {
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
+        _vnodes: Vec<VirtualNode>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -85,7 +93,12 @@ impl StateStore for RocksDBStateStore {
         async move { unimplemented!() }
     }
 
-    fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(
+        &self,
+        _key_range: R,
+        _epoch: u64,
+        _vnodes: Vec<VirtualNode>,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -93,7 +106,12 @@ impl StateStore for RocksDBStateStore {
         async move { unimplemented!() }
     }
 
-    fn backward_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(
+        &self,
+        _key_range: R,
+        _epoch: u64,
+        _vnodes: Vec<VirtualNode>,
+    ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,

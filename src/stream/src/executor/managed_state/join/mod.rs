@@ -218,7 +218,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             Some(_) => Ok(self.inner.get_mut(key)),
             None => {
                 let keyspace = self.get_state_keyspace(key)?;
-                let all_data = keyspace.scan(None, self.current_epoch).await.unwrap();
+                let all_data = keyspace
+                    .scan(None, self.current_epoch, vec![])
+                    .await
+                    .unwrap();
                 let total_count = all_data.len();
                 if total_count > 0 {
                     let state = JoinEntryState::new(

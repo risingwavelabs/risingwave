@@ -100,7 +100,7 @@ impl Operations {
                 let mut sizes: Vec<usize> = vec![];
                 for key in keys {
                     let start = Instant::now();
-                    let val_size = match store.get(&key, u64::MAX).await.unwrap() {
+                    let val_size = match store.get(&key, u64::MAX, None).await.unwrap() {
                         Some(v) => v.len(),
                         None => 0,
                     };

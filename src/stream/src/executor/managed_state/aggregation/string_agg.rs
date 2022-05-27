@@ -114,7 +114,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         // storage.
         assert!(!self.is_dirty());
         // Read all.
-        let all_data = self.keyspace.scan(None, epoch).await?;
+        let all_data = self.keyspace.scan(None, epoch, vec![]).await?;
         for (raw_key, mut raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
             let value = deserialize_cell(&mut raw_value, &DataType::Varchar)?.unwrap();

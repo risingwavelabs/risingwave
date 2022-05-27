@@ -411,7 +411,7 @@ impl<S: StateStore> LookupExecutor<S> {
         tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}, {:?}", lookup_row, bytes::Bytes::copy_from_slice(&key_prefix));
 
         let arrange_keyspace = self.arrangement.keyspace.append(key_prefix);
-        let all_cells = arrange_keyspace.scan(None, lookup_epoch).await?;
+        let all_cells = arrange_keyspace.scan(None, lookup_epoch, vec![]).await?;
 
         let mut all_rows = vec![];
 

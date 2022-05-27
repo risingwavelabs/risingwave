@@ -16,6 +16,7 @@ use std::future::Future;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::next_key;
 
 use crate::error::StorageResult;
@@ -100,7 +101,7 @@ impl<S: StateStore> Keyspace<S> {
     /// Treats the keyspace as a single key, and gets its value.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
     pub async fn value(&self, epoch: u64) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefix, epoch).await
+        self.store.get(&self.prefix, epoch, None).await
     }
 
     /// Concatenates this keyspace and the given key to produce a prefixed key.
@@ -110,8 +111,13 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Gets from the keyspace with the `prefixed_key` of given key.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
-    pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefixed_key(key), epoch).await
+    pub async fn get(
+        &self,
+        key: impl AsRef<[u8]>,
+        epoch: u64,
+        vnode: Option<VirtualNode>,
+    ) -> StorageResult<Option<Bytes>> {
+        self.store.get(&self.prefixed_key(key), epoch, vnode).await
     }
 
     /// Scans `limit` keys from the keyspace using an inclusive `start_key` and get their values. If
@@ -123,10 +129,11 @@ impl<S: StateStore> Keyspace<S> {
         start_key: Vec<u8>,
         limit: Option<usize>,
         epoch: u64,
+        vnodes: Vec<VirtualNode>,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
         let start_key_with_prefix = [self.prefix.as_slice(), start_key.as_slice()].concat();
         let range = start_key_with_prefix..next_key(self.prefix.as_slice());
-        let mut pairs = self.store.scan(range, limit, epoch).await?;
+        let mut pairs = self.store.scan(range, limit, epoch, vnodes).await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -140,9 +147,10 @@ impl<S: StateStore> Keyspace<S> {
         &self,
         limit: Option<usize>,
         epoch: u64,
+        vnodes: Vec<VirtualNode>,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
-        let mut pairs = self.store.scan(range, limit, epoch).await?;
+        let mut pairs = self.store.scan(range, limit, epoch, vnodes).await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -151,13 +159,17 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Gets an iterator with the prefix of this keyspace.
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    async fn iter_inner(&'_ self, epoch: u64) -> StorageResult<S::Iter> {
+    async fn iter_inner(&'_ self, epoch: u64, vnodes: Vec<VirtualNode>) -> StorageResult<S::Iter> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
-        self.store.iter(range, epoch).await
+        self.store.iter(range, epoch, vnodes).await
     }
 
-    pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
-        let iter = self.iter_inner(epoch).await?;
+    pub async fn iter(
+        &self,
+        epoch: u64,
+        vnodes: Vec<VirtualNode>,
+    ) -> StorageResult<StripPrefixIterator<S::Iter>> {
+        let iter = self.iter_inner(epoch, vnodes).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),

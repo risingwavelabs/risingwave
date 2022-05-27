@@ -141,14 +141,14 @@ mod tests {
         state.delete(Row(vec![Some(2_i32.into())]));
 
         state.flush(epoch).await.unwrap();
-        let data = keyspace.scan(None, epoch).await.unwrap();
+        let data = keyspace.scan(None, epoch, vec![]).await.unwrap();
         // cell-based storage has 6 cells
         assert_eq!(data.len(), 6);
 
         epoch += 1;
         state.delete(Row(vec![Some(3_i32.into())]));
         state.flush(epoch).await.unwrap();
-        let data = keyspace.scan(None, epoch).await.unwrap();
+        let data = keyspace.scan(None, epoch, vec![]).await.unwrap();
         assert_eq!(data.len(), 3);
     }
 }

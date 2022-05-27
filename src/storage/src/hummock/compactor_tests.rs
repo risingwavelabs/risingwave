@@ -150,7 +150,7 @@ mod tests {
         storage
             .local_version_manager()
             .try_update_pinned_version(version);
-        let get_val = storage.get(&key, epoch).await.unwrap().unwrap();
+        let get_val = storage.get(&key, epoch, None).await.unwrap().unwrap();
         assert_eq!(get_val, val);
 
         // 6. get compact task and there should be none

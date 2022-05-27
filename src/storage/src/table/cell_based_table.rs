@@ -133,6 +133,16 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // get row by state_store get
         // TODO: use multi-get for cell_based get_row
+        let vnode = self
+            .dist_key_indices
+            .as_ref()
+            .map(|indices| {
+                let hash_builder = CRC32FastBuilder {};
+                pk.hash_by_indices(indices, &hash_builder)
+                    .unwrap()
+                    .to_vnode()
+            })
+            .unwrap_or_default();
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let serialized_pk = &serialize_pk(pk, pk_serializer).map_err(err)?[..];
         let sentinel_key = [
@@ -141,7 +151,7 @@ impl<S: StateStore> CellBasedTable<S> {
         ]
         .concat();
         let mut get_res = Vec::new();
-        let sentinel_cell = self.keyspace.get(&sentinel_key, epoch).await?;
+        let sentinel_cell = self.keyspace.get(&sentinel_key, epoch, Some(vnode)).await?;
 
         if sentinel_cell.is_none() {
             // if sentinel cell is none, this row doesn't exist
@@ -151,7 +161,7 @@ impl<S: StateStore> CellBasedTable<S> {
         }
         for column_id in &self.column_ids {
             let key = [serialized_pk, &serialize_column_id(column_id).map_err(err)?].concat();
-            let state_store_get_res = self.keyspace.get(&key, epoch).await?;
+            let state_store_get_res = self.keyspace.get(&key, epoch, Some(vnode)).await?;
             if let Some(state_store_get_res) = state_store_get_res {
                 get_res.push((key, state_store_get_res));
             }
@@ -170,6 +180,16 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // get row by state_store scan
+        let vnode = self
+            .dist_key_indices
+            .as_ref()
+            .map(|indices| {
+                let hash_builder = CRC32FastBuilder {};
+                pk.hash_by_indices(indices, &hash_builder)
+                    .unwrap()
+                    .to_vnode()
+            })
+            .unwrap_or_default();
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let start_key = self
             .keyspace
@@ -179,7 +199,7 @@ impl<S: StateStore> CellBasedTable<S> {
         let state_store_range_scan_res = self
             .keyspace
             .state_store()
-            .scan(start_key..end_key, None, epoch)
+            .scan(start_key..end_key, None, epoch, vec![vnode])
             .await?;
         let mut cell_based_row_deserializer =
             CellBasedRowDeserializer::new(self.column_descs.clone());
@@ -365,16 +385,23 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
     async fn consume_more(&mut self) -> StorageResult<()> {
         assert_eq!(self.next_idx, self.buf.len());
 
+        // TODO(Yuanxin): pass vnodes
         if self.buf.is_empty() {
             self.buf = self
                 .keyspace
-                .scan(Some(Self::SCAN_LIMIT), self.epoch)
+                .scan(Some(Self::SCAN_LIMIT), self.epoch, Default::default())
                 .await?;
         } else {
             let last_key = self.buf.last().unwrap().0.clone();
+            // TODO(Yuanxin): pass vnodes
             let buf = self
                 .keyspace
-                .scan_with_start_key(last_key.to_vec(), Some(Self::SCAN_LIMIT), self.epoch)
+                .scan_with_start_key(
+                    last_key.to_vec(),
+                    Some(Self::SCAN_LIMIT),
+                    self.epoch,
+                    Default::default(),
+                )
                 .await?;
             assert!(!buf.is_empty());
             assert_eq!(buf.first().as_ref().unwrap().0, last_key);
@@ -494,7 +521,8 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         epoch: u64,
     ) -> StorageResult<Self> {
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
-        let iter = keyspace.iter(epoch).await?;
+        // TODO(Yuanxin): pass vnodes
+        let iter = keyspace.iter(epoch, Default::default()).await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,
