@@ -112,7 +112,6 @@ impl ManagedValueState {
 
         // Persist value into relational table.
         let v = self.state.get_output()?;
-        // TODO(Yuanxin): Implement value meta
         state_table.insert(
             self.pk.as_ref().cloned().unwrap_or(Row(vec![])),
             Row(vec![v]),
