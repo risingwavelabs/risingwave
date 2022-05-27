@@ -52,9 +52,7 @@ pub fn split_part(
         }
     };
 
-    let mut writer = writer.begin();
-    writer.write_ref(nth_val).unwrap();
-    Ok(writer.finish().unwrap())
+    writer.write_ref(nth_val)
 }
 
 #[cfg(test)]
