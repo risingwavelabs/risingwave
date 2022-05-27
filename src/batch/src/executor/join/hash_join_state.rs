@@ -1027,7 +1027,7 @@ impl<K: HashKey> ProbeTable<K> {
             .map(|array| Column::new(Arc::new(array)))
             .collect_vec();
 
-        let data_chunk = DataChunk::try_from(new_columns)?;
+        let data_chunk = DataChunk::new(new_columns, None);
 
         Ok(data_chunk)
     }
