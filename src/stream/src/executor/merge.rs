@@ -18,6 +18,7 @@ use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
+use madsim::rand::prelude::SliceRandom;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
@@ -86,6 +87,9 @@ pub struct MergeExecutor {
     actor_id: u32,
 
     info: ExecutorInfo,
+
+    /// Actor operator context
+    status: OperatorInfoStatus,
 }
 
 impl MergeExecutor {
@@ -94,6 +98,8 @@ impl MergeExecutor {
         pk_indices: PkIndices,
         actor_id: u32,
         inputs: Vec<Receiver<Message>>,
+        actor_context: ActorContextRef,
+        receiver_id: u64,
     ) -> Self {
         Self {
             upstreams: inputs,
@@ -103,6 +109,7 @@ impl MergeExecutor {
                 pk_indices,
                 identity: "MergeExecutor".to_string(),
             },
+            status: OperatorInfoStatus::new(actor_context, receiver_id),
         }
     }
 }
@@ -128,8 +135,11 @@ impl Executor for MergeExecutor {
 
 impl MergeExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         let mut upstreams = self.upstreams;
+
+        use madsim::rand::SeedableRng;
+        let mut rng = madsim::rand::rngs::StdRng::from_entropy();
 
         loop {
             // Futures of all active upstreams.
@@ -144,6 +154,7 @@ impl MergeExecutor {
 
             // 1. Align the barriers.
             while !active.is_empty() {
+                active.shuffle(&mut rng);
                 // Poll upstreams and get a message from the ready one.
                 let ((message, from), _id, remainings) = select_all(active)
                     .instrument(tracing::trace_span!("idle"))
@@ -160,6 +171,7 @@ impl MergeExecutor {
                     Message::Chunk(_) => {
                         // We may still receive message from this channel.
                         active.push(from.into_future());
+                        self.status.next_message(&message);
                         yield message;
                     }
                     Message::Barrier(barrier) => {
@@ -184,7 +196,9 @@ impl MergeExecutor {
             // 2. Yield the barrier to downstream once all barriers collected from upstream.
             let barrier = current_barrier.unwrap();
             let to_stop = barrier.is_to_stop_actor(self.actor_id);
-            yield Message::Barrier(barrier);
+            let message = Message::Barrier(barrier);
+            self.status.next_message(&message);
+            yield message;
 
             // 3. Put back the upstreams, or close the stream.
             if to_stop {
@@ -240,7 +254,8 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::new(Schema::default(), vec![], 0, rxs);
+        let merger =
+            MergeExecutor::new(Schema::default(), vec![], 0, rxs, ActorContext::create(), 0);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
