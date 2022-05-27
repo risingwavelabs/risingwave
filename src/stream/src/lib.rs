@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(rustdoc::private_intra_doc_links)]
+#![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(backtrace)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]

@@ -54,7 +54,7 @@ jobs:
       - name: Run rust doc check
         run: |
           cargo test --doc
-      
+
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info -- --no-fail-fast

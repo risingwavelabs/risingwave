@@ -23,7 +23,7 @@ use super::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{align_types, Expr as _, ExprImpl, Literal};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundValues {
     pub rows: Vec<Vec<ExprImpl>>,
     pub schema: Schema,

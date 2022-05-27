@@ -26,7 +26,7 @@ use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use crate::base::{SourceMessage, SplitReader};
 use crate::kafka::split::KafkaSplit;
 use crate::kafka::KafkaProperties;
-use crate::{Column, ConnectorStateV2, SplitImpl};
+use crate::{Column, ConnectorState, SplitImpl};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -41,7 +41,7 @@ impl SplitReader for KafkaSplitReader {
 
     async fn new(
         properties: KafkaProperties,
-        state: ConnectorStateV2,
+        state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self>
     where
@@ -75,7 +75,7 @@ impl SplitReader for KafkaSplitReader {
             .create_with_context(DefaultConsumerContext)
             .map_err(|e| anyhow!("consumer creation failed {}", e))?;
 
-        if let ConnectorStateV2::Splits(splits) = state {
+        if let Some(splits) = state {
             log::debug!("Splits for kafka found! {:?}", splits);
             let mut tpl = TopicPartitionList::with_capacity(splits.len());
 

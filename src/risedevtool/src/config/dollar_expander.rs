@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use regex::Regex;
 use yaml_rust::Yaml;
@@ -19,6 +21,7 @@ use yaml_rust::Yaml;
 /// Expands `x-${port}` to `x-2333`.
 pub struct DollarExpander {
     re: Regex,
+    extra_info: HashMap<String, String>,
 }
 
 fn yaml_to_string(y: &Yaml) -> Result<String> {
@@ -30,9 +33,10 @@ fn yaml_to_string(y: &Yaml) -> Result<String> {
 }
 
 impl DollarExpander {
-    pub fn new() -> Self {
+    pub fn new(extra_info: HashMap<String, String>) -> Self {
         Self {
             re: Regex::new(r"\$\{(.*?)\}").unwrap(),
+            extra_info,
         }
     }
 
@@ -47,10 +51,13 @@ impl DollarExpander {
                         for cap in self.re.captures_iter(v) {
                             let cap = cap.get(1).unwrap();
                             let name = cap.as_str();
-                            let value = yaml_to_string(
-                                y.get(&Yaml::String(name.to_string()))
-                                    .ok_or_else(|| anyhow!("{} not found in {:?}", name, y))?,
-                            )?;
+                            let value = if let Some(item) = y.get(&Yaml::String(name.to_string())) {
+                                yaml_to_string(item)?
+                            } else if let Some(item) = self.extra_info.get(name) {
+                                item.clone()
+                            } else {
+                                return Err(anyhow!("{} not found in {:?}", name, y));
+                            };
                             target += &v[last_location..(cap.start() - 2)]; // ignore `${`
                             target += &value;
                             last_location = cap.end() + 1; // ignore `}`
@@ -88,7 +95,7 @@ mod tests {
 a:
   b:
     c:
-      d: \"${x}${y}\"
+      d: \"${x}${y},${test:key}\"
       x: 2333
       y: 2334
     ",
@@ -100,14 +107,18 @@ a:
   a:
     b:
       c:
-        d: \"23332334\"
+        d: \"23332334,value\"
         x: 2333
         y: 2334
       ",
         )
         .unwrap()
         .remove(0);
-        let mut visitor = DollarExpander::new();
+        let mut visitor = DollarExpander::new(
+            vec![("test:key".to_string(), "value".to_string())]
+                .into_iter()
+                .collect(),
+        );
 
         assert_eq!(visitor.visit(yaml).unwrap(), yaml_result);
     }

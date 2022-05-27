@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::array::{
-    Array, BoolArray, DecimalArray, I32Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray,
-    Utf8Array,
+    Array, BoolArray, DecimalArray, I32Array, IntervalArray, ListArray, NaiveDateArray,
+    NaiveDateTimeArray, StructArray, Utf8Array,
 };
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
@@ -31,11 +29,6 @@ use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
 use crate::vector_op::tumble::{tumble_start_date, tumble_start_date_time};
-
-/// A placeholder function that returns bool in [`gen_binary_expr_atm`]
-pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
-    Err(InternalError("The function is not supported".to_string()).into())
-}
 
 /// This macro helps create arithmetic expression.
 /// It receive all the combinations of `gen_binary_expr` and generate corresponding match cases
@@ -118,11 +111,30 @@ macro_rules! gen_cmp_impl {
 /// * `general_f`: generic cmp function (require a common ``TryInto`` type for two input).
 /// * `str_f`: cmp function between str
 macro_rules! gen_binary_expr_cmp {
-    ($macro:ident, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
+    ($macro:ident, $general_f:ident, $op:ident, $l:expr, $r:expr, $ret:expr) => {
         match ($l.return_type(), $r.return_type()) {
             (DataType::Varchar, DataType::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
-                    $l, $r, $ret, $str_f,
+                    $l,
+                    $r,
+                    $ret,
+                    gen_str_cmp($op),
+                ))
+            }
+            (DataType::Struct { fields: _ }, DataType::Struct { fields: _ }) => Box::new(
+                BinaryExpression::<StructArray, StructArray, BoolArray, _>::new(
+                    $l,
+                    $r,
+                    $ret,
+                    gen_struct_cmp($op),
+                ),
+            ),
+            (DataType::List { datatype: _ }, DataType::List { datatype: _ }) => {
+                Box::new(BinaryExpression::<ListArray, ListArray, BoolArray, _>::new(
+                    $l,
+                    $r,
+                    $ret,
+                    gen_list_cmp($op),
                 ))
             }
             _ => {
@@ -223,25 +235,24 @@ pub fn new_binary_expr(
     r: BoxedExpression,
 ) -> BoxedExpression {
     use crate::expr::data_types::*;
-
     match expr_type {
         Type::Equal => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, str_eq, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, EQ, l, r, ret}
         }
         Type::NotEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, str_ne, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, NE, l, r, ret}
         }
         Type::LessThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, str_lt, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, LT, l, r, ret}
         }
         Type::GreaterThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, str_gt, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, GT, l, r, ret}
         }
         Type::GreaterThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, str_ge, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, GE, l, r, ret}
         }
         Type::LessThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_le, str_le, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_le, LE, l, r, ret}
         }
         Type::Add => {
             gen_binary_expr_atm! {

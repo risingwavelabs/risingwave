@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     create table t(a int, b int);
     select
@@ -13,8 +15,8 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$1, $0] }
         BatchHashAgg { group_keys: [$0], aggs: [max($1)] }
-          BatchProject { exprs: [$0, $2] }
-            BatchExchange { order: [], dist: HashShard([0]) }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [$0, $2] }
               BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
                 BatchExchange { order: [], dist: HashShard([0, 1]) }
                   BatchScan { table: t, columns: [a, b] }
@@ -22,8 +24,32 @@
     StreamMaterialize { columns: [max_num, a], pk_columns: [a] }
       StreamProject { exprs: [$2, $0] }
         StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
-          StreamProject { exprs: [$0, $3, $1] }
-            StreamExchange { dist: HashShard([0]) }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [$0, $3, $1] }
               StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
                 StreamExchange { dist: HashShard([0, 1]) }
                   StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }
+- sql: |
+    create table t(a int, b int);
+    select
+      max(a) as max_a
+    from (
+      select
+        a, a + b as ab
+      from t
+    )
+    group by ab;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$1] }
+        BatchHashAgg { group_keys: [$0], aggs: [max($1)] }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [($0 + $1), $0] }
+              BatchScan { table: t, columns: [a, b] }
+  stream_plan: |
+    StreamMaterialize { columns: [max_a, expr#0(hidden)], pk_columns: [expr#0] }
+      StreamProject { exprs: [$2, $0] }
+        StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [($0 + $1), $0, $2] }
+              StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }

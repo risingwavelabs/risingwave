@@ -12,21 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::{TryFrom, TryInto};
-use std::io::Cursor;
-use std::str::FromStr;
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 use prost::DecodeError;
-use risingwave_common::array::{
-    read_interval_unit, Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, Row,
-};
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, Row};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, Datum, Decimal, IntervalUnit, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
 use risingwave_common::{ensure, for_all_variants};
-use risingwave_pb::data::data_type::IntervalType::*;
-use risingwave_pb::data::data_type::{IntervalType, TypeName};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -114,35 +107,6 @@ fn literal_type_match(return_type: &DataType, literal: Option<&ScalarImpl>) -> b
     }
 }
 
-fn make_interval(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
-    // TODO: remove IntervalType later.
-    match ty {
-        // the unit is months
-        Year | YearToMonth | Month => {
-            let bytes = bytes.try_into().map_err(|e| {
-                InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
-            })?;
-            let mouths = i32::from_be_bytes(bytes);
-            Ok(IntervalUnit::from_month(mouths))
-        }
-        // the unit is ms
-        Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
-        | Minute | MinuteToSecond | Second => {
-            let bytes = bytes.try_into().map_err(|e| {
-                InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
-            })?;
-            let ms = i64::from_be_bytes(bytes);
-            Ok(IntervalUnit::from_millis(ms))
-        }
-        Invalid => {
-            // Invalid means the interval is from the new frontend.
-            // TODO: make this default path later.
-            let mut cursor = Cursor::new(bytes);
-            read_interval_unit(&mut cursor)
-        }
-    }
-}
-
 impl LiteralExpression {
     pub fn new(return_type: DataType, literal: Datum) -> Self {
         assert!(literal_type_match(&return_type, literal.as_ref()));
@@ -172,68 +136,8 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
         if let RexNode::Constant(prost_value) = prost.get_rex_node()? {
             // TODO: We need to unify these
-            let value = match prost.get_return_type()?.get_type_name()? {
-                TypeName::Boolean => ScalarImpl::Bool(
-                    i8::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(
-                        |e| InternalError(format!("Failed to deserialize bool, reason: {:?}", e)),
-                    )?) == 1,
-                ),
-                TypeName::Int16 => ScalarImpl::Int16(i16::from_be_bytes(
-                    prost_value.get_body().as_slice().try_into().map_err(|e| {
-                        InternalError(format!("Failed to deserialize i16, reason: {:?}", e))
-                    })?,
-                )),
-                TypeName::Int32 => ScalarImpl::Int32(i32::from_be_bytes(
-                    prost_value.get_body().as_slice().try_into().map_err(|e| {
-                        InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
-                    })?,
-                )),
-                TypeName::Int64 => ScalarImpl::Int64(i64::from_be_bytes(
-                    prost_value.get_body().as_slice().try_into().map_err(|e| {
-                        InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
-                    })?,
-                )),
-                TypeName::Float => ScalarImpl::Float32(
-                    f32::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(
-                        |e| InternalError(format!("Failed to deserialize f32, reason: {:?}", e)),
-                    )?)
-                    .into(),
-                ),
-                TypeName::Double => ScalarImpl::Float64(
-                    f64::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(
-                        |e| InternalError(format!("Failed to deserialize f64, reason: {:?}", e)),
-                    )?)
-                    .into(),
-                ),
-                TypeName::Varchar => ScalarImpl::Utf8(
-                    std::str::from_utf8(prost_value.get_body())
-                        .map_err(|e| {
-                            InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
-                        })?
-                        .to_string(),
-                ),
-                TypeName::Decimal => ScalarImpl::Decimal(
-                    Decimal::from_str(std::str::from_utf8(prost_value.get_body()).unwrap())
-                        .map_err(|e| {
-                            InternalError(format!("Failed to deserialize decimal, reason: {:?}", e))
-                        })?,
-                ),
-                TypeName::Interval => {
-                    let bytes = prost_value.get_body();
-                    ScalarImpl::Interval(make_interval(
-                        bytes,
-                        prost.get_return_type()?.get_interval_type()?,
-                    )?)
-                }
-                _ => {
-                    return Err(InternalError(format!(
-                        "Unrecognized type name: {:?}",
-                        prost.get_return_type()?.get_type_name()
-                    ))
-                    .into());
-                }
-            };
-
+            let value =
+                ScalarImpl::bytes_to_scalar(prost_value.get_body(), prost.get_return_type()?)?;
             Ok(Self {
                 return_type: ret_type,
                 literal: Some(value),
@@ -251,15 +155,50 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{I32Array, PrimitiveArray};
+    use risingwave_common::array::{I32Array, PrimitiveArray, StructValue};
     use risingwave_common::array_nonnull;
-    use risingwave_common::types::IntoOrdered;
-    use risingwave_pb::data::data_type::IntervalType;
+    use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
+    use risingwave_pb::data::data_type::{IntervalType, TypeName};
     use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::expr::expr_node::RexNode::Constant;
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_pb::expr::{ConstantValue, ExprNode};
 
     use super::*;
+
+    #[test]
+    fn test_struct_expr_literal_from() {
+        let value = StructValue::new(vec![
+            Some(ScalarImpl::Utf8("12222".to_string())),
+            Some(2.into()),
+            None,
+        ]);
+        let body = value.to_protobuf_owned();
+        let expr = ExprNode {
+            expr_type: Type::ConstantValue as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::Struct as i32,
+                field_type: vec![
+                    ProstDataType {
+                        type_name: TypeName::Varchar as i32,
+                        ..Default::default()
+                    },
+                    ProstDataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    },
+                    ProstDataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }),
+            rex_node: Some(Constant(ConstantValue { body })),
+        };
+        let expr = LiteralExpression::try_from(&expr).unwrap();
+        assert_eq!(value.to_scalar_value(), expr.literal().unwrap());
+    }
 
     #[test]
     fn test_expr_literal_from() {
@@ -275,6 +214,7 @@ mod tests {
             TypeName::Double,
             TypeName::Interval,
             TypeName::Date,
+            TypeName::Struct,
         ] {
             assert!(
                 LiteralExpression::try_from(&make_expression(Some(bytes.clone()), typ)).is_err()

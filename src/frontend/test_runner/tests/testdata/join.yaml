@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
@@ -55,6 +57,15 @@
               BatchScan { table: t2, columns: [v1, v2] }
         BatchExchange { order: [], dist: HashShard([1]) }
           BatchScan { table: t3, columns: [v1, v2] }
+  batch_local_plan: |
+    BatchHashJoin { type: Inner, predicate: $3 = $5 }
+      BatchHashJoin { type: Inner, predicate: $0 = $2 }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t1, columns: [v1, v2] }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t2, columns: [v1, v2] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: t3, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [t1_v1, t1_v2, _row_id(hidden), t2_v1, t2_v2, _row_id#1(hidden), t3_v1, t3_v2, _row_id#2(hidden)], pk_columns: [_row_id, _row_id#1, _row_id#2] }
       StreamExchange { dist: HashShard([2, 5, 8]) }
@@ -79,6 +90,13 @@
             BatchScan { table: t1, columns: [v1, v2] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchScan { table: t2, columns: [v1, v2] }
+  batch_local_plan: |
+    BatchProject { exprs: [$1, $3] }
+      BatchHashJoin { type: Inner, predicate: $0 = $2 }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t1, columns: [v1, v2] }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t2, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [t1_v2, t2_v2, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
       StreamExchange { dist: HashShard([2, 3]) }
@@ -93,6 +111,14 @@
     create table t2 (v1 int not null, v2 int not null);
     select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 > t2.v1 and t1.v2 < 10;
   batch_plan: |
+    BatchProject { exprs: [$1, $3] }
+      BatchNestedLoopJoin { type: Inner, predicate: ($0 > $2) }
+        BatchExchange { order: [], dist: Single }
+          BatchFilter { predicate: ($1 < 10:Int32) }
+            BatchScan { table: t1, columns: [v1, v2] }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t2, columns: [v1, v2] }
+  batch_local_plan: |
     BatchProject { exprs: [$1, $3] }
       BatchNestedLoopJoin { type: Inner, predicate: ($0 > $2) }
         BatchExchange { order: [], dist: Single }

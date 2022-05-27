@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     /* test filter protobuf encoding */
     create table t (v1 int);
@@ -562,20 +564,34 @@
                       - dataType:
                           typeName: INT32
                           isNullable: true
-                        name: v1
+                        name: v2
                       - dataType:
                           typeName: INT32
                           isNullable: true
-                        name: v2
+                        name: v1
                       - dataType:
                           typeName: INT64
                           isNullable: true
                         name: _row_id
-                    exchange:
-                      strategy:
-                        type: HASH
-                        columnIndices:
-                          - 1
+                    project:
+                      selectList:
+                        - exprType: INPUT_REF
+                          returnType:
+                            typeName: INT32
+                            isNullable: true
+                          inputRef:
+                            columnIdx: 1
+                        - exprType: INPUT_REF
+                          returnType:
+                            typeName: INT32
+                            isNullable: true
+                          inputRef: {}
+                        - exprType: INPUT_REF
+                          returnType:
+                            typeName: INT64
+                            isNullable: true
+                          inputRef:
+                            columnIdx: 2
                 pkIndices:
                   - 2
                 fields:
@@ -591,25 +607,11 @@
                       typeName: INT64
                       isNullable: true
                     name: _row_id
-                project:
-                  selectList:
-                    - exprType: INPUT_REF
-                      returnType:
-                        typeName: INT32
-                        isNullable: true
-                      inputRef:
-                        columnIdx: 1
-                    - exprType: INPUT_REF
-                      returnType:
-                        typeName: INT32
-                        isNullable: true
-                      inputRef: {}
-                    - exprType: INPUT_REF
-                      returnType:
-                        typeName: INT64
-                        isNullable: true
-                      inputRef:
-                        columnIdx: 2
+                exchange:
+                  strategy:
+                    type: HASH
+                    columnIndices:
+                      - 0
             pkIndices:
               - 0
             fields:

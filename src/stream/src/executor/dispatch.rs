@@ -783,6 +783,7 @@ mod tests {
 
     use super::*;
     use crate::executor::receiver::ReceiverExecutor;
+    use crate::executor::ActorContext;
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -809,7 +810,7 @@ mod tests {
         }
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_hash_dispatcher_complex() {
         test_hash_dispatcher_complex_inner().await
     }
@@ -916,11 +917,17 @@ mod tests {
         }
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
         let (mut tx, rx) = channel(16);
-        let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
+        let input = Box::new(ReceiverExecutor::new(
+            schema.clone(),
+            vec![],
+            rx,
+            ActorContext::create(),
+            0,
+        ));
         let data_sink = Arc::new(Mutex::new(vec![]));
         let actor_id = 233;
         let output = Box::new(MockOutput::new(actor_id, data_sink));
@@ -996,7 +1003,7 @@ mod tests {
         }
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_hash_dispatcher() {
         let num_outputs = 5; // actor id ranges from 1 to 5
         let cardinality = 10;

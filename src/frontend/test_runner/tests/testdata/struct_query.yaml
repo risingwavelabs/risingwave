@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     create materialized view t as select country from s;
     select * from t;
@@ -316,10 +318,10 @@
           string zipcode = 3;
         }
 - sql: |
-    insert into s values (1,2,(1,2,(1,2,3)));
+    insert into s values (1,2,(1,2,(1,2,null)));
   logical_plan: |
     LogicalInsert { table: s }
-      LogicalValues { rows: [[1:Int32, 2:Int32, {1, 2, {1, 2, 3}}:Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }]], schema: Schema { fields: [:Int32, :Int32, :Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }] } }
+      LogicalValues { rows: [[1:Int32, 2:Int32, (1, 2, (1, 2,  )):Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }]], schema: Schema { fields: [:Int32, :Int32, :Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }] } }
   create_source:
     row_format: protobuf
     name: s
@@ -346,7 +348,7 @@
     select * from s where s.v3 = (1,2,(1,2,3));
   logical_plan: |
     LogicalProject { exprs: [$1, $2, $3] }
-      LogicalFilter { predicate: ($3 = {1, 2, {1, 2, 3}}:Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }) }
+      LogicalFilter { predicate: ($3 = (1, 2, (1, 2, 3)):Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }) }
         LogicalScan { table: s, columns: [_row_id, v1, v2, v3] }
   create_source:
     row_format: protobuf
