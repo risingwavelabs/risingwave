@@ -45,12 +45,13 @@ use crate::storage::{MetaStore, Transaction};
 /// Hummock `compact_status` key
 /// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
 pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
-const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 2GB
-const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024;
+const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4GB
+const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
+const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
 const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 32;
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
-const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 16;
+const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 8;
 
 const MAX_LEVEL: usize = 6;
 
@@ -106,6 +107,7 @@ pub struct CompactionConfig {
     pub max_level: usize,
     pub max_bytes_for_level_multiplier: u64,
     pub max_compaction_bytes: u64,
+    pub min_compaction_bytes: u64,
     pub level0_max_file_number: usize,
     pub level0_trigger_number: usize,
     pub compaction_mode: CompactionMode,
@@ -118,6 +120,7 @@ impl Default for CompactionConfig {
             max_bytes_for_level_multiplier: 10,
             max_level: MAX_LEVEL,
             max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
+            min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
             level0_max_file_number: DEFAULT_LEVEL0_MAX_FILE_NUMBER,
             level0_trigger_number: DEFAULT_LEVEL0_TRIGGER_NUMBER,
             compaction_mode: ConsistentHashMode,

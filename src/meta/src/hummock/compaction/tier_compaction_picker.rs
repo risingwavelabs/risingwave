@@ -217,7 +217,7 @@ impl TierCompactionPicker {
                 next_offset += 1;
             }
 
-            if compaction_bytes < self.config.max_bytes_for_level_base / 2
+            if compaction_bytes < self.config.min_compaction_bytes
                 && select_level_inputs.len() < self.config.level0_trigger_number
             {
                 idx = next_offset;
@@ -271,7 +271,7 @@ impl TierCompactionPicker {
                 target_level,
                 target_level_handler,
             ) {
-                None => break,
+                None => continue,
                 Some(tables) => {
                     target_level_ssts.add_tables(tables);
                 }
@@ -310,7 +310,9 @@ impl TierCompactionPicker {
                     }
                     Some(tables) => {
                         // we only extend L0 files when it does not overlap with multiple files.
-                        if target_level_ssts.calc_inc_compaction_size(&tables) > other.file_size {
+                        if select_compaction_bytes > self.config.min_compaction_bytes
+                            && target_level_ssts.calc_inc_compaction_size(&tables) > other.file_size
+                        {
                             select_level_ssts.pop().unwrap();
                             break;
                         }
@@ -318,6 +320,11 @@ impl TierCompactionPicker {
                     }
                 }
                 select_compaction_bytes += other.file_size;
+            }
+            if select_compaction_bytes < self.config.min_compaction_bytes
+                && select_level_ssts.len() < self.config.level0_trigger_number
+            {
+                return (vec![], vec![]);
             }
             target_level_ssts.tables.sort_by(|a, b| {
                 let r1 = KeyRange::from(a.key_range.as_ref().unwrap());

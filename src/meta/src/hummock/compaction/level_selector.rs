@@ -203,9 +203,7 @@ impl DynamicLevelSelector {
                 // manager can trigger compaction jobs of other level but we add a base score
                 // `idle_file_count + 100` so that the manager can trigger L0
                 // compaction when the other levels are all balanced.
-                let score = idle_file_count * SCORE_BASE / self.config.level0_trigger_number as u64
-                    + idle_file_count
-                    + SCORE_BASE;
+                let score = idle_file_count * SCORE_BASE / self.config.level0_trigger_number as u64;
                 let score = std::cmp::max(
                     total_size * SCORE_BASE / self.config.max_bytes_for_level_base,
                     score,
