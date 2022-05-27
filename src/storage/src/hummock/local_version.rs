@@ -82,10 +82,10 @@ impl LocalVersion {
                 self.shared_buffer
                     .range(smallest_uncommitted_epoch..=read_epoch)
                     .rev() // Important: order by epoch descendingly
-                    .map(|(epoch, shared_buffer)| (*epoch, shared_buffer.read_arc()))
+                    .map(|(_, shared_buffer)| shared_buffer.read_arc())
                     .collect()
             } else {
-                BTreeMap::new()
+                Vec::new()
             },
             pinned_version: self.pinned_version.clone(),
         }
@@ -138,6 +138,7 @@ impl PinnedVersion {
 }
 
 pub struct ReadVersion {
-    pub shared_buffer: BTreeMap<HummockEpoch, ArcRwLockReadGuard<RawRwLock, SharedBuffer>>,
+    /// The shared buffer is sorted by epoch descendingly
+    pub shared_buffer: Vec<ArcRwLockReadGuard<RawRwLock, SharedBuffer>>,
     pub pinned_version: Arc<PinnedVersion>,
 }

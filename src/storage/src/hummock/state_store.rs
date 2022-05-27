@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
@@ -87,7 +86,7 @@ impl HummockStorage {
 
         let mut stats = StoreLocalStatistic::default();
 
-        for (replicated_batches, uncommitted_data) in shared_buffer_data.into_values() {
+        for (replicated_batches, uncommitted_data) in shared_buffer_data {
             for batch in replicated_batches {
                 overlapped_iters
                     .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
@@ -216,9 +215,7 @@ impl HummockStorage {
         // TODO: may want to avoid use Arc in read options
         let read_options = Arc::new(ReadOptions::default());
 
-        // Query shared buffer. Return the value without iterating SSTs if found.
-        // We take rev here because we first look for the shared buffer of larger epoch.
-        for (replicated_batches, uncommitted_data) in shared_buffer_data.values().rev() {
+        for (replicated_batches, uncommitted_data) in &shared_buffer_data {
             for batch in replicated_batches {
                 if let Some(v) = get_from_batch(batch) {
                     return Ok(v);
@@ -291,7 +288,7 @@ impl HummockStorage {
         key_range: &R,
         vnode_set: Option<&VNodeBitmap>,
     ) -> HummockResult<(
-        BTreeMap<HummockEpoch, (Vec<SharedBufferBatch>, Vec<UncommittedData>)>,
+        Vec<(Vec<SharedBufferBatch>, Vec<UncommittedData>)>,
         Arc<PinnedVersion>,
     )>
     where
@@ -303,12 +300,10 @@ impl HummockStorage {
         // Check epoch validity
         validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
 
-        let shared_buffer_data: BTreeMap<_, _> = read_version
+        let shared_buffer_data = read_version
             .shared_buffer
             .iter()
-            .map(|(epoch, shared_buffer)| {
-                (*epoch, shared_buffer.get_overlap_data(key_range, vnode_set))
-            })
+            .map(|shared_buffer| shared_buffer.get_overlap_data(key_range, vnode_set))
             .collect();
 
         Ok((shared_buffer_data, read_version.pinned_version))
