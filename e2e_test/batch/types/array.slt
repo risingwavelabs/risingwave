@@ -81,17 +81,3 @@ select max(ARRAY[1, v1*2]) from t;
 
 statement ok
 drop table t;
-
-statement ok
-create table t1 (v1 int[]);
-
-statement ok
-insert into t1 values(Array[1,2,3]);
-
-query T
-select * from t1;
-----
-[1,2,3]
-
-statement ok
-drop table t1;

@@ -1,0 +1,13 @@
+statement ok
+create table lt (v1 int[]);
+
+statement ok
+insert into lt values(Array[1,2,3]);
+
+query T
+select * from lt;
+----
+[1,2,3]
+
+statement ok
+drop table lt;
