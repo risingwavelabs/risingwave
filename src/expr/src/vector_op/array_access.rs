@@ -33,26 +33,29 @@ mod tests {
     use risingwave_common::array::ListValue;
 
     #[test]
-    fn test_length() {
-        let v = ListValue::new(vec![
+    fn test_utf8_array_access() {
+        let v1 = ListValue::new(vec![
+                Some(ScalarImpl::Utf8("来自".into())),
                 Some(ScalarImpl::Utf8("foo".into())),
                 Some(ScalarImpl::Utf8("bar".into())),
-            ]);
-        let l = ListRef::ValueRef { val: &v };
+        ]);
+        let v2 = ListValue::new(vec![
+            Some(ScalarImpl::Utf8("fizz".into())),
+            Some(ScalarImpl::Utf8("荷兰".into())),
+            Some(ScalarImpl::Utf8("buzz".into())),
+        ]);
+        let v3 = ListValue::new(vec![
+            None,
+            None,
+            Some(ScalarImpl::Utf8("的爱".into())),
+        ]);
 
-        println!("access: {:?}", array_access::<String>(l, 1));
+        let l1 = ListRef::ValueRef { val: &v1 };
+        let l2 = ListRef::ValueRef { val: &v2 };
+        let l3 = ListRef::ValueRef { val: &v3 };
 
-
-
-        // let cases = [
-        //     ("hello world", "world", Ok(7)),
-        //     ("床前明月光", "月光", Ok(4)),
-        //     ("床前明月光", "故乡", Ok(0)),
-        // ];
-
-        // for (str, sub_str, expected) in cases {
-        //     println!("position is {}", position(str, sub_str).unwrap());
-        //     assert_eq!(position(str, sub_str), expected)
-        // }
+        assert_eq!(array_access::<String>(l1, 0), Ok("来自".into()));
+        assert_eq!(array_access::<String>(l2, 1), Ok("荷兰".into()));
+        assert_eq!(array_access::<String>(l3, 2), Ok("的爱".into()));
     }
 }

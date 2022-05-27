@@ -333,6 +333,14 @@ impl<'a> ListRef<'a> {
     pub fn value_at(&self, index: usize) -> Result<DatumRef<'a>> {
         match self {
             ListRef::Indexed { arr, idx } => Ok(arr.value.value_at(index)),
+            ListRef::ValueRef { val } => {
+                let temp = val
+                .values()
+                .into_iter()
+                .nth(index)
+                .unwrap();
+                Ok(to_datum_ref(temp))
+            }
             _ => unimplemented!()
             // ListRef::ValueRef { val } => Ok(val.values().into_iter().nth(index)),
         }

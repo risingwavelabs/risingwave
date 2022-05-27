@@ -16,7 +16,6 @@ mod agg;
 pub mod build_expr_from_prost;
 pub mod data_types;
 mod expr_array;
-mod expr_array_access;
 mod expr_binary_bytes;
 pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
