@@ -46,6 +46,7 @@ cd src/frontend/test_runner/tests/testdata/
 for f in *.apply.yaml
 do
   SOURCE="$(basename $f .apply.yaml).yaml"
+  sed -i '1i# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.\n' "$f"
   if [ -f "$SOURCE" ]; then
     cp "$f" "$SOURCE"
   fi

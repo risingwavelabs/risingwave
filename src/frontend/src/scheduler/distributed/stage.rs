@@ -17,6 +17,7 @@ use std::mem::swap;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use futures::{stream, StreamExt};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -39,6 +40,8 @@ use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, QueryStageRef, StageId, TaskId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+
+const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
 enum StageState {
     Pending,
@@ -292,14 +295,19 @@ impl StageRunner {
     }
 
     async fn schedule_tasks(&self) -> Result<()> {
+        let mut futures = vec![];
         for id in 0..self.stage.parallelism {
             let task_id = TaskIdProst {
                 query_id: self.stage.query_id.id.clone(),
                 stage_id: self.stage.id,
                 task_id: id,
             };
-            self.schedule_task(task_id, self.create_plan_fragment(id))
-                .await?;
+            let plan_fragment = self.create_plan_fragment(id);
+            futures.push(async { self.schedule_task(task_id, plan_fragment).await });
+        }
+        let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
+        while let Some(result) = buffered.next().await {
+            result?;
         }
         Ok(())
     }

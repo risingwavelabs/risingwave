@@ -23,7 +23,9 @@ use risingwave_common::catalog::Schema;
 use tokio::sync::Mutex;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream};
+use super::{
+    expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
+};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -126,11 +128,7 @@ impl RearrangedChainExecutor {
             .map(move |result| result.map(|msg| mapping(&upstream_indices, msg)));
 
         // 1. Poll the upstream to get the first barrier.
-        let first_msg = upstream.next().await.unwrap()?;
-        let first_barrier = first_msg
-            .as_barrier()
-            .cloned()
-            .expect("the first message received by chain must be a barrier");
+        let first_barrier = expect_first_barrier(&mut upstream).await?;
         let create_epoch = first_barrier.epoch;
 
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
@@ -139,7 +137,7 @@ impl RearrangedChainExecutor {
         let to_consume_snapshot = first_barrier.is_to_add_output(self.actor_id);
 
         // The first barrier message should be propagated.
-        yield first_msg;
+        yield Message::Barrier(first_barrier.clone());
 
         if to_consume_snapshot {
             // If we need to consume the snapshot ...

@@ -188,8 +188,9 @@ impl NestedLoopJoinExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 2);
@@ -207,9 +208,9 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
             (Some(left_plan), Some(right_plan)) => {
-                let left_child = source.clone_for_plan(left_plan).build()?;
+                let left_child = source.clone_for_plan(left_plan).build().await?;
                 let probe_side_schema = left_child.schema().data_types();
-                let right_child = source.clone_for_plan(right_plan).build()?;
+                let right_child = source.clone_for_plan(right_plan).build().await?;
 
                 // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
                 let fields = match join_type {

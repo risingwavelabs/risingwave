@@ -67,8 +67,9 @@ impl LocalQueryExecution {
         };
 
         let epoch = self.hummock_snapshot_manager.get_epoch(query_id).await?;
-        let executor =
-            ExecutorBuilder::new(&plan_fragment.root.unwrap(), &task_id, context, epoch).build()?;
+        let plan_node = plan_fragment.root.unwrap();
+        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, epoch);
+        let executor = executor.build().await?;
 
         #[for_await]
         for chunk in executor.execute() {
