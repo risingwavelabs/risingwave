@@ -233,8 +233,9 @@ impl SortMergeJoinExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortMergeJoinExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> risingwave_common::error::Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 2);
@@ -254,8 +255,8 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
             (Some(left_plan), Some(right_plan)) => {
-                let left_child = source.clone_for_plan(left_plan).build()?;
-                let right_child = source.clone_for_plan(right_plan).build()?;
+                let left_child = source.clone_for_plan(left_plan).build().await?;
+                let right_child = source.clone_for_plan(right_plan).build().await?;
 
                 let fields = left_child
                     .schema()

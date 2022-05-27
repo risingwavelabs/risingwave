@@ -45,7 +45,8 @@ Firstly, we will need to create a placeholder in yaml testcases:
 ```
 
 You'll need to install [yq](https://github.com/mikefarah/yq). For macOS users,
-simply `brew install yq`. For Linux users, download yq 4.x from the release page.
+simply `brew install yq`. For Linux users, download yq 4.x from the
+[release page](https://github.com/mikefarah/yq/releases).
 
 ```
 ./risedev apply-planner-test

@@ -40,8 +40,9 @@ pub struct HopWindowExecutor {
     window_size: IntervalUnit,
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for HopWindowExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
@@ -53,7 +54,7 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
         let window_slide = hop_window_node.get_window_slide()?.into();
         let window_size = hop_window_node.get_window_size()?.into();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build()?;
+            let child = source.clone_for_plan(child_plan).build().await?;
             let schema = child
                 .schema()
                 .clone()

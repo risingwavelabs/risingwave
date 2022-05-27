@@ -25,18 +25,11 @@ use risingwave_source::SourceManagerRef;
 pub struct FrontendBatchTaskContext {}
 
 impl BatchTaskContext for FrontendBatchTaskContext {
-    fn get_task_output(
-        &self,
-        task_output_id: TaskOutputId,
-    ) -> risingwave_common::error::Result<TaskOutput<Self>> {
+    fn get_task_output(&self, _task_output_id: TaskOutputId) -> Result<TaskOutput> {
         todo!()
     }
 
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
-        todo!()
-    }
-
-    fn get_task_error(&self, task_id: TaskId) -> Result<Option<RwError>> {
         todo!()
     }
 
@@ -49,10 +42,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn stats(&self) -> Arc<BatchMetrics> {
-        todo!()
-    }
-
-    fn try_get_error(&self, task_id: &TaskId) -> risingwave_common::error::Result<Option<RwError>> {
         todo!()
     }
 }

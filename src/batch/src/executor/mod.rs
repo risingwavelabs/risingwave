@@ -89,8 +89,9 @@ pub trait Executor: Send + 'static {
 
 /// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor`
 /// from proto and global environment.
+#[async_trait::async_trait]
 pub trait BoxedExecutorBuilder {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor>;
 }
@@ -124,8 +125,8 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         }
     }
 
-    pub fn build(&self) -> Result<BoxedExecutor> {
-        self.try_build().map_err(|e| {
+    pub async fn build(&self) -> Result<BoxedExecutor> {
+        self.try_build().await.map_err(|e| {
             InternalError(format!(
                 "[PlanNode: {:?}] Failed to build executor: {}",
                 self.plan_node.get_node_body(),
@@ -140,7 +141,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
     }
 
-    fn try_build(&self) -> Result<BoxedExecutor> {
+    async fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
             NodeBody::Insert => InsertExecutor,
@@ -161,7 +162,8 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
             NodeBody::GenerateSeries => GenerateSeriesExecutorBuilder,
             NodeBody::HopWindow => HopWindowExecutor,
-        }?;
+        }
+        .await?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
     }
