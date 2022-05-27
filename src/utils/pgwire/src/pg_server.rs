@@ -90,9 +90,11 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>)
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::intrinsics::transmute;
     use std::sync::Arc;
 
-    use tokio_postgres::NoTls;
+    use tokio_postgres::types::*;
+    use tokio_postgres::{NoTls, Transaction};
 
     use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
@@ -162,15 +164,19 @@ mod tests {
         let value: &str = rows[0].get(0);
         assert_eq!(value, "Hello, World");
     }
-    /*
+
+    // test_psql_extended_mode_explicit
+    // constrain:
+    // - explict parameter type (server needn't to infer parameter type)
+    // - SELECT
+    // - (option) INSERT
     #[tokio::test]
-    // The test is to test the explicit paramter type support
     async fn test_psql_extended_mode_exlicit() {
         let session_mgr = Arc::new(MockSessionManager {});
         tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
 
         // Connect to the database.
-        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
+        let (mut client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
             .await
             .unwrap();
 
@@ -182,15 +188,66 @@ mod tests {
             }
         });
 
-        let statement = client.prepare_typed("SELECT $1", &[TEXT]).await.unwrap();
-        let rows = client.query(&statement, &[&"Hello, World"]).await.unwrap();
-        let value: &str = rows[0].get(0);
-        assert_eq!(value, "Hello, World");
-        let rows = client
-            .query(&statement, &[&"Statement is still useful"])
-            .await
-            .unwrap();
-        let value: &str = rows[0].get(0);
-        assert_eq!(value, "Statement is still useful");
-    }*/
+        // non parameter (test pre_statement)
+        {
+            let statement1 = client.prepare("SELECT 1,true,'hello world'").await.unwrap();
+            let statement2 = client
+                .prepare("SELECT 2,false,'hello world'")
+                .await
+                .unwrap();
+            let rows = client.query(&statement1, &[]).await.unwrap();
+            let value: i32 = rows[0].get(0);
+            assert_eq!(value, 1);
+            let value: bool = rows[0].get(1);
+            assert_eq!(value, true);
+            let value: &str = rows[0].get(2);
+            assert_eq!(value, "hello world");
+            let rows = client.query(&statement2, &[]).await.unwrap();
+            let value: i32 = rows[0].get(0);
+            assert_eq!(value, 2);
+            let value: bool = rows[0].get(1);
+            assert_eq!(value, false);
+            let value: &str = rows[0].get(2);
+            assert_eq!(value, "hello world");
+        }
+        // explicit parameter (test pre_statement)
+        {
+            let statement = client
+                .prepare_typed("SELECT $1", &[Type::TEXT])
+                .await
+                .unwrap();
+            let rows = client.query(&statement, &[&"Hello, World"]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "Hello, World");
+            let rows = client
+                .query(&statement, &[&"Statement is still useful"])
+                .await
+                .unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "Statement is still useful");
+        }
+        // explict parameter (test portal)
+        {
+            let transaction = client.transaction().await.unwrap();
+            let statement = transaction
+                .prepare_typed("SELECT $1", &[Type::TEXT])
+                .await
+                .unwrap();
+            let portal1 = transaction
+                .bind(&statement, &[&"Hello,World"])
+                .await
+                .unwrap();
+            let portal2 = transaction
+                .bind(&statement, &[&"Portal is still useful"])
+                .await
+                .unwrap();
+            let rows = transaction.query_portal(&portal1, 2).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "Hello, World");
+            let rows = transaction.query_portal(&portal2, 2).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "Portal is still useful");
+            transaction.rollback().await.unwrap();
+        }
+    }
 }
