@@ -48,7 +48,7 @@ impl StreamService for StreamServiceImpl {
         match res {
             Err(e) => {
                 error!("failed to update stream actor {}", e);
-                Err(e.to_grpc_status())
+                Err(e.into())
             }
             Ok(()) => Ok(Response::new(UpdateActorsResponse { status: None })),
         }
@@ -66,7 +66,7 @@ impl StreamService for StreamServiceImpl {
         match res {
             Err(e) => {
                 error!("failed to build actors {}", e);
-                Err(e.to_grpc_status())
+                Err(e.into())
             }
             Ok(()) => Ok(Response::new(BuildActorsResponse {
                 request_id: req.request_id,
@@ -86,7 +86,7 @@ impl StreamService for StreamServiceImpl {
         match res {
             Err(e) => {
                 error!("failed to update actor info table actor {}", e);
-                Err(e.to_grpc_status())
+                Err(e.into())
             }
             Ok(()) => Ok(Response::new(BroadcastActorInfoTableResponse {
                 status: None,
@@ -101,9 +101,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
-        self.mgr
-            .drop_actor(&actors)
-            .map_err(|e| e.to_grpc_status())?;
+        self.mgr.drop_actor(&actors)?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -122,8 +120,7 @@ impl StreamService for StreamServiceImpl {
                 curr: epoch.curr,
                 prev: epoch.prev,
             })
-            .await
-            .map_err(|e| e.to_grpc_status())?;
+            .await?;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -147,8 +144,7 @@ impl StreamService for StreamServiceImpl {
                 req.actor_ids_to_collect,
                 true,
             )
-            .await
-            .map_err(|e| e.to_grpc_status())?;
+            .await?;
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,

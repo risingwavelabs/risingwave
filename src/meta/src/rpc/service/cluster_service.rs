@@ -50,13 +50,11 @@ where
     ) -> Result<Response<AddWorkerNodeResponse>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type().map_err(tonic_err)?;
-        let host = try_match_expand!(req.host, Some, "AddWorkerNodeRequest::host is empty")
-            .map_err(|e| e.to_grpc_status())?;
+        let host = try_match_expand!(req.host, Some, "AddWorkerNodeRequest::host is empty")?;
         let (worker_node, _added) = self
             .cluster_manager
             .add_worker_node(host, worker_type)
-            .await
-            .map_err(|e| e.to_grpc_status())?;
+            .await?;
         Ok(Response::new(AddWorkerNodeResponse {
             status: None,
             node: Some(worker_node),
@@ -68,12 +66,8 @@ where
         request: Request<ActivateWorkerNodeRequest>,
     ) -> Result<Response<ActivateWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")
-            .map_err(|e| e.to_grpc_status())?;
-        self.cluster_manager
-            .activate_worker_node(host)
-            .await
-            .map_err(|e| e.to_grpc_status())?;
+        let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")?;
+        self.cluster_manager.activate_worker_node(host).await?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
     }
 
@@ -82,12 +76,8 @@ where
         request: Request<DeleteWorkerNodeRequest>,
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")
-            .map_err(|e| e.to_grpc_status())?;
-        self.cluster_manager
-            .delete_worker_node(host)
-            .await
-            .map_err(|e| e.to_grpc_status())?;
+        let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")?;
+        self.cluster_manager.delete_worker_node(host).await?;
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
     }
 
