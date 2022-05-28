@@ -25,8 +25,7 @@ use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
-use tokio::net::TcpListener;
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
@@ -60,7 +59,7 @@ pub async fn rpc_serve(
     max_heartbeat_interval: Duration,
     ui_path: Option<String>,
     opts: MetaOpts,
-) -> Result<(JoinHandle<()>, UnboundedSender<()>)> {
+) -> Result<(JoinHandle<()>, Sender<()>)> {
     Ok(match meta_store_backend {
         MetaStoreBackend::Etcd { endpoints } => {
             let client = EtcdClient::connect(
@@ -108,8 +107,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     max_heartbeat_interval: Duration,
     ui_path: Option<String>,
     opts: MetaOpts,
-) -> (JoinHandle<()>, UnboundedSender<()>) {
-    let listener = TcpListener::bind(addr).await.unwrap();
+) -> (JoinHandle<()>, Sender<()>) {
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
@@ -231,7 +229,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
-    let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
@@ -241,25 +239,22 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(HummockManagerServiceServer::new(hummock_srv))
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
-            .serve_with_incoming_shutdown(
-                tokio_stream::wrappers::TcpListenerStream::new(listener),
-                async move {
-                    tokio::select! {
-                        _ = tokio::signal::ctrl_c() => {},
-                        _ = shutdown_recv.recv() => {
-                            for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
-                                    continue;
-                                }
-                                if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
-                                }
+            .serve_with_shutdown(addr, async move {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = &mut shutdown_recv => {
+                        for (join_handle, shutdown_sender) in sub_tasks {
+                            if let Err(err) = shutdown_sender.send(()) {
+                                tracing::warn!("Failed to send shutdown: {:?}", err);
+                                continue;
                             }
-                        },
-                    }
-                },
-            )
+                            if let Err(err) = join_handle.await {
+                                tracing::warn!("Failed to join shutdown: {:?}", err);
+                            }
+                        }
+                    },
+                }
+            })
             .await
             .unwrap();
     });

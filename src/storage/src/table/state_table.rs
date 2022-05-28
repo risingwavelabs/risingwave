@@ -143,7 +143,7 @@ enum NextOutcome {
     MemTable,
     Storage,
     Both,
-    Neither,
+    End,
 }
 impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     async fn new(
@@ -167,447 +167,118 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
         Ok(state_table_iter)
     }
 
+    /// This function scans kv pairs from the `shared_storage`(`cell_based_table`) and
+    /// memory(`mem_table`). If a record exist in both `cell_based_table` and `mem_table`, result in
+    /// `mem_table` is returned according to the operation(RowOp) on it. This is because the data in
+    /// memory is fresher.
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
-        let next_flag;
-        let mut res = None;
-        let cell_based_item = self.cell_based_item.take();
-        match (cell_based_item, self.mem_table_iter.peek()) {
-            (None, None) => {
-                next_flag = NextOutcome::Neither;
-                res = None;
-            }
-            (Some((_, row)), None) => {
-                res = Some(row);
-                next_flag = NextOutcome::Storage;
-            }
-            (None, Some((_, row_op))) => {
-                next_flag = NextOutcome::MemTable;
-                match row_op {
-                    RowOp::Insert(row) => res = Some(row.clone()),
-                    RowOp::Delete(_) => {}
-                    RowOp::Update((_, new_row)) => res = Some(new_row.clone()),
+        loop {
+            let next_flag;
+            let res;
+            let cell_based_item = self.cell_based_item.take();
+            match (cell_based_item, self.mem_table_iter.peek()) {
+                (None, None) => {
+                    next_flag = NextOutcome::End;
+                    res = None;
+                }
+                (Some((_, row)), None) => {
+                    next_flag = NextOutcome::Storage;
+                    res = Some(row);
+                }
+                (None, Some((_, row_op))) => {
+                    next_flag = NextOutcome::MemTable;
+                    match row_op {
+                        RowOp::Insert(row) => {
+                            res = Some(row.clone());
+                        }
+                        RowOp::Delete(_) => {
+                            res = None;
+                        }
+                        RowOp::Update((_, new_row)) => {
+                            res = Some(new_row.clone());
+                        }
+                    }
+                }
+                (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
+                    let mem_table_pk_bytes =
+                        serialize_pk(mem_table_pk, &self.pk_serializer).map_err(err)?;
+                    match cell_based_pk.cmp(&mem_table_pk_bytes) {
+                        Ordering::Less => {
+                            // cell_based_table_item will be return
+                            next_flag = NextOutcome::Storage;
+                            res = Some(cell_based_row);
+                        }
+                        Ordering::Equal => {
+                            // mem_table_item will be return, while both cell_based_streaming_iter
+                            // and mem_table_iter need to execute next()
+                            // once.
+                            next_flag = NextOutcome::Both;
+                            match mem_table_row_op {
+                                RowOp::Insert(row) => {
+                                    res = Some(row.clone());
+                                }
+                                RowOp::Delete(_) => {
+                                    res = None;
+                                }
+                                RowOp::Update((old_row, new_row)) => {
+                                    debug_assert!(old_row == &cell_based_row);
+                                    res = Some(new_row.clone());
+                                }
+                            }
+                        }
+                        Ordering::Greater => {
+                            // mem_table_item will be return
+                            next_flag = NextOutcome::MemTable;
+                            match mem_table_row_op {
+                                RowOp::Insert(row) => {
+                                    res = Some(row.clone());
+                                }
+                                RowOp::Delete(_) => {
+                                    res = None;
+                                }
+                                RowOp::Update(_) => {
+                                    unreachable!();
+                                }
+                            }
+                            self.cell_based_item = Some((cell_based_pk, cell_based_row));
+                        }
+                    }
                 }
             }
-            (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
-                let mem_table_pk_bytes =
-                    serialize_pk(mem_table_pk, &self.pk_serializer).map_err(err)?;
-                match cell_based_pk.cmp(&mem_table_pk_bytes) {
-                    Ordering::Less => {
-                        // cell_based_table_item will be return
-                        res = Some(cell_based_row);
-                        next_flag = NextOutcome::Storage;
-                    }
-                    Ordering::Equal => {
-                        // mem_table_item will be return, while both cell_based_streaming_iter and
-                        // mem_table_iter need to execute next() once.
 
-                        next_flag = NextOutcome::Both;
-                        match mem_table_row_op {
-                            RowOp::Insert(row) => {
-                                res = Some(row.clone());
-                            }
-                            RowOp::Delete(_) => {}
-                            RowOp::Update((old_row, new_row)) => {
-                                debug_assert!(old_row == &cell_based_row);
-                                res = Some(new_row.clone());
-                            }
-                        }
+            // If a pk exist in both shared storage(cell_based_table) and memory(mem_table), and
+            // mem_table stores a delete record, state table iter need to next again.
+            match next_flag {
+                NextOutcome::MemTable => {
+                    self.mem_table_iter.next();
+                    if res.is_some() {
+                        return Ok(res);
                     }
-                    Ordering::Greater => {
-                        // mem_table_item will be return
-                        next_flag = NextOutcome::MemTable;
+                }
+                NextOutcome::Storage => {
+                    self.cell_based_item =
+                        self.cell_based_streaming_iter.next().await.map_err(err)?;
 
-                        match mem_table_row_op {
-                            RowOp::Insert(row) => res = Some(row.clone()),
-                            RowOp::Delete(_) => {}
-                            RowOp::Update(_) => {
-                                panic!(
-                                    "There must be a record in shared storage, so this case is unreachable.",
-                                );
-                            }
-                        }
-                        self.cell_based_item = Some((cell_based_pk, cell_based_row));
+                    if res.is_some() {
+                        return Ok(res);
                     }
+                }
+                NextOutcome::Both => {
+                    self.mem_table_iter.next();
+                    self.cell_based_item =
+                        self.cell_based_streaming_iter.next().await.map_err(err)?;
+                    if res.is_some() {
+                        return Ok(res);
+                    }
+                }
+                NextOutcome::End => {
+                    return Ok(res);
                 }
             }
         }
-        match next_flag {
-            NextOutcome::MemTable => {
-                self.mem_table_iter.next();
-            }
-            NextOutcome::Storage => {
-                self.cell_based_item = self.cell_based_streaming_iter.next().await.map_err(err)?;
-            }
-            NextOutcome::Both => {
-                self.mem_table_iter.next();
-                self.cell_based_item = self.cell_based_streaming_iter.next().await.map_err(err)?
-            }
-            NextOutcome::Neither => {}
-        }
-
-        Ok(res)
     }
 }
 
 fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::StateTable(rw.into())
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_common::catalog::ColumnId;
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
-
-    use super::*;
-    use crate::memory::MemoryStateStore;
-
-    #[tokio::test]
-    async fn test_state_table() -> StorageResult<()> {
-        let state_store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
-        let column_descs = vec![
-            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
-        ];
-        let order_types = vec![OrderType::Ascending];
-        let mut state_table = StateTable::new(keyspace.clone(), column_descs, order_types, None);
-        let mut epoch: u64 = 0;
-        state_table
-            .insert(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(1_i32.into()),
-                    Some(11_i32.into()),
-                    Some(111_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(2_i32.into())]),
-                Row(vec![
-                    Some(2_i32.into()),
-                    Some(22_i32.into()),
-                    Some(222_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(3_i32.into())]),
-                Row(vec![
-                    Some(3_i32.into()),
-                    Some(33_i32.into()),
-                    Some(333_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        // test read visibility
-        let row1 = state_table
-            .get_row(&Row(vec![Some(1_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row1,
-            Some(Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into())
-            ]))
-        );
-
-        let row2 = state_table
-            .get_row(&Row(vec![Some(2_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row2,
-            Some(Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into())
-            ]))
-        );
-
-        state_table
-            .delete(
-                Row(vec![Some(2_i32.into())]),
-                Row(vec![
-                    Some(2_i32.into()),
-                    Some(22_i32.into()),
-                    Some(222_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        let row2_delete = state_table
-            .get_row(&Row(vec![Some(2_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row2_delete, None);
-
-        state_table.commit(epoch).await.unwrap();
-
-        let row2_delete_commit = state_table
-            .get_row(&Row(vec![Some(2_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row2_delete_commit, None);
-
-        epoch += 1;
-        state_table
-            .delete(
-                Row(vec![Some(3_i32.into())]),
-                Row(vec![
-                    Some(3_i32.into()),
-                    Some(33_i32.into()),
-                    Some(333_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        state_table
-            .insert(
-                Row(vec![Some(4_i32.into())]),
-                Row(vec![Some(4_i32.into()), None, None]),
-            )
-            .unwrap();
-        state_table
-            .insert(Row(vec![Some(5_i32.into())]), Row(vec![None, None, None]))
-            .unwrap();
-
-        let row4 = state_table
-            .get_row(&Row(vec![Some(4_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row4, Some(Row(vec![Some(4_i32.into()), None, None])));
-
-        let row5 = state_table
-            .get_row(&Row(vec![Some(5_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row5, Some(Row(vec![None, None, None])));
-
-        let non_exist_row = state_table
-            .get_row(&Row(vec![Some(0_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(non_exist_row, None);
-
-        state_table
-            .delete(
-                Row(vec![Some(4_i32.into())]),
-                Row(vec![Some(4_i32.into()), None, None]),
-            )
-            .unwrap();
-
-        state_table.commit(epoch).await.unwrap();
-
-        let row3_delete = state_table
-            .get_row(&Row(vec![Some(3_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row3_delete, None);
-
-        let row4_delete = state_table
-            .get_row(&Row(vec![Some(4_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row4_delete, None);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_state_table_update_insert() -> StorageResult<()> {
-        let state_store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
-        let column_descs = vec![
-            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(4), DataType::Int32),
-        ];
-        let order_types = vec![OrderType::Ascending];
-        let mut state_table = StateTable::new(keyspace.clone(), column_descs, order_types, None);
-        let mut epoch: u64 = 0;
-        state_table
-            .insert(
-                Row(vec![Some(6_i32.into())]),
-                Row(vec![
-                    Some(6_i32.into()),
-                    Some(66_i32.into()),
-                    Some(666_i32.into()),
-                    Some(6666_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        state_table
-            .insert(
-                Row(vec![Some(7_i32.into())]),
-                Row(vec![Some(7_i32.into()), None, Some(777_i32.into()), None]),
-            )
-            .unwrap();
-        state_table.commit(epoch).await.unwrap();
-
-        epoch += 1;
-        state_table
-            .delete(
-                Row(vec![Some(6_i32.into())]),
-                Row(vec![
-                    Some(6_i32.into()),
-                    Some(66_i32.into()),
-                    Some(666_i32.into()),
-                    Some(6666_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(6_i32.into())]),
-                Row(vec![
-                    Some(6666_i32.into()),
-                    None,
-                    None,
-                    Some(6666_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        state_table
-            .delete(
-                Row(vec![Some(7_i32.into())]),
-                Row(vec![Some(7_i32.into()), None, Some(777_i32.into()), None]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(7_i32.into())]),
-                Row(vec![None, Some(77_i32.into()), Some(7777_i32.into()), None]),
-            )
-            .unwrap();
-        let row6 = state_table
-            .get_row(&Row(vec![Some(6_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row6,
-            Some(Row(vec![
-                Some(6666_i32.into()),
-                None,
-                None,
-                Some(6666_i32.into())
-            ]))
-        );
-
-        let row7 = state_table
-            .get_row(&Row(vec![Some(7_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row7,
-            Some(Row(vec![
-                None,
-                Some(77_i32.into()),
-                Some(7777_i32.into()),
-                None
-            ]))
-        );
-
-        state_table.commit(epoch).await.unwrap();
-
-        let row6_commit = state_table
-            .get_row(&Row(vec![Some(6_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row6_commit,
-            Some(Row(vec![
-                Some(6666_i32.into()),
-                None,
-                None,
-                Some(6666_i32.into())
-            ]))
-        );
-        let row7_commit = state_table
-            .get_row(&Row(vec![Some(7_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row7_commit,
-            Some(Row(vec![
-                None,
-                Some(77_i32.into()),
-                Some(7777_i32.into()),
-                None
-            ]))
-        );
-
-        epoch += 1;
-
-        state_table
-            .insert(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(1_i32.into()),
-                    Some(2_i32.into()),
-                    Some(3_i32.into()),
-                    Some(4_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table.commit(epoch).await.unwrap();
-        // one epoch: delete (1, 2, 3, 4), insert (5, 6, 7, None), delete(5, 6, 7, None)
-        state_table
-            .delete(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(1_i32.into()),
-                    Some(2_i32.into()),
-                    Some(3_i32.into()),
-                    Some(4_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(5_i32.into()),
-                    Some(6_i32.into()),
-                    Some(7_i32.into()),
-                    None,
-                ]),
-            )
-            .unwrap();
-        state_table
-            .delete(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(5_i32.into()),
-                    Some(6_i32.into()),
-                    Some(7_i32.into()),
-                    None,
-                ]),
-            )
-            .unwrap();
-
-        let row1 = state_table
-            .get_row(&Row(vec![Some(1_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row1, None);
-        state_table.commit(epoch).await.unwrap();
-
-        let row1_commit = state_table
-            .get_row(&Row(vec![Some(1_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row1_commit, None);
-        Ok(())
-    }
 }

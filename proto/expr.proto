@@ -55,8 +55,10 @@ message ExprNode {
     COALESCE = 217;
     CONCAT_WS = 218;
     ABS = 219;
-    CEIL = 220;
-    FLOOR = 221;
+    SPLIT_PART = 220;
+    CEIL = 221;
+    FLOOR = 222;
+
 
     // Boolean comparison
     IS_TRUE = 301;

@@ -30,7 +30,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::base::{SourceMessage, SplitReader};
 use crate::pulsar::split::PulsarSplit;
 use crate::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
-use crate::{Column, ConnectorStateV2, SplitImpl};
+use crate::{Column, ConnectorState, SplitImpl};
 
 struct PulsarSingleSplitReader {
     pulsar: Pulsar<TokioExecutor>,
@@ -170,7 +170,7 @@ impl SplitReader for PulsarSplitReader {
 
     async fn new(
         props: PulsarProperties,
-        state: ConnectorStateV2,
+        state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self>
     where
@@ -178,7 +178,7 @@ impl SplitReader for PulsarSplitReader {
     {
         let (tx, rx) = mpsc::unbounded_channel();
         let rx = UnboundedReceiverStream::from(rx);
-        let splits = try_match_expand!(state, ConnectorStateV2::Splits).map_err(|e| anyhow!(e))?;
+        let splits = state.unwrap();
 
         let pulsar_splits: Vec<PulsarSplit> = splits
             .into_iter()

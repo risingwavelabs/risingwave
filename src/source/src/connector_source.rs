@@ -23,7 +23,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::{
-    Column, ConnectorProperties, ConnectorStateV2, SourceMessage, SplitImpl, SplitReaderImpl,
+    Column, ConnectorProperties, ConnectorState, SourceMessage, SplitReaderImpl,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
@@ -34,7 +34,8 @@ use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSour
 
 struct InnerConnectorSourceReader {
     reader: SplitReaderImpl,
-    split: SplitImpl,
+    // split should be None or only contains one value
+    split: ConnectorState,
 }
 
 struct InnerConnectorSourceReaderHandle {
@@ -63,7 +64,7 @@ pub struct ConnectorSourceReader {
 impl InnerConnectorSourceReader {
     async fn new(
         prop: ConnectorProperties,
-        split: SplitImpl,
+        split: ConnectorState,
         columns: Vec<SourceColumnDesc>,
     ) -> Result<Self> {
         log::debug!(
@@ -75,7 +76,7 @@ impl InnerConnectorSourceReader {
         // Here is a workaround, we now provide the vec with only one element
         let reader = SplitReaderImpl::create(
             prop,
-            ConnectorStateV2::Splits(vec![split.clone()]),
+            split.clone(),
             Some(
                 columns
                     .iter()
@@ -99,24 +100,28 @@ impl InnerConnectorSourceReader {
         output: mpsc::UnboundedSender<Either<Vec<SourceMessage>, RwError>>,
     ) {
         loop {
+            let id = match &self.split {
+                Some(splits) => splits[0].id(),
+                None => "None".to_string(),
+            };
             tokio::select! {
                 biased;
                 // stop chan has high priority
                 _ = stop.borrow_mut() => {
-                    log::debug!("connector reader {} stop signal received", self.split.id());
+                    log::debug!("connector reader {} stop signal received", id);
                     break;
                 }
 
                 chunk = self.reader.next() => {
                     match chunk.map_err(|e| internal_error(e.to_string())) {
                         Err(e) => {
-                            log::error!("connector reader {} error happened {}", self.split.id(), e.to_string());
+                            log::error!("connector reader {} error happened {}", id, e.to_string());
                             // just ignore
                             let _ = output.send(Either::Right(e));
                             break;
                         },
                         Ok(None) => {
-                            log::warn!("connector reader {} stream stopped", self.split.id());
+                            log::warn!("connector reader {} stream stopped", id);
                             break;
                         },
                         Ok(Some(msg)) => {
@@ -182,24 +187,31 @@ impl Drop for ConnectorSourceReader {
 }
 
 impl ConnectorSourceReader {
-    pub async fn add_split(&mut self, split: SplitImpl) -> Result<()> {
-        let split_id = split.id();
+    pub async fn add_split(&mut self, split: ConnectorState) -> Result<()> {
+        if let Some(append_splits) = split {
+            for split in append_splits {
+                let split_id = split.id();
 
-        let mut reader =
-            InnerConnectorSourceReader::new(self.config.clone(), split, self.columns.clone())
+                let mut reader = InnerConnectorSourceReader::new(
+                    self.config.clone(),
+                    Some(vec![split]),
+                    self.columns.clone(),
+                )
                 .await?;
-        let (stop_tx, stop_rx) = oneshot::channel();
-        let sender = self.message_tx.clone();
-        let join_handle = tokio::spawn(async move { reader.run(stop_rx, sender).await });
+                let (stop_tx, stop_rx) = oneshot::channel();
+                let sender = self.message_tx.clone();
+                let join_handle = tokio::spawn(async move { reader.run(stop_rx, sender).await });
 
-        if let Some(handles) = self.handles.as_mut() {
-            handles.insert(
-                split_id,
-                InnerConnectorSourceReaderHandle {
-                    stop_tx,
-                    join_handle,
-                },
-            );
+                if let Some(handles) = self.handles.as_mut() {
+                    handles.insert(
+                        split_id,
+                        InnerConnectorSourceReaderHandle {
+                            stop_tx,
+                            join_handle,
+                        },
+                    );
+                }
+            }
         }
 
         Ok(())
@@ -248,15 +260,26 @@ impl ConnectorSource {
 
     pub async fn stream_reader(
         &self,
-        splits: Vec<SplitImpl>,
+        splits: ConnectorState,
         column_ids: Vec<ColumnId>,
     ) -> Result<ConnectorSourceReader> {
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut handles = HashMap::with_capacity(splits.len());
+        let mut handles = HashMap::with_capacity(if let Some(split) = &splits {
+            split.len()
+        } else {
+            1
+        });
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
 
-        let readers = try_join_all(splits.into_iter().map(|split| {
+        let to_reader_splits = match splits {
+            Some(vec_split_impl) => vec_split_impl
+                .into_iter()
+                .map(|split| Some(vec![split]))
+                .collect::<Vec<ConnectorState>>(),
+            None => vec![None],
+        };
+        let readers = try_join_all(to_reader_splits.into_iter().map(|split| {
             log::debug!("spawning connector split reader for split {:?}", split);
             let props = config.clone();
             let columns = columns.clone();
@@ -265,7 +288,10 @@ impl ConnectorSource {
         .await?;
 
         for mut reader in readers {
-            let split_id = reader.split.id();
+            let split_id = match &reader.split {
+                Some(s) => s[0].id(),
+                None => "None".to_string(),
+            };
             let (stop_tx, stop_rx) = oneshot::channel();
             let sender = tx.clone();
             let join_handle = tokio::spawn(async move { reader.run(stop_rx, sender).await });

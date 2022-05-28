@@ -18,7 +18,6 @@ use std::sync::Arc;
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
-use madsim::task::JoinHandle;
 use parking_lot::Mutex;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -31,6 +30,7 @@ use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
 use crate::executor::dispatch::*;
@@ -110,7 +110,11 @@ pub struct ExecutorParams {
     /// Id of the actor.
     pub actor_id: ActorId,
 
+    /// Metrics
     pub executor_stats: Arc<StreamingMetrics>,
+
+    // Actor context
+    pub actor_context: ActorContextRef,
 }
 
 impl Debug for ExecutorParams {
@@ -266,7 +270,7 @@ impl LocalStreamManager {
     pub async fn wait_all(self) -> Result<()> {
         let handles = self.core.lock().take_all_handles()?;
         for (_id, handle) in handles {
-            handle.await;
+            handle.await.unwrap();
         }
         Ok(())
     }
@@ -275,7 +279,7 @@ impl LocalStreamManager {
     pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
         let handles = self.core.lock().remove_actor_handles(actor_ids)?;
         for handle in handles {
-            handle.await;
+            handle.await.unwrap();
         }
         Ok(())
     }
@@ -443,6 +447,7 @@ impl LocalStreamManagerCore {
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
+    #[allow(clippy::too_many_arguments)]
     fn create_nodes_inner(
         &mut self,
         fragment_id: u32,
@@ -451,6 +456,7 @@ impl LocalStreamManagerCore {
         input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
+        actor_context: &ActorContextRef,
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -467,6 +473,7 @@ impl LocalStreamManagerCore {
                     input_pos,
                     env.clone(),
                     store.clone(),
+                    actor_context,
                 )
             })
             .try_collect()?;
@@ -491,6 +498,7 @@ impl LocalStreamManagerCore {
             input,
             actor_id,
             executor_stats: self.streaming_metrics.clone(),
+            actor_context: actor_context.clone(),
         };
 
         let executor = create_executor(executor_params, self, node, store)?;
@@ -510,9 +518,10 @@ impl LocalStreamManagerCore {
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
+        actor_context: &ActorContextRef,
     ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
+            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store, actor_context)
         })
     }
 
@@ -549,7 +558,7 @@ impl LocalStreamManagerCore {
 
                         let pool = self.compute_client_pool.clone();
 
-                        madsim::task::spawn(async move {
+                        tokio::spawn(async move {
                             let init_client = async move {
                                 let remote_input = RemoteInput::create(
                                     pool.get_client_for_addr(upstream_addr).await?,
@@ -565,8 +574,7 @@ impl LocalStreamManagerCore {
                                     error!("Spawn remote input fails:{}", e);
                                 }
                             }
-                        })
-                        .detach();
+                        });
                     }
                     Ok::<_, RwError>(self.context.take_receiver(&(*up_id, actor_id))?)
                 }
@@ -589,14 +597,27 @@ impl LocalStreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor =
-                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
+            let actor_context = Arc::new(Mutex::new(ActorContext::default()));
+
+            let executor = self.create_nodes(
+                actor.fragment_id,
+                actor_id,
+                actor.get_nodes()?,
+                env.clone(),
+                &actor_context,
+            )?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
-            let actor = Actor::new(dispatcher, actor_id, self.context.clone());
+            let actor = Actor::new(
+                dispatcher,
+                actor_id,
+                self.context.clone(),
+                self.streaming_metrics.clone(),
+                actor_context,
+            );
             self.handles.insert(
                 actor_id,
-                madsim::task::spawn(async move {
+                tokio::spawn(async move {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
                 }),
@@ -644,7 +665,7 @@ impl LocalStreamManagerCore {
     /// `drop_actor` is invoked by meta node via RPC once the stop barrier arrives at the
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: ActorId) {
-        let mut handle = self.handles.remove(&actor_id).unwrap();
+        let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
 
         self.actor_infos.remove(&actor_id);
@@ -656,7 +677,7 @@ impl LocalStreamManagerCore {
     /// `drop_all_actors` is invoked by meta node via RPC once the stop barrier arrives at all the
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_all_actors(&mut self) {
-        for (actor_id, mut handle) in self.handles.drain() {
+        for (actor_id, handle) in self.handles.drain() {
             self.context.retain(|&(up_id, _)| up_id != actor_id);
             self.actors.remove(&actor_id);
             // Task should have already stopped when this method is invoked.

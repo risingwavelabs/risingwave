@@ -21,15 +21,19 @@ use risingwave_rpc_client::ExchangeSource;
 use crate::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 
 /// Exchange data from a local task execution.
-pub struct LocalExchangeSource<C> {
-    task_output: TaskOutput<C>,
+pub struct LocalExchangeSource {
+    task_output: TaskOutput,
 
     /// Id of task which contains the `ExchangeExecutor` of this source.
     task_id: TaskId,
 }
 
-impl<C: BatchTaskContext> LocalExchangeSource<C> {
-    pub fn create(output_id: TaskOutputId, context: C, task_id: TaskId) -> Result<Self> {
+impl LocalExchangeSource {
+    pub fn create<C: BatchTaskContext>(
+        output_id: TaskOutputId,
+        context: C,
+        task_id: TaskId,
+    ) -> Result<Self> {
         let task_output = context.get_task_output(output_id)?;
         Ok(Self {
             task_output,
@@ -38,7 +42,7 @@ impl<C: BatchTaskContext> LocalExchangeSource<C> {
     }
 }
 
-impl<C> Debug for LocalExchangeSource<C> {
+impl Debug for LocalExchangeSource {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalExchangeSource")
             .field("task_output_id", self.task_output.id())
@@ -47,7 +51,7 @@ impl<C> Debug for LocalExchangeSource<C> {
 }
 
 #[async_trait::async_trait]
-impl<C: BatchTaskContext> ExchangeSource for LocalExchangeSource<C> {
+impl ExchangeSource for LocalExchangeSource {
     async fn take_data(&mut self) -> Result<Option<DataChunk>> {
         let ret = self.task_output.direct_take_data().await?;
         if let Some(data) = ret {
@@ -126,7 +130,7 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
 
         // Start a server.
-        let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+        let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
         let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
             rpc_called: rpc_called.clone(),
         });
@@ -136,7 +140,7 @@ mod tests {
             tonic::transport::Server::builder()
                 .add_service(exchange_svc)
                 .serve_with_shutdown(addr, async move {
-                    shutdown_recv.recv().await;
+                    shutdown_recv.await.unwrap();
                 })
                 .await
                 .unwrap();

@@ -17,10 +17,8 @@ use std::sync::Arc;
 
 use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
-use risingwave_batch::rpc::service::exchange::GrpcExchangeWriter;
-use risingwave_batch::task::{BatchManager, TaskOutputId};
+use risingwave_batch::task::BatchManager;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::batch_plan::TaskOutputId as ProtoTaskOutputId;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
@@ -51,25 +49,20 @@ impl ExchangeService for ExchangeServiceImpl {
         &self,
         request: Request<GetDataRequest>,
     ) -> std::result::Result<Response<Self::GetDataStream>, Status> {
-        use risingwave_common::error::tonic_err;
-
         let peer_addr = request
             .remote_addr()
             .ok_or_else(|| Status::unavailable("connection unestablished"))?;
-        let req = request.into_inner();
-        match self
-            .get_data_impl(
-                peer_addr,
-                req.get_task_output_id().map_err(tonic_err)?.clone(),
-            )
-            .await
-        {
-            Ok(resp) => Ok(resp),
-            Err(e) => {
-                error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
-                Err(e.to_grpc_status())
-            }
+        let pb_task_output_id = request
+            .into_inner()
+            .task_output_id
+            .expect("Failed to get task output id.");
+        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
+        if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
+            error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
+            return Err(e.to_grpc_status());
         }
+
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 
     async fn get_stream(
@@ -104,35 +97,6 @@ impl ExchangeServiceImpl {
             batch_mgr: mgr,
             stream_mgr,
         }
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn get_data_impl(
-        &self,
-        peer_addr: SocketAddr,
-        pb_tsid: ProtoTaskOutputId,
-    ) -> Result<Response<<Self as ExchangeService>::GetDataStream>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
-
-        let tsid = TaskOutputId::try_from(&pb_tsid)?;
-        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?tsid, "serve exchange RPC");
-        let mut task_output = self.batch_mgr.take_output(&pb_tsid)?;
-        tokio::spawn(async move {
-            let mut writer = GrpcExchangeWriter::new(tx.clone());
-            match task_output.take_data(&mut writer).await {
-                Ok(_) => {
-                    tracing::debug!(
-                        from = ?tsid,
-                        "exchanged {} chunks",
-                        writer.written_chunks(),
-                    );
-                    Ok(())
-                }
-                Err(e) => tx.send(Err(e.to_grpc_status())).await,
-            }
-        });
-
-        Ok(Response::new(ReceiverStream::new(rx)))
     }
 
     async fn get_stream_impl(

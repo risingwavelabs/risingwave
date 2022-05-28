@@ -14,6 +14,7 @@
 
 #![allow(dead_code)]
 #![allow(rustdoc::private_intra_doc_links)]
+#![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -41,7 +42,6 @@ pub mod error;
 pub mod array;
 #[macro_use]
 pub mod util;
-mod alloc;
 pub mod buffer;
 pub mod catalog;
 pub mod collection;

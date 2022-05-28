@@ -15,6 +15,7 @@
 use std::clone::Clone;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use bytes::Bytes;
 use fail::fail_point;
@@ -100,11 +101,15 @@ impl SstableStore {
         &self,
         sst: &Sstable,
         block_index: u64,
+        stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         loop {
+            stats.cache_data_block_total += 1;
             if let Some(block) = self.block_cache.get(sst.id, block_index) {
                 return Ok(block);
             }
+            stats.cache_data_block_miss += 1;
+            let timer = Instant::now();
             let pending_request = {
                 let mut pending_request = self.prefetch_request.lock().unwrap();
                 if let Some(que) = pending_request.get_mut(&sst.id) {
@@ -131,6 +136,7 @@ impl SstableStore {
             for p in pending_requests {
                 let _ = p.send(());
             }
+            stats.remote_io_time += timer.elapsed().as_secs_f64();
             return ret;
         }
     }
@@ -339,6 +345,14 @@ impl SstableStore {
 
     pub fn store(&self) -> ObjectStoreRef {
         self.store.clone()
+    }
+
+    pub fn get_meta_cache(&self) -> Arc<LruCache<HummockSSTableId, Box<Sstable>>> {
+        self.meta_cache.clone()
+    }
+
+    pub fn get_block_cache(&self) -> BlockCache {
+        self.block_cache.clone()
     }
 
     #[cfg(test)]

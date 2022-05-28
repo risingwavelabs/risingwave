@@ -136,15 +136,14 @@ impl PlanRoot {
         };
 
         // Reorder multijoin into left-deep join tree.
-        // Apply limited set of filter pushdown rules again since we pullup non eq-join
-        // conditions into a filter above the multijoin.
         plan = {
             let rules = vec![ReorderMultiJoinRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
 
-        // Predicate Push-down
+        // Apply predicate pushdown again since we pullup non eq-join
+        // conditions into a filter above the multijoin.
         plan = plan.predicate_pushdown(Condition::true_cond());
 
         // Prune Columns

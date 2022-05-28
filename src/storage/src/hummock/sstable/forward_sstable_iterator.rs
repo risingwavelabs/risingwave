@@ -23,7 +23,7 @@ use crate::hummock::iterator::{Forward, HummockIterator, ReadOptions};
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
-pub trait SSTableIteratorType: HummockIterator {
+pub trait SSTableIteratorType: HummockIterator + 'static {
     fn create(
         table: TableHolder,
         sstable_store: SstableStoreRef,
@@ -76,7 +76,7 @@ impl SSTableIterator {
         } else {
             let block = if self.options.prefetch {
                 self.sstable_store
-                    .get_with_prefetch(self.sst.value(), idx as u64)
+                    .get_with_prefetch(self.sst.value(), idx as u64, &mut self.stats)
                     .await?
             } else {
                 self.sstable_store

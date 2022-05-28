@@ -40,6 +40,8 @@ impl Binder {
                 "min" => Some(AggKind::Min),
                 "max" => Some(AggKind::Max),
                 "avg" => Some(AggKind::Avg),
+                "string_agg" => Some(AggKind::StringAgg),
+                "single_value" => Some(AggKind::SingleValue),
                 _ => None,
             };
             if let Some(kind) = agg_kind {
@@ -63,6 +65,7 @@ impl Binder {
                     ExprType::Case
                 }
                 "concat_ws" => ExprType::ConcatWs,
+                "split_part" => ExprType::SplitPart,
                 "coalesce" => ExprType::Coalesce,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);

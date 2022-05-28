@@ -18,7 +18,7 @@ use std::sync::Arc;
 use enum_as_inner::EnumAsInner;
 use error::StreamExecutorResult;
 use futures::stream::BoxStream;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
@@ -73,7 +73,7 @@ mod integration_tests;
 #[cfg(test)]
 mod test_utils;
 
-pub use actor::Actor;
+pub use actor::{Actor, ActorContext, ActorContextRef, OperatorInfo, OperatorInfoStatus};
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use debug::DebugExecutor;
@@ -451,6 +451,17 @@ pub fn pk_input_array_refs<'a>(
         .iter()
         .map(|pk_idx| columns[*pk_idx].array_ref())
         .collect()
+}
+
+/// Expect the first message of the given `stream` as a barrier.
+pub async fn expect_first_barrier(
+    stream: &mut (impl MessageStream + Unpin),
+) -> StreamExecutorResult<Barrier> {
+    let message = stream.next().await.unwrap()?;
+    let barrier = message
+        .into_barrier()
+        .expect("the first message must be a barrier");
+    Ok(barrier)
 }
 
 /// `StreamConsumer` is the last step in an actor.
