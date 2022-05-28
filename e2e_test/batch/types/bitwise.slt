@@ -1,0 +1,29 @@
+query T
+select 3&5;
+----
+1
+
+query T
+select 3|5;
+----
+7
+
+query T
+select 3#5;
+----
+6
+
+query T
+select 1<<2;
+----
+4
+
+query T
+select 4>>2;
+----
+1
+
+query T
+select ~1;
+----
+-2
