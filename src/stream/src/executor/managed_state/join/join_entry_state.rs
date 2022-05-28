@@ -73,7 +73,7 @@ impl<S: StateStore> JoinEntryState<S> {
         pk_data_types: Arc<[DataType]>,
         epoch: u64,
     ) -> Result<Option<Self>> {
-        let all_data = keyspace.scan(None, epoch, vec![]).await?;
+        let all_data = keyspace.scan(None, epoch).await?;
         if !all_data.is_empty() {
             // Insert cached states.
             let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
@@ -154,7 +154,7 @@ impl<S: StateStore> JoinEntryState<S> {
     async fn populate_cache(&mut self, epoch: u64) -> Result<()> {
         assert!(self.cached.is_none());
 
-        let all_data = self.keyspace.scan(None, epoch, vec![]).await?;
+        let all_data = self.keyspace.scan(None, epoch).await?;
 
         // Insert cached states.
         let mut cached = Self::fill_cached(
@@ -215,6 +215,7 @@ impl<S: StateStore> JoinEntryState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::*;
+    use risingwave_common::column_nonnull;
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -230,15 +231,15 @@ mod tests {
             vec![DataType::Int64].into(),
         );
         assert!(!managed_state.is_dirty());
+        let columns = vec![
+            column_nonnull! { I64Array, [3, 2, 1] },
+            column_nonnull! { I64Array, [4, 5, 6] },
+        ];
         let pk_indices = [0];
         let col1 = [1, 2, 3];
         let col2 = [6, 5, 4];
-        let data_chunk = DataChunk::from_pretty(
-            "I I
-             3 4
-             2 5
-             1 6",
-        );
+        let data_chunk_builder = DataChunk::builder().columns(columns);
+        let data_chunk = data_chunk_builder.build();
 
         for row_ref in data_chunk.rows() {
             let row: Row = row_ref.into();

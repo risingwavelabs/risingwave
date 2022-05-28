@@ -206,7 +206,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// The same as the one in `ManagedTopNState`.
     pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
-        let iter = self.keyspace.iter(epoch, vec![]).await?;
+        let iter = self.keyspace.iter(epoch).await?;
         let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_MIN>::new(
             iter,
             &mut self.ordered_row_deserializer,
@@ -267,7 +267,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
         debug_assert!(!self.is_dirty());
         let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_MIN>::new(
-            self.keyspace.iter(epoch, vec![]).await?,
+            self.keyspace.iter(epoch).await?,
             &mut self.ordered_row_deserializer,
             &mut self.cell_based_row_deserializer,
         );

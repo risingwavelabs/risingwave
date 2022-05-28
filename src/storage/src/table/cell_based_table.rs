@@ -151,7 +151,10 @@ impl<S: StateStore> CellBasedTable<S> {
         ]
         .concat();
         let mut get_res = Vec::new();
-        let sentinel_cell = self.keyspace.get(&sentinel_key, epoch, Some(vnode)).await?;
+        let sentinel_cell = self
+            .keyspace
+            .get_with_vnode(&sentinel_key, epoch, vnode)
+            .await?;
 
         if sentinel_cell.is_none() {
             // if sentinel cell is none, this row doesn't exist
@@ -161,7 +164,7 @@ impl<S: StateStore> CellBasedTable<S> {
         }
         for column_id in &self.column_ids {
             let key = [serialized_pk, &serialize_column_id(column_id).map_err(err)?].concat();
-            let state_store_get_res = self.keyspace.get(&key, epoch, Some(vnode)).await?;
+            let state_store_get_res = self.keyspace.get_with_vnode(&key, epoch, vnode).await?;
             if let Some(state_store_get_res) = state_store_get_res {
                 get_res.push((key, state_store_get_res));
             }
@@ -362,7 +365,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
         // TODO(Yuanxin): pass vnode
-        let iter = keyspace.iter(epoch, vec![]).await?;
+        let iter = keyspace.iter(epoch).await?;
 
         let iter = Self {
             iter,
@@ -461,7 +464,7 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
     ) -> StorageResult<Self> {
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
         // TODO(Yuanxin): pass vnodes
-        let iter = keyspace.iter(epoch, vec![]).await?;
+        let iter = keyspace.iter(epoch).await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,

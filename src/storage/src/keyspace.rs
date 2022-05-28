@@ -29,6 +29,9 @@ pub struct Keyspace<S: StateStore> {
 
     /// Encoded representation for all segments.
     prefix: Vec<u8>,
+
+    /// Vnodes that the keyspace owns.
+    vnodes: Vec<VirtualNode>,
 }
 
 impl<S: StateStore> Keyspace<S> {
@@ -47,7 +50,11 @@ impl<S: StateStore> Keyspace<S> {
             buf.put_u64(operator_id);
             buf.to_vec()
         };
-        Self { store, prefix }
+        Self {
+            store,
+            prefix,
+            vnodes: vec![],
+        }
     }
 
     /// Creates a root [`Keyspace`] for an executor.
@@ -58,7 +65,11 @@ impl<S: StateStore> Keyspace<S> {
             buf.put_u64(executor_id);
             buf.to_vec()
         };
-        Self { store, prefix }
+        Self {
+            store,
+            prefix,
+            vnodes: vec![],
+        }
     }
 
     /// Creates a root [`Keyspace`] for a table.
@@ -69,7 +80,26 @@ impl<S: StateStore> Keyspace<S> {
             buf.put_u32(id.table_id);
             buf.to_vec()
         };
-        Self { store, prefix }
+        Self {
+            store,
+            prefix,
+            vnodes: vec![],
+        }
+    }
+
+    /// Creates a root [`Keyspace`] for a table with specific vnodes.
+    pub fn table_root_with_vnodes(store: S, id: &TableId, vnodes: Vec<VirtualNode>) -> Self {
+        let prefix = {
+            let mut buf = BytesMut::with_capacity(5);
+            buf.put_u8(b't');
+            buf.put_u32(id.table_id);
+            buf.to_vec()
+        };
+        Self {
+            store,
+            prefix,
+            vnodes,
+        }
     }
 
     /// Appends more bytes to the prefix and returns a new `Keyspace`
@@ -80,6 +110,7 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store: self.store.clone(),
             prefix,
+            vnodes: self.vnodes.clone(),
         }
     }
 
@@ -111,13 +142,19 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Gets from the keyspace with the `prefixed_key` of given key.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
-    pub async fn get(
+    pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> StorageResult<Option<Bytes>> {
+        self.store.get(&self.prefixed_key(key), epoch, None).await
+    }
+
+    pub async fn get_with_vnode(
         &self,
         key: impl AsRef<[u8]>,
         epoch: u64,
-        vnode: Option<VirtualNode>,
+        vnode: VirtualNode,
     ) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefixed_key(key), epoch, vnode).await
+        self.store
+            .get(&self.prefixed_key(key), epoch, Some(vnode))
+            .await
     }
 
     /// Scans `limit` keys from the keyspace using an inclusive `start_key` and get their values. If
@@ -129,11 +166,13 @@ impl<S: StateStore> Keyspace<S> {
         start_key: Vec<u8>,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Vec<VirtualNode>,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
         let start_key_with_prefix = [self.prefix.as_slice(), start_key.as_slice()].concat();
         let range = start_key_with_prefix..next_key(self.prefix.as_slice());
-        let mut pairs = self.store.scan(range, limit, epoch, vnodes).await?;
+        let mut pairs = self
+            .store
+            .scan(range, limit, epoch, self.vnodes.clone())
+            .await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -147,10 +186,12 @@ impl<S: StateStore> Keyspace<S> {
         &self,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Vec<VirtualNode>,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
-        let mut pairs = self.store.scan(range, limit, epoch, vnodes).await?;
+        let mut pairs = self
+            .store
+            .scan(range, limit, epoch, self.vnodes.clone())
+            .await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -159,17 +200,13 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Gets an iterator with the prefix of this keyspace.
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    async fn iter_inner(&'_ self, epoch: u64, vnodes: Vec<VirtualNode>) -> StorageResult<S::Iter> {
+    async fn iter_inner(&'_ self, epoch: u64) -> StorageResult<S::Iter> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
-        self.store.iter(range, epoch, vnodes).await
+        self.store.iter(range, epoch, self.vnodes.clone()).await
     }
 
-    pub async fn iter(
-        &self,
-        epoch: u64,
-        vnodes: Vec<VirtualNode>,
-    ) -> StorageResult<StripPrefixIterator<S::Iter>> {
-        let iter = self.iter_inner(epoch, vnodes).await?;
+    pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
+        let iter = self.iter_inner(epoch).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),

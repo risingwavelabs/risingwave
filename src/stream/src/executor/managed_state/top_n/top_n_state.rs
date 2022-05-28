@@ -188,7 +188,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // This `order` is defined by the order between two `OrderedRow`.
         // We have to scan all because the top n on the storage may have been deleted by the flush
         // buffer.
-        let iter = self.keyspace.iter(epoch, vec![]).await?;
+        let iter = self.keyspace.iter(epoch).await?;
         let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_TYPE>::new(
             iter,
             &mut self.ordered_row_deserializer,
@@ -303,7 +303,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     /// the same key in the cache, and their value must be the same.
     pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
         debug_assert!(!self.is_dirty());
-        let iter = self.keyspace.iter(epoch, vec![]).await?;
+        let iter = self.keyspace.iter(epoch).await?;
         let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_TYPE>::new(
             iter,
             &mut self.ordered_row_deserializer,

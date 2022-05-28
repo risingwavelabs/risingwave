@@ -96,7 +96,7 @@ impl<S: StateStore> SourceStateHandler<S> {
         epoch: u64,
     ) -> Result<Option<Bytes>> {
         self.keyspace
-            .get(state_identifier, epoch, None)
+            .get(state_identifier, epoch)
             .await
             .map_err(|e| anyhow!(e))
     }
@@ -202,7 +202,7 @@ mod tests {
         let _rs = take_snapshot_and_get_states(state_store_handler.clone(), current_epoch).await;
         let stored_states = state_store_handler
             .keyspace
-            .scan(None, current_epoch, vec![])
+            .scan(None, current_epoch)
             .await
             .unwrap();
         assert_ne!(0, stored_states.len());
