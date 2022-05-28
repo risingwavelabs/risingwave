@@ -59,7 +59,6 @@ message ExprNode {
     CEIL = 221;
     FLOOR = 222;
 
-
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
