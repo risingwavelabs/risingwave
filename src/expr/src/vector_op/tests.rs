@@ -143,8 +143,22 @@ fn test_bitwise() {
         1);
     
     assert!(
+        general_shl::<i32, i32, i64>(1, 1).unwrap(),
+        2);
+    assert!(
+        general_shl::<i32, i32, i64>(1, 31).unwrap(),
+        -2147483648);
+
+    assert!(
         general_shl::<i32, i32, i64>(1, 0).unwrap(),
         1);
+    assert!(
+        general_shl::<i32, i32, i64>(1, 1).unwrap(),
+        2);
+    assert!(
+        general_shr::<i32, i32, i64>(-2147483648, 31).unwrap(),
+        1);
+
 
 }
 
