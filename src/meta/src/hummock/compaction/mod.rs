@@ -153,26 +153,22 @@ impl CompactStatus {
         HUMMOCK_COMPACT_STATUS_KEY
     }
 
-    pub async fn get<S: MetaStore>(
-        meta_store: &S,
-        config: Arc<CompactionConfig>,
-    ) -> Result<Option<CompactStatus>> {
+    pub async fn load<S: MetaStore>(&mut self, meta_store: &S) -> Result<()> {
         match meta_store
             .get_cf(CompactStatus::cf_name(), CompactStatus::key().as_bytes())
             .await
             .map(|v| risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(v)).unwrap())
         {
             Ok(compact_status) => {
-                let mut status = CompactStatus::new(config);
-                status.level_handlers = compact_status.level_handlers.iter().map_into().collect();
-                status.next_compact_task_id = compact_status.next_compact_task_id;
-                Ok(Some(status))
+                self.level_handlers = compact_status.level_handlers.iter().map_into().collect();
+                self.next_compact_task_id = compact_status.next_compact_task_id;
+                Ok(())
             }
             Err(err) => {
                 if !matches!(err, storage::Error::ItemNotFound(_)) {
                     return Err(err.into());
                 }
-                Ok(None)
+                Ok(())
             }
         }
     }

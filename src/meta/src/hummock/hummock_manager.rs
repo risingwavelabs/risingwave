@@ -185,12 +185,12 @@ where
 
     /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
-        let config = self.config.clone();
         let mut compaction_guard = self.compaction.write().await;
 
-        compaction_guard.compact_status = CompactStatus::get(self.env.meta_store(), config.clone())
-            .await?
-            .unwrap_or_else(|| CompactStatus::new(config));
+        compaction_guard
+            .compact_status
+            .load(self.env.meta_store())
+            .await?;
 
         compaction_guard.compact_task_assignment =
             CompactTaskAssignment::list(self.env.meta_store())
