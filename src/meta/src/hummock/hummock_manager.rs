@@ -138,11 +138,14 @@ impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
+    // only for test
+    pub async fn new_with_config(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
+        config: CompactionConfig,
     ) -> Result<HummockManager<S>> {
+        let config = Arc::new(config);
         let instance = HummockManager {
             env,
             versioning: RwLock::new(Versioning {
@@ -154,14 +157,13 @@ where
                 sstable_id_infos: Default::default(),
             }),
             compaction: RwLock::new(Compaction {
-                compact_status: CompactStatus::default(),
+                compact_status: CompactStatus::new(config.clone()),
                 compact_task_assignment: Default::default(),
             }),
             metrics,
             cluster_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
-            // TODO: load it from etcd or configuration file.
-            config: Arc::new(CompactionConfig::default()),
+            config,
         };
 
         instance.load_meta_store_state().await?;
@@ -169,8 +171,16 @@ where
         instance.cancel_unassigned_compaction_task().await?;
         // Release snapshots pinned by meta on restarting.
         instance.release_contexts([META_NODE_ID]).await?;
-
         Ok(instance)
+    }
+
+    pub async fn new(
+        env: MetaSrvEnv<S>,
+        cluster_manager: ClusterManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
+    ) -> Result<HummockManager<S>> {
+        // TODO: load it from etcd or configuration file.
+        Self::new_with_config(env, cluster_manager, metrics, CompactionConfig::default()).await
     }
 
     /// Load state from meta store.
@@ -178,7 +188,7 @@ where
         let config = self.config.clone();
         let mut compaction_guard = self.compaction.write().await;
 
-        compaction_guard.compact_status = CompactStatus::get(self.env.meta_store())
+        compaction_guard.compact_status = CompactStatus::get(self.env.meta_store(), config.clone())
             .await?
             .unwrap_or_else(|| CompactStatus::new(config));
 

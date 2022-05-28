@@ -204,11 +204,12 @@ impl DynamicLevelSelector {
             if level_idx == 0 {
                 if total_size < self.config.max_bytes_for_level_base {
                     // trigger intra-l0 compaction at first when the files in L0 are all small
-                    let score =
-                        idle_file_count * SCORE_BASE / self.config.level0_trigger_number as u64;
+                    let score = idle_file_count * SCORE_BASE
+                        / self.config.level0_tier_compact_file_number as u64;
                     ctx.score_levels.push((score, 0, 0));
                 }
-                let score = 2 * total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
+                let score = 2 * total_size * SCORE_BASE / self.config.max_bytes_for_level_base
+                    + idle_file_count * SCORE_BASE / self.config.level0_tigger_file_numer as u64;
                 ctx.score_levels.push((score, 0, ctx.base_level));
             } else {
                 ctx.score_levels.push((
@@ -296,8 +297,8 @@ pub mod tests {
             max_bytes_for_level_multiplier: 5,
             max_compaction_bytes: 0,
             min_compaction_bytes: 1,
-            level0_max_file_number: 0,
-            level0_trigger_number: 2,
+            level0_tigger_file_numer: 1,
+            level0_tier_compact_file_number: 2,
             compaction_mode: RangeMode,
         };
         let selector =
@@ -374,8 +375,8 @@ pub mod tests {
             max_bytes_for_level_multiplier: 5,
             max_compaction_bytes: 10000,
             min_compaction_bytes: 200,
-            level0_max_file_number: 0,
-            level0_trigger_number: 2,
+            level0_tigger_file_numer: 8,
+            level0_tier_compact_file_number: 4,
             compaction_mode: RangeMode,
         };
         let mut levels = vec![
@@ -421,6 +422,7 @@ pub mod tests {
 
         config.min_compaction_bytes = 1;
         config.max_bytes_for_level_base = 100;
+        config.level0_tigger_file_numer = 8;
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();

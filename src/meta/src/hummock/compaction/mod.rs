@@ -48,17 +48,16 @@ pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
 const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4GB
 const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
 const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
-const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 32;
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
-const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 16;
+const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: usize = 16;
 
 const MAX_LEVEL: usize = 6;
 
 pub struct CompactStatus {
     pub(crate) level_handlers: Vec<LevelHandler>,
     pub(crate) next_compact_task_id: u64,
-    compaction_selector: Box<dyn LevelSelector>,
+    compaction_selector: Arc<dyn LevelSelector>,
 }
 
 impl Debug for CompactStatus {
@@ -83,7 +82,7 @@ impl Clone for CompactStatus {
     fn clone(&self) -> Self {
         Self {
             level_handlers: self.level_handlers.clone(),
-            compaction_selector: Box::new(DynamicLevelSelector::default()),
+            compaction_selector: self.compaction_selector.clone(),
             next_compact_task_id: self.next_compact_task_id,
         }
     }
@@ -108,8 +107,8 @@ pub struct CompactionConfig {
     pub max_bytes_for_level_multiplier: u64,
     pub max_compaction_bytes: u64,
     pub min_compaction_bytes: u64,
-    pub level0_max_file_number: usize,
-    pub level0_trigger_number: usize,
+    pub level0_tigger_file_numer: usize,
+    pub level0_tier_compact_file_number: usize,
     pub compaction_mode: CompactionMode,
 }
 
@@ -121,8 +120,8 @@ impl Default for CompactionConfig {
             max_level: MAX_LEVEL,
             max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
             min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
-            level0_max_file_number: DEFAULT_LEVEL0_MAX_FILE_NUMBER,
-            level0_trigger_number: DEFAULT_LEVEL0_TRIGGER_NUMBER,
+            level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
+            level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
             compaction_mode: ConsistentHashMode,
         }
     }
@@ -142,7 +141,7 @@ impl CompactStatus {
             level_handlers,
             next_compact_task_id: 1,
             // TODO: create selector and overlap strategy by configure.
-            compaction_selector: Box::new(DynamicLevelSelector::new(config, overlap_strategy)),
+            compaction_selector: Arc::new(DynamicLevelSelector::new(config, overlap_strategy)),
         }
     }
 
@@ -154,14 +153,21 @@ impl CompactStatus {
         HUMMOCK_COMPACT_STATUS_KEY
     }
 
-    pub async fn get<S: MetaStore>(meta_store: &S) -> Result<Option<CompactStatus>> {
+    pub async fn get<S: MetaStore>(
+        meta_store: &S,
+        config: Arc<CompactionConfig>,
+    ) -> Result<Option<CompactStatus>> {
         match meta_store
             .get_cf(CompactStatus::cf_name(), CompactStatus::key().as_bytes())
             .await
             .map(|v| risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(v)).unwrap())
-            .map(|s| (&s).into())
         {
-            Ok(compact_status) => Ok(Some(compact_status)),
+            Ok(compact_status) => {
+                let mut status = CompactStatus::new(config);
+                status.level_handlers = compact_status.level_handlers.iter().map_into().collect();
+                status.next_compact_task_id = compact_status.next_compact_task_id;
+                Ok(Some(status))
+            }
             Err(err) => {
                 if !matches!(err, storage::Error::ItemNotFound(_)) {
                     return Err(err.into());
@@ -338,7 +344,7 @@ impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
         CompactStatus {
             level_handlers: status.level_handlers.iter().map_into().collect(),
             next_compact_task_id: status.next_compact_task_id,
-            compaction_selector: Box::new(DynamicLevelSelector::default()),
+            compaction_selector: Arc::new(DynamicLevelSelector::default()),
         }
     }
 }

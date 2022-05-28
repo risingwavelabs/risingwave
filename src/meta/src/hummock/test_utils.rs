@@ -22,6 +22,7 @@ use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo, VNodeBitmap};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
+use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
@@ -151,11 +152,19 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
+    let config = CompactionConfig {
+        level0_tigger_file_numer: 2,
+        level0_tier_compact_file_number: 1,
+        min_compaction_bytes: 1,
+        max_bytes_for_level_base: 1,
+        ..Default::default()
+    };
     let hummock_manager = Arc::new(
-        HummockManager::new(
+        HummockManager::new_with_config(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
+            config,
         )
         .await
         .unwrap(),
