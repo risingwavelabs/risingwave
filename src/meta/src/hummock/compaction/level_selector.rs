@@ -196,13 +196,6 @@ impl DynamicLevelSelector {
                 continue;
             }
             if level_idx == 0 {
-                // The number of files in L0 can grow quickly due to frequent checkpoint. So, if we
-                // set level0_trigger_number too small, the manager will always
-                // compact the files in L0 and it would make the whole tree more unbalanced. So we
-                // set level0_trigger_number a large number to make compaction
-                // manager can trigger compaction jobs of other level but we add a base score
-                // `idle_file_count + 100` so that the manager can trigger L0
-                // compaction when the other levels are all balanced.
                 let score = idle_file_count * SCORE_BASE / self.config.level0_trigger_number as u64;
                 let score = std::cmp::max(
                     total_size * SCORE_BASE / self.config.max_bytes_for_level_base,
@@ -293,6 +286,7 @@ pub mod tests {
             max_level: 4,
             max_bytes_for_level_multiplier: 5,
             max_compaction_bytes: 0,
+            min_compaction_bytes: 1,
             level0_max_file_number: 0,
             level0_trigger_number: 2,
             compaction_mode: RangeMode,
@@ -370,6 +364,7 @@ pub mod tests {
             max_level: 4,
             max_bytes_for_level_multiplier: 5,
             max_compaction_bytes: 10000,
+            min_compaction_bytes: 1,
             level0_max_file_number: 0,
             level0_trigger_number: 2,
             compaction_mode: RangeMode,
