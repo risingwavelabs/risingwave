@@ -45,8 +45,8 @@ impl BoundQuery {
         self.schema().data_types()
     }
 
-    pub fn has_correlated_input_ref(&self) -> bool {
-        self.body.has_correlated_input_ref()
+    pub fn is_correlated(&self) -> bool {
+        self.body.is_correlated()
     }
 
     pub fn get_and_change_correlated_input_ref(&mut self) -> Vec<InputRef> {

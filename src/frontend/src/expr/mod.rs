@@ -27,9 +27,9 @@ mod input_ref;
 mod literal;
 mod subquery;
 
-mod expr_changer;
 mod expr_rewriter;
 mod expr_visitor;
+mod expr_visitor_mut;
 mod type_inference;
 mod utils;
 
@@ -42,9 +42,9 @@ pub use subquery::{Subquery, SubqueryKind};
 
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
-pub use expr_changer::ExprChanger;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
+pub use expr_visitor_mut::ExprVisitorMut;
 pub use type_inference::{align_types, cast_ok, infer_type, least_restrictive, CastContext};
 pub use utils::*;
 
@@ -159,12 +159,12 @@ impl ExprImpl {
             depth: usize,
             index: usize,
         }
-        impl ExprChanger for Changer {
+        impl ExprVisitorMut for Changer {
             fn change_correlated_input_ref(
                 &mut self,
                 correlated_input_ref: &mut CorrelatedInputRef,
             ) {
-                if correlated_input_ref.depth() >= self.depth {
+                if correlated_input_ref.depth() == self.depth {
                     self.correlated_inputs.push(InputRef::new(
                         correlated_input_ref.index(),
                         correlated_input_ref.return_type(),
@@ -208,7 +208,7 @@ impl ExprImpl {
 
         impl ExprVisitor for Has {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-                if correlated_input_ref.depth() >= self.depth {
+                if correlated_input_ref.depth() == self.depth {
                     self.has = true;
                 }
             }

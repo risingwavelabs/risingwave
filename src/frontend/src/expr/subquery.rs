@@ -44,8 +44,8 @@ impl Subquery {
         Self { query, kind }
     }
 
-    pub fn has_correlated_input_ref(&self) -> bool {
-        self.query.has_correlated_input_ref()
+    pub fn is_correlated(&self) -> bool {
+        self.query.is_correlated()
     }
 
     pub fn get_and_change_correlated_input_ref(&mut self) -> Vec<InputRef> {

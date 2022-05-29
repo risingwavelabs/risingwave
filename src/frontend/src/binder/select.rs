@@ -44,7 +44,7 @@ impl BoundSelect {
         &self.schema
     }
 
-    pub fn has_correlated_input_ref(&self) -> bool {
+    pub fn is_correlated(&self) -> bool {
         self.select_items
             .iter()
             .chain(self.group_by.iter())

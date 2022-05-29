@@ -22,7 +22,7 @@ use super::{AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Liter
 ///
 /// Note: The default implementation for `change_subquery` is a no-op, i.e., expressions inside
 /// subqueries are not traversed.
-pub trait ExprChanger {
+pub trait ExprVisitorMut {
     fn change_expr(&mut self, expr: &mut ExprImpl) {
         match expr {
             ExprImpl::InputRef(inner) => self.change_input_ref(inner),

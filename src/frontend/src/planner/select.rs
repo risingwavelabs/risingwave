@@ -178,7 +178,10 @@ impl Planner {
         let on = match subquery.kind {
             SubqueryKind::Existential => ExprImpl::literal_bool(true),
             SubqueryKind::In(left_expr) => {
-                let right_expr = InputRef::new(input.schema().fields().len(), output_column_type);
+                let right_expr = InputRef::new(
+                    input.schema().fields().len() + correlated_inputs.len(),
+                    output_column_type,
+                );
                 FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?.into()
             }
             kind => {
@@ -296,22 +299,12 @@ impl Planner {
                 Condition::true_cond(),
             );
 
-            // let mut shifted_inputs = correlated_inputs.clone();
-            // shifted_inputs
-            //     .iter_mut()
-            //     .for_each(|input| input.shift_with_offset(left.schema().len() as isize));
             let apply_left_len = left.schema().len();
-            // let shifted_input = (apply_left_len..apply_left_len +
-            // correlated_inputs.len()).into_iter().map(|index| InputRef::new())
-            let shifted_inputs: Vec<InputRef> = correlated_inputs
-                .iter()
-                .enumerate()
-                .map(|(index, input)| InputRef::new(index + apply_left_len, input.return_type()))
-                .collect();
             correlated_inputs
                 .into_iter()
-                .zip_eq(shifted_inputs.into_iter())
-                .for_each(|(input, shifted_input)| {
+                .enumerate()
+                .for_each(|(index, input)| {
+                    let shifted_input = InputRef::new(index + apply_left_len, input.return_type());
                     let equal_predicate = FunctionCall::new(
                         ExprType::Equal,
                         vec![input.into(), shifted_input.into()],

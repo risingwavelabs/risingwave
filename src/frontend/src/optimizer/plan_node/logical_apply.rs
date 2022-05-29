@@ -46,14 +46,11 @@ impl fmt::Display for LogicalApply {
 
 impl LogicalApply {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
-        // assert!(
-        //     matches!(
-        //         join_type,
-        //         JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
-        //     ),
-        //     "Invalid join type {:?} for LogicalApply",
-        //     join_type
-        // );
+        assert!(
+            matches!(join_type, JoinType::Inner),
+            "Invalid join type {:?} for LogicalApply",
+            join_type
+        );
         let ctx = left.ctx();
         let out_column_num =
             LogicalJoin::out_column_num(left.schema().len(), right.schema().len(), join_type);

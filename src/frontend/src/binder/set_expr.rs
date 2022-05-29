@@ -37,9 +37,9 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn has_correlated_input_ref(&self) -> bool {
+    pub fn is_correlated(&self) -> bool {
         match self {
-            BoundSetExpr::Select(s) => s.has_correlated_input_ref(),
+            BoundSetExpr::Select(s) => s.is_correlated(),
             BoundSetExpr::Values(_) => false,
         }
     }
