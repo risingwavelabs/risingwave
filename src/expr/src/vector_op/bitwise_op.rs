@@ -107,13 +107,4 @@ where
 pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> Result<T1> {
     Ok(expr.not())
 }
-   general_atm(l, r,  |a, b| Ok( a.bitxor(b)) )
-}
-
-
-#[inline(always)]
-pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> Result<T1> {
-    Ok(expr.not())
-}
-
->>>>>>> Bitwise not done implemetation. TODO Testing
+   
