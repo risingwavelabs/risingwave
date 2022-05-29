@@ -155,6 +155,9 @@ pub struct QueryStage {
     pub root: Arc<ExecutionPlanNode>,
     pub exchange_info: ExchangeInfo,
     pub parallelism: u32,
+    /// This is a flag to indicate whether this stage contains some executor that creates
+    /// Hummock iterators to read data from table. The iterator is initialized during
+    /// the executor building process on the batch execution engine.
     pub has_table_scan: bool,
 }
 
@@ -359,6 +362,7 @@ impl BatchPlanFragmenter {
                 } else {
                     builder.root = Some(Arc::new(execution_plan_node));
                 }
+                // Check out the comments for `has_table_scan` in `QueryStage`.
                 builder.has_table_scan = node.node_type() == PlanNodeType::BatchSeqScan;
             }
         }
