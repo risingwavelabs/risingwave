@@ -63,8 +63,10 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 rand = "0.8"
-risingwave_frontend = { path = "../frontend" }
 tempfile = "3"
+
+[target.'cfg(not(madsim))'.dev-dependencies]
+risingwave_frontend = { path = "../frontend" }
 
 [features]
 test = []
