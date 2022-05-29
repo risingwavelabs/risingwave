@@ -16,7 +16,7 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use prost::DecodeError;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, Row};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
 use risingwave_common::{ensure, for_all_variants};
@@ -61,6 +61,10 @@ impl Expression for LiteralExpression {
         let literal = &self.literal;
         for_all_variants! {array_impl_literal_append, builder, literal, cardinality}
         array_builder.finish().map(Arc::new)
+    }
+
+    fn eval_row(&self, _input: &Row) -> Result<Datum> {
+        Ok(self.literal.as_ref().cloned())
     }
 }
 
@@ -309,5 +313,12 @@ mod tests {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
         let result = literal.eval(&DataChunk::new_dummy(1)).unwrap();
         assert_eq!(*result, array_nonnull!(I32Array, [1]).into());
+    }
+
+    #[test]
+    fn test_literal_eval_row_dummy_chunk() {
+        let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
+        let result = literal.eval_row(&Row::new(vec![])).unwrap();
+        assert_eq!(result, Some(1.into()))
     }
 }

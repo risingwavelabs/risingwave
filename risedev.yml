@@ -127,6 +127,11 @@ risedev:
       listen-address: "0.0.0.0"
       address: ${id}
 
+    - use: grafana
+      listen-address: "0.0.0.0"
+      address: ${id}
+      id: grafana-0
+
   # special config for deployment, see related PR for more information
   compose-3node-deploy:
     - use: minio

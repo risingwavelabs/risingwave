@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::ops::Index;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::ensure;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -53,6 +54,11 @@ impl Expression for InputRefExpression {
             None => Ok(array),
         }
     }
+
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
+        let cell = input.index(self.idx).as_ref().cloned();
+        Ok(cell)
+    }
 }
 
 impl InputRefExpression {
@@ -81,6 +87,26 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
             Err(RwError::from(ErrorCode::InternalError(
                 "expects a input ref node".to_string(),
             )))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::Row;
+    use risingwave_common::types::{DataType, Datum};
+
+    use crate::expr::{Expression, InputRefExpression};
+
+    #[test]
+    fn test_eval_row_input_ref() {
+        let datums: Vec<Datum> = vec![Some(1.into()), Some(2.into()), None];
+        let input_row = Row::new(datums.clone());
+
+        for (i, expected) in datums.iter().enumerate() {
+            let expr = InputRefExpression::new(DataType::Int32, i);
+            let result = expr.eval_row(&input_row).unwrap();
+            assert_eq!(*expected, result);
         }
     }
 }
