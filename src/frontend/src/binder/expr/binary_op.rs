@@ -48,7 +48,7 @@ impl Binder {
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::PgBitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::PgBitwiseShiftRight,
-            
+
             _ => return Err(ErrorCode::NotImplemented(format!("{:?}", op), 112.into()).into()),
         };
         Ok(FunctionCall::new(func_type, vec![bound_left, bound_right])?.into())

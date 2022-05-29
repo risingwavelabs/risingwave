@@ -140,33 +140,31 @@ fn test_arithmetic() {
 #[test]
 fn test_bitwise() {
     // check the boundary
-    
-    assert_eq!(
-        general_shl::<i32, i32, i64>(1i32, 0i32).unwrap(),
-        1i64);
+
+    assert_eq!(general_shl::<i32, i32, i64>(1i32, 0i32).unwrap(), 1i64);
     assert_eq!(
         general_shl::<i32, i32, i64>(1i32, 31i32).unwrap(),
-        2147483648i64);
+        2147483648i64
+    );
     assert_eq!(
         general_shr::<i32, i32, i64>(-2147483648i32, 31i32).unwrap(),
-        -1i64);
-    assert_eq!(
-        general_shr::<i32,i32,i64>(1i32,0i32),
-        Ok(1i64));
+        -1i64
+    );
+    assert_eq!(general_shr::<i32, i32, i64>(1i32, 0i32), Ok(1i64));
     // truth table
     assert_eq!(
-        general_bitand::<u32,u32,u64>(0b0011u32,0b0101u32),
-        Ok(0b1u64));
+        general_bitand::<u32, u32, u64>(0b0011u32, 0b0101u32),
+        Ok(0b1u64)
+    );
     assert_eq!(
-        general_bitor::<u32,u32,u64>(0b0011u32,0b0101u32),
-        Ok(0b0111u64));
+        general_bitor::<u32, u32, u64>(0b0011u32, 0b0101u32),
+        Ok(0b0111u64)
+    );
     assert_eq!(
-        general_bitxor::<u32,u32,u64>(0b0011u32,0b0101u32),
-        Ok(0b0110u64));
-    assert_eq!(
-        general_bitnot::<i32>(0b01i32),
-        Ok(-2i32));   
-
+        general_bitxor::<u32, u32, u64>(0b0011u32, 0b0101u32),
+        Ok(0b0110u64)
+    );
+    assert_eq!(general_bitnot::<i32>(0b01i32), Ok(-2i32));
 }
 
 #[test]

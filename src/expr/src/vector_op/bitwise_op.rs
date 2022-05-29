@@ -16,10 +16,9 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 use std::ops::{BitAnd, BitOr, BitXor, Not};
 
-use num_traits::{CheckedShl,CheckedShr};
+use num_traits::{CheckedShl, CheckedShr};
 use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use risingwave_common::error::{Result, RwError};
-
 
 use crate::vector_op::arithmetic_op::general_atm;
 
@@ -74,7 +73,6 @@ where
     atm(l, r)
 }
 
-
 #[inline(always)]
 pub fn general_bitand<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
@@ -82,7 +80,7 @@ where
     T2: TryInto<T3> + Debug,
     T3: BitAnd<Output = T3>,
 {
-    general_atm(l, r,  |a, b| Ok( a.bitand(b)) )
+    general_atm(l, r, |a, b| Ok(a.bitand(b)))
 }
 
 #[inline(always)]
@@ -92,7 +90,7 @@ where
     T2: TryInto<T3> + Debug,
     T3: BitOr<Output = T3>,
 {
-    general_atm(l, r,  |a, b| Ok( a.bitor(b)) )
+    general_atm(l, r, |a, b| Ok(a.bitor(b)))
 }
 
 #[inline(always)]
@@ -102,12 +100,10 @@ where
     T2: TryInto<T3> + Debug,
     T3: BitXor<Output = T3>,
 {
-    general_atm(l, r,  |a, b| Ok( a.bitxor(b)) )
+    general_atm(l, r, |a, b| Ok(a.bitxor(b)))
 }
-
 
 #[inline(always)]
 pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> Result<T1> {
     Ok(expr.not())
 }
-

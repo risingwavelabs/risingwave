@@ -263,14 +263,17 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     // bitwise operator
     build_binary_atm_funcs(
         &mut map,
-        &[E::PgBitwiseShiftLeft, E::PgBitwiseShiftRight, E::BitwiseAnd, E::BitwiseOr, E::BitwiseNot, E::BitwiseXor],
+        &[
+            E::PgBitwiseShiftLeft,
+            E::PgBitwiseShiftRight,
+            E::BitwiseAnd,
+            E::BitwiseOr,
+            E::BitwiseNot,
+            E::BitwiseXor,
+        ],
         &[T::Int16, T::Int32, T::Int64],
     );
-    build_unary_atm_funcs(
-        &mut map,
-        &[E::BitwiseNot],
-        &[T::Int16, T::Int32, T::Int64],
-    );
+    build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
     // temporal expressions
     for (base, delta) in [
         (T::Date, T::Int32),
@@ -579,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bitwise(){
+    fn test_bitwise() {
         use DataType::*;
         let bitwise_exprs = vec![
             ExprType::BitwiseAnd,
@@ -598,9 +601,6 @@ mod tests {
             (Int64, Int16, Int64),
             (Int64, Int32, Int64),
             (Int64, Int64, Int64),
-           
-            
-            
         ];
         for (expr, (t1, t2, tr)) in iproduct!(bitwise_exprs, num_promote_table) {
             test_simple_infer_type(expr, vec![t1, t2], tr);
