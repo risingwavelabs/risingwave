@@ -14,7 +14,9 @@
 use std::any::type_name;
 use std::convert::TryInto;
 use std::fmt::Debug;
-use std::ops::{BitAnd, BitOr,use num_traits::{CheckedShl, CheckedShr};
+use std::ops::{BitAnd, BitOr, BitXor, Not};
+
+use num_traits::{CheckedShl, CheckedShr};
 use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use risingwave_common::error::{Result, RwError};
 
@@ -105,8 +107,13 @@ where
 pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> Result<T1> {
     Ok(expr.not())
 }
-inline(always)]
+   general_atm(l, r,  |a, b| Ok( a.bitxor(b)) )
+}
+
+
+#[inline(always)]
 pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> Result<T1> {
     Ok(expr.not())
 }
 
+>>>>>>> Bitwise not done implemetation. TODO Testing
