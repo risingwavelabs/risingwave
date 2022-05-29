@@ -30,12 +30,12 @@ message ExprNode {
     NOT = 23;
     IN = 24;
     // bitwise operators
-    BitwiseAnd = 31;
-    BitwiseOr = 32;
-    BitwiseXor = 33;
-    BitwiseNot = 34;
-    PGBitwiseShiftLeft = 35;
-    PGBitwiseShiftRight = 36;
+    BITWISE_AND = 31;
+    BITWISE_OR = 32;
+    BITWISE_XOR = 33;
+    BITWISE_NOT = 34;
+    PG_BITWISE_SHIFT_LEFT = 35;
+    PG_BITWISE_SHIFT_RIGHT = 36;
     // date functions
     EXTRACT = 101;
     TUMBLE_START = 103;
