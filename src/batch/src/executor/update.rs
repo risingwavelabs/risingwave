@@ -189,7 +189,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
-            source.batch_task_context().try_get_source_manager_ref()?,
+            source.context().try_get_source_manager_ref()?,
             child,
             exprs,
         )))

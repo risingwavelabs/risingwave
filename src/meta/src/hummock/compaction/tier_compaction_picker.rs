@@ -111,7 +111,7 @@ impl CompactionPicker for TierCompactionPicker {
                     level_type: LevelType::Overlapping as i32,
                     table_infos: vec![],
                 },
-                split_ranges: vec![KeyRange::inf()],
+                split_ranges: vec![],
             });
         }
         None

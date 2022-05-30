@@ -18,8 +18,8 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo, VNodeBitmap};
+use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
+use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::hummock::compaction::CompactionConfig;
@@ -96,12 +96,10 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
             vnode_bitmaps: vec![
                 VNodeBitmap {
                     table_id: (i + 1) as u32,
-                    maplen: 0,
                     bitmap: vec![],
                 },
                 VNodeBitmap {
                     table_id: (i + 2) as u32,
-                    maplen: 0,
                     bitmap: vec![],
                 },
             ],
