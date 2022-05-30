@@ -111,7 +111,6 @@ statement ok
 drop table t;
 
 query T
-
 select md5('abcdefghijklmnopqrstuvwxyz');
 ----
 c3fcd3d76192e4007dfb496cca67e13b
@@ -126,6 +125,7 @@ select md5('hello world');
 ----
 5eb63bbbe01eeed093cb22bb8f5acdc3
 
+query T
 select split_part('abc~@~def~@~ghi', '~@~', 2);
 ----
 def
