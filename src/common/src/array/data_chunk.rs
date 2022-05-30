@@ -49,13 +49,6 @@ impl DataChunkBuilder {
         }
     }
 
-    pub fn visibility(self, visibility: Bitmap) -> DataChunkBuilder {
-        DataChunkBuilder {
-            columns: self.columns,
-            visibility: Some(visibility),
-        }
-    }
-
     pub fn build(self) -> DataChunk {
         DataChunk::new(self.columns, self.visibility)
     }

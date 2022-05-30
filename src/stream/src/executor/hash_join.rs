@@ -582,14 +582,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let chunk = chunk.compact()?;
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().columns(columns);
-            if let Some(visibility) = visibility {
-                data_chunk_builder.visibility(visibility).build()
-            } else {
-                data_chunk_builder.build()
-            }
-        };
+        let data_chunk = DataChunk::new(columns, visibility);
 
         let (side_update, side_match) = if SIDE == SideType::Left {
             (&mut side_l, &mut side_r)

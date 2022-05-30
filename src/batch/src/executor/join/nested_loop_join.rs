@@ -567,12 +567,7 @@ impl NestedLoopJoinExecutor {
                 .into())
             }
         };
-        let builder = DataChunk::builder().columns(concated_columns);
-        let data_chunk = if let Some(vis) = vis {
-            builder.visibility(vis).build()
-        } else {
-            builder.build()
-        };
+        let data_chunk = DataChunk::new(concated_columns, vis);
         Ok(data_chunk)
     }
 }
@@ -610,10 +605,10 @@ mod tests {
         }
         let chunk1: DataChunk = DataChunk::builder().columns(columns.clone()).build();
         let bool_vec = vec![true, false, true, false, false];
-        let chunk2: DataChunk = DataChunk::builder()
-            .columns(columns.clone())
-            .visibility((bool_vec.clone()).try_into().unwrap())
-            .build();
+        let chunk2 = DataChunk::new(
+            columns.clone(),
+            Some((bool_vec.clone()).try_into().unwrap()),
+        );
         let chunk = NestedLoopJoinExecutor::concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
         assert_eq!(chunk.capacity(), chunk2.capacity());
