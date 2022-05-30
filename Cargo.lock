@@ -4205,7 +4205,6 @@ name = "risingwave_storage"
 version = "0.1.7"
 dependencies = [
  "anyhow",
- "async-stream",
  "async-trait",
  "aws-config",
  "aws-endpoint",
@@ -4225,6 +4224,7 @@ dependencies = [
  "fail",
  "farmhash",
  "futures",
+ "futures-async-stream",
  "hyper",
  "itertools",
  "lazy_static",

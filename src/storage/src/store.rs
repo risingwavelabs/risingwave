@@ -163,7 +163,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Gets `epoch`'s uncommitted `SSTables`.
     fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<SstableInfo> {
-        vec![]
+        todo!()
     }
 }
 

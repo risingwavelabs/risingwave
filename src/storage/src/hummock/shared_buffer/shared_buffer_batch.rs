@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -74,9 +73,6 @@ pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
 }
-
-/// `{ end key -> batch }`
-pub(crate) type IndexedSharedBufferBatches = BTreeMap<Vec<u8>, SharedBufferBatch>;
 
 impl SharedBufferBatch {
     pub fn new(

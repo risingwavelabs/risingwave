@@ -18,10 +18,11 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo, VNodeBitmap};
+use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
+use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
+use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
@@ -95,12 +96,10 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
             vnode_bitmaps: vec![
                 VNodeBitmap {
                     table_id: (i + 1) as u32,
-                    maplen: 0,
                     bitmap: vec![],
                 },
                 VNodeBitmap {
                     table_id: (i + 2) as u32,
-                    maplen: 0,
                     bitmap: vec![],
                 },
             ],
@@ -151,11 +150,19 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
+    let config = CompactionConfig {
+        level0_tigger_file_numer: 2,
+        level0_tier_compact_file_number: 1,
+        min_compaction_bytes: 1,
+        max_bytes_for_level_base: 1,
+        ..Default::default()
+    };
     let hummock_manager = Arc::new(
-        HummockManager::new(
+        HummockManager::new_with_config(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
+            config,
         )
         .await
         .unwrap(),

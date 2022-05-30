@@ -28,22 +28,19 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
-use risingwave_pb::hummock::{
-    CompactTask, SstableInfo, SubscribeCompactTasksResponse, VNodeBitmap, VacuumTask,
-};
+use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::group_builder::KeyValueGroupingImpl::VirtualNode;
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
-use super::iterator::{
-    BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
-};
-use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
 use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::ReadOptions;
+use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
@@ -117,10 +114,10 @@ impl Compactor {
     /// For compaction from shared buffer to level 0, this is the only function gets called.
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
-        buffers: &[SharedBufferBatch],
+        payload: &UploadTaskPayload,
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
-        let mut start_user_keys: Vec<_> = buffers.iter().map(|m| m.start_user_key()).collect();
+        let mut start_user_keys = payload.iter().map(|m| m.start_user_key()).collect_vec();
         start_user_keys.sort();
         start_user_keys.dedup();
         let mut splits = Vec::with_capacity(start_user_keys.len());
@@ -172,10 +169,10 @@ impl Compactor {
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let iter = {
-                let iters = buffers.iter().map(|m| {
+                let iters = payload.iter().map(|m| {
                     Box::new(m.clone().into_forward_iter()) as BoxedForwardHummockIterator
                 });
-                MergeIterator::new(iters, stats.clone())
+                Box::new(MergeIterator::new(iters, stats.clone()))
             };
             let vnode2unit = vnode2unit.clone();
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
@@ -301,6 +298,7 @@ impl Compactor {
 
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
+        assert_ne!(parallelism, 0, "splits cannot be empty");
         let mut compact_success = true;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
@@ -440,7 +438,7 @@ impl Compactor {
     async fn compact_key_range(
         &self,
         split_index: usize,
-        iter: MergeIterator,
+        iter: BoxedForwardHummockIterator,
         vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
     ) -> HummockResult<CompactOutput> {
         let split = self.compact_task.splits[split_index].clone();
@@ -533,7 +531,7 @@ impl Compactor {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    async fn build_sst_iter(&self) -> HummockResult<MergeIterator> {
+    async fn build_sst_iter(&self) -> HummockResult<BoxedForwardHummockIterator> {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
         let mut stats = StoreLocalStatistic::default();
         let read_options = Arc::new(ReadOptions { prefetch: true });
@@ -575,7 +573,10 @@ impl Compactor {
             }
         }
         stats.report(self.context.stats.as_ref());
-        Ok(MergeIterator::new(table_iters, self.context.stats.clone()))
+        Ok(Box::new(MergeIterator::new(
+            table_iters,
+            self.context.stats.clone(),
+        )))
     }
 
     pub async fn try_vacuum(
@@ -710,7 +711,7 @@ impl Compactor {
     async fn compact_and_build_sst<B, F>(
         sst_builder: &mut GroupedSstableBuilder<B>,
         kr: KeyRange,
-        mut iter: MergeIterator,
+        mut iter: BoxedForwardHummockIterator,
         has_user_key_overlap: bool,
         watermark: Epoch,
     ) -> HummockResult<()>

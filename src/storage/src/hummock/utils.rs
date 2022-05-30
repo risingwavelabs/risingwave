@@ -16,8 +16,10 @@ use std::cmp::Ordering;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_pb::hummock::{Level, SstableInfo, VNodeBitmap};
+use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::{HummockError, HummockResult};
 
@@ -80,15 +82,34 @@ pub fn bitmap_overlap(pattern: &VNodeBitmap, sst_bitmaps: &Vec<VNodeBitmap>) -> 
         sst_bitmaps.binary_search_by_key(&pattern.get_table_id(), |bitmap| bitmap.get_table_id())
     {
         let text = &sst_bitmaps[pos];
-        let pattern_maplen = pattern.get_maplen();
-        assert_eq!(pattern_maplen, text.get_maplen());
-        for i in 0..pattern_maplen as usize {
+        assert_eq!(pattern.bitmap.len(), VNODE_BITMAP_LEN);
+        assert_eq!(text.bitmap.len(), VNODE_BITMAP_LEN);
+        for i in 0..VNODE_BITMAP_LEN as usize {
             if (pattern.get_bitmap()[i] & text.get_bitmap()[i]) != 0 {
                 return true;
             }
         }
     }
     false
+}
+
+pub fn filter_single_sst<R, B>(
+    info: &SstableInfo,
+    key_range: &R,
+    vnode_set: Option<&VNodeBitmap>,
+) -> bool
+where
+    R: RangeBounds<B>,
+    B: AsRef<[u8]>,
+{
+    ({
+        let table_range = info.key_range.as_ref().unwrap();
+        let table_start = user_key(table_range.left.as_slice());
+        let table_end = user_key(table_range.right.as_slice());
+        range_overlap(key_range, table_start, table_end)
+    }) && vnode_set.map_or(true, |vnode_set| {
+        bitmap_overlap(vnode_set, &info.vnode_bitmaps)
+    })
 }
 
 /// Prune SSTs that does not overlap with a specific key range or does not overlap with a specific
@@ -99,24 +120,11 @@ pub fn prune_ssts<'a, R, B>(
     vnode_set: Option<&VNodeBitmap>,
 ) -> Vec<&'a SstableInfo>
 where
-    R: RangeBounds<B> + Send,
-    B: AsRef<[u8]> + Send,
+    R: RangeBounds<B>,
+    B: AsRef<[u8]>,
 {
-    let mut result_sst_ids: Vec<&'a SstableInfo> = ssts
-        .filter(|info| {
-            let table_range = info.key_range.as_ref().unwrap();
-            let table_start = user_key(table_range.left.as_slice());
-            let table_end = user_key(table_range.right.as_slice());
-            range_overlap(key_range, table_start, table_end)
-        })
-        .collect();
-    if let Some(vnode_set) = vnode_set {
-        result_sst_ids = result_sst_ids
-            .into_iter()
-            .filter(|info| bitmap_overlap(vnode_set, &info.vnode_bitmaps))
-            .collect();
-    }
-    result_sst_ids
+    ssts.filter(|info| filter_single_sst(info, key_range, vnode_set))
+        .collect()
 }
 
 pub fn can_concat(ssts: &[&SstableInfo]) -> bool {
