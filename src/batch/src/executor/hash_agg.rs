@@ -247,7 +247,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
 
-            let output = DataChunk::builder().columns(columns).build();
+            let output = DataChunk::new(columns, None);
             yield output;
         }
     }

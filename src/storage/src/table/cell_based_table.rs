@@ -383,7 +383,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
                 .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
                 .try_collect()
                 .map_err(err)?;
-            DataChunk::builder().columns(columns).build()
+            DataChunk::new(columns, None)
         };
 
         if chunk.cardinality() == 0 {

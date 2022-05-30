@@ -175,7 +175,7 @@ impl SortAggExecutor {
                         .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
                         .collect::<Result<Vec<_>>>()?;
 
-                    let output = DataChunk::builder().columns(columns).build();
+                    let output = DataChunk::new(columns, None);
                     yield output;
 
                     // reset builders and capactiy to build next output chunk
@@ -212,7 +212,7 @@ impl SortAggExecutor {
         let output = match columns.is_empty() {
             // Zero group column means SimpleAgg, which always returns 1 row.
             true => DataChunk::new_dummy(1),
-            false => DataChunk::builder().columns(columns).build(),
+            false => DataChunk::new(columns, None),
         };
 
         yield output;

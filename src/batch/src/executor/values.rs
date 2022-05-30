@@ -85,9 +85,8 @@ impl ValuesExecutor {
                     // We need a one row chunk rather than an empty chunk because constant
                     // expression's eval result is same size as input chunk
                     // cardinality.
-                    let one_row_chunk = DataChunk::builder()
-                        .columns(vec![Column::new(Arc::new(one_row_array.into()))])
-                        .build();
+                    let one_row_chunk =
+                        DataChunk::new(vec![Column::new(Arc::new(one_row_array.into()))], None);
 
                     let chunk_size = self.chunk_size.min(self.rows.len());
                     let mut array_builders = self.schema.create_array_builders(chunk_size)?;
@@ -103,7 +102,7 @@ impl ValuesExecutor {
                         .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
                         .collect::<Result<Vec<Column>>>()?;
 
-                    let chunk = DataChunk::builder().columns(columns).build();
+                    let chunk = DataChunk::new(columns, None);
 
                     yield chunk
                 }

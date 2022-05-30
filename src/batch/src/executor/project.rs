@@ -61,7 +61,7 @@ impl ProjectExecutor {
             let ret = if arrays.is_empty() {
                 DataChunk::new_dummy(data_chunk.cardinality())
             } else {
-                DataChunk::builder().columns(arrays).build()
+                DataChunk::new(arrays, None)
             };
             yield ret
         }

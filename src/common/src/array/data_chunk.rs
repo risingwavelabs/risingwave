@@ -34,26 +34,6 @@ pub struct DataChunkBuilder {
     visibility: Option<Bitmap>,
 }
 
-impl DataChunkBuilder {
-    fn new() -> Self {
-        DataChunkBuilder {
-            columns: vec![],
-            visibility: None,
-        }
-    }
-
-    pub fn columns(self, columns: Vec<Column>) -> DataChunkBuilder {
-        DataChunkBuilder {
-            columns,
-            visibility: self.visibility,
-        }
-    }
-
-    pub fn build(self) -> DataChunk {
-        DataChunk::new(self.columns, self.visibility)
-    }
-}
-
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, Default, PartialEq)]
 pub struct DataChunk {
@@ -144,10 +124,6 @@ impl DataChunk {
         }
     }
 
-    pub fn builder() -> DataChunkBuilder {
-        DataChunkBuilder::new()
-    }
-
     pub fn into_parts(self) -> (Vec<Column>, Option<Bitmap>) {
         (self.columns, self.visibility)
     }
@@ -236,7 +212,7 @@ impl DataChunk {
                             .map(|array| Column::new(Arc::new(array)))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                Ok(Self::builder().columns(columns).build())
+                Ok(Self::new(columns, None))
             }
         }
     }
@@ -337,7 +313,7 @@ impl DataChunk {
                     .map(|col_type| col_type.array_ref().create_builder(new_chunk_require))
                     .try_collect()?;
 
-                let data_chunk = DataChunk::builder().columns(new_columns).build();
+                let data_chunk = DataChunk::new(new_columns, None);
                 new_chunks.push(data_chunk);
 
                 new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
