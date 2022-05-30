@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::common::VNodeBitmap;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -194,7 +194,6 @@ impl SSTableBuilder {
                 .iter()
                 .map(|(table_id, vnode_bitmaps)| VNodeBitmap {
                     table_id: *table_id,
-                    maplen: VNODE_BITMAP_LEN as u32,
                     bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmaps),
                 })
                 .collect(),

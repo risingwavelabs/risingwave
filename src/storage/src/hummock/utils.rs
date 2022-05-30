@@ -17,9 +17,11 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_pb::hummock::{Level, SstableInfo, VNodeBitmap};
+use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::{HummockError, HummockResult};
+use crate::hummock::VNODE_BITMAP_LEN;
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -80,9 +82,9 @@ pub fn bitmap_overlap(pattern: &VNodeBitmap, sst_bitmaps: &Vec<VNodeBitmap>) -> 
         sst_bitmaps.binary_search_by_key(&pattern.get_table_id(), |bitmap| bitmap.get_table_id())
     {
         let text = &sst_bitmaps[pos];
-        let pattern_maplen = pattern.get_maplen();
-        assert_eq!(pattern_maplen, text.get_maplen());
-        for i in 0..pattern_maplen as usize {
+        assert_eq!(pattern.bitmap.len(), VNODE_BITMAP_LEN);
+        assert_eq!(text.bitmap.len(), VNODE_BITMAP_LEN);
+        for i in 0..VNODE_BITMAP_LEN as usize {
             if (pattern.get_bitmap()[i] & text.get_bitmap()[i]) != 0 {
                 return true;
             }

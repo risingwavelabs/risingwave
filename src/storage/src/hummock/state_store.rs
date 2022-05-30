@@ -20,7 +20,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
+use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::SstableInfo;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,

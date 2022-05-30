@@ -67,3 +67,9 @@ message ParallelUnitMapping {
   repeated uint64 original_indices = 2;
   repeated uint32 data = 3;
 }
+
+// Bitmap that records whether vnodes are present.
+message VNodeBitmap {
+  uint32 table_id = 1;
+  bytes bitmap = 2;
+}

@@ -18,7 +18,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::common::VNodeBitmap;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
@@ -222,7 +222,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
@@ -236,7 +235,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [0; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
@@ -250,7 +248,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 5,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
