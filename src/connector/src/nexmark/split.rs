@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::base::SplitMetaData;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct NexmarkSplit {
     pub(crate) split_index: i32,
     pub(crate) split_num: i32,
