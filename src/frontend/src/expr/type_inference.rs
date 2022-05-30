@@ -274,6 +274,11 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &[T::Int16, T::Int32, T::Int64],
     );
     build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
+
+    build_round_funcs(&mut map, E::Round);
+    build_round_funcs(&mut map, E::Ceil);
+    build_round_funcs(&mut map, E::Floor);
+
     // temporal expressions
     for (base, delta) in [
         (T::Date, T::Int32),

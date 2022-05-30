@@ -303,6 +303,15 @@ pub fn new_unary_expr(
                 }
             }
         }
+        (ProstType::BitwiseNot, _, _) => {
+            gen_unary_impl! {
+                [ "Bitwisenot", child_expr, return_type],
+                { int16, int16, general_bitnot },
+                { int32, int32, general_bitnot },
+                { int64, int64, general_bitnot },
+
+            }
+        }
         (ProstType::Ceil, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, ceil_f64, ceil_decimal}
         }
