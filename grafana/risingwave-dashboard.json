@@ -2565,7 +2565,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "rate(stream_exchange_send_size[15s])",
+							"expr": "rate(stream_exchange_send_size[15s]) / 1024",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "{{up_actor_id}}->{{down_actor_id}}",
@@ -2589,7 +2589,7 @@
 					"yaxes": [
 						{
 							"$$hashKey": "object:439",
-							"format": "B/s",
+							"format": "KB/s",
 							"logBase": 1,
 							"show": true
 						},
@@ -2654,7 +2654,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "rate(stream_exchange_recv_size[15s])",
+							"expr": "rate(stream_exchange_recv_size[15s]) / 1024",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "{{up_actor_id}}->{{down_actor_id}}",
@@ -2678,7 +2678,7 @@
 					"yaxes": [
 						{
 							"$$hashKey": "object:439",
-							"format": "B/s",
+							"format": "KB/s",
 							"logBase": 1,
 							"show": true
 						},
