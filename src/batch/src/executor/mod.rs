@@ -89,8 +89,9 @@ pub trait Executor: Send + 'static {
 
 /// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor`
 /// from proto and global environment.
+#[async_trait::async_trait]
 pub trait BoxedExecutorBuilder {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor>;
 }
@@ -114,7 +115,7 @@ macro_rules! build_executor {
     }
 }
 
-impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
+impl<'a, C: Clone> ExecutorBuilder<'a, C> {
     pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, context: C, epoch: u64) -> Self {
         Self {
             plan_node,
@@ -124,8 +125,27 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         }
     }
 
-    pub fn build(&self) -> Result<BoxedExecutor> {
-        self.try_build().map_err(|e| {
+    #[must_use]
+    pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
+        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
+    }
+
+    pub fn plan_node(&self) -> &PlanNode {
+        self.plan_node
+    }
+
+    pub fn context(&self) -> &C {
+        &self.context
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+}
+
+impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
+    pub async fn build(&self) -> Result<BoxedExecutor> {
+        self.try_build().await.map_err(|e| {
             InternalError(format!(
                 "[PlanNode: {:?}] Failed to build executor: {}",
                 self.plan_node.get_node_body(),
@@ -135,12 +155,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         })
     }
 
-    #[must_use]
-    pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
-    }
-
-    fn try_build(&self) -> Result<BoxedExecutor> {
+    async fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
             NodeBody::Insert => InsertExecutor,
@@ -161,21 +176,10 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
             NodeBody::GenerateSeries => GenerateSeriesExecutorBuilder,
             NodeBody::HopWindow => HopWindowExecutor,
-        }?;
+        }
+        .await?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
-    }
-
-    pub fn plan_node(&self) -> &PlanNode {
-        self.plan_node
-    }
-
-    pub fn batch_task_context(&self) -> &C {
-        &self.context
-    }
-
-    pub fn epoch(&self) -> u64 {
-        self.epoch
     }
 }
 

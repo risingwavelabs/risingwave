@@ -31,6 +31,7 @@ use crate::vector_op::conjunction;
 use crate::vector_op::length::length_default;
 use crate::vector_op::lower::lower;
 use crate::vector_op::ltrim::ltrim;
+use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
@@ -205,6 +206,22 @@ macro_rules! gen_unary_atm_expr  {
     };
 }
 
+macro_rules! gen_round_expr {
+    (
+        $expr_name:literal,
+        $child:expr,
+        $ret:expr,
+        $float64_round_func:ident,
+        $decimal_round_func:ident
+    ) => {
+        gen_unary_impl! {
+            [$expr_name, $child, $ret],
+            { float64, float64, $float64_round_func },
+            { decimal, decimal, $decimal_round_func },
+        }
+    };
+}
+
 pub fn new_unary_expr(
     expr_type: ProstType,
     return_type: DataType,
@@ -284,6 +301,15 @@ pub fn new_unary_expr(
                     {decimal, decimal, decimal_abs},
                 }
             }
+        }
+        (ProstType::Ceil, _, _) => {
+            gen_round_expr! {"Ceil", child_expr, return_type, ceil_f64, ceil_decimal}
+        }
+        (ProstType::Floor, _, _) => {
+            gen_round_expr! {"Floor", child_expr, return_type, floor_f64, floor_decimal}
+        }
+        (ProstType::Round, _, _) => {
+            gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         }
         (expr, ret, child) => {
             return Err(ErrorCode::NotImplemented(format!(
@@ -394,6 +420,13 @@ mod tests {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
         }
+
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i].map(|int| int.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].map(|int| int.to_scalar_value());
+            assert_eq!(result, expected);
+        }
     }
 
     #[test]
@@ -433,6 +466,13 @@ mod tests {
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
+        }
+
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i].map(|int| int.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].map(|int| int.to_scalar_value());
+            assert_eq!(result, expected);
         }
     }
 
@@ -480,6 +520,16 @@ mod tests {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
         }
+
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i]
+                .as_ref()
+                .cloned()
+                .map(|str| str.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
+            assert_eq!(result, expected);
+        }
     }
 
     fn test_unary_bool<A, F>(f: F, kind: Type)
@@ -518,6 +568,13 @@ mod tests {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
         }
+
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i].map(|b| b.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
+            assert_eq!(result, expected);
+        }
     }
 
     fn test_unary_date<A, F>(f: F, kind: Type)
@@ -553,6 +610,13 @@ mod tests {
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
+        }
+
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i].map(|d| d.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
+            assert_eq!(result, expected);
         }
     }
 

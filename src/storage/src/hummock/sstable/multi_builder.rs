@@ -16,7 +16,7 @@ use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::common::VNodeBitmap;
 
 use super::SstableMeta;
 use crate::hummock::value::HummockValue;

@@ -162,8 +162,9 @@ impl UpdateExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for UpdateExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         let update_node = try_match_expand!(
@@ -184,11 +185,11 @@ impl BoxedExecutorBuilder for UpdateExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child = source.clone_for_plan(proto_child).build()?;
+        let child = source.clone_for_plan(proto_child).build().await?;
 
         Ok(Box::new(Self::new(
             table_id,
-            source.batch_task_context().try_get_source_manager_ref()?,
+            source.context().try_get_source_manager_ref()?,
             child,
             exprs,
         )))
@@ -200,9 +201,9 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use risingwave_common::array::{Array, I32Array};
+    use risingwave_common::array::Array;
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
-    use risingwave_common::column_nonnull;
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
 
@@ -234,10 +235,14 @@ mod tests {
             })
             .collect();
 
-        let col1 = column_nonnull! { I32Array, [1, 3, 5, 7, 9] };
-        let col2 = column_nonnull! { I32Array, [2, 4, 6, 8, 10] };
-        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        mock_executor.add(data_chunk.clone());
+        mock_executor.add(DataChunk::from_pretty(
+            "i  i
+             1  2
+             3  4
+             5  6
+             7  8
+             9 10",
+        ));
 
         // Update expressions, will swap two columns.
         let exprs = vec![

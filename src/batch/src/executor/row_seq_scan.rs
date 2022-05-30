@@ -19,7 +19,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use crate::executor::monitor::BatchMetrics;
@@ -30,34 +30,30 @@ use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
 pub struct RowSeqScanExecutor<S: StateStore> {
-    table: CellBasedTable<S>,
     primary: bool,
     chunk_size: usize,
     schema: Schema,
     identity: String,
-    epoch: u64,
     stats: Arc<BatchMetrics>,
+    row_iter: CellBasedTableRowIter<S>,
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
-        table: CellBasedTable<S>,
+        schema: Schema,
+        row_iter: CellBasedTableRowIter<S>,
         chunk_size: usize,
         primary: bool,
         identity: String,
-        epoch: u64,
         stats: Arc<BatchMetrics>,
     ) -> Self {
-        let schema = table.schema().clone();
-
         Self {
-            table,
             primary,
             chunk_size,
             schema,
             identity,
-            epoch,
             stats,
+            row_iter,
         }
     }
 
@@ -76,8 +72,9 @@ impl RowSeqScanExecutorBuilder {
     pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         let seq_scan_node = try_match_expand!(
@@ -93,24 +90,21 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        dispatch_state_store!(
-            source.batch_task_context().try_get_state_store()?,
-            state_store,
-            {
-                let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
-                let storage_stats = state_store.stats();
-                let batch_stats = source.batch_task_context().stats();
-                let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-                Ok(Box::new(RowSeqScanExecutor::new(
-                    table,
-                    RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
-                    source.task_id.task_id == 0,
-                    source.plan_node().get_identity().clone(),
-                    source.epoch(),
-                    batch_stats,
-                )))
-            }
-        )
+        dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
+            let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
+            let storage_stats = state_store.stats();
+            let batch_stats = source.context().stats();
+            let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
+            let iter = table.iter(source.epoch).await?;
+            Ok(Box::new(RowSeqScanExecutor::new(
+                table.schema().clone(),
+                iter,
+                RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
+                source.task_id.task_id == 0,
+                source.plan_node().get_identity().clone(),
+                batch_stats,
+            )))
+        })
     }
 }
 
@@ -130,15 +124,14 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(self: Box<Self>) {
+    async fn do_execute(mut self: Box<Self>) {
         if !self.should_ignore() {
-            let mut iter = self.table.iter(self.epoch).await.map_err(RwError::from)?;
-
             loop {
                 let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
-                let chunk = iter
-                    .collect_data_chunk(&self.table, Some(self.chunk_size))
+                let chunk = self
+                    .row_iter
+                    .collect_data_chunk(&self.schema, Some(self.chunk_size))
                     .await
                     .map_err(RwError::from)?;
                 timer.observe_duration();

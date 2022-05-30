@@ -284,18 +284,21 @@ impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
 }
 
 /// Hash join executor builder.
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         context: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         ensure!(context.plan_node().get_children().len() == 2);
 
         let left_child = context
             .clone_for_plan(&context.plan_node.get_children()[0])
-            .build()?;
+            .build()
+            .await?;
         let right_child = context
             .clone_for_plan(&context.plan_node.get_children()[1])
-            .build()?;
+            .build()
+            .await?;
 
         let hash_join_node = try_match_expand!(
             context.plan_node().get_node_body().unwrap(),
@@ -383,12 +386,12 @@ mod tests {
 
     use futures::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array;
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayBuilderImpl, DataChunk, F32Array, F64Array, I32Array};
+    use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
     use risingwave_common::hash::Key32;
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
@@ -489,33 +492,23 @@ mod tests {
             };
             let mut executor = MockExecutor::new(schema);
 
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(1), Some(2), None, Some(3), None]}.into(),
-                ));
-                let column2 = Column::new(Arc::new(
-                    array! {F32Array, [Some(6.1f32), None, Some(8.4f32), Some(3.9f32), None]}
-                        .into(),
-                ));
+            executor.add(DataChunk::from_pretty(
+                "i f
+                 1 6.1
+                 2 .
+                 . 8.4
+                 3 3.9
+                 . .  ",
+            ));
 
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
-
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(4), Some(3), None, Some(5), None]}.into(),
-                ));
-                let column2 = Column::new(Arc::new(
-                    array! {F32Array, [Some(6.6f32), None, Some(0.7f32), None, Some(5.5f32)]}
-                        .into(),
-                ));
-
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
+            executor.add(DataChunk::from_pretty(
+                "i f
+                 4 6.6
+                 3 .
+                 . 0.7
+                 5 .
+                 . 5.5",
+            ));
 
             Box::new(executor)
         }
@@ -529,49 +522,35 @@ mod tests {
             };
             let mut executor = MockExecutor::new(schema);
 
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(8), Some(2), None, Some(3), None, Some(6)]}.into(),
-                ));
+            executor.add(DataChunk::from_pretty(
+                "i F
+                 8 6.1
+                 2 .
+                 . 8.9
+                 3 .
+                 . 3.5
+                 6 .  ",
+            ));
 
-                let column2 = Column::new(Arc::new(
-                    array! {F64Array, [Some(6.1f64), None, Some(8.9f64), None, Some(3.5f64), None]}
-                        .into(),
-                ));
+            executor.add(DataChunk::from_pretty(
+                "i F
+                 4 7.5
+                 6 .
+                 . 8
+                 7 .
+                 . 9.1
+                 9 .  ",
+            ));
 
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
-
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(4), Some(6), None, Some(7), None, Some(9)]}.into(),
-                ));
-
-                let column2 = Column::new(Arc::new(
-                    array! {F64Array, [Some(7.5f64), None, Some(8f64), None, Some(9.1f64), None]}
-                        .into(),
-                ));
-
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
-
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(3), Some(9), None, Some(100), None, Some(200)]}.into(),
-                ));
-
-                let column2 = Column::new(Arc::new(
-                array! {F64Array, [Some(3.7f64), None, Some(9.6f64), None, Some(8.18f64), None]}.into(),
-                ));
-
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
+            executor.add(DataChunk::from_pretty(
+                "  i F
+                   3 3.7
+                   9 .
+                   . 9.6
+                 100 .
+                   . 8.18
+                 200 .   ",
+            ));
 
             Box::new(executor)
         }
@@ -722,17 +701,15 @@ mod tests {
     async fn test_inner_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::Inner);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [None, Some(3.9f32), Some(3.9f32), Some(6.6f32), None, None]}.into(),
-        ));
-
-        let column2 = Column::new(Arc::new(
-            array! {F64Array, [None, Some(3.7f64), None,  Some(7.5f64), Some(3.7f64),  None]}
-                .into(),
-        ));
-
-        let expected_chunk =
-            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             .   .
+             3.9 3.7
+             3.9 .
+             6.6 7.5
+             .   3.7
+             .   .  ",
+        );
 
         test_fixture.do_test(expected_chunk, false).await;
     }
@@ -745,16 +722,10 @@ mod tests {
     async fn test_inner_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::Inner);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [
-            Some(6.6f32)]}
-            .into(),
-        ));
-
-        let column2 = Column::new(Arc::new(array! {F64Array, [Some(7.5f64)]}.into()));
-
-        let expected_chunk =
-            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.6 7.5",
+        );
 
         test_fixture.do_test(expected_chunk, true).await;
     }
@@ -767,19 +738,21 @@ mod tests {
     async fn test_left_outer_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [Some(6.1f32), None, Some(8.4f32), Some(3.9f32), Some(3.9f32), None,
-            Some(6.6f32), None, None, Some(0.7f32), None, Some(5.5f32)]}
-            .into(),
-        ));
-
-        let column2 = Column::new(Arc::new(
-            array! {F64Array, [None, None, None, Some(3.7f64), None, None, Some(7.5f64), Some(3.7f64),
-                None, None, None, None]}.into(),
-    ));
-
-        let expected_chunk =
-            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.1 .
+             .   .
+             8.4 .
+             3.9 3.7
+             3.9 .
+             .   .
+             6.6 7.5
+             .   3.7
+             .   .
+             0.7 .
+             .   .
+             5.5 .  ",
+        );
 
         test_fixture.do_test(expected_chunk, false).await;
     }
@@ -792,19 +765,19 @@ mod tests {
     async fn test_left_outer_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [Some(6.1f32), None, Some(8.4f32), Some(3.9f32), None,
-            Some(6.6f32), None, Some(0.7f32), None, Some(5.5f32)]}
-            .into(),
-        ));
-
-        let column2 = Column::new(Arc::new(
-            array! {F64Array, [None, None, None, None, None, Some(7.5f64), None, None, None, None]}
-                .into(),
-        ));
-
-        let expected_chunk =
-            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.1 .
+             .   .
+             8.4 .
+             3.9 .
+             .   .
+             6.6 7.5
+             .   .
+             0.7 .
+             .   .
+             5.5 .",
+        );
 
         test_fixture.do_test(expected_chunk, true).await;
     }
@@ -817,27 +790,29 @@ mod tests {
     async fn test_right_outer_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightOuter);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [
-                None, Some(3.9f32), Some(3.9f32), Some(6.6), None,
-                None, None, None, None, None,
-                None, None, None, None, None,
-                None, None, None, None, None
-            ]}
-            .into(),
-        ));
-
-        let column2 = Column::new(Arc::new(
-            array! {F64Array, [
-            None, Some(3.7f64), None, Some(7.5f64), Some(3.7f64),
-            None, Some(6.1f64), Some(8.9f64), Some(3.5f64), None,
-            None, Some(8.0f64), None, Some(9.1f64), None,
-            None, Some(9.6f64),None, Some(8.18f64), None]}
-            .into(),
-        ));
-
-        let expected_chunk =
-            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             .   .
+             3.9 3.7
+             3.9 .
+             6.6 7.5
+             .   3.7
+             .   .
+             .   6.1
+             .   8.9
+             .   3.5
+             .   .
+             .   .
+             .   8.0
+             .   .
+             .   9.1
+             .   .
+             .   .
+             .   9.6
+             .   .
+             .   8.18
+             .   .",
+        );
 
         test_fixture.do_test(expected_chunk, false).await;
     }
@@ -850,25 +825,27 @@ mod tests {
     async fn test_right_outer_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightOuter);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [
-                Some(6.6), None, None, None, None, None, None,
-                None, None, None, None, None,
-                None, None, None, None, None, None
-            ]}
-            .into(),
-        ));
-
-        let column2 = Column::new(Arc::new(
-            array! {F64Array, [
-            Some(7.5f64), Some(6.1f64), None, Some(8.9f64), None, Some(3.5f64), None,
-            None, Some(8.0f64), None, Some(9.1f64), None, Some(3.7),
-            None, Some(9.6f64),None, Some(8.18f64), None]}
-            .into(),
-        ));
-
-        let expected_chunk =
-            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.6 7.5
+             .   6.1
+             .   .
+             .   8.9
+             .   .
+             .   3.5
+             .   .
+             .   .
+             .   8.0
+             .   .
+             .   9.1
+             .   .
+             .   3.7
+             .   .
+             .   9.6
+             .   .
+             .   8.18
+             .   .",
+        );
 
         test_fixture.do_test(expected_chunk, true).await;
     }
@@ -880,32 +857,35 @@ mod tests {
     async fn test_full_outer_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::FullOuter);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [
-                Some(6.1f32), None, Some(8.4f32), Some(3.9f32), Some(3.9f32),
-                None, Some(6.6f32), None, None, Some(0.7f32),
-                None, Some(5.5f32), None, None, None,
-                None, None, None, None, None,
-                None, None, None, None, None,
-                None
-            ]}
-            .into(),
-        ));
-
-        let column2 = Column::new(Arc::new(
-            array! {F64Array, [
-                None, None, None, Some(3.7f64), None,
-                None, Some(7.5f64), Some(3.7f64), None, None,
-                None, None, Some(6.1f64), Some(8.9f64), Some(3.5f64),
-                None, None, Some(8.0f64), None, Some(9.1f64),
-                None, None, Some(9.6f64), None, Some(8.18f64),
-                None
-            ]}
-            .into(),
-        ));
-
-        let expected_chunk =
-            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.1 .
+             .   .
+             8.4 .
+             3.9 3.7
+             3.9 .
+             .   .
+             6.6 7.5
+             .   3.7
+             .   .
+             0.7 .
+             .   .
+             5.5 .
+             .   6.1
+             .   8.9
+             .   3.5
+             .   .
+             .   .
+             .   8.0
+             .   .
+             .   9.1
+             .   .
+             .   .
+             .   9.6
+             .   .
+             .   8.18
+             .   .   ",
+        );
 
         test_fixture.do_test(expected_chunk, false).await;
     }
@@ -914,14 +894,15 @@ mod tests {
     async fn test_left_anti_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftAnti);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [
-                Some(6.1f32), Some(8.4f32), None, Some(0.7f32), None, Some(5.5f32)
-            ]}
-            .into(),
-        ));
-
-        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f
+             6.1
+             8.4
+             .
+             0.7
+             .
+             5.5",
+        );
 
         test_fixture.do_test(expected_chunk, false).await;
     }
@@ -930,14 +911,18 @@ mod tests {
     async fn test_left_anti_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftAnti);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [
-                Some(6.1f32), None, Some(8.4f32), Some(3.9), None, None, Some(0.7f32), None, Some(5.5f32)
-            ]}
-            .into(),
-        ));
-
-        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f
+             6.1
+             .
+             8.4
+             3.9
+             .
+             .
+             0.7
+             .
+             5.5",
+        );
 
         test_fixture.do_test(expected_chunk, true).await;
     }
@@ -946,14 +931,13 @@ mod tests {
     async fn test_left_semi_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [
-                None, Some(3.9f32), Some(6.6f32), None
-            ]}
-            .into(),
-        ));
-
-        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f
+             .
+             3.9
+             6.6
+             .",
+        );
 
         test_fixture.do_test(expected_chunk, false).await;
     }
@@ -962,14 +946,10 @@ mod tests {
     async fn test_left_semi_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
 
-        let column1 = Column::new(Arc::new(
-            array! {F32Array, [
-                Some(6.6f32)
-            ]}
-            .into(),
-        ));
-
-        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "f
+             6.6",
+        );
 
         test_fixture.do_test(expected_chunk, true).await;
     }
@@ -978,16 +958,23 @@ mod tests {
     async fn test_right_anti_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
 
-        let column1 = Column::new(Arc::new(
-            array! {F64Array, [
-                Some(6.1f64), Some(8.9f64), Some(3.5f64), None, None,
-                Some(8.0f64), None, Some(9.1f64), None, None,
-                Some(9.6f64), None, Some(8.18f64), None
-            ]}
-            .into(),
-        ));
-
-        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "F
+             6.1
+             8.9
+             3.5
+             .
+             .
+             8.0
+             .
+             9.1
+             .
+             .
+             9.6
+             .
+             8.18
+             .",
+        );
 
         test_fixture.do_test(expected_chunk, false).await;
     }
@@ -996,16 +983,26 @@ mod tests {
     async fn test_right_anti_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
 
-        let column1 = Column::new(Arc::new(
-            array! {F64Array, [
-                Some(6.1f64), None, Some(8.9f64), None, Some(3.5f64), None, None,
-                Some(8.0f64), None, Some(9.1f64), None, Some(3.7f64), None,
-                Some(9.6f64), None, Some(8.18f64), None
-            ]}
-            .into(),
-        ));
-
-        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "F
+             6.1
+             .
+             8.9
+             .
+             3.5
+             .
+             .
+             8.0
+             .
+             9.1
+             .
+             3.7
+             .
+             9.6
+             .
+             8.18
+             .",
+        );
 
         test_fixture.do_test(expected_chunk, true).await;
     }
@@ -1014,14 +1011,13 @@ mod tests {
     async fn test_right_semi_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
 
-        let column1 = Column::new(Arc::new(
-            array! {F64Array, [
-                None, Some(3.7f64), None, Some(7.5f64)
-            ]}
-            .into(),
-        ));
-
-        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "F
+             .
+             3.7
+             .
+             7.5",
+        );
 
         test_fixture.do_test(expected_chunk, false).await;
     }
@@ -1030,14 +1026,10 @@ mod tests {
     async fn test_right_semi_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
 
-        let column1 = Column::new(Arc::new(
-            array! {F64Array, [
-                Some(7.5f64)
-            ]}
-            .into(),
-        ));
-
-        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "F
+             7.5",
+        );
 
         test_fixture.do_test(expected_chunk, true).await;
     }
