@@ -31,6 +31,7 @@ use crate::vector_op::conjunction;
 use crate::vector_op::length::length_default;
 use crate::vector_op::lower::lower;
 use crate::vector_op::ltrim::ltrim;
+use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
@@ -204,6 +205,22 @@ macro_rules! gen_unary_atm_expr  {
     };
 }
 
+macro_rules! gen_round_expr {
+    (
+        $expr_name:literal,
+        $child:expr,
+        $ret:expr,
+        $float64_round_func:ident,
+        $decimal_round_func:ident
+    ) => {
+        gen_unary_impl! {
+            [$expr_name, $child, $ret],
+            { float64, float64, $float64_round_func },
+            { decimal, decimal, $decimal_round_func },
+        }
+    };
+}
+
 pub fn new_unary_expr(
     expr_type: ProstType,
     return_type: DataType,
@@ -278,6 +295,15 @@ pub fn new_unary_expr(
                     {decimal, decimal, decimal_abs},
                 }
             }
+        }
+        (ProstType::Ceil, _, _) => {
+            gen_round_expr! {"Ceil", child_expr, return_type, ceil_f64, ceil_decimal}
+        }
+        (ProstType::Floor, _, _) => {
+            gen_round_expr! {"Floor", child_expr, return_type, floor_f64, floor_decimal}
+        }
+        (ProstType::Round, _, _) => {
+            gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         }
         (expr, ret, child) => {
             return Err(ErrorCode::NotImplemented(format!(
