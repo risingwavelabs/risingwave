@@ -331,7 +331,13 @@ impl<'a> ListRef<'a> {
 
     pub fn value_at(&self, index: usize) -> Result<DatumRef<'a>> {
         match self {
-            ListRef::Indexed { arr, .. } => Ok(arr.value.value_at(index - 1)),
+            ListRef::Indexed { arr, .. } => {
+                if index <= arr.value.len() {
+                    Ok(arr.value.value_at(index - 1))
+                } else {
+                    Ok(None)
+                }
+            }
             ListRef::ValueRef { val } => {
                 if let Some(datum) = val.values().iter().nth(index - 1) {
                     Ok(to_datum_ref(datum))

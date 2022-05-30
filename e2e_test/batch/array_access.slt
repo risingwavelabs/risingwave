@@ -1,0 +1,22 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T
+select (ARRAY['foo', 'bar'])[-1];
+----
+NULL
+
+query T
+select (ARRAY['foo', 'bar'])[0];
+----
+NULL
+
+query T
+select (ARRAY['foo', 'bar'])[1];
+----
+foo
+
+query T
+select (ARRAY['foo', 'bar'])[3];
+----
+NULL
