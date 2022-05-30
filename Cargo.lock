@@ -3877,6 +3877,7 @@ dependencies = [
 name = "risingwave_expr"
 version = "0.1.7"
 dependencies = [
+ "aho-corasick",
  "anyhow",
  "async-stream",
  "async-trait",

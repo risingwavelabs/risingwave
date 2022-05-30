@@ -56,6 +56,7 @@ message ExprNode {
     CONCAT_WS = 218;
     ABS = 219;
     SPLIT_PART = 220;
+    TO_CHAR = 221;
 
     // Boolean comparison
     IS_TRUE = 301;
