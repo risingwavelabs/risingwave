@@ -73,6 +73,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .try_collect()?;
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
+        // TODO(Yuanxin): Use `params.vnode_bitmap` to initialize keyspace.
         let keyspace = node
             .get_table_ids()
             .iter()
