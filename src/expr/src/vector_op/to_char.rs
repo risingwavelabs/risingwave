@@ -20,9 +20,11 @@ use risingwave_common::types::NaiveDateTimeWrapper;
 /// Compile the pg pattern to chrono pattern.
 // TODO: Chrono can not fully support the pg format, so consider using other implementations later.
 fn compile_pattern_to_chrono(tmpl: &str) -> String {
+    // https://www.postgresql.org/docs/current/functions-formatting.html
     static PG_PATTERNS: &[&str] = &[
         "HH24", "HH12", "HH", "MI", "SS", "YYYY", "YY", "IYYY", "IY", "MM", "DD",
     ];
+    // https://docs.rs/chrono/latest/chrono/format/strftime/index.html
     static CHRONO_PATTERNS: &[&str] = &[
         "%H", "%I", "%I", "%M", "%S", "%Y", "%Y", "%G", "%g", "%m", "%d",
     ];
