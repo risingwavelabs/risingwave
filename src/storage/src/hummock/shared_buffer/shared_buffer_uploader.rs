@@ -28,7 +28,7 @@ use tracing::error;
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::shared_buffer::{OrderIndex, OrderSortedUncommittedData, UncommittedData};
+use crate::hummock::shared_buffer::{OrderIndex, OrderSortedUncommittedData};
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
@@ -164,7 +164,7 @@ impl SharedBufferUploader {
 
     async fn flush(
         &mut self,
-        epoch: HummockEpoch,
+        _epoch: HummockEpoch,
         is_local: bool,
         payload: &UploadTaskPayload,
     ) -> HummockResult<Vec<SstableInfo>> {
@@ -210,15 +210,16 @@ impl SharedBufferUploader {
             })
             .collect();
 
-        if let Some(detector) = &self.write_conflict_detector {
-            for data_list in payload {
-                for data in data_list {
-                    if let UncommittedData::Batch(batch) = data {
-                        detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
-                    }
-                }
-            }
-        }
+        // TODO: re-enable conflict detector after we have a better way to determine which actor
+        // writes the batch. if let Some(detector) = &self.write_conflict_detector {
+        //     for data_list in payload {
+        //         for data in data_list {
+        //             if let UncommittedData::Batch(batch) = data {
+        //                 detector.check_conflict_and_track_write_batch(batch.get_payload(),
+        // epoch);             }
+        //         }
+        //     }
+        // }
 
         Ok(uploaded_sst_info)
     }

@@ -568,50 +568,21 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use risingwave_hummock_sdk::HummockSSTableId;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
-    use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+    use risingwave_pb::hummock::HummockVersion;
 
     use super::LocalVersionManager;
     use crate::hummock::conflict_detector::ConflictDetector;
-    use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_sstable_store};
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::shared_buffer::UncommittedData;
     use crate::hummock::shared_buffer::UploadTaskType::SyncEpoch;
-    use crate::hummock::test_utils::default_config_for_test;
+    use crate::hummock::test_utils::{
+        default_config_for_test, gen_dummy_batch, gen_dummy_sst_info,
+    };
     use crate::monitor::StateStoreMetrics;
-    use crate::storage_value::{StorageValue, ValueMeta};
-
-    fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
-        vec![(
-            iterator_test_key_of_epoch(0, epoch).into(),
-            StorageValue::new_put(ValueMeta::default(), b"value1".to_vec()),
-        )]
-    }
-
-    fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
-        let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
-        let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
-        for batch in batches.iter().skip(1) {
-            if min_key.as_slice() > batch.start_key() {
-                min_key = batch.start_key().to_vec();
-            }
-            if max_key.as_slice() < batch.end_key() {
-                max_key = batch.end_key().to_vec();
-            }
-        }
-        SstableInfo {
-            id,
-            key_range: Some(KeyRange {
-                left: min_key,
-                right: max_key,
-                inf: false,
-            }),
-            file_size: batches.len() as u64,
-            vnode_bitmaps: vec![],
-        }
-    }
+    use crate::storage_value::StorageValue;
 
     #[tokio::test]
     async fn test_update_pinned_version() {

@@ -421,14 +421,19 @@ impl SharedBuffer {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::ops::DerefMut;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use futures::executor::block_on;
     use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
+    use crate::hummock::shared_buffer::UploadTaskType::{LocalFlush, SyncEpoch};
+    use crate::hummock::test_utils::gen_dummy_sst_info;
     use crate::hummock::HummockValue;
 
     async fn generate_and_write_batch(
@@ -528,5 +533,79 @@ mod tests {
             shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key.clone()), None);
         assert!(replicate_batches.is_empty());
         assert!(overlap_data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_new_upload_task() {
+        let shared_buffer = RefCell::new(SharedBuffer::default());
+        let mut idx = 0;
+        let mut generate_test_data = |key: &str| {
+            block_on(generate_and_write_batch(
+                &[key.as_bytes().to_vec()],
+                &[],
+                1,
+                &mut idx,
+                shared_buffer.borrow_mut().deref_mut(),
+                false,
+            ))
+        };
+
+        let batch1 = generate_test_data("aa");
+        let batch2 = generate_test_data("bb");
+
+        let (order_index1, payload1) = shared_buffer
+            .borrow_mut()
+            .new_upload_task(LocalFlush)
+            .unwrap();
+        assert_eq!(order_index1, 0);
+        assert_eq!(2, payload1.len());
+        assert_eq!(payload1[0].len(), 1);
+        assert_eq!(payload1[0], vec![UncommittedData::Batch(batch2.clone())]);
+        assert_eq!(payload1[1].len(), 1);
+        assert_eq!(payload1[1], vec![UncommittedData::Batch(batch1.clone())]);
+
+        let batch3 = generate_test_data("cc");
+        let batch4 = generate_test_data("dd");
+
+        let (order_index2, payload2) = shared_buffer
+            .borrow_mut()
+            .new_upload_task(LocalFlush)
+            .unwrap();
+        assert_eq!(order_index2, 2);
+        assert_eq!(2, payload2.len());
+        assert_eq!(payload2[0].len(), 1);
+        assert_eq!(payload2[0], vec![UncommittedData::Batch(batch4.clone())]);
+        assert_eq!(payload2[1].len(), 1);
+        assert_eq!(payload2[1], vec![UncommittedData::Batch(batch3.clone())]);
+
+        shared_buffer.borrow_mut().fail_upload_task(order_index1);
+        let (order_index1, payload1) = shared_buffer
+            .borrow_mut()
+            .new_upload_task(LocalFlush)
+            .unwrap();
+        assert_eq!(order_index1, 0);
+        assert_eq!(2, payload1.len());
+        assert_eq!(payload1[0].len(), 1);
+        assert_eq!(payload1[0], vec![UncommittedData::Batch(batch2.clone())]);
+        assert_eq!(payload1[1].len(), 1);
+        assert_eq!(payload1[1], vec![UncommittedData::Batch(batch1.clone())]);
+
+        let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2]);
+        shared_buffer
+            .borrow_mut()
+            .succeed_upload_task(order_index1, vec![sst1.clone()]);
+
+        shared_buffer.borrow_mut().fail_upload_task(order_index2);
+
+        let (order_index3, payload3) = shared_buffer
+            .borrow_mut()
+            .new_upload_task(SyncEpoch)
+            .unwrap();
+
+        assert_eq!(order_index3, 0);
+        assert_eq!(3, payload3.len());
+        assert_eq!(vec![UncommittedData::Batch(batch4)], payload3[0]);
+        assert_eq!(vec![UncommittedData::Batch(batch3)], payload3[1]);
+        assert_eq!(vec![UncommittedData::Sst(sst1)], payload3[2]);
     }
 }
