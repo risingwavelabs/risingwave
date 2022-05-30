@@ -373,7 +373,7 @@ pub mod tests {
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch),
                 inf: false,
             }),
-            file_size: 1,
+            file_size: (right - left + 1) as u64,
             vnode_bitmaps: vec![],
         }
     }
@@ -513,7 +513,7 @@ pub mod tests {
                     generate_table(3, 1, 0, 50, 1),
                     generate_table(4, 1, 150, 200, 1),
                     generate_table(5, 1, 250, 300, 1),
-                    generate_table(6, 1, 1000, 200, 1),
+                    generate_table(6, 1, 1000, 2000, 1),
                 ],
             },
         ];
@@ -677,5 +677,41 @@ pub mod tests {
         assert!(picker
             .pick_compaction(&levels, &mut levels_handler)
             .is_none());
+    }
+
+    #[test]
+    fn test_compact_with_write_amplification_limit() {
+        let picker = create_compaction_picker_for_test();
+        let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 100, 160, 2),
+                    generate_table(2, 1, 190, 250, 2),
+                    generate_table(3, 1, 200, 300, 2),
+                ],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(4, 1, 100, 199, 2),
+                    generate_table(5, 1, 200, 260, 2),
+                    generate_table(6, 1, 300, 600, 2),
+                ],
+            },
+        ];
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 2);
+        assert_eq!(ret.select_level.table_infos[0].id, 1);
+        assert_eq!(ret.select_level.table_infos[1].id, 2);
+        assert_eq!(ret.target_level.table_infos[0].id, 4);
+        assert_eq!(ret.target_level.table_infos[1].id, 5);
     }
 }
