@@ -95,7 +95,9 @@ async fn test_failpoint_state_store_read_upload() {
 
     let result = hummock_storage.get(&anchor, 2, None).await;
     assert!(result.is_err());
-    let result = hummock_storage.iter(..=b"ee".to_vec(), 2, Default::default()).await;
+    let result = hummock_storage
+        .iter(..=b"ee".to_vec(), 2, Default::default())
+        .await;
     assert!(result.is_err());
 
     let value = hummock_storage.get(b"ee".as_ref(), 2, None).await.unwrap();
