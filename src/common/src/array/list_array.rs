@@ -211,6 +211,12 @@ impl Array for ListArray {
         )?;
         Ok(ArrayBuilderImpl::List(array_builder))
     }
+
+    fn array_meta(&self) -> ArrayMeta {
+        ArrayMeta::List {
+            datatype: Box::new(self.value_type.clone()),
+        }
+    }
 }
 
 impl ListArray {
