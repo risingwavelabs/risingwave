@@ -16,8 +16,9 @@ use std::future::Future;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VNODE_BITMAP_LEN};
 use risingwave_hummock_sdk::key::next_key;
+use risingwave_pb::common::VNodeBitmap;
 
 use crate::error::StorageResult;
 use crate::{StateStore, StateStoreIter};
@@ -30,8 +31,8 @@ pub struct Keyspace<S: StateStore> {
     /// Encoded representation for all segments.
     prefix: Vec<u8>,
 
-    /// Vnodes that the keyspace owns.
-    vnodes: Vec<VirtualNode>,
+    /// Records vnodes that the keyspace owns.
+    vnodes: VNodeBitmap,
 }
 
 impl<S: StateStore> Keyspace<S> {
@@ -53,7 +54,7 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store,
             prefix,
-            vnodes: vec![],
+            vnodes: Default::default(),
         }
     }
 
@@ -68,7 +69,7 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store,
             prefix,
-            vnodes: vec![],
+            vnodes: Default::default(),
         }
     }
 
@@ -83,12 +84,12 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store,
             prefix,
-            vnodes: vec![],
+            vnodes: Default::default(),
         }
     }
 
     /// Creates a root [`Keyspace`] for a table with specific vnodes.
-    pub fn table_root_with_vnodes(store: S, id: &TableId, vnodes: Vec<VirtualNode>) -> Self {
+    pub fn table_root_with_vnodes(store: S, id: &TableId, vnodes: VNodeBitmap) -> Self {
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -152,8 +153,15 @@ impl<S: StateStore> Keyspace<S> {
         epoch: u64,
         vnode: VirtualNode,
     ) -> StorageResult<Option<Bytes>> {
+        // Construct vnode bitmap.
+        let mut bitmap_inner = [0; VNODE_BITMAP_LEN];
+        bitmap_inner[(vnode >> 3) as usize] |= 1 << (vnode & 0b111);
+        let vnode_bitmap = VNodeBitmap {
+            table_id: self.vnodes.table_id,
+            bitmap: bitmap_inner.to_vec(),
+        };
         self.store
-            .get(&self.prefixed_key(key), epoch, Some(vnode))
+            .get(&self.prefixed_key(key), epoch, Some(&vnode_bitmap))
             .await
     }
 
@@ -217,6 +225,10 @@ impl<S: StateStore> Keyspace<S> {
     /// Gets the underlying state store.
     pub fn state_store(&self) -> S {
         self.store.clone()
+    }
+
+    pub fn vnode_bitmap(&self) -> &VNodeBitmap {
+        &self.vnodes
     }
 }
 

@@ -21,10 +21,12 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::RwError;
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::next_key;
+use risingwave_pb::common::VNodeBitmap;
 
 use super::mem_table::RowOp;
 use super::TableIter;
@@ -199,10 +201,18 @@ impl<S: StateStore> CellBasedTable<S> {
             .prefixed_key(&serialize_pk(pk, pk_serializer).map_err(err)?);
         let end_key = next_key(&start_key);
 
+        // Construct a vnode bitmap according to the given vnode.
+        let mut bitmap_inner = [0; VNODE_BITMAP_LEN];
+        bitmap_inner[(vnode >> 3) as usize] |= 1 << (vnode & 0b111);
+        let vnode_bitmap = VNodeBitmap {
+            table_id: self.keyspace.vnode_bitmap().table_id,
+            bitmap: bitmap_inner.to_vec(),
+        };
+
         let state_store_range_scan_res = self
             .keyspace
             .state_store()
-            .scan(start_key..end_key, None, epoch, vec![vnode])
+            .scan(start_key..end_key, None, epoch, vnode_bitmap)
             .await?;
         let mut cell_based_row_deserializer =
             CellBasedRowDeserializer::new(self.column_descs.clone());

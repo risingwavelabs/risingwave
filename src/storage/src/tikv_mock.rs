@@ -16,7 +16,7 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_common::hash::VirtualNode;
+use risingwave_pb::common::VNodeBitmap;
 
 use super::StateStore;
 use crate::storage_value::StorageValue;
@@ -41,7 +41,7 @@ impl StateStore for TikvStateStore {
         &'a self,
         _key: &'a [u8],
         _epoch: u64,
-        _vnode: Option<VirtualNode>,
+        _vnode: Option<&'a VNodeBitmap>,
     ) -> Self::GetFuture<'_> {
         async move { unimplemented!() }
     }
@@ -58,7 +58,7 @@ impl StateStore for TikvStateStore {
         &self,
         _key_range: R,
         _epoch: u64,
-        _vnodes: Vec<VirtualNode>,
+        _vnodes: VNodeBitmap,
     ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -79,7 +79,7 @@ impl StateStore for TikvStateStore {
         &self,
         _key_range: R,
         _epoch: u64,
-        _vnodes: Vec<VirtualNode>,
+        _vnodes: VNodeBitmap,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -101,7 +101,7 @@ impl StateStore for TikvStateStore {
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-        _vnodes: Vec<VirtualNode>,
+        _vnodes: VNodeBitmap,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -115,7 +115,7 @@ impl StateStore for TikvStateStore {
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-        _vnodes: Vec<VirtualNode>,
+        _vnodes: VNodeBitmap,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,

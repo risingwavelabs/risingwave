@@ -241,7 +241,7 @@ async fn test_lookup_this_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
 
     for (k, v) in store
-        .scan::<_, Vec<u8>>(.., None, u64::MAX, vec![])
+        .scan::<_, Vec<u8>>(.., None, u64::MAX, Default::default())
         .await
         .unwrap()
     {

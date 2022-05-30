@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+use risingwave_pb::common::VNodeBitmap;
 
 use super::*;
 use crate::executor::aggregation::AggCall;
@@ -73,11 +74,19 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .try_collect()?;
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
-        // TODO(Yuanxin): Use `params.vnode_bitmap` to initialize keyspace.
         let keyspace = node
             .get_table_ids()
             .iter()
-            .map(|table_id| Keyspace::table_root(store.clone(), &TableId::new(*table_id)))
+            .map(|&table_id| {
+                Keyspace::table_root_with_vnodes(
+                    store.clone(),
+                    &TableId::new(table_id),
+                    VNodeBitmap {
+                        table_id,
+                        bitmap: (*params.vnode_bitmap).clone(),
+                    },
+                )
+            })
             .collect();
         let input = params.input.remove(0);
         let keys = key_indices

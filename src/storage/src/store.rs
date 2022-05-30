@@ -16,7 +16,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common::hash::VirtualNode;
+use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::error::StorageResult;
@@ -83,7 +83,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         &'a self,
         key: &'a [u8],
         epoch: u64,
-        vnode: Option<VirtualNode>,
+        vnode: Option<&'a VNodeBitmap>,
     ) -> Self::GetFuture<'_>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
@@ -96,7 +96,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Vec<VirtualNode>,
+        vnodes: VNodeBitmap,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -107,7 +107,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Vec<VirtualNode>,
+        vnodes: VNodeBitmap,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -142,7 +142,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         &self,
         key_range: R,
         epoch: u64,
-        vnodes: Vec<VirtualNode>,
+        vnodes: VNodeBitmap,
     ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -155,7 +155,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         &self,
         key_range: R,
         epoch: u64,
-        vnodes: Vec<VirtualNode>,
+        vnodes: VNodeBitmap,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,

@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::VNodeBitmap;
@@ -75,6 +74,7 @@ impl HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
+        vnodes: VNodeBitmap,
     ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
@@ -117,7 +117,7 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, None);
+            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, Some(&vnodes));
             if table_infos.is_empty() {
                 continue;
             }
@@ -198,11 +198,11 @@ impl HummockStorage {
         &'a self,
         key: &'a [u8],
         epoch: u64,
-        vnode_set: Option<VNodeBitmap>,
+        vnode_set: Option<&'a VNodeBitmap>,
     ) -> StorageResult<Option<Bytes>> {
         let mut stats = StoreLocalStatistic::default();
         let (shared_buffer_data, pinned_version) =
-            self.read_filter(epoch, &(key..=key), vnode_set.as_ref())?;
+            self.read_filter(epoch, &(key..=key), vnode_set)?;
 
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
@@ -258,8 +258,7 @@ impl HummockStorage {
                 continue;
             }
             {
-                let table_infos =
-                    prune_ssts(level.table_infos.iter(), &(key..=key), vnode_set.as_ref());
+                let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key), vnode_set);
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
@@ -321,9 +320,9 @@ impl StateStore for HummockStorage {
         &'a self,
         key: &'a [u8],
         epoch: u64,
-        _vnode: Option<VirtualNode>,
+        vnode: Option<&'a VNodeBitmap>,
     ) -> Self::GetFuture<'_> {
-        async move { self.get_with_vnode_set(key, epoch, None).await }
+        async move { self.get_with_vnode_set(key, epoch, vnode).await }
     }
 
     fn scan<R, B>(
@@ -331,7 +330,7 @@ impl StateStore for HummockStorage {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Vec<VirtualNode>,
+        vnodes: VNodeBitmap,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -350,7 +349,7 @@ impl StateStore for HummockStorage {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Vec<VirtualNode>,
+        vnodes: VNodeBitmap,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -408,13 +407,13 @@ impl StateStore for HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
-        _vnodes: Vec<VirtualNode>,
+        vnodes: VNodeBitmap,
     ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, ForwardIter>(key_range, epoch)
+        self.iter_inner::<R, B, ForwardIter>(key_range, epoch, vnodes)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -423,7 +422,7 @@ impl StateStore for HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
-        _vnodes: Vec<VirtualNode>,
+        vnodes: VNodeBitmap,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -433,7 +432,7 @@ impl StateStore for HummockStorage {
             key_range.end_bound().map(|v| v.as_ref().to_vec()),
             key_range.start_bound().map(|v| v.as_ref().to_vec()),
         );
-        self.iter_inner::<_, _, BackwardIter>(key_range, epoch)
+        self.iter_inner::<_, _, BackwardIter>(key_range, epoch, vnodes)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {

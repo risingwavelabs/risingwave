@@ -22,7 +22,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
-use risingwave_common::hash::VirtualNode;
+use risingwave_pb::common::VNodeBitmap;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::HummockError;
@@ -114,15 +114,14 @@ impl StateStore for MemoryStateStore {
         &'a self,
         key: &'a [u8],
         epoch: u64,
-        vnode: Option<VirtualNode>,
+        _vnode: Option<&'a VNodeBitmap>,
     ) -> Self::GetFuture<'_> {
         async move {
             let range_bounds = key.to_vec()..=key.to_vec();
-            let vnodes = match vnode {
-                Some(vnode) => vec![vnode],
-                None => vec![],
-            };
-            let res = self.scan(range_bounds, Some(1), epoch, vnodes).await?;
+            // We do not really care about vnodes here, so we just use the default value.
+            let res = self
+                .scan(range_bounds, Some(1), epoch, Default::default())
+                .await?;
 
             Ok(match res.as_slice() {
                 [] => None,
@@ -137,7 +136,7 @@ impl StateStore for MemoryStateStore {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        _vnodes: Vec<VirtualNode>,
+        _vnodes: VNodeBitmap,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -174,7 +173,7 @@ impl StateStore for MemoryStateStore {
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-        _vnodes: Vec<VirtualNode>,
+        _vnodes: VNodeBitmap,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -211,7 +210,7 @@ impl StateStore for MemoryStateStore {
         &self,
         key_range: R,
         epoch: u64,
-        vnodes: Vec<VirtualNode>,
+        vnodes: VNodeBitmap,
     ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -231,7 +230,7 @@ impl StateStore for MemoryStateStore {
         &self,
         _key_range: R,
         _epoch: u64,
-        _vnodes: Vec<VirtualNode>,
+        _vnodes: VNodeBitmap,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -316,7 +315,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            state_store.scan("a"..="b", None, 0, vec![]).await.unwrap(),
+            state_store
+                .scan("a"..="b", None, 0, Default::default())
+                .await
+                .unwrap(),
             vec![
                 (b"a".to_vec().into(), b"v1".to_vec().into()),
                 (b"b".to_vec().into(), b"v1".to_vec().into())
@@ -324,13 +326,16 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .scan("a"..="b", Some(1), 0, vec![])
+                .scan("a"..="b", Some(1), 0, Default::default())
                 .await
                 .unwrap(),
             vec![(b"a".to_vec().into(), b"v1".to_vec().into())]
         );
         assert_eq!(
-            state_store.scan("a"..="b", None, 1, vec![]).await.unwrap(),
+            state_store
+                .scan("a"..="b", None, 1, Default::default())
+                .await
+                .unwrap(),
             vec![(b"a".to_vec().into(), b"v2".to_vec().into())]
         );
         assert_eq!(

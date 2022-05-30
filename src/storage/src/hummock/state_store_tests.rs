@@ -133,7 +133,7 @@ async fn test_basic() {
 
     // Write aa bb
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch1, vec![])
+        .iter(..=b"ee".to_vec(), epoch1, Default::default())
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;
@@ -156,7 +156,7 @@ async fn test_basic() {
     assert_eq!(value, Bytes::from("111111"));
     // Update aa, write cc
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch2, vec![])
+        .iter(..=b"ee".to_vec(), epoch2, Default::default())
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;
@@ -164,7 +164,7 @@ async fn test_basic() {
 
     // Delete aa, write dd,ee
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch3, vec![])
+        .iter(..=b"ee".to_vec(), epoch3, Default::default())
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;
@@ -195,7 +195,6 @@ async fn test_basic() {
 
 #[tokio::test]
 async fn test_vnode_filter() {
-    // TODO(Yuanxin): rewrite this test
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -237,7 +236,7 @@ async fn test_vnode_filter() {
         .get_with_vnode_set(
             &Bytes::from(&b"t\0\0\0\0"[..]),
             epoch,
-            Some(VNodeBitmap {
+            Some(&VNodeBitmap {
                 table_id: 0,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
@@ -250,7 +249,7 @@ async fn test_vnode_filter() {
         .get_with_vnode_set(
             &Bytes::from(&b"t\0\0\0\0"[..]),
             epoch,
-            Some(VNodeBitmap {
+            Some(&VNodeBitmap {
                 table_id: 0,
                 bitmap: [0; VNODE_BITMAP_LEN].to_vec(),
             }),
@@ -263,7 +262,7 @@ async fn test_vnode_filter() {
         .get_with_vnode_set(
             &Bytes::from(&b"t\0\0\0\0"[..]),
             epoch,
-            Some(VNodeBitmap {
+            Some(&VNodeBitmap {
                 table_id: 5,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
@@ -450,7 +449,7 @@ async fn test_reload_storage() {
 
     // Write aa bb
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch1, vec![])
+        .iter(..=b"ee".to_vec(), epoch1, Default::default())
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;
@@ -473,7 +472,7 @@ async fn test_reload_storage() {
     assert_eq!(value, Bytes::from("111111"));
     // Update aa, write cc
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch2, vec![])
+        .iter(..=b"ee".to_vec(), epoch2, Default::default())
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;

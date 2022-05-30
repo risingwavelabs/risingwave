@@ -28,7 +28,7 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
         u32::MAX => {
             tracing::info!("using .. as range");
             hummock
-                .scan::<_, Vec<u8>>(.., None, u64::MAX, vec![])
+                .scan::<_, Vec<u8>>(.., None, u64::MAX, Default::default())
                 .await?
         }
         _ => {
@@ -37,7 +37,7 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
             buf.put_u32(table_id);
             let range = buf.to_vec()..next_key(buf.to_vec().as_slice());
             hummock
-                .scan::<_, Vec<u8>>(range, None, u64::MAX, vec![])
+                .scan::<_, Vec<u8>>(range, None, u64::MAX, Default::default())
                 .await?
         }
     };
