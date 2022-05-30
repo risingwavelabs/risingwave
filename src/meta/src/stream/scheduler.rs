@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{internal_error, Result};
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -212,15 +213,16 @@ where
                 .hash_mapping_manager
                 .get_fragment_hash_mapping(&fragment.fragment_id)
                 .unwrap();
-            let mut owner_mapping: HashMap<ParallelUnitId, Vec<u32>> = HashMap::new();
+            type VNodeBitmap = [u8; VNODE_BITMAP_LEN];
+            let mut vnode_bitmaps: HashMap<ParallelUnitId, VNodeBitmap> = HashMap::new();
             vnode_mapping
                 .iter()
                 .enumerate()
                 .for_each(|(vnode, parallel_unit)| {
-                    owner_mapping
+                    vnode_bitmaps
                         .entry(*parallel_unit)
-                        .or_default()
-                        .push(vnode as u32);
+                        .or_insert([0; VNODE_BITMAP_LEN])[(vnode >> 3) as usize] |=
+                        1 << (vnode & 0b111);
                 });
 
             // Record actor locations and set vnodes into the actors.
@@ -228,15 +230,15 @@ where
                 if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
                     let parallel_unit =
                         locations.schedule_colocate_with(&actor.upstream_actor_id)?;
-                    actor.vnodes = owner_mapping.get(&parallel_unit.id).unwrap().to_owned();
+                    actor.vnode_bitmap = vnode_bitmaps.get(&parallel_unit.id).unwrap().to_vec();
                     locations
                         .actor_locations
                         .insert(actor.actor_id, parallel_unit);
                 } else {
-                    actor.vnodes = owner_mapping
+                    actor.vnode_bitmap = vnode_bitmaps
                         .get(&parallel_units[idx % parallel_units.len()].id)
                         .unwrap()
-                        .to_owned();
+                        .to_vec();
                     locations.actor_locations.insert(
                         actor.actor_id,
                         parallel_units[idx % parallel_units.len()].clone(),
@@ -336,7 +338,7 @@ mod test {
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
-                        vnodes: vec![],
+                        vnode_bitmap: vec![],
                     }],
                     vnode_mapping: None,
                 };
@@ -365,7 +367,7 @@ mod test {
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
-                        vnodes: vec![],
+                        vnode_bitmap: vec![],
                     })
                     .collect_vec();
                 actor_id += node_count * 7;
@@ -401,7 +403,7 @@ mod test {
                 None
             );
             for actor in fragment.actors {
-                assert!(actor.vnodes.is_empty());
+                assert!(actor.vnode_bitmap.is_empty());
             }
         }
 
@@ -437,10 +439,12 @@ mod test {
             );
             let mut vnode_sum = 0;
             for actor in fragment.actors {
-                assert!(!actor.vnodes.is_empty());
-                vnode_sum += actor.vnodes.len();
+                assert!(!actor.vnode_bitmap.is_empty());
+                for byte in actor.vnode_bitmap {
+                    vnode_sum += byte.count_ones();
+                }
             }
-            assert_eq!(vnode_sum, VIRTUAL_NODE_COUNT);
+            assert_eq!(vnode_sum as usize, VIRTUAL_NODE_COUNT);
         }
 
         Ok(())

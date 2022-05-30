@@ -972,8 +972,8 @@ mod tests {
                 .cloned()
                 .unwrap()
                 .clone();
-            assert!(!scheduled_actor.vnodes.is_empty());
-            scheduled_actor.vnodes.clear();
+            assert!(!scheduled_actor.vnode_bitmap.is_empty());
+            scheduled_actor.vnode_bitmap.clear();
             assert_eq!(scheduled_actor, actor);
             assert!(services
                 .state

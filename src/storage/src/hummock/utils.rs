@@ -16,12 +16,12 @@ use std::cmp::Ordering;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::{HummockError, HummockResult};
-use crate::hummock::VNODE_BITMAP_LEN;
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,

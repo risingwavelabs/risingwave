@@ -22,7 +22,6 @@ use madsim::collections::{HashMap, HashSet};
 use parking_lot::Mutex;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::hash::VirtualNode;
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::compress::decompress_data;
@@ -118,8 +117,8 @@ pub struct ExecutorParams {
     // Actor context
     pub actor_context: ActorContextRef,
 
-    // Vnodes owned by this executor.
-    pub vnodes: Rc<Vec<VirtualNode>>,
+    // Vnodes owned by this executor. Represented in bitmap.
+    pub vnode_bitmap: Rc<Vec<u8>>,
 }
 
 impl Debug for ExecutorParams {
@@ -462,7 +461,7 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
-        vnodes: Rc<Vec<VirtualNode>>,
+        vnode_bitmap: Rc<Vec<u8>>,
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -480,7 +479,7 @@ impl LocalStreamManagerCore {
                     env.clone(),
                     store.clone(),
                     actor_context,
-                    Rc::clone(&vnodes),
+                    Rc::clone(&vnode_bitmap),
                 )
             })
             .try_collect()?;
@@ -506,7 +505,7 @@ impl LocalStreamManagerCore {
             actor_id,
             executor_stats: self.streaming_metrics.clone(),
             actor_context: actor_context.clone(),
-            vnodes,
+            vnode_bitmap,
         };
 
         let executor = create_executor(executor_params, self, node, store)?;
@@ -527,7 +526,7 @@ impl LocalStreamManagerCore {
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
-        vnodes: Rc<Vec<VirtualNode>>,
+        vnode_bitmap: Rc<Vec<u8>>,
     ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
@@ -538,7 +537,7 @@ impl LocalStreamManagerCore {
                 env,
                 store,
                 actor_context,
-                vnodes,
+                vnode_bitmap,
             )
         })
     }
@@ -616,11 +615,6 @@ impl LocalStreamManagerCore {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
             let actor_context = Arc::new(Mutex::new(ActorContext::default()));
-            let actor_vnodes = actor
-                .vnodes
-                .iter()
-                .map(|vnode| *vnode as VirtualNode)
-                .collect_vec();
 
             let executor = self.create_nodes(
                 actor.fragment_id,
@@ -628,7 +622,7 @@ impl LocalStreamManagerCore {
                 actor.get_nodes()?,
                 env.clone(),
                 &actor_context,
-                Rc::new(actor_vnodes),
+                Rc::new(actor.get_vnode_bitmap().to_owned()),
             )?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;

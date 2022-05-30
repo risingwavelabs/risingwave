@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::config::StorageConfig;
+use risingwave_common::hash::{VNODE_BITMAP_LEN, VNODE_BITS};
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
 use risingwave_pb::common::VNodeBitmap;
 
@@ -69,8 +70,6 @@ impl Default for SSTableBuilderOptions {
     }
 }
 
-pub const VNODE_BITS: usize = 11;
-pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
 pub struct SSTableBuilder {
     /// Options.
     options: SSTableBuilderOptions,

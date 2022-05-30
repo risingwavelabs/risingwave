@@ -41,7 +41,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .map(|id| ColumnId::from(*id))
             .collect();
 
-        // TODO(Yuanxin): Use `params.vnodes` to initialize keyspace.
+        // TODO(Yuanxin): Use `params.vnode_bitmap` to initialize keyspace.
         let keyspace = Keyspace::table_root(store, &table_id);
 
         let distribution_keys = node
