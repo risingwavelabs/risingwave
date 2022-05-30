@@ -28,11 +28,11 @@ use tracing::error;
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::shared_buffer::{OrderIndex, OrderIndexedUncommittedData, UncommittedData};
+use crate::hummock::shared_buffer::{OrderIndex, OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
-pub(crate) type UploadTaskPayload = OrderIndexedUncommittedData;
+pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
 pub(crate) type UploadTaskResult =
     BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<SstableInfo>>>;
 

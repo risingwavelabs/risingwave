@@ -83,11 +83,11 @@ pub(crate) type OrderIndex = usize;
 pub(crate) type KeyIndexedUncommittedData = BTreeMap<(Vec<u8>, OrderIndex), UncommittedData>;
 /// uncommitted data sorted by order index in descending order. Data in the same inner list share
 /// the same order index, which means their keys don't overlap.
-pub(crate) type OrderIndexedUncommittedData = Vec<Vec<UncommittedData>>;
+pub(crate) type OrderSortedUncommittedData = Vec<Vec<UncommittedData>>;
 
-pub(crate) fn to_order_indexed(
+pub(crate) fn to_order_sorted(
     key_indexed_data: &KeyIndexedUncommittedData,
-) -> OrderIndexedUncommittedData {
+) -> OrderSortedUncommittedData {
     let mut order_indexed_data = BTreeMap::new();
     for ((_, order_id), data) in key_indexed_data {
         order_indexed_data
@@ -100,7 +100,7 @@ pub(crate) fn to_order_indexed(
 }
 
 pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
-    uncommitted_data: &OrderIndexedUncommittedData,
+    uncommitted_data: &OrderSortedUncommittedData,
     sstable_store: Arc<SstableStore>,
     stats: Arc<StateStoreMetrics>,
     local_stats: &mut StoreLocalStatistic,
@@ -189,7 +189,7 @@ impl SharedBuffer {
         &self,
         key_range: &R,
         vnode_set: Option<&VNodeBitmap>,
-    ) -> (Vec<SharedBufferBatch>, OrderIndexedUncommittedData)
+    ) -> (Vec<SharedBufferBatch>, OrderSortedUncommittedData)
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
@@ -264,8 +264,10 @@ impl SharedBuffer {
                 // Keep track of whether the data of an order index is non uploaded local batches
                 let mut order_index_is_non_upload_batch = BTreeMap::new();
                 for ((end_key, order_index), data) in &self.uncommitted_data {
-                    // Bug: multiple data can shared the same order_index
                     if matches!(data, UncommittedData::Batch(_)) {
+                        // Here we assume that for a write batch, no other uncommitted data will
+                        // share the same order index with it, and therefore it's safe to insert
+                        // into the map directly.
                         order_index_is_non_upload_batch
                             .insert(*order_index, Some((end_key, order_index)));
                     } else {
@@ -320,7 +322,7 @@ impl SharedBuffer {
             .cloned();
 
         if let Some(min_order_index) = min_order_index {
-            let ret = Some((min_order_index, to_order_indexed(&keyed_payload)));
+            let ret = Some((min_order_index, to_order_sorted(&keyed_payload)));
             self.uploading_tasks.insert(min_order_index, keyed_payload);
             ret
         } else {

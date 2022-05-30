@@ -590,7 +590,6 @@ mod tests {
         )]
     }
 
-    #[allow(dead_code)]
     fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
         let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
         let mut max_key: Vec<u8> = batches[0].end_key().to_vec();

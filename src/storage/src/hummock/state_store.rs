@@ -36,7 +36,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
-    build_ordered_merge_iter, OrderIndexedUncommittedData, UncommittedData,
+    build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
 };
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
@@ -285,7 +285,7 @@ impl HummockStorage {
         key_range: &R,
         vnode_set: Option<&VNodeBitmap>,
     ) -> HummockResult<(
-        Vec<(Vec<SharedBufferBatch>, OrderIndexedUncommittedData)>,
+        Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
         Arc<PinnedVersion>,
     )>
     where
