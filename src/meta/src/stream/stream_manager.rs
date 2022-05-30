@@ -963,17 +963,18 @@ mod tests {
             .await?;
 
         for actor in actors {
-            assert_eq!(
-                services
-                    .state
-                    .actor_streams
-                    .lock()
-                    .unwrap()
-                    .get(&actor.get_actor_id())
-                    .cloned()
-                    .unwrap(),
-                actor
-            );
+            let mut scheduled_actor = services
+                .state
+                .actor_streams
+                .lock()
+                .unwrap()
+                .get(&actor.get_actor_id())
+                .cloned()
+                .unwrap()
+                .clone();
+            assert!(!scheduled_actor.vnode_bitmap.is_empty());
+            scheduled_actor.vnode_bitmap.clear();
+            assert_eq!(scheduled_actor, actor);
             assert!(services
                 .state
                 .actor_ids

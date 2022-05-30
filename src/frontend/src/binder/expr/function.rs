@@ -60,6 +60,7 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
+                "to_char" => ExprType::ToChar,
                 "nullif" => {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case
@@ -69,7 +70,19 @@ impl Binder {
                 "coalesce" => ExprType::Coalesce,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
-                    ExprType::RoundDigit
+                    if inputs.len() >= 2 {
+                        ExprType::RoundDigit
+                    } else {
+                        ExprType::Round
+                    }
+                }
+                "ceil" => {
+                    inputs = Self::rewrite_round_args(inputs);
+                    ExprType::Ceil
+                }
+                "floor" => {
+                    inputs = Self::rewrite_round_args(inputs);
+                    ExprType::Floor
                 }
                 "abs" => ExprType::Abs,
                 "booleq" => {
@@ -113,20 +126,32 @@ impl Binder {
         }
     }
 
-    /// Rewrite the arguments to be consistent with the `round` signature:
+    /// Rewrite the arguments to be consistent with the `round, ceil, floor` signature:
+    /// Round:
     /// - round(Decimal, Int32) -> Decimal
     /// - round(Decimal) -> Decimal
+    /// - round(Float64) -> Float64
+    /// - Extend: round(Int16, Int32, Int64, Float32) -> Decimal
+    ///
+    /// Ceil:
+    /// - ceil(Decimal) -> Decimal
+    /// - ceil(Float) -> Float64
+    /// - Extend: ceil(Int16, Int32, Int64, Float32) -> Decimal
+    ///
+    /// Floor:
+    /// - floor(Decimal) -> Decimal
+    /// - floor(Float) -> Float64
+    /// - Extend: floor(Int16, Int32, Int64, Float32) -> Decimal
     fn rewrite_round_args(mut inputs: Vec<ExprImpl>) -> Vec<ExprImpl> {
         if inputs.len() == 1 {
-            // Rewrite round(Decimal) to round(Decimal, 0).
             let input = inputs.pop().unwrap();
-            vec![
-                input
+            match input.return_type() {
+                risingwave_common::types::DataType::Float64 => vec![input],
+                _ => vec![input
                     .clone()
                     .cast_implicit(DataType::Decimal)
-                    .unwrap_or(input),
-                Literal::new(Some(0.into()), DataType::Int32).into(),
-            ]
+                    .unwrap_or(input)],
+            }
         } else if inputs.len() == 2 {
             let digits = inputs.pop().unwrap();
             let input = inputs.pop().unwrap();

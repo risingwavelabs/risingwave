@@ -286,7 +286,7 @@ pub mod tests {
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![
                     generate_table(4, 1, 50, 199, 1),
-                    generate_table(5, 1, 200, 299, 1),
+                    generate_table(5, 1, 200, 399, 1),
                 ],
             },
         ];

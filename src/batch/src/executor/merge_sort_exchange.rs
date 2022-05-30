@@ -217,7 +217,7 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
 
         let num_sources = proto_sources.len();
         Ok(Box::new(MergeSortExchangeExecutor::<C> {
-            context: source.batch_task_context().clone(),
+            context: source.context().clone(),
             source_inputs: vec![None; num_sources],
             order_pairs,
             min_heap: BinaryHeap::new(),

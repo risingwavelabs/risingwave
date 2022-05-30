@@ -90,25 +90,21 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        dispatch_state_store!(
-            source.batch_task_context().try_get_state_store()?,
-            state_store,
-            {
-                let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
-                let storage_stats = state_store.stats();
-                let batch_stats = source.batch_task_context().stats();
-                let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-                let iter = table.iter(source.epoch).await?;
-                Ok(Box::new(RowSeqScanExecutor::new(
-                    table.schema().clone(),
-                    iter,
-                    RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
-                    source.task_id.task_id == 0,
-                    source.plan_node().get_identity().clone(),
-                    batch_stats,
-                )))
-            }
-        )
+        dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
+            let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
+            let storage_stats = state_store.stats();
+            let batch_stats = source.context().stats();
+            let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
+            let iter = table.iter(source.epoch).await?;
+            Ok(Box::new(RowSeqScanExecutor::new(
+                table.schema().clone(),
+                iter,
+                RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
+                source.task_id.task_id == 0,
+                source.plan_node().get_identity().clone(),
+                batch_stats,
+            )))
+        })
     }
 }
 

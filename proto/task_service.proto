@@ -15,14 +15,6 @@ message TaskId {
   uint32 task_id = 3;
 }
 
-// Every task will create N buffers (channels) for parent operators to fetch results from,
-// where N is the parallelism of parent stage.
-message TaskOutputId {
-  TaskId task_id = 1;
-  // The id of output channel to fetch from
-  uint32 output_id = 2;
-}
-
 message TaskInfo {
   enum TaskStatus {
     NOT_FOUND = 0;
