@@ -37,7 +37,7 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
-use crate::model::{ActorId, DispatcherId, TableFragments};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
@@ -136,11 +136,11 @@ where
                 same_worker_node_as_upstream: bool,
             ) -> Result<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
-                        // If node is not chain node, recursively deal with input nodes
-                        for input in &mut stream_node.input {
-                            self.resolve_chain_node_inner(input, actor_id, same_worker_node_as_upstream)?;
-                        }
-                        return Ok(());
+                    // If node is not chain node, recursively deal with input nodes
+                    for input in &mut stream_node.input {
+                        self.resolve_chain_node_inner(input, actor_id, same_worker_node_as_upstream)?;
+                    }
+                    return Ok(());
                 };
                 // If node is chain node, we insert upstream ids into chain's input (merge)
 
@@ -455,7 +455,24 @@ where
             }
         }
 
-        self.source_manager.register_source(source_actors_group_by_fragment.clone(), None).await.unwrap();
+        let mut source_fragments = HashMap::new();
+        for fragment in table_fragments.fragments() {
+            for actor in &fragment.actors {
+                if let Some(source_id) =
+                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+                {
+                    source_fragments
+                        .entry(source_id)
+                        .or_insert(vec![])
+                        .push(fragment.fragment_id as FragmentId);
+                }
+            }
+        }
+
+        self.source_manager
+            .register_source(source_fragments, None)
+            .await
+            .unwrap();
 
         let split_assignment = self
             .source_manager
@@ -880,6 +897,7 @@ mod tests {
                     cluster_manager.clone(),
                     barrier_manager.clone(),
                     catalog_manager.clone(),
+                    fragment_manager.clone(),
                 )
                 .await?,
             );

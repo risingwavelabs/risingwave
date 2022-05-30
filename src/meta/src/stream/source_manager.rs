@@ -12,22 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::{BorrowMut};
-
-use std::collections::{HashMap, HashSet};
+use std::borrow::BorrowMut;
+use std::collections::hash_map::Entry::Vacant;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use risingwave_common::error::internal_error;
 
 use futures::future::try_join_all;
-
 use itertools::Itertools;
-
-use tokio::sync::{Mutex, oneshot};
-use tokio::time;
-
 use risingwave_common::error::ErrorCode::{ConnectorError, InternalError};
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
@@ -39,12 +33,15 @@ use risingwave_pb::stream_service::{
     DropSourceRequest as ComputeNodeDropSourceRequest,
 };
 use risingwave_rpc_client::StreamClient;
+use tokio::sync::{oneshot, Mutex};
+use tokio::time;
 
 use crate::barrier::BarrierManagerRef;
 use crate::cluster::ClusterManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
-use crate::model::ActorId;
+use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
+use crate::stream::FragmentManagerRef;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
@@ -52,22 +49,34 @@ pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
-    core: Arc<Mutex<SourceManagerCore>>,
+    fragment_manager: FragmentManagerRef<S>,
+    core: Arc<Mutex<SourceManagerCore<S>>>,
 }
 
 pub struct ConnectorSourceWorker {
     source_id: SourceId,
-    current_splits: Arc<Mutex<Option<Vec<SplitImpl>>>>,
+    current_splits: Arc<Mutex<Option<BTreeMap<String, SplitImpl>>>>,
     enumerator: SplitEnumeratorImpl,
     stop_tx: oneshot::Sender<()>,
 }
 
 impl ConnectorSourceWorker {
-    pub async fn create(source_id: SourceId, info: &StreamSourceInfo, stop_tx: oneshot::Sender<()>) -> Result<Self> {
+    pub async fn create(
+        source_id: SourceId,
+        info: &StreamSourceInfo,
+        stop_tx: oneshot::Sender<()>,
+    ) -> Result<Self> {
         let properties = ConnectorProperties::extract(info.properties.to_owned()).to_rw_result()?;
-        let enumerator = SplitEnumeratorImpl::create(properties).await.to_rw_result()?;
+        let enumerator = SplitEnumeratorImpl::create(properties)
+            .await
+            .to_rw_result()?;
         let current_splits = Arc::new(Mutex::new(None));
-        Ok(Self { source_id, current_splits, enumerator, stop_tx })
+        Ok(Self {
+            source_id,
+            current_splits,
+            enumerator,
+            stop_tx,
+        })
     }
 
     pub async fn run(&mut self, mut stop_rx: oneshot::Receiver<()>) {
@@ -92,7 +101,7 @@ impl ConnectorSourceWorker {
 
                     {
                         let mut currend_splits_guard = self.current_splits.lock().await;
-                        currend_splits_guard.replace(splits);
+                        currend_splits_guard.replace(splits.into_iter().map(|split| (split.id(), split)).collect());
                     }
 
                 }
@@ -101,65 +110,89 @@ impl ConnectorSourceWorker {
     }
 }
 
-pub struct SourceManagerCore {
-    pub managed_sources: HashMap<SourceId, Arc<Mutex<Option<Vec<SplitImpl>>>>>,
-    pub actors: HashMap<SourceId, Vec<HashMap<ActorId, Vec<SplitImpl>>>>,
+pub struct SourceManagerCore<S: MetaStore> {
+    pub fragment_manager: FragmentManagerRef<S>,
+    pub managed_sources: HashMap<SourceId, Arc<Mutex<Option<BTreeMap<String, SplitImpl>>>>>,
+    pub source_fragments: HashMap<SourceId, Vec<FragmentId>>,
+    pub actor_splits: HashMap<ActorId, Vec<String>>,
 }
 
-impl SourceManagerCore
+impl<S> SourceManagerCore<S>
+where
+    S: MetaStore,
 {
-    fn new() -> Self {
+    fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
         Self {
+            fragment_manager,
             managed_sources: HashMap::new(),
-            actors: Default::default(),
+            source_fragments: HashMap::new(),
+            actor_splits: HashMap::new(),
         }
     }
 
     async fn tick(&mut self) -> Result<()> {
-        for (source_id, splits) in &self.managed_sources {
-            let splits_guard = splits.lock().await;
-            if splits_guard.is_none() {
-                continue;
+        let table_frags = self.fragment_manager.list_table_fragments().await?;
+        let mut frag_actors = HashMap::new();
+        for table_frag in table_frags {
+            for (frag_id, mut frag) in table_frag.fragments {
+                let mut actors = frag.actors.iter_mut().map(|x| x.actor_id).collect_vec();
+                frag_actors
+                    .entry(frag_id)
+                    .or_insert(vec![])
+                    .append(&mut actors);
             }
+        }
 
-            if let Some(splits) = splits_guard.as_ref() {
-                let actor_group = match self.actors.get_mut(source_id) {
-                    None => {
-                        log::warn!("no actors bind to source {}", source_id);
-                        continue;
-                    }
-                    Some(actor_group) => actor_group,
+        println!("frags {:?}", frag_actors);
+
+        for (source_id, splits) in &self.managed_sources {
+            let frag_ids = match self.source_fragments.get(source_id) {
+                Some(frags) if !frags.is_empty() => frags,
+                _ => continue,
+            };
+
+            let splits_guard = splits.lock().await;
+            let current_splits = match &*splits_guard {
+                None => continue,
+                Some(splits) => splits,
+            };
+
+            for frag_id in frag_ids {
+                let actors = match frag_actors.remove(frag_id) {
+                    None => continue,
+                    Some(actors) => actors,
                 };
 
-                for actor_group_assigned_splits in actor_group {
-                    let mut assigned_splits = HashSet::new();
-                    let mut id_to_splits = HashMap::new();
-
-                    for actor_splits in actor_group_assigned_splits.values() {
-                        for split in actor_splits {
-                            let id = split.id();
-                            assigned_splits.insert(id.clone());
-                            id_to_splits.insert(id, split);
+                let actor_len = actors.len();
+                let mut allocated_split_ids = HashSet::new();
+                for actor_id in &actors {
+                    if let Some(splits) = self.actor_splits.get(actor_id) {
+                        for split in splits {
+                            allocated_split_ids.insert(split.clone());
                         }
                     }
+                }
 
-                    let new_splits = splits.iter().filter(|split| !assigned_splits.contains(split.id().as_str())).cloned().collect_vec();
-
-                    // todo: use heap
-                    let actors = actor_group_assigned_splits.keys().collect_vec();
-                    let actor_len = actors.len();
-
-                    let mut assigned = HashMap::new();
-
-                    for (i, split) in new_splits.into_iter().enumerate() {
-                        assigned.entry(actors[i % actor_len].clone()).or_insert(vec![]).push(split)
+                let mut new_splits = vec![];
+                for (split_id, split) in current_splits {
+                    if allocated_split_ids.contains(split_id) {
+                        continue;
                     }
+                    new_splits.push(split)
+                }
 
-                    // do something
+                let mut assigned = HashMap::new();
+                for (index, split) in new_splits.iter().enumerate() {
+                    let actor = actors[index % actor_len];
+                    assigned.entry(actor).or_insert(vec![]).push(split.id())
+                }
 
-                    for (k, mut vs) in assigned {
-                        actor_group_assigned_splits.entry(k).or_insert(vec![]).append(&mut vs)
-                    }
+                for (actor_id, mut splits) in assigned {
+                    println!("assign {} => {:?}", actor_id, splits);
+                    self.actor_splits
+                        .entry(actor_id)
+                        .or_insert(vec![])
+                        .append(&mut splits);
                 }
             }
         }
@@ -168,34 +201,39 @@ impl SourceManagerCore
     }
 }
 
-
 impl<S> SourceManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         _barrier_manager: BarrierManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> Result<Self> {
-        let core = Arc::new(Mutex::new(SourceManagerCore::new()));
+        let core = Arc::new(Mutex::new(SourceManagerCore::new(fragment_manager.clone())));
 
         Ok(Self {
             env,
             cluster_manager,
             catalog_manager,
+            fragment_manager,
             core,
         })
     }
 
-    pub async fn register_source(&self, actors: HashMap<SourceId, Vec<Vec<ActorId>>>, affiliated_source: Option<Source>) -> Result<()> {
+    pub async fn register_source(
+        &self,
+        actors: HashMap<SourceId, Vec<FragmentId>>,
+        affiliated_source: Option<Source>,
+    ) -> Result<()> {
         let mut core = self.core.lock().await;
 
         let source_ref = &affiliated_source;
 
-        for (source_id, actor_groups) in actors {
-            if let std::collections::hash_map::Entry::Vacant(e) = core.managed_sources.entry(source_id) {
+        for (source_id, fragments) in actors {
+            if let Vacant(entry) = core.managed_sources.entry(source_id) {
                 let source = if let Some(affiliated_source) = source_ref && affiliated_source.get_id() == source_id {
                     affiliated_source.clone()
                 } else {
@@ -207,23 +245,19 @@ impl<S> SourceManager<S>
                     })?
                 };
 
-                let info = source.info.unwrap();
-                let stream_source_info = try_match_expand!(info, Info::StreamSource)?;
-
+                let stream_source_info =
+                    try_match_expand!(source.info.unwrap(), Info::StreamSource)?;
                 let (stop_tx, stop_rx) = oneshot::channel();
-                let mut worker = ConnectorSourceWorker::create(source_id, &stream_source_info, stop_tx).await?;
-                e.insert(worker.current_splits.clone());
+                let mut worker =
+                    ConnectorSourceWorker::create(source_id, &stream_source_info, stop_tx).await?;
+                entry.insert(worker.current_splits.clone());
                 let _ = tokio::spawn(async move { worker.run(stop_rx).await });
             }
 
-            let mut map = actor_groups
-                .into_iter()
-                .map(|actors|
-                    actors
-                        .into_iter()
-                        .map(|actor| (actor, vec![])).collect() )
-                .collect();
-            core.actors.entry(source_id).or_insert(vec![]).append(&mut map);
+            core.source_fragments
+                .entry(source_id)
+                .or_insert(vec![])
+                .append(fragments.clone().as_mut());
         }
 
         Ok(())
@@ -300,7 +334,7 @@ impl<S> SourceManager<S>
         Ok(result)
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -315,8 +349,8 @@ impl<S> SourceManager<S>
                 .iter()
                 .map(|worker| self.env.stream_client_pool().get(worker)),
         )
-            .await?
-            .into_iter();
+        .await?
+        .into_iter();
 
         Ok(all_stream_clients)
     }
