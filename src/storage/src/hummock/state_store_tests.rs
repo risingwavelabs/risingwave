@@ -159,7 +159,7 @@ async fn test_basic() {
             epoch1,
             hummock_storage
                 .local_version_manager
-                .get_remote_ssts(epoch1),
+                .get_uncommitted_ssts(epoch1),
         )
         .await
         .unwrap();
@@ -209,7 +209,10 @@ async fn test_vnode_filter() {
     storage.ingest_batch(batch, epoch).await.unwrap();
     storage.sync(Some(epoch)).await.unwrap();
     meta_client
-        .commit_epoch(epoch, storage.local_version_manager.get_remote_ssts(epoch))
+        .commit_epoch(
+            epoch,
+            storage.local_version_manager.get_uncommitted_ssts(epoch),
+        )
         .await
         .unwrap();
 

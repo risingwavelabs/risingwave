@@ -666,8 +666,9 @@ mod tests {
     use crate::array;
     use crate::array::column::Column;
     use crate::array::{
-        ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-        I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray, Utf8Array,
+        ArrayRef, BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array,
+        I16Array, I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray,
+        NaiveTimeArray, Utf8Array,
     };
     use crate::hash::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -860,12 +861,11 @@ mod tests {
     fn test_simple_hash_key_nullable_serde() {
         let keys = Key64::build(
             &[0, 1],
-            &DataChunk::builder()
-                .columns(vec![
-                    Column::new(Arc::new(array! { I32Array, [Some(1), None] }.into())),
-                    Column::new(Arc::new(array! { I32Array, [None, Some(2)] }.into())),
-                ])
-                .build(),
+            &DataChunk::from_pretty(
+                "i i
+                 1 .
+                 . 2",
+            ),
         )
         .unwrap();
 

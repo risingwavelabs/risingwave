@@ -84,7 +84,7 @@ impl LocalVersion {
                 self.shared_buffer
                     .range(smallest_uncommitted_epoch..=read_epoch)
                     .rev() // Important: order by epoch descendingly
-                    .map(|e| e.1.read_arc())
+                    .map(|(_, shared_buffer)| shared_buffer.read_arc())
                     .collect()
             } else {
                 Vec::new()
@@ -150,6 +150,7 @@ impl PinnedVersion {
 }
 
 pub struct ReadVersion {
+    /// The shared buffer is sorted by epoch descendingly
     pub shared_buffer: Vec<ArcRwLockReadGuard<RawRwLock, SharedBuffer>>,
     pub pinned_version: Arc<PinnedVersion>,
 }

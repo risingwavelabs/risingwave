@@ -95,7 +95,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                     epoch1,
                     hummock_storage
                         .local_version_manager
-                        .get_remote_ssts(epoch1),
+                        .get_uncommitted_ssts(epoch1),
                 )
                 .await
                 .unwrap();
@@ -124,7 +124,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                     epoch2,
                     hummock_storage
                         .local_version_manager
-                        .get_remote_ssts(epoch2),
+                        .get_uncommitted_ssts(epoch2),
                 )
                 .await
                 .unwrap();
@@ -154,7 +154,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                     epoch3,
                     hummock_storage
                         .local_version_manager
-                        .get_remote_ssts(epoch3),
+                        .get_uncommitted_ssts(epoch3),
                 )
                 .await
                 .unwrap();
@@ -205,7 +205,9 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
             mock_hummock_meta_client
                 .commit_epoch(
                     epoch,
-                    hummock_storage.local_version_manager.get_remote_ssts(epoch),
+                    hummock_storage
+                        .local_version_manager
+                        .get_uncommitted_ssts(epoch),
                 )
                 .await
                 .unwrap();
@@ -266,7 +268,9 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
             mock_hummock_meta_client
                 .commit_epoch(
                     epoch,
-                    hummock_storage.local_version_manager.get_remote_ssts(epoch),
+                    hummock_storage
+                        .local_version_manager
+                        .get_uncommitted_ssts(epoch),
                 )
                 .await
                 .unwrap();
@@ -293,7 +297,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                     epoch + 1,
                     hummock_storage
                         .local_version_manager
-                        .get_remote_ssts(epoch + 1),
+                        .get_uncommitted_ssts(epoch + 1),
                 )
                 .await
                 .unwrap();

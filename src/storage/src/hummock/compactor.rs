@@ -120,7 +120,7 @@ impl Compactor {
         payload: &UploadTaskPayload,
     ) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
         let mut start_user_keys = payload
-            .values()
+            .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
             .collect_vec();
         start_user_keys.sort();

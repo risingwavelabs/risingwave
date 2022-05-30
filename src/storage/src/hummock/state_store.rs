@@ -20,21 +20,26 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::VNodeBitmap;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
-use super::utils::{can_concat, search_sst_idx, validate_epoch, validate_table_key_range};
+use super::utils::{can_concat, search_sst_idx, validate_epoch};
 use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, BoxedHummockIterator, DirectedUserIteratorBuilder, DirectionEnum, Forward,
     HummockIteratorDirection, ReadOptions,
 };
+use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
+use crate::hummock::shared_buffer::{
+    build_ordered_merge_iter, OrderIndexedUncommittedData, UncommittedData,
+};
 use crate::hummock::utils::prune_ssts;
+use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -78,24 +83,8 @@ impl HummockStorage {
     {
         let read_options = Arc::new(ReadOptions::default());
         let mut overlapped_iters = vec![];
-        let backward = T::direction() == DirectionEnum::Backward;
 
-        let (shared_buffer_data, pinned_version) = {
-            let read_version = self.local_version_manager.read_version(epoch);
-
-            // Check epoch validity
-            validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
-            let levels = read_version.pinned_version.levels();
-            validate_table_key_range(levels)?;
-
-            let shared_buffer_data = read_version
-                .shared_buffer
-                .iter()
-                .map(|shared_buffer| shared_buffer.get_overlap_data(&key_range, backward, None))
-                .collect_vec();
-
-            (shared_buffer_data, read_version.pinned_version)
-        };
+        let (shared_buffer_data, pinned_version) = self.read_filter(epoch, &key_range, None)?;
 
         let mut stats = StoreLocalStatistic::default();
 
@@ -119,8 +108,7 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos =
-                prune_ssts(level.get_table_infos().iter(), &key_range, backward, None);
+            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, None);
             if table_infos.is_empty() {
                 continue;
             }
@@ -136,17 +124,16 @@ impl HummockStorage {
                 assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
                 let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
 
-                let tables = if backward {
-                    matched_table_infos
+                let tables = match T::Direction::direction() {
+                    DirectionEnum::Backward => matched_table_infos
                         .iter()
                         .rev()
                         .map(|&info| info.clone())
-                        .collect_vec()
-                } else {
-                    matched_table_infos
+                        .collect_vec(),
+                    DirectionEnum::Forward => matched_table_infos
                         .iter()
                         .map(|&info| info.clone())
-                        .collect_vec()
+                        .collect_vec(),
                 };
 
                 overlapped_iters.push(Box::new(ConcatIteratorInner::<T::SstableIteratorType>::new(
@@ -173,17 +160,10 @@ impl HummockStorage {
             .iter_merge_sstable_counts
             .observe(overlapped_iters.len() as f64);
 
-        let key_range = if backward {
-            (
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-            )
-        } else {
-            (
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
-            )
-        };
+        let key_range = (
+            key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            key_range.end_bound().map(|b| b.as_ref().to_owned()),
+        );
 
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
@@ -212,21 +192,8 @@ impl HummockStorage {
         vnode_set: Option<VNodeBitmap>,
     ) -> StorageResult<Option<Bytes>> {
         let mut stats = StoreLocalStatistic::default();
-        let (shared_buffer_data, pinned_version) = {
-            let read_version = self.local_version_manager.read_version(epoch);
-
-            // check epoch validity
-            validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
-
-            let shared_buffer_data = read_version
-                .shared_buffer
-                .into_iter()
-                .map(|shared_buffer| {
-                    shared_buffer.get_overlap_data(&(key..=key), false, vnode_set.as_ref())
-                })
-                .collect_vec();
-            (shared_buffer_data, read_version.pinned_version)
-        };
+        let (shared_buffer_data, pinned_version) =
+            self.read_filter(epoch, &(key..=key), vnode_set.as_ref())?;
 
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
@@ -249,7 +216,7 @@ impl HummockStorage {
                 }
             }
             // iterate over uncommitted data in order index in descending order
-            for data_list in uncommitted_data.into_values().rev() {
+            for data_list in uncommitted_data {
                 for data in data_list {
                     match data {
                         UncommittedData::Batch(batch) => {
@@ -286,12 +253,8 @@ impl HummockStorage {
                 continue;
             }
             {
-                let table_infos = prune_ssts(
-                    level.table_infos.iter(),
-                    &(key..=key),
-                    false,
-                    vnode_set.as_ref(),
-                );
+                let table_infos =
+                    prune_ssts(level.table_infos.iter(), &(key..=key), vnode_set.as_ref());
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
@@ -313,6 +276,34 @@ impl HummockStorage {
             .iter_merge_sstable_counts
             .observe(table_counts as f64);
         Ok(None)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn read_filter<R, B>(
+        &self,
+        epoch: HummockEpoch,
+        key_range: &R,
+        vnode_set: Option<&VNodeBitmap>,
+    ) -> HummockResult<(
+        Vec<(Vec<SharedBufferBatch>, OrderIndexedUncommittedData)>,
+        Arc<PinnedVersion>,
+    )>
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        let read_version = self.local_version_manager.read_version(epoch);
+
+        // Check epoch validity
+        validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
+
+        let shared_buffer_data = read_version
+            .shared_buffer
+            .iter()
+            .map(|shared_buffer| shared_buffer.get_overlap_data(key_range, vnode_set))
+            .collect();
+
+        Ok((shared_buffer_data, read_version.pinned_version))
     }
 }
 
@@ -411,7 +402,11 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, BackwardIter>(key_range, epoch)
+        let key_range = (
+            key_range.end_bound().map(|v| v.as_ref().to_vec()),
+            key_range.start_bound().map(|v| v.as_ref().to_vec()),
+        );
+        self.iter_inner::<_, _, BackwardIter>(key_range, epoch)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {

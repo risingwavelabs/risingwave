@@ -141,14 +141,12 @@ impl SharedBufferUploader {
                         "failed due to previous failure",
                     ))
                 } else {
-                    match self.flush(epoch, is_local, &payload).await {
-                        Ok(tables) => Ok(tables),
-                        Err(e) => {
+                    self.flush(epoch, is_local, &payload)
+                        .await
+                        .inspect_err(|e| {
                             error!("Failed to flush shared buffer: {:?}", e);
                             failed = true;
-                            Err(e)
-                        }
-                    }
+                        })
                 };
                 assert!(
                     task_results.insert((epoch, order_index), result).is_none(),
@@ -213,7 +211,7 @@ impl SharedBufferUploader {
             .collect();
 
         if let Some(detector) = &self.write_conflict_detector {
-            for data_list in payload.values() {
+            for data_list in payload {
                 for data in data_list {
                     if let UncommittedData::Batch(batch) = data {
                         detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);

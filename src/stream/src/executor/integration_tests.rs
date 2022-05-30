@@ -24,8 +24,10 @@ use risingwave_common::types::*;
 use risingwave_expr::expr::*;
 
 use super::*;
+use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::dispatch::*;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::create_in_memory_keyspace_agg;
 use crate::executor::{
@@ -43,7 +45,7 @@ async fn test_merger_sum_aggr() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = ReceiverExecutor::new(schema, vec![], input_rx);
+        let input = ReceiverExecutor::new(schema, vec![], input_rx, ActorContext::create(), 0);
         let append_only = false;
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
@@ -72,7 +74,13 @@ async fn test_merger_sum_aggr() {
             channel: Box::new(LocalOutput::new(233, tx)),
         };
         let context = SharedContext::for_test().into();
-        let actor = Actor::new(consumer, 0, context);
+        let actor = Actor::new(
+            consumer,
+            0,
+            context,
+            StreamingMetrics::unused().into(),
+            ActorContext::create(),
+        );
         (actor, rx)
     };
 
@@ -99,7 +107,13 @@ async fn test_merger_sum_aggr() {
     let schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
-    let receiver_op = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
+    let receiver_op = Box::new(ReceiverExecutor::new(
+        schema.clone(),
+        vec![],
+        rx,
+        ActorContext::create(),
+        0,
+    ));
     let dispatcher = DispatchExecutor::new(
         receiver_op,
         vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
@@ -109,11 +123,17 @@ async fn test_merger_sum_aggr() {
         ctx,
     );
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(dispatcher, 0, context);
+    let actor = Actor::new(
+        dispatcher,
+        0,
+        context,
+        StreamingMetrics::unused().into(),
+        ActorContext::create(),
+    );
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema, vec![], 0, outputs);
+    let merger = MergeExecutor::new(schema, vec![], 0, outputs, ActorContext::create(), 0);
 
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;
@@ -156,7 +176,13 @@ async fn test_merger_sum_aggr() {
         data: items.clone(),
     };
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(consumer, 0, context);
+    let actor = Actor::new(
+        consumer,
+        0,
+        context,
+        StreamingMetrics::unused().into(),
+        ActorContext::create(),
+    );
     handles.push(tokio::spawn(actor.run()));
 
     let mut epoch = 1;

@@ -19,15 +19,16 @@ use std::sync::Arc;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_batch::executor2::monitor::BatchMetrics;
-use risingwave_batch::executor2::{
-    BoxedDataChunkStream, BoxedExecutor2, DeleteExecutor2, Executor2, InsertExecutor2,
-    RowSeqScanExecutor2,
+use risingwave_batch::executor::monitor::BatchMetrics;
+use risingwave_batch::executor::{
+    BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
+    RowSeqScanExecutor,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
@@ -40,7 +41,7 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
-    Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
+    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -60,8 +61,7 @@ impl SingleChunkExecutor {
     }
 }
 
-#[async_trait::async_trait]
-impl Executor2 for SingleChunkExecutor {
+impl BatchExecutor for SingleChunkExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -167,11 +167,13 @@ async fn test_table_v2_materialize() -> Result<()> {
     //
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
-    let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
-    let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let insert_inner: BoxedExecutor2 =
-        Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
-    let insert = Box::new(InsertExecutor2::new(
+    let chunk = DataChunk::from_pretty(
+        "F
+         1.14
+         5.14",
+    );
+    let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let insert = Box::new(InsertExecutor::new(
         source_table_id,
         source_manager.clone(),
         insert_inner,
@@ -203,12 +205,12 @@ async fn test_table_v2_materialize() -> Result<()> {
         Arc::new(StateStoreMetrics::unused()),
     );
 
-    let scan = Box::new(RowSeqScanExecutor2::new(
-        table.clone(),
+    let scan = Box::new(RowSeqScanExecutor::new(
+        table.schema().clone(),
+        table.iter(u64::MAX).await?,
         1024,
         true,
         "RowSeqExecutor2".to_string(),
-        u64::MAX,
         Arc::new(BatchMetrics::unused()),
     ));
     let mut stream = scan.execute();
@@ -262,12 +264,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to get the data now!
-    let scan = Box::new(RowSeqScanExecutor2::new(
-        table.clone(),
+    let scan = Box::new(RowSeqScanExecutor::new(
+        table.schema().clone(),
+        table.iter(u64::MAX).await?,
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
-        u64::MAX,
         Arc::new(BatchMetrics::unused()),
     ));
 
@@ -289,9 +291,8 @@ async fn test_table_v2_materialize() -> Result<()> {
         column_nonnull! { F64Array, [1.14] },
     ];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let delete_inner: BoxedExecutor2 =
-        Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
-    let delete = Box::new(DeleteExecutor2::new(
+    let delete_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let delete = Box::new(DeleteExecutor::new(
         source_table_id,
         source_manager.clone(),
         delete_inner,
@@ -331,12 +332,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to see the deletion now!
-    let scan = Box::new(RowSeqScanExecutor2::new(
-        table.clone(),
+    let scan = Box::new(RowSeqScanExecutor::new(
+        table.schema().clone(),
+        table.iter(u64::MAX).await?,
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
-        u64::MAX,
         Arc::new(BatchMetrics::unused()),
     ));
 
