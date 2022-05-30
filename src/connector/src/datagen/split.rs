@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::base::SplitMetaData;
 
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default, PartialEq)]
 pub struct DatagenSplit {}
 
 impl SplitMetaData for DatagenSplit {

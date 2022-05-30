@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::ExchangeInfo;
+use risingwave_pb::batch_plan::{ExchangeInfo, PlanNode};
 use risingwave_pb::plan_common::Field as FieldProst;
 use uuid::Uuid;
 
@@ -133,6 +133,19 @@ impl Query {
     pub fn root_stage_id(&self) -> StageId {
         self.stage_graph.root_stage_id
     }
+
+    pub fn query_id(&self) -> &QueryId {
+        &self.query_id
+    }
+
+    pub fn stage_has_table_scan(&self) -> Vec<StageId> {
+        self.stage_graph
+            .stages
+            .iter()
+            .filter(|(stage_id, stage_query)| stage_query.has_table_scan)
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>()
+    }
 }
 
 /// Fragment part of `Query`.
@@ -142,6 +155,10 @@ pub struct QueryStage {
     pub root: Arc<ExecutionPlanNode>,
     pub exchange_info: ExchangeInfo,
     pub parallelism: u32,
+    /// This is a flag to indicate whether this stage contains some executor that creates
+    /// Hummock iterators to read data from table. The iterator is initialized during
+    /// the executor building process on the batch execution engine.
+    pub has_table_scan: bool,
 }
 
 impl Debug for QueryStage {
@@ -150,6 +167,7 @@ impl Debug for QueryStage {
             .field("id", &self.id)
             .field("parallelism", &self.parallelism)
             .field("exchange_info", &self.exchange_info)
+            .field("has_table_scan", &self.has_table_scan)
             .finish()
     }
 }
@@ -164,6 +182,7 @@ struct QueryStageBuilder {
     exchange_info: ExchangeInfo,
 
     children_stages: Vec<QueryStageRef>,
+    has_table_scan: bool,
 }
 
 impl QueryStageBuilder {
@@ -175,6 +194,7 @@ impl QueryStageBuilder {
             parallelism,
             exchange_info,
             children_stages: vec![],
+            has_table_scan: false,
         }
     }
 
@@ -185,6 +205,7 @@ impl QueryStageBuilder {
             root: self.root.unwrap(),
             exchange_info: self.exchange_info,
             parallelism: self.parallelism,
+            has_table_scan: self.has_table_scan,
         });
 
         stage_graph_builder.add_node(stage.clone());
@@ -341,6 +362,8 @@ impl BatchPlanFragmenter {
                 } else {
                     builder.root = Some(Arc::new(execution_plan_node));
                 }
+                // Check out the comments for `has_table_scan` in `QueryStage`.
+                builder.has_table_scan = node.node_type() == PlanNodeType::BatchSeqScan;
             }
         }
     }

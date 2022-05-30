@@ -23,6 +23,7 @@ use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
+use super::expect_first_barrier;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef};
 
@@ -85,12 +86,10 @@ where
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub(crate) async fn top_n_executor_execute(mut self: Box<Self>) {
         let mut input = self.input.execute();
-        let first_msg = input.next().await.unwrap()?;
-        let barrier = first_msg
-            .as_barrier()
-            .expect("the first message received by agg executor must be a barrier");
+
+        let barrier = expect_first_barrier(&mut input).await?;
         let mut epoch = barrier.epoch.curr;
-        yield first_msg;
+        yield Message::Barrier(barrier);
 
         #[for_await]
         for msg in input {

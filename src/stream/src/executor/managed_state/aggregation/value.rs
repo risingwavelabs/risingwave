@@ -13,52 +13,51 @@
 // limitations under the License.
 
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
+use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
-use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
-use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::write_batch::WriteBatch;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
 
 /// A wrapper around [`StreamingAggStateImpl`], which fetches data from the state store and helps
 /// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce
 /// the overhead of creating boxed async future.
-pub struct ManagedValueState<S: StateStore> {
+pub struct ManagedValueState {
     /// The internal single-value state.
     state: Box<dyn StreamingAggStateImpl>,
-
-    /// The keyspace to operate on.
-    keyspace: Keyspace<S>,
 
     /// Indicates whether this managed state is dirty. If this state is dirty, we cannot evict the
     /// state from memory.
     is_dirty: bool,
+
+    /// Primary key to look up in relational table. For value state, there is only one row.
+    /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
+    pk: Option<Row>,
 }
 
-impl<S: StateStore> ManagedValueState<S> {
+impl ManagedValueState {
     /// Create a single-value managed state based on `AggCall` and `Keyspace`.
-    pub async fn new(
+    pub async fn new<S: StateStore>(
         agg_call: AggCall,
-        keyspace: Keyspace<S>,
         row_count: Option<usize>,
+        pk: Option<&Row>,
+        state_table: &StateTable<S>,
     ) -> Result<Self> {
         let data = if row_count != Some(0) {
             // TODO: use the correct epoch
             let epoch = u64::MAX;
-            // View the keyspace as a single-value space, and get the value.
-            let raw_data = keyspace.value(epoch).await?;
 
-            // Decode the Datum from the value.
-            if let Some(mut raw_data) = raw_data {
-                // let mut deserializer = value_encoding::Deserializer::new(raw_data);
-                Some(deserialize_cell(&mut raw_data, &agg_call.return_type)?)
-            } else {
-                None
-            }
+            // View the state table as single-value table, and get the value via empty primary key
+            // or group key.
+            let raw_data = state_table
+                .get_row(pk.unwrap_or(&Row(vec![])), epoch)
+                .await?;
+
+            raw_data.and_then(|row| row.values().next().cloned())
         } else {
             None
         };
@@ -72,7 +71,7 @@ impl<S: StateStore> ManagedValueState<S> {
                 data,
             )?,
             is_dirty: false,
-            keyspace,
+            pk: pk.cloned(),
         })
     }
 
@@ -102,15 +101,22 @@ impl<S: StateStore> ManagedValueState<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+    pub async fn flush<S: StateStore>(
+        &mut self,
+        _write_batch: &mut WriteBatch<S>,
+        state_table: &mut StateTable<S>,
+    ) -> Result<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.
         debug_assert!(self.is_dirty());
 
-        let mut local = write_batch.prefixify(&self.keyspace);
+        // Persist value into relational table.
         let v = self.state.get_output()?;
-        // TODO(Yuanxin): Implement value meta
-        local.put_single(StorageValue::new_default_put(serialize_cell(&v)?));
+        state_table.insert(
+            self.pk.as_ref().cloned().unwrap_or(Row(vec![])),
+            Row(vec![v]),
+        )?;
+
         self.is_dirty = false;
         Ok(())
     }
@@ -119,7 +125,9 @@ impl<S: StateStore> ManagedValueState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I64Array, Op};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_storage::table::state_table::StateTable;
 
     use super::*;
     use crate::executor::aggregation::AggArgs;
@@ -137,8 +145,14 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state() {
         let keyspace = create_in_memory_keyspace();
+        let mut state_table = StateTable::new(
+            keyspace.clone(),
+            vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
+            vec![],
+            None,
+        );
         let mut managed_state =
-            ManagedValueState::new(create_test_count_state(), keyspace.clone(), Some(0))
+            ManagedValueState::new(create_test_count_state(), Some(0), None, &state_table)
                 .await
                 .unwrap();
         assert!(!managed_state.is_dirty());
@@ -159,8 +173,11 @@ mod tests {
         // flush to write batch and write to state store
         let epoch: u64 = 0;
         let mut write_batch = keyspace.state_store().start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .await
+            .unwrap();
+        state_table.commit(epoch).await.unwrap();
 
         // get output
         assert_eq!(
@@ -169,9 +186,10 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state = ManagedValueState::new(create_test_count_state(), keyspace, None)
-            .await
-            .unwrap();
+        let mut managed_state =
+            ManagedValueState::new(create_test_count_state(), None, None, &state_table)
+                .await
+                .unwrap();
         assert_eq!(
             managed_state.get_output().await.unwrap(),
             Some(ScalarImpl::Int64(3))
@@ -190,10 +208,20 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only() {
         let keyspace = create_in_memory_keyspace();
-        let mut managed_state =
-            ManagedValueState::new(create_test_max_agg_append_only(), keyspace.clone(), Some(0))
-                .await
-                .unwrap();
+        let mut state_table = StateTable::new(
+            keyspace.clone(),
+            vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
+            vec![],
+            None,
+        );
+        let mut managed_state = ManagedValueState::new(
+            create_test_max_agg_append_only(),
+            Some(0),
+            None,
+            &state_table,
+        )
+        .await
+        .unwrap();
         assert!(!managed_state.is_dirty());
 
         // apply a batch and get the output
@@ -214,8 +242,11 @@ mod tests {
         // flush to write batch and write to state store
         let epoch: u64 = 0;
         let mut write_batch = keyspace.state_store().start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .await
+            .unwrap();
+        state_table.commit(epoch).await.unwrap();
 
         // get output
         assert_eq!(
@@ -225,7 +256,7 @@ mod tests {
 
         // reload the state and check the output
         let mut managed_state =
-            ManagedValueState::new(create_test_max_agg_append_only(), keyspace, None)
+            ManagedValueState::new(create_test_max_agg_append_only(), None, None, &state_table)
                 .await
                 .unwrap();
         assert_eq!(

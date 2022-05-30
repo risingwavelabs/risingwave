@@ -19,6 +19,8 @@ bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", 
 bytes = { version = "1", features = ["serde", "std"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-utils = { version = "0.8", features = ["lazy_static", "std"] }
+crypto-common = { version = "0.1", default-features = false, features = ["std"] }
+digest = { version = "0.10", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 either = { version = "1", features = ["use_std"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4", features = ["std"] }
@@ -69,6 +71,8 @@ bytes = { version = "1", features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-utils = { version = "0.8", features = ["lazy_static", "std"] }
+crypto-common = { version = "0.1", default-features = false, features = ["std"] }
+digest = { version = "0.10", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 either = { version = "1", features = ["use_std"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4", features = ["std"] }

@@ -14,9 +14,9 @@
 
 use std::convert::TryFrom;
 
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, Row};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::{ensure, ensure_eq, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -43,6 +43,10 @@ impl Expression for FieldExpression {
         } else {
             Err(internal_error("expects a struct array ref"))
         }
+    }
+
+    fn eval_row(&self, _input: &Row) -> Result<Datum> {
+        Err(internal_error("expects a struct array ref"))
     }
 }
 

@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
-use futures::future::select_all;
-use futures::{SinkExt, StreamExt};
-use futures_async_stream::{for_await, try_stream};
-use itertools::Itertools;
+use futures::{SinkExt, Stream, StreamExt};
+use futures_async_stream::for_await;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
-use tracing_futures::Instrument;
 
 use super::error::StreamExecutorError;
 use super::*;
@@ -103,6 +103,9 @@ pub struct MergeExecutor {
     actor_id: u32,
 
     info: ExecutorInfo,
+
+    /// Actor operator context
+    status: OperatorInfoStatus,
 }
 
 impl MergeExecutor {
@@ -111,6 +114,8 @@ impl MergeExecutor {
         pk_indices: PkIndices,
         actor_id: u32,
         inputs: Vec<Receiver<Message>>,
+        actor_context: ActorContextRef,
+        receiver_id: u64,
     ) -> Self {
         Self {
             upstreams: inputs,
@@ -120,6 +125,7 @@ impl MergeExecutor {
                 pk_indices,
                 identity: "MergeExecutor".to_string(),
             },
+            status: OperatorInfoStatus::new(actor_context, receiver_id),
         }
     }
 }
@@ -127,7 +133,12 @@ impl MergeExecutor {
 #[async_trait]
 impl Executor for MergeExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
+        let upstreams = self.upstreams;
+        // Futures of all active upstreams.
+        let status = self.status;
+        let select_all = SelectReceivers::new(self.actor_id, status, upstreams);
+        // Channels that're blocked by the barrier to align.
+        select_all.boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -143,72 +154,89 @@ impl Executor for MergeExecutor {
     }
 }
 
-impl MergeExecutor {
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
-        let mut upstreams = self.upstreams;
+pub struct SelectReceivers {
+    blocks: Vec<Receiver<Message>>,
+    upstreams: Vec<Receiver<Message>>,
+    barrier: Option<Barrier>,
+    last_base: usize,
+    status: OperatorInfoStatus,
+    actor_id: u32,
+}
 
-        loop {
-            // Futures of all active upstreams.
-            let mut active = upstreams
-                .into_iter()
-                .map(|ch| ch.into_future())
-                .collect_vec();
-            // Channels that're blocked by the barrier to align.
-            let mut blocked = Vec::with_capacity(active.len());
-            // The current barrier to align.
-            let mut current_barrier = None;
+impl SelectReceivers {
+    fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Receiver<Message>>) -> Self {
+        Self {
+            blocks: Vec::with_capacity(upstreams.len()),
+            upstreams,
+            last_base: 0,
+            actor_id,
+            status,
+            barrier: None,
+        }
+    }
+}
 
-            // 1. Align the barriers.
-            while !active.is_empty() {
-                // Poll upstreams and get a message from the ready one.
-                let ((message, from), _id, remainings) = select_all(active)
-                    .instrument(tracing::trace_span!("idle"))
-                    .await;
+impl Unpin for SelectReceivers {}
 
-                // Panic on channel close.
-                let message = message.expect(
-                    "upstream channel closed unexpectedly, please check error in upstream executors"
-                );
-                // Put back the remainings.
-                active = remainings;
+impl Stream for SelectReceivers {
+    type Item = std::result::Result<Message, StreamExecutorError>;
 
-                match message {
-                    Message::Chunk(_) => {
-                        // We may still receive message from this channel.
-                        active.push(from.into_future());
-                        yield message;
-                    }
-                    Message::Barrier(barrier) => {
-                        // Align the barrier.
-                        if let Some(current_barrier) = current_barrier.as_ref() {
-                            if &barrier != current_barrier {
-                                return Err(StreamExecutorError::align_barrier(
-                                    current_barrier.clone(),
-                                    barrier,
-                                ));
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut poll_count = 0;
+        while poll_count < self.upstreams.len() {
+            let idx = (poll_count + self.last_base) % self.upstreams.len();
+            match self.upstreams[idx].poll_next_unpin(cx) {
+                Poll::Pending => {
+                    poll_count += 1;
+                    continue;
+                }
+                Poll::Ready(item) => {
+                    let message = item.expect(
+                        "upstream channel closed unexpectedly, please check error in upstream executors"
+                    );
+                    match message {
+                        Message::Barrier(barrier) => {
+                            let rc = self.upstreams.swap_remove(idx);
+                            self.blocks.push(rc);
+                            if let Some(current_barrier) = self.barrier.as_ref() {
+                                if current_barrier.epoch != barrier.epoch {
+                                    return Poll::Ready(Some(Err(
+                                        StreamExecutorError::align_barrier(
+                                            current_barrier.clone(),
+                                            barrier,
+                                        ),
+                                    )));
+                                }
+                            } else {
+                                self.barrier = Some(barrier);
                             }
-                            assert_eq!(&barrier, current_barrier);
-                        } else {
-                            current_barrier = Some(barrier);
+                            poll_count = 0;
                         }
-                        // We'll not receive message from this channel during this epoch.
-                        blocked.push(from);
+                        Message::Chunk(chunk) => {
+                            let message = Message::Chunk(chunk);
+                            self.status.next_message(&message);
+                            self.last_base = (idx + 1) % self.upstreams.len();
+                            return Poll::Ready(Some(Ok(message)));
+                        }
                     }
                 }
             }
-
-            // 2. Yield the barrier to downstream once all barriers collected from upstream.
-            let barrier = current_barrier.unwrap();
-            let to_stop = barrier.is_to_stop_actor(self.actor_id);
-            yield Message::Barrier(barrier);
-
-            // 3. Put back the upstreams, or close the stream.
-            if to_stop {
-                break;
+        }
+        if self.upstreams.is_empty() {
+            if let Some(barrier) = self.barrier.take() {
+                // If this barrier acquire the executor stop, we do not reset the upstreams
+                // so that the next call would return `Poll::Ready(None)`.
+                if !barrier.is_to_stop_actor(self.actor_id) {
+                    self.upstreams = std::mem::take(&mut self.blocks);
+                }
+                let message = Message::Barrier(barrier);
+                self.status.next_message(&message);
+                Poll::Ready(Some(Ok(message)))
             } else {
-                upstreams = blocked;
+                Poll::Ready(None)
             }
+        } else {
+            Poll::Pending
         }
     }
 }
@@ -257,7 +285,8 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::new(Schema::default(), vec![], 0, rxs);
+        let merger =
+            MergeExecutor::new(Schema::default(), vec![], 0, rxs, ActorContext::create(), 0);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();

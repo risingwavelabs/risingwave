@@ -25,6 +25,7 @@
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
 #![deny(unused_must_use)]
+#![feature(iterator_try_collect)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
