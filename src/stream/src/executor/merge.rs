@@ -57,6 +57,8 @@ impl RemoteInput {
     }
 
     pub async fn run(mut self) {
+        let up_actor_id = self.up_down_ids.0.to_string();
+        let down_actor_id = self.up_down_ids.1.to_string();
         #[for_await]
         for data_res in self.stream {
             match data_res {
@@ -69,10 +71,7 @@ impl RemoteInput {
                     );
                     self.metrics
                         .exchange_recv_size
-                        .with_label_values(&[
-                            &self.up_down_ids.0.to_string(),
-                            &self.up_down_ids.1.to_string(),
-                        ])
+                        .with_label_values(&[&up_actor_id, &down_actor_id])
                         .inc_by(bytes as u64);
                     match msg_res {
                         Ok(msg) => {

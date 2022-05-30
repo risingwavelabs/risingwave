@@ -117,6 +117,8 @@ impl ExchangeServiceImpl {
         let metrics = self.metrics.clone();
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         tokio::spawn(async move {
+            let up_actor_id = up_down_ids.0.to_string();
+            let down_actor_id = up_down_ids.1.to_string();
             loop {
                 let msg = receiver.next().await;
                 match msg {
@@ -144,10 +146,7 @@ impl ExchangeServiceImpl {
                             Ok(_) => {
                                 metrics
                                     .stream_exchange_bytes
-                                    .with_label_values(&[
-                                        &up_down_ids.0.to_string(),
-                                        &up_down_ids.1.to_string(),
-                                    ])
+                                    .with_label_values(&[&up_actor_id, &down_actor_id])
                                     .inc_by(bytes as u64);
                                 Ok(())
                             }
