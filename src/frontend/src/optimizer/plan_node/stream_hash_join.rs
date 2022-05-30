@@ -56,7 +56,9 @@ impl StreamHashJoin {
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &logical.l2o_col_mapping(),
+            &logical
+                .l2i_col_mapping()
+                .composite(&logical.i2o_col_mapping()),
         );
 
         let force_delta = if let Some(config) = ctx.inner().session_ctx.get_config(DELTA_JOIN) {
