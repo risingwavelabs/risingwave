@@ -63,6 +63,12 @@ pub struct DataChunk {
 }
 
 impl DataChunk {
+    // #[cfg(test)]
+    pub fn zooja(columns: Vec<Column>) -> Self {
+        assert!(!columns.is_empty());
+        Self::new(columns, None)
+    }
+
     pub fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
         let cardinality = if let Some(bitmap) = &visibility {
             // with visibility bitmap
@@ -566,11 +572,9 @@ mod tests {
                 for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
                     builder.append(Some(i as i32)).unwrap();
                 }
-                let chunk = DataChunk::builder()
-                    .columns(vec![Column::new(Arc::new(
-                        builder.finish().unwrap().into(),
-                    ))])
-                    .build();
+                let chunk = DataChunk::zooja(vec![Column::new(Arc::new(
+                    builder.finish().unwrap().into(),
+                ))]);
                 chunks.push(chunk);
             }
 
@@ -632,7 +636,7 @@ mod tests {
             let arr = builder.finish().unwrap();
             columns.push(Column::new(Arc::new(arr.into())))
         }
-        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+        let chunk: DataChunk = DataChunk::zooja(columns);
         for row in chunk.rows() {
             for i in 0..num_of_columns {
                 let val = row.value_at(i).unwrap();

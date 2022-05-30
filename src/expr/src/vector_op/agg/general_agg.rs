@@ -220,9 +220,7 @@ mod tests {
         return_type: DataType,
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
-        let input_chunk = DataChunk::builder()
-            .columns(vec![Column::new(input)])
-            .build();
+        let input_chunk = DataChunk::zooja(vec![Column::new(input)]);
         let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, false)?;
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;

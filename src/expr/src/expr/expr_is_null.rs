@@ -124,9 +124,8 @@ mod tests {
             builder.finish()?
         };
 
-        let input_chunk = DataChunk::builder()
-            .columns(vec![Column::new(Arc::new(ArrayImpl::Decimal(input_array)))])
-            .build();
+        let input_chunk =
+            DataChunk::zooja(vec![Column::new(Arc::new(ArrayImpl::Decimal(input_array)))]);
         let result_array = expr.eval(&input_chunk).unwrap();
         assert_eq!(3, result_array.len());
         for (i, v) in expected_eval_result.iter().enumerate() {

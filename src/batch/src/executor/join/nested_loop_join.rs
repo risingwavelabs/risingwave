@@ -603,7 +603,7 @@ mod tests {
             let arr = builder.finish().unwrap();
             columns.push(Column::new(Arc::new(arr.into())))
         }
-        let chunk1: DataChunk = DataChunk::builder().columns(columns.clone()).build();
+        let chunk1: DataChunk = DataChunk::zooja(columns.clone());
         let bool_vec = vec![true, false, true, false, false];
         let chunk2 = DataChunk::new(
             columns.clone(),

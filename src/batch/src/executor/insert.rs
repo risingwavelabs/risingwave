@@ -220,7 +220,7 @@ mod tests {
         .map(|x| Arc::new(x.into()))
         .unwrap();
         let col3 = Column::new(array);
-        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2, col3]).build();
+        let data_chunk: DataChunk = DataChunk::zooja(vec![col1, col2, col3]);
         mock_executor.add(data_chunk.clone());
 
         // Create the table.
