@@ -104,7 +104,7 @@ statement ok
 create materialized view source_mv2 as select sum(v1) as sum_v1, count(v2) as count_v2 from s6 where v1 > 3;
 
 # Wait for source
-sleep 30s
+sleep 10s
 
 # Flush into storage
 statement ok
