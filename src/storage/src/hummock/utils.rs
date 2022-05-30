@@ -91,6 +91,25 @@ pub fn bitmap_overlap(pattern: &VNodeBitmap, sst_bitmaps: &Vec<VNodeBitmap>) -> 
     false
 }
 
+pub fn filter_single_sst<R, B>(
+    info: &SstableInfo,
+    key_range: &R,
+    vnode_set: Option<&VNodeBitmap>,
+) -> bool
+where
+    R: RangeBounds<B>,
+    B: AsRef<[u8]>,
+{
+    ({
+        let table_range = info.key_range.as_ref().unwrap();
+        let table_start = user_key(table_range.left.as_slice());
+        let table_end = user_key(table_range.right.as_slice());
+        range_overlap(key_range, table_start, table_end)
+    }) && vnode_set.map_or(true, |vnode_set| {
+        bitmap_overlap(vnode_set, &info.vnode_bitmaps)
+    })
+}
+
 /// Prune SSTs that does not overlap with a specific key range or does not overlap with a specific
 /// vnode set. Returns the sst ids after pruning
 pub fn prune_ssts<'a, R, B>(
@@ -99,24 +118,11 @@ pub fn prune_ssts<'a, R, B>(
     vnode_set: Option<&VNodeBitmap>,
 ) -> Vec<&'a SstableInfo>
 where
-    R: RangeBounds<B> + Send,
-    B: AsRef<[u8]> + Send,
+    R: RangeBounds<B>,
+    B: AsRef<[u8]>,
 {
-    let mut result_sst_ids: Vec<&'a SstableInfo> = ssts
-        .filter(|info| {
-            let table_range = info.key_range.as_ref().unwrap();
-            let table_start = user_key(table_range.left.as_slice());
-            let table_end = user_key(table_range.right.as_slice());
-            range_overlap(key_range, table_start, table_end)
-        })
-        .collect();
-    if let Some(vnode_set) = vnode_set {
-        result_sst_ids = result_sst_ids
-            .into_iter()
-            .filter(|info| bitmap_overlap(vnode_set, &info.vnode_bitmaps))
-            .collect();
-    }
-    result_sst_ids
+    ssts.filter(|info| filter_single_sst(info, key_range, vnode_set))
+        .collect()
 }
 
 pub fn can_concat(ssts: &[&SstableInfo]) -> bool {

@@ -115,8 +115,9 @@ where
 
 pub struct GenerateSeriesExecutorBuilder {}
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for GenerateSeriesExecutorBuilder {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(

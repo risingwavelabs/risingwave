@@ -106,3 +106,28 @@
       StreamProject { exprs: [$0, $1, $2, $3] }
         StreamHopWindow { time_col: $1 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
           StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
+- sql: |
+    create table t (v1 varchar, v2 timestamp, v3 float);
+    select v1, window_end, avg(v3) as avg from hop( t, v2, interval '1' minute, interval '10' minute) group by v1, window_end;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, ($2 / $3)] }
+      LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2), count($2)] }
+        LogicalProject { exprs: [$1, $5, $3] }
+          LogicalHopWindow { time_col: $2 slide: 00:01:00 size: 00:10:00 }
+            LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $1, ($2 / $3)] }
+        BatchHashAgg { group_keys: [$0, $1], aggs: [sum($2), count($2)] }
+          BatchExchange { order: [], dist: HashShard([0, 1]) }
+            BatchProject { exprs: [$0, $4, $2] }
+              BatchHopWindow { time_col: $1 slide: 00:01:00 size: 00:10:00 }
+                BatchScan { table: t, columns: [v1, v2, v3] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, window_end, avg], pk_columns: [v1, window_end] }
+      StreamProject { exprs: [$0, $1, ($3 / $4)] }
+        StreamHashAgg { group_keys: [$0, $1], aggs: [count, sum($2), count($2)] }
+          StreamExchange { dist: HashShard([0, 1]) }
+            StreamProject { exprs: [$0, $5, $2, $3, $4] }
+              StreamHopWindow { time_col: $1 slide: 00:01:00 size: 00:10:00 }
+                StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }

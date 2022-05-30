@@ -69,7 +69,7 @@ where
         let mut iter = self.table.iter(epoch).await?;
 
         while let Some(data_chunk) = iter
-            .collect_data_chunk(&self.table, Some(self.batch_size))
+            .collect_data_chunk(self.schema(), Some(self.batch_size))
             .await?
         {
             // Filter out rows

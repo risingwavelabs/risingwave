@@ -68,8 +68,9 @@ impl ProjectExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for ProjectExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
@@ -84,7 +85,7 @@ impl BoxedExecutorBuilder for ProjectExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child_node = source.clone_for_plan(proto_child).build()?;
+        let child_node = source.clone_for_plan(proto_child).build().await?;
 
         let project_exprs = project_node
             .get_select_list()
