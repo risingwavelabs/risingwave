@@ -857,6 +857,8 @@ pub enum Statement {
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
+    /// CREATE USER
+    CreateUser(CreateUserStatement),
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1227,6 +1229,9 @@ impl fmt::Display for Statement {
                 } else {
                     write!(f, "NULL")
                 }
+            }
+            Statement::CreateUser(statement) => {
+                write!(f, "CREATE USER {}", statement)
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
