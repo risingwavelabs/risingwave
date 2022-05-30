@@ -466,7 +466,7 @@ async fn test_state_table_iter() {
         .unwrap();
 
     {
-        let mut iter = state.iter(epoch).await.unwrap();
+        let mut iter = Box::pin(state.iter(epoch).await.unwrap());
 
         let res = iter.next().await.unwrap().unwrap();
         assert!(res.is_some());
@@ -576,7 +576,7 @@ async fn test_state_table_iter() {
         )
         .unwrap();
 
-    let mut iter = state.iter(epoch).await.unwrap();
+    let mut iter = Box::pin(state.iter(epoch).await.unwrap());
 
     let res = iter.next().await.unwrap().unwrap();
 
@@ -771,8 +771,8 @@ async fn test_multi_state_table_iter() {
         .unwrap();
 
     {
-        let mut iter_1 = state_1.iter(epoch).await.unwrap();
-        let mut iter_2 = state_2.iter(epoch).await.unwrap();
+        let mut iter_1 = Box::pin(state_1.iter(epoch).await.unwrap());
+        let mut iter_2 = Box::pin(state_2.iter(epoch).await.unwrap());
 
         let res_1_1 = iter_1.next().await.unwrap().unwrap();
         assert!(res_1_1.is_some());

@@ -117,13 +117,13 @@ impl<S: StateStore> StateTable<S> {
 
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
         let mem_table_iter = self.mem_table.buffer.iter();
-        Ok(Box::pin(StateTableRowIter::into_stream(
+        Ok(StateTableRowIter::into_stream(
             &self.keyspace,
             self.column_descs.clone(),
             mem_table_iter,
             &self.order_types,
             epoch,
-        )))
+        ))
     }
 }
 
