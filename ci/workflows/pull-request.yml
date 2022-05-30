@@ -1,5 +1,5 @@
 steps:
-  - label: "compute node build dev"
+  - label: "build ({{matrix.profile}} mode)"
     command: "ci/scripts/compute-node-build.sh -t debug -p dev"
     key: "build"
     plugins:
@@ -9,7 +9,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
 
-  - label: "e2e risedev"
+  - label: "end-to-end test ({{matrix.profile}} mode)"
     command: "ci/scripts/e2e-risedev.sh -p dev"
     depends_on: "build"
     plugins:
@@ -19,7 +19,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
 
-  - label: "e2e source"
+  - label: "end-to-end source test"
     command: "ci/scripts/e2e-source.sh"
     depends_on: "build"
     plugins:
@@ -29,7 +29,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 5
 
-  - label: "compute node test"
+  - label: "unit test"
     command: "ci/scripts/compute-node-test.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -42,7 +42,7 @@ steps:
             - CODECOV_TOKEN
     timeout_in_minutes: 15
 
-  - label: "deterministic simulation test"
+  - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-simulation-test.sh"
     plugins:
       - docker-compose#v3.9.0:
