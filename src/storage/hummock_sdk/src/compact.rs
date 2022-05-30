@@ -40,7 +40,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         let tables: Vec<(HummockSSTableId, String)> = level_entry
             .table_infos
             .iter()
-            .map(|table| (table.id, format!("{}MB", table.file_size / 1024 / 1024)))
+            .map(|table| (table.id, format!("{}KB", table.file_size / 1024)))
             .collect();
         writeln!(s, "Level {:?}: {:?} ", level_entry.level_idx, tables).unwrap();
     }

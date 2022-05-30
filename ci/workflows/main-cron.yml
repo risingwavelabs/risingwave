@@ -1,6 +1,6 @@
 steps:
-  - label: "compute node build dev"
-    command: "ci/scripts/compute-node-build.sh -t debug -p dev"
+  - label: "build"
+    command: "ci/scripts/build.sh -t debug -p dev"
     key: "build"
     plugins:
       - docker-compose#v3.9.0:
@@ -9,8 +9,8 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
 
-  - label: "e2e risedev"
-    command: "ci/scripts/e2e-risedev.sh -p dev"
+  - label: "end-to-end test"
+    command: "ci/scripts/e2e-test.sh -p dev"
     depends_on: "build"
     plugins:
       - docker-compose#v3.9.0:
@@ -19,8 +19,8 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
 
-  - label: "e2e source"
-    command: "ci/scripts/e2e-source.sh"
+  - label: "end-to-end source test"
+    command: "ci/scripts/e2e-source-test.sh"
     depends_on: "build"
     plugins:
       - docker-compose#v3.9.0:
@@ -29,18 +29,28 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 5
 
-  - label: "compute node test"
-    command: "ci/scripts/compute-node-test.sh"
+  - label: "unit test"
+    command: "ci/scripts/unit-test.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
-            env:
-              CODECOV_TOKEN: my-codecov-token
+          env:
+            CODECOV_TOKEN: my-codecov-token
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
     timeout_in_minutes: 15
+
+  - label: "unit test (deterministic simulation)"
+    command: "ci/scripts/deterministic-simulation-test.sh"
+    plugins:
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 5
+    soft_fail: true
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"

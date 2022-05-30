@@ -162,6 +162,17 @@ fn build_commutative_funcs(
     map.insert(FuncSign::new(expr, vec![arg1, arg0]), ret);
 }
 
+fn build_round_funcs(map: &mut HashMap<FuncSign, DataTypeName>, expr: ExprType) {
+    map.insert(
+        FuncSign::new(expr, vec![DataTypeName::Float64]),
+        DataTypeName::Float64,
+    );
+    map.insert(
+        FuncSign::new(expr, vec![DataTypeName::Decimal]),
+        DataTypeName::Decimal,
+    );
+}
+
 /// This function builds type derived map for all built-in functions that take a fixed number
 /// of arguments.  They can be determined to have one or more type signatures since some are
 /// compatible with more than one type.
@@ -245,6 +256,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         T::Decimal,
     );
 
+    build_round_funcs(&mut map, E::Round);
+    build_round_funcs(&mut map, E::Ceil);
+    build_round_funcs(&mut map, E::Floor);
     // temporal expressions
     for (base, delta) in [
         (T::Date, T::Int32),
@@ -316,6 +330,11 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     );
     map.insert(
         FuncSign::new(E::SplitPart, vec![T::Varchar, T::Varchar, T::Int32]),
+        T::Varchar,
+    );
+    // TODO: Support more `to_char` types.
+    map.insert(
+        FuncSign::new(E::ToChar, vec![T::Timestamp, T::Varchar]),
         T::Varchar,
     );
 

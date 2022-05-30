@@ -110,7 +110,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
         Ok(Box::new(
             GenericExchangeExecutor::<DefaultCreateSource, C> {
                 sources,
-                context: source.batch_task_context().clone(),
+                context: source.context().clone(),
                 source_creator: PhantomData,
                 source_idx: 0,
                 current_source: None,

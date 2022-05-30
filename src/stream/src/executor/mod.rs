@@ -24,14 +24,16 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
+use risingwave_connector::{ConnectorState, SplitImpl};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
 use risingwave_pb::data::{
     AddMutation, Barrier as ProstBarrier, DispatcherMutation, Epoch as ProstEpoch, NothingMutation,
-    StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
+    SourceChangeSplit, SourceChangeSplitMutation, StopMutation,
+    StreamMessage as ProstStreamMessage, UpdateMutation,
 };
 use smallvec::SmallVec;
 use tracing::trace_span;
@@ -165,6 +167,7 @@ pub enum Mutation {
     Stop(HashSet<ActorId>),
     UpdateOutputs(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
     AddOutput(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
+    SourceChangeSplit(HashMap<ActorId, ConnectorState>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -316,6 +319,28 @@ impl Barrier {
                         })
                         .collect(),
                 })),
+                Some(Mutation::SourceChangeSplit(changes)) => {
+                    Some(ProstMutation::Splits(SourceChangeSplitMutation {
+                        mutations: changes
+                            .iter()
+                            .map(|(&actor_id, splits)| SourceChangeSplit {
+                                actor_id,
+                                split_type: if let Some(s) = splits {
+                                    s[0].get_type()
+                                } else {
+                                    "".to_string()
+                                },
+                                source_splits: match splits.clone() {
+                                    Some(split) => split
+                                        .into_iter()
+                                        .map(|s| s.to_json_bytes().to_vec())
+                                        .collect::<Vec<_>>(),
+                                    None => vec![],
+                                },
+                            })
+                            .collect(),
+                    }))
+                }
             },
             span: vec![],
         }
@@ -356,6 +381,36 @@ impl Barrier {
                 )
                 .into(),
             ),
+            ProstMutation::Splits(s) => {
+                let mut change_splits: Vec<(ActorId, ConnectorState)> =
+                    Vec::with_capacity(s.mutations.len());
+                for change_split in &s.mutations {
+                    if change_split.source_splits.is_empty() {
+                        change_splits.push((change_split.actor_id, None));
+                    } else {
+                        let split_impl = change_split
+                            .source_splits
+                            .iter()
+                            .map(|split| {
+                                SplitImpl::restore_from_bytes(
+                                    change_split.split_type.clone(),
+                                    split,
+                                )
+                            })
+                            .collect::<anyhow::Result<Vec<SplitImpl>>>()
+                            .to_rw_result()?;
+                        change_splits.push((change_split.actor_id, Some(split_impl)));
+                    }
+                }
+                Some(
+                    Mutation::SourceChangeSplit(
+                        change_splits
+                            .into_iter()
+                            .collect::<HashMap<ActorId, ConnectorState>>(),
+                    )
+                    .into(),
+                )
+            }
         };
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
