@@ -1,0 +1,9 @@
+query T
+SELECT to_char(timestamp '2002-04-20 17:31:12.66', 'HH12:MI:SS')
+----
+05:31:12
+
+query T
+SELECT to_char(timestamp '2006-01-02 15:04:05', 'YYYY-MM-DD HH24:MI:SS');
+----
+2006-01-02 15:04:05
