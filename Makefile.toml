@@ -403,6 +403,29 @@ cargo nextest run "$@"
 """
 description = "Run unit tests"
 
+[tasks.sbuild]
+category = "RiseDev - Build in simulation mode"
+description = "Build in simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo build "$@"
+"""
+
+[tasks.stest]
+category = "RiseDev - Deterministic Simulation Test"
+description = "Run unit tests in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo nextest run "$@"
+"""
 
 [tasks.check-hakari]
 category = "RiseDev - Check"
