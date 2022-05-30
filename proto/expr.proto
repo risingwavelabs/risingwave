@@ -58,6 +58,7 @@ message ExprNode {
     SPLIT_PART = 220;
     CEIL = 221;
     FLOOR = 222;
+    TO_CHAR = 223;
 
     // Boolean comparison
     IS_TRUE = 301;

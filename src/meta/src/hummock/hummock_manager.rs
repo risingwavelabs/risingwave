@@ -138,11 +138,14 @@ impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
+    // only for test
+    pub async fn new_with_config(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
+        config: CompactionConfig,
     ) -> Result<HummockManager<S>> {
+        let config = Arc::new(config);
         let instance = HummockManager {
             env,
             versioning: RwLock::new(Versioning {
@@ -154,14 +157,13 @@ where
                 sstable_id_infos: Default::default(),
             }),
             compaction: RwLock::new(Compaction {
-                compact_status: CompactStatus::default(),
+                compact_status: CompactStatus::new(config.clone()),
                 compact_task_assignment: Default::default(),
             }),
             metrics,
             cluster_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
-            // TODO: load it from etcd or configuration file.
-            config: Arc::new(CompactionConfig::default()),
+            config,
         };
 
         instance.load_meta_store_state().await?;
@@ -169,18 +171,26 @@ where
         instance.cancel_unassigned_compaction_task().await?;
         // Release snapshots pinned by meta on restarting.
         instance.release_contexts([META_NODE_ID]).await?;
-
         Ok(instance)
+    }
+
+    pub async fn new(
+        env: MetaSrvEnv<S>,
+        cluster_manager: ClusterManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
+    ) -> Result<HummockManager<S>> {
+        // TODO: load it from etcd or configuration file.
+        Self::new_with_config(env, cluster_manager, metrics, CompactionConfig::default()).await
     }
 
     /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
-        let config = self.config.clone();
         let mut compaction_guard = self.compaction.write().await;
 
-        compaction_guard.compact_status = CompactStatus::get(self.env.meta_store())
-            .await?
-            .unwrap_or_else(|| CompactStatus::new(config));
+        compaction_guard
+            .compact_status
+            .load(self.env.meta_store())
+            .await?;
 
         compaction_guard.compact_task_assignment =
             CompactTaskAssignment::list(self.env.meta_store())
@@ -479,33 +489,35 @@ where
                         .flat_map(|v| v.snapshot_id.clone())
                         .fold(max_committed_epoch, std::cmp::min)
                 };
-                let table_ids = compact_task
-                    .input_ssts
-                    .iter()
-                    .flat_map(|level| {
-                        level
-                            .table_infos
-                            .iter()
-                            .flat_map(|sst_info| {
-                                sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
-                            })
-                            .collect_vec()
-                    })
-                    .collect::<HashSet<u32>>();
-                compact_task.vnode_mappings.reserve_exact(table_ids.len());
-                for table_id in table_ids {
-                    if let Some(vnode_mapping) = self
-                        .env
-                        .hash_mapping_manager()
-                        .get_table_hash_mapping(&table_id)
-                    {
-                        let (original_indices, compressed_data) = compress_data(&vnode_mapping);
-                        let compressed_mapping = ParallelUnitMapping {
-                            table_id,
-                            original_indices,
-                            data: compressed_data,
-                        };
-                        compact_task.vnode_mappings.push(compressed_mapping);
+                if compact_task.target_level != 0 {
+                    let table_ids = compact_task
+                        .input_ssts
+                        .iter()
+                        .flat_map(|level| {
+                            level
+                                .table_infos
+                                .iter()
+                                .flat_map(|sst_info| {
+                                    sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
+                                })
+                                .collect_vec()
+                        })
+                        .collect::<HashSet<u32>>();
+                    compact_task.vnode_mappings.reserve_exact(table_ids.len());
+                    for table_id in table_ids {
+                        if let Some(vnode_mapping) = self
+                            .env
+                            .hash_mapping_manager()
+                            .get_table_hash_mapping(&table_id)
+                        {
+                            let (original_indices, compressed_data) = compress_data(&vnode_mapping);
+                            let compressed_mapping = ParallelUnitMapping {
+                                table_id,
+                                original_indices,
+                                data: compressed_data,
+                            };
+                            compact_task.vnode_mappings.push(compressed_mapping);
+                        }
                     }
                 }
 
