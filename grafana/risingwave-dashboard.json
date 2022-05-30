@@ -2149,90 +2149,6 @@
 			"bars": false,
 			"dashLength": 10,
 			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 76
-			},
-			"hiddenSeries": false,
-			"id": 14,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "rate(stream_actor_row_count[15s]) > 0",
-					"interval": "",
-					"legendFormat": "{{actor_id}}",
-					"refId": "A"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "actor throughput",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:627",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:628",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
 			"datasource": {
 				"type": "prometheus",
 				"uid": "risedev-prometheus"
@@ -2242,8 +2158,8 @@
 			"gridPos": {
 				"h": 8,
 				"w": 12,
-				"x": 0,
-				"y": 84
+				"x": 12,
+				"y": 76
 			},
 			"hiddenSeries": false,
 			"id": 16,
@@ -2318,174 +2234,272 @@
 			}
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"description": "",
-			"fill": 1,
-			"fillGradient": 0,
+			"collapsed": true,
 			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
+				"h": 1,
+				"w": 24,
+				"x": 0,
 				"y": 84
 			},
-			"hiddenSeries": false,
-			"id": 197,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
+			"id": 200,
+			"panels": [
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 85
 					},
-					"exemplar": true,
-					"expr": "rate(stream_actor_processing_time[1m]) > 0",
-					"interval": "",
-					"legendFormat": "{{actor_id}}",
-					"refId": "A"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "actor processing latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:627",
-					"format": "s",
-					"logBase": 1,
-					"show": true
+					"hiddenSeries": false,
+					"id": 14,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "rate(stream_actor_row_count[15s]) > 0",
+							"interval": "",
+							"legendFormat": "{{actor_id}}",
+							"refId": "A"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "actor throughput",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:627",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:628",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				},
 				{
-					"$$hashKey": "object:628",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"description": "",
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 92
-			},
-			"hiddenSeries": false,
-			"id": 198,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"description": "",
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 85
 					},
-					"exemplar": true,
-					"expr": "rate(stream_actor_barrier_time[1m]) > 0",
-					"interval": "",
-					"legendFormat": "{{actor_id}}",
-					"refId": "A"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "actor barrier latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:627",
-					"format": "s",
-					"logBase": 1,
-					"show": true
+					"hiddenSeries": false,
+					"id": 198,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "rate(stream_actor_barrier_time[1m]) > 0",
+							"interval": "",
+							"legendFormat": "{{actor_id}}",
+							"refId": "A"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "actor barrier latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:627",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:628",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				},
 				{
-					"$$hashKey": "object:628",
-					"format": "short",
-					"logBase": 1,
-					"show": true
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"description": "",
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 93
+					},
+					"hiddenSeries": false,
+					"id": 197,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "rate(stream_actor_processing_time[1m]) > 0",
+							"interval": "",
+							"legendFormat": "{{actor_id}}",
+							"refId": "A"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "actor processing time",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:627",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:628",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				}
 			],
-			"yaxis": {
-				"align": false
-			}
+			"title": "Stream Actors",
+			"type": "row"
 		},
 		{
 			"collapsed": false,
@@ -2497,7 +2511,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 100
+				"y": 85
 			},
 			"id": 26,
 			"panels": [],
@@ -2564,7 +2578,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 101
+				"y": 86
 			},
 			"id": 30,
 			"options": {
@@ -2700,7 +2714,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 101
+				"y": 86
 			},
 			"id": 28,
 			"options": {
@@ -2934,7 +2948,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 109
+				"y": 94
 			},
 			"id": 128,
 			"options": {
@@ -2983,7 +2997,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 109
+				"y": 94
 			},
 			"hiddenSeries": false,
 			"id": 196,
@@ -3135,7 +3149,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 117
+				"y": 102
 			},
 			"id": 43,
 			"options": {
@@ -3243,7 +3257,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 117
+				"y": 102
 			},
 			"id": 40,
 			"options": {
@@ -3434,7 +3448,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 125
+				"y": 110
 			},
 			"id": 130,
 			"options": {
@@ -3574,7 +3588,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 125
+				"y": 110
 			},
 			"id": 32,
 			"options": {
@@ -3713,7 +3727,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 133
+				"y": 118
 			},
 			"id": 44,
 			"options": {
@@ -3805,7 +3819,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 133
+				"y": 118
 			},
 			"id": 45,
 			"options": {
@@ -3908,7 +3922,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 141
+				"y": 126
 			},
 			"id": 41,
 			"options": {
@@ -4036,7 +4050,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 141
+				"y": 126
 			},
 			"id": 132,
 			"options": {
@@ -4140,7 +4154,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 149
+				"y": 134
 			},
 			"id": 134,
 			"options": {
@@ -4268,7 +4282,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 149
+				"y": 134
 			},
 			"id": 48,
 			"options": {
@@ -4346,7 +4360,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 157
+				"y": 142
 			},
 			"id": 115,
 			"panels": [
@@ -4964,7 +4978,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 158
+				"y": 143
 			},
 			"id": 113,
 			"panels": [
@@ -5282,7 +5296,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 159
+				"y": 144
 			},
 			"id": 97,
 			"panels": [
@@ -5900,7 +5914,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 160
+				"y": 145
 			},
 			"id": 88,
 			"panels": [
@@ -6290,7 +6304,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 161
+				"y": 146
 			},
 			"id": 84,
 			"panels": [
@@ -6556,7 +6570,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 162
+				"y": 147
 			},
 			"id": 82,
 			"panels": [
@@ -6946,7 +6960,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 163
+				"y": 148
 			},
 			"id": 78,
 			"panels": [
@@ -7605,7 +7619,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 164
+				"y": 149
 			},
 			"id": 62,
 			"panels": [
@@ -8682,6 +8696,6 @@
 	"timezone": "",
 	"title": "risingwave_dashboard",
 	"uid": "Ecy3uV1nz",
-	"version": 3,
+	"version": 6,
 	"weekStart": ""
 }
