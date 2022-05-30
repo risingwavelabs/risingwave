@@ -332,6 +332,11 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         FuncSign::new(E::SplitPart, vec![T::Varchar, T::Varchar, T::Int32]),
         T::Varchar,
     );
+    // TODO: Support more `to_char` types.
+    map.insert(
+        FuncSign::new(E::ToChar, vec![T::Timestamp, T::Varchar]),
+        T::Varchar,
+    );
 
     map
 }

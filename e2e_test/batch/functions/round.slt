@@ -1,30 +1,29 @@
 query I
-SELECT round(-5.5) 
+SELECT round(-5.5)
 ----
 -6
 
 query I
-SELECT round(5.5) 
+SELECT round(5.5)
 ----
 6
 
 query I
-SELECT ceil(4.7) 
+SELECT ceil(4.7)
 ----
 5
 
 query I
-SELECT floor(4.7::double) 
+SELECT floor(4.7::double)
 ----
 4
 
 query I
-SELECT round(4) 
+SELECT round(4)
 ----
 4
 
 query I
-SELECT round(4.5::float) 
+SELECT round(4.5::float)
 ----
 5
-
