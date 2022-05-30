@@ -1,5 +1,5 @@
 steps:
-  - label: "build (dev mode)"
+  - label: "build"
     command: "ci/scripts/compute-node-build.sh -t debug -p dev"
     key: "build"
     plugins:

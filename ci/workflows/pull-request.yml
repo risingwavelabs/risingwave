@@ -1,5 +1,5 @@
 steps:
-  - label: "build ({{matrix.profile}} mode)"
+  - label: "build"
     command: "ci/scripts/compute-node-build.sh -t debug -p dev"
     key: "build"
     plugins:
@@ -9,7 +9,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
 
-  - label: "end-to-end test ({{matrix.profile}} mode)"
+  - label: "end-to-end test"
     command: "ci/scripts/e2e-risedev.sh -p dev"
     depends_on: "build"
     plugins:
