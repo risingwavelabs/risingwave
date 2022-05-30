@@ -420,7 +420,7 @@ mod tests {
         g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
             .unwrap();
         agg.update_and_output_with_sorted_groups(
-            &DataChunk::zooja(vec![Column::new(Arc::new(input.into()))]),
+            &DataChunk::cols(vec![Column::new(Arc::new(input.into()))]),
             &mut a_builder,
             &eq,
         )
@@ -431,7 +431,7 @@ mod tests {
         g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
             .unwrap();
         agg.update_and_output_with_sorted_groups(
-            &DataChunk::zooja(vec![Column::new(Arc::new(input.into()))]),
+            &DataChunk::cols(vec![Column::new(Arc::new(input.into()))]),
             &mut a_builder,
             &eq,
         )
@@ -442,7 +442,7 @@ mod tests {
         g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
             .unwrap();
         agg.update_and_output_with_sorted_groups(
-            &DataChunk::zooja(vec![Column::new(Arc::new(input.into()))]),
+            &DataChunk::cols(vec![Column::new(Arc::new(input.into()))]),
             &mut a_builder,
             &eq,
         )

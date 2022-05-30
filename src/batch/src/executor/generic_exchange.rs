@@ -212,7 +212,7 @@ mod tests {
             ) -> Result<Box<dyn ExchangeSource>> {
                 let mut rng = rand::thread_rng();
                 let i = rng.gen_range(1..=100000);
-                let chunk = DataChunk::zooja(vec![Column::new(Arc::new(
+                let chunk = DataChunk::cols(vec![Column::new(Arc::new(
                     array_nonnull! { I32Array, [i] }.into(),
                 ))]);
                 let chunks = vec![Some(chunk); 100];

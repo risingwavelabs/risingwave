@@ -435,7 +435,7 @@ mod tests {
                 .map(|array_builder| array_builder.finish().map(|arr| Column::new(Arc::new(arr))))
                 .collect::<Result<Vec<Column>>>()?;
 
-            Ok(DataChunk::zooja(columns))
+            Ok(DataChunk::cols(columns))
         }
     }
 

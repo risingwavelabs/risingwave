@@ -394,7 +394,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::zooja(vec![col1]);
+        let data_chunk = DataChunk::cols(vec![col1]);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
             is_nullable: false,
@@ -441,7 +441,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::zooja(vec![col1]);
+        let data_chunk = DataChunk::cols(vec![col1]);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
             is_nullable: false,
@@ -494,7 +494,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::zooja(vec![col1]);
+        let data_chunk = DataChunk::cols(vec![col1]);
         let return_type = DataType {
             type_name: TypeName::Int16 as i32,
             is_nullable: false,
@@ -553,7 +553,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::zooja(vec![col1]);
+        let data_chunk = DataChunk::cols(vec![col1]);
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
@@ -596,7 +596,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::zooja(vec![col1]);
+        let data_chunk = DataChunk::cols(vec![col1]);
         let expr = make_expression(kind, &[TypeName::Date], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
