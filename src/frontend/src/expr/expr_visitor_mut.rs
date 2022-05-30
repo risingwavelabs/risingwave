@@ -14,39 +14,45 @@
 
 use super::{AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
 
-/// Traverse an expression tree.
+/// Traverse and mutate an expression tree.
+///
+/// There is no difference in the use of this trait and `ExprVisitor` except that [`ExprVisitorMut`]
+/// can be used to directly mutate something inside the expression. This trait can avoid many
+/// unnecessary copies when you just want to modify something that
+/// won't change the correctness of the expression and provide much convenience compared to
+/// `ExprRewriter` expecially when you have to traverse into the `Subquery`.
 ///
 /// Each method of the trait is a hook that can be overridden to customize the behavior when
 /// traversing the corresponding type of node. By default, every method recursively changes the
 /// subtree.
 ///
-/// Note: The default implementation for `change_subquery` is a no-op, i.e., expressions inside
+/// Note: The default implementation for `mut_subquery` is a no-op, i.e., expressions inside
 /// subqueries are not traversed.
 pub trait ExprVisitorMut {
-    fn change_expr(&mut self, expr: &mut ExprImpl) {
+    fn mut_expr(&mut self, expr: &mut ExprImpl) {
         match expr {
             ExprImpl::InputRef(inner) => self.change_input_ref(inner),
-            ExprImpl::Literal(inner) => self.change_literal(inner),
-            ExprImpl::FunctionCall(inner) => self.change_function_call(inner),
-            ExprImpl::AggCall(inner) => self.change_agg_call(inner),
-            ExprImpl::Subquery(inner) => self.change_subquery(inner),
-            ExprImpl::CorrelatedInputRef(inner) => self.change_correlated_input_ref(inner),
+            ExprImpl::Literal(inner) => self.mut_literal(inner),
+            ExprImpl::FunctionCall(inner) => self.mut_function_call(inner),
+            ExprImpl::AggCall(inner) => self.mut_agg_call(inner),
+            ExprImpl::Subquery(inner) => self.mut_subquery(inner),
+            ExprImpl::CorrelatedInputRef(inner) => self.mut_correlated_input_ref(inner),
         }
     }
-    fn change_function_call(&mut self, func_call: &mut FunctionCall) {
+    fn mut_function_call(&mut self, func_call: &mut FunctionCall) {
         func_call
             .inputs
             .iter_mut()
-            .for_each(|expr| self.change_expr(expr))
+            .for_each(|expr| self.mut_expr(expr))
     }
-    fn change_agg_call(&mut self, agg_call: &mut AggCall) {
+    fn mut_agg_call(&mut self, agg_call: &mut AggCall) {
         agg_call
             .inputs
             .iter_mut()
-            .for_each(|expr| self.change_expr(expr))
+            .for_each(|expr| self.mut_expr(expr))
     }
-    fn change_literal(&mut self, _: &mut Literal) {}
+    fn mut_literal(&mut self, _: &mut Literal) {}
     fn change_input_ref(&mut self, _: &mut InputRef) {}
-    fn change_subquery(&mut self, _: &mut Subquery) {}
-    fn change_correlated_input_ref(&mut self, _: &mut CorrelatedInputRef) {}
+    fn mut_subquery(&mut self, _: &mut Subquery) {}
+    fn mut_correlated_input_ref(&mut self, _: &mut CorrelatedInputRef) {}
 }

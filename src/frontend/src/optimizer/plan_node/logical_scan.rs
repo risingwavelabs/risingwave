@@ -261,11 +261,6 @@ impl LogicalScan {
     }
 
     pub fn rewrtie_scan(&self, required_col_idx: Vec<usize>) -> Option<PlanRef> {
-        for i in &required_col_idx {
-            if *i >= self.schema().len() {
-                return None;
-            }
-        }
         Some(
             Self::new(
                 self.table_name.clone(),

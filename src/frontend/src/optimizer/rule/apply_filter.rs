@@ -21,6 +21,7 @@ use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
+/// Push `LogicalFilter` down `LogicalApply`
 pub struct ApplyFilter {}
 impl Rule for ApplyFilter {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -51,12 +52,13 @@ impl Rule for ApplyFilter {
             conjunctions: cor_exprs,
         });
         let new_apply = LogicalApply::create(left, filter.input(), join_type, new_on);
-        let new_filter = LogicalFilter::create(
+        let new_filter = LogicalFilter::new(
             new_apply,
             Condition {
                 conjunctions: uncor_exprs,
             },
-        );
+        )
+        .into();
         Some(new_filter)
     }
 }
@@ -67,6 +69,7 @@ impl ApplyFilter {
     }
 }
 
+/// Convert `CorrelatedInputRef` to `InputRef` and shift `InputRef` with offset.
 struct Rewriter {
     offset: usize,
 }

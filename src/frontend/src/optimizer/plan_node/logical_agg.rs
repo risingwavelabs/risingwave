@@ -406,15 +406,13 @@ impl LogicalAgg {
     }
 
     pub fn rewrite_agg(&self) -> Option<PlanRef> {
+        // `LogicalAgg` is used to remove duplicate rows, so its `agg_calls` must be empty.
         if !self.agg_calls.is_empty() {
             return None;
         }
-        if let Some(project) = self.input.as_logical_project() {
-            let new_input = project.rewrite_project()?;
-            Some(self.clone_with_input(new_input).into())
-        } else {
-            None
-        }
+        let project = self.input.as_logical_project()?;
+        let new_input = project.rewrite_project()?;
+        Some(self.clone_with_input(new_input).into())
     }
 }
 

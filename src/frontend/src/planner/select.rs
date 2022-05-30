@@ -281,7 +281,10 @@ impl Planner {
         join_type: JoinType,
     ) -> PlanRef {
         if !correlated_inputs.is_empty() {
-            // Translate Apply here.
+            // Translate Apply according to the fomula provided by Unnesting Arbitrary Queries.
+
+            // `correlated_inputs` is the Domain. We use `LogicalProject` to pick up the columns in
+            // Domain, and then use `LogicalAgg` to de-duplicate.
             let logical_project = LogicalProject::create(
                 left.clone(),
                 correlated_inputs
@@ -299,6 +302,7 @@ impl Planner {
                 Condition::true_cond(),
             );
 
+            // Construct the equations here so that we can align rows later.
             let apply_left_len = left.schema().len();
             correlated_inputs
                 .into_iter()

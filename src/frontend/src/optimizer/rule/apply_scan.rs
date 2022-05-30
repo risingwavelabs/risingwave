@@ -29,10 +29,15 @@ impl Rule for ApplyScan {
         let (left, right, on, join_type) = apply.clone().decompose();
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
+        // TODO: Push `LogicalApply` down `LogicalJoin`.
         if let (None, None) = (right.as_logical_scan(), right.as_logical_join()) {
             return None;
         }
 
+        // Record the mapping from `CorrelatedInputRef`'s index to `InputRef`'s index.
+        // We currently can remove DAG only if ALL the `CorrelatedInputRef` are equal joined to
+        // `InputRef`.
+        // TODO: Do some transformation for IN, and try to remove DAG for it.
         let mut column_mapping = HashMap::new();
         on.conjunctions.iter().for_each(|expr| {
             if let ExprImpl::FunctionCall(func_call) = expr {
@@ -42,7 +47,11 @@ impl Rule for ApplyScan {
             }
         });
         if column_mapping.len() == apply_left_len {
-            // We can eliminate join now!
+            // Remove DAG.
+
+            // Replace `LogicalApply` with `LogicalProject` and insert the `InputRef`s which is
+            // equal to `CorrelatedInputRef` at the beginning of `LogicalProject`.
+            // See the fourth section of Unnesting Arbitrary Queries for how to do the optimization.
             let mut exprs: Vec<ExprImpl> = (0..apply_left_len)
                 .into_iter()
                 .map(|left| {
@@ -62,13 +71,16 @@ impl Rule for ApplyScan {
             // TODO: add LogicalFilter here to do null-check.
             Some(project)
         } else {
+            // Rewrite `LogicalApply`'s left.
+
+            // Use `rewrite_agg`, `rewrite_project`, `rewrite_join` and `rewrite_scan` to remove
+            // useless columns.
             let left = apply.left();
-            let new_left = if let Some(agg) = left.as_logical_agg() {
-                agg.rewrite_agg()
-            } else {
-                None
-            };
-            let join = LogicalJoin::new(new_left.unwrap(), right, join_type, on);
+            let new_left = left
+                .as_logical_agg()
+                .map(|agg| agg.rewrite_agg().unwrap())
+                .unwrap();
+            let join = LogicalJoin::new(new_left, right, join_type, on);
             Some(join.into())
         }
     }
@@ -79,6 +91,8 @@ impl ApplyScan {
         Box::new(ApplyScan {})
     }
 
+    /// Check whether the `func_call` is like v1 = v2, in which v1 and v2 belong respectively to
+    /// `LogicalApply`'s left and right.
     fn check(func_call: &FunctionCall, apply_left_len: usize) -> Option<(usize, usize, DataType)> {
         let inputs = func_call.inputs();
         if func_call.get_expr_type() == ExprType::Equal && inputs.len() == 2 {

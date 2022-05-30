@@ -162,6 +162,7 @@ impl LogicalProject {
     }
 
     pub fn rewrite_project(&self) -> Option<PlanRef> {
+        // `LogicalProject` is used to pick up those columns needed by `LogicalApply`'s right.
         let mut required_col_idx = vec![];
         for expr in &self.exprs {
             if let ExprImpl::InputRef(input_ref) = expr {

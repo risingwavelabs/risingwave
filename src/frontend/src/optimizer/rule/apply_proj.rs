@@ -15,10 +15,12 @@
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeBinary};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeBinary, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
+use crate::utils::ColIndexMapping;
 
+/// Push `LogicalApply` down `LogicalProject`.
 pub struct ApplyProj {}
 impl Rule for ApplyProj {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -27,6 +29,8 @@ impl Rule for ApplyProj {
         let right = apply.right();
         let project = right.as_logical_project()?;
 
+        // Insert all the columns of `LogicalApply`'s left at the beginning of the new
+        // `LogicalProject`.
         let mut exprs: Vec<ExprImpl> = apply
             .left()
             .schema()
@@ -37,17 +41,14 @@ impl Rule for ApplyProj {
             .collect();
 
         let (proj_exprs, proj_input) = project.clone().decompose();
-        // let mut shift_input_ref = ColIndexMapping::with_shift_offset(
-        //     proj_exprs.len(),
-        //     apply.left().schema().len() as isize,
-        // );
-        let mut rewriter = Rewriter {
-            offset: apply.left().schema().len(),
-        };
+        let mut col_mapping = ColIndexMapping::with_shift_offset(
+            project.input().schema().len(),
+            apply.left().schema().len() as isize,
+        );
         exprs.extend(
             proj_exprs
                 .into_iter()
-                .map(|expr| rewriter.rewrite_expr(expr)),
+                .map(|expr| col_mapping.rewrite_expr(expr)),
         );
 
         let new_apply = apply.clone_with_left_right(apply.left(), proj_input);
@@ -59,15 +60,5 @@ impl Rule for ApplyProj {
 impl ApplyProj {
     pub fn create() -> BoxedRule {
         Box::new(ApplyProj {})
-    }
-}
-
-struct Rewriter {
-    offset: usize,
-}
-
-impl ExprRewriter for Rewriter {
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
     }
 }

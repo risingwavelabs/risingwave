@@ -153,17 +153,19 @@ macro_rules! impl_has_variant {
 impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
 
 impl ExprImpl {
-    pub fn get_and_change_correlated_input_ref(&mut self) -> Vec<InputRef> {
-        struct Changer {
+    /// Used to change the `CorrelatedInputRef` in the expression and returns `InputRef` with the
+    /// same `index` and same `return_type`.
+    ///
+    /// Used to construct the `Domain`(i.e. the collection of `CorrelatedInputRef`) of a correlated
+    /// subquery.
+    pub fn get_and_change_correlated_input_ref(&mut self, index: &mut usize) -> Vec<InputRef> {
+        struct VisitorMut {
             correlated_inputs: Vec<InputRef>,
             depth: usize,
             index: usize,
         }
-        impl ExprVisitorMut for Changer {
-            fn change_correlated_input_ref(
-                &mut self,
-                correlated_input_ref: &mut CorrelatedInputRef,
-            ) {
+        impl ExprVisitorMut for VisitorMut {
+            fn mut_correlated_input_ref(&mut self, correlated_input_ref: &mut CorrelatedInputRef) {
                 if correlated_input_ref.depth() == self.depth {
                     self.correlated_inputs.push(InputRef::new(
                         correlated_input_ref.index(),
@@ -174,7 +176,7 @@ impl ExprImpl {
                 }
             }
 
-            fn change_subquery(&mut self, subquery: &mut Subquery) {
+            fn mut_subquery(&mut self, subquery: &mut Subquery) {
                 use crate::binder::BoundSetExpr;
 
                 self.depth += 1;
@@ -184,22 +186,24 @@ impl ExprImpl {
                         .iter_mut()
                         .chain(select.group_by.iter_mut())
                         .chain(select.where_clause.iter_mut())
-                        .for_each(|expr| self.change_expr(expr)),
+                        .for_each(|expr| self.mut_expr(expr)),
                     BoundSetExpr::Values(_) => {}
                 }
                 self.depth -= 1;
             }
         }
-        let mut changer = Changer {
+        let mut visitor_mut = VisitorMut {
             correlated_inputs: vec![],
             depth: 1,
-            index: 0,
+            index: *index,
         };
-        changer.change_expr(self);
-        changer.correlated_inputs
+        visitor_mut.mut_expr(self);
+        *index = visitor_mut.index;
+        visitor_mut.correlated_inputs
     }
 
     /// Used to check whether the expression has [`CorrelatedInputRef`].
+    // We need to traverse inside subqueries.
     pub fn has_correlated_input_ref(&self) -> bool {
         struct Has {
             has: bool,

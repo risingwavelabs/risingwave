@@ -54,11 +54,12 @@ impl BoundSelect {
 
     pub fn get_and_change_correlated_input_ref(&mut self) -> Vec<InputRef> {
         let mut ret = vec![];
+        let mut index = 0;
         self.select_items
             .iter_mut()
             .chain(self.group_by.iter_mut())
             .chain(self.where_clause.iter_mut())
-            .for_each(|expr| ret.extend(expr.get_and_change_correlated_input_ref()));
+            .for_each(|expr| ret.extend(expr.get_and_change_correlated_input_ref(&mut index)));
         ret
     }
 }
