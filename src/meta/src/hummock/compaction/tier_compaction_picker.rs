@@ -315,9 +315,13 @@ impl LevelCompactionPicker {
                         break;
                     }
                     Some(tables) => {
-                        // we only extend L0 files when it does not overlap with multiple files.
-                        if select_compaction_bytes > self.config.min_compaction_bytes
-                            && target_level_ssts.calc_inc_compaction_size(&tables) > other.file_size
+                        // we only extend L0 files when write-amplification does not increase.
+                        let inc_compaction_size =
+                            target_level_ssts.calc_inc_compaction_size(&tables);
+                        if select_compaction_bytes > 0
+                            && (target_level_ssts.compaction_bytes + inc_compaction_size)
+                                / (select_compaction_bytes + other.file_size)
+                                > target_level_ssts.compaction_bytes / select_compaction_bytes
                         {
                             select_level_ssts.pop().unwrap();
                             break;
