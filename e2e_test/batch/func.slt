@@ -109,3 +109,13 @@ select concat_ws(v1, v2, v3, v4, v5, v6, v7, v8) from t;
 
 statement ok
 drop table t;
+
+query T
+select split_part('abc~@~def~@~ghi', '~@~', 2);
+----
+def
+
+query T
+select split_part('abc,def,ghi,jkl', ',', -2);
+----
+ghi

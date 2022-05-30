@@ -233,8 +233,9 @@ impl SortMergeJoinExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortMergeJoinExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> risingwave_common::error::Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 2);
@@ -254,8 +255,8 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
             (Some(left_plan), Some(right_plan)) => {
-                let left_child = source.clone_for_plan(left_plan).build()?;
-                let right_child = source.clone_for_plan(right_plan).build()?;
+                let left_child = source.clone_for_plan(left_plan).build().await?;
+                let right_child = source.clone_for_plan(right_plan).build().await?;
 
                 let fields = left_child
                     .schema()
@@ -306,12 +307,9 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryFrom;
-    use std::sync::Arc;
-
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{DataChunk, F32Array, F64Array, I32Array};
+    use risingwave_common::array::DataChunk;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
 
     use crate::executor::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor};
@@ -358,34 +356,21 @@ mod tests {
             };
             let mut executor = MockExecutor::new(schema);
 
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(1), Some(2), Some(3)]}.into(),
-                ));
-                let column2 = Column::new(Arc::new(
-                    array! {F32Array, [Some(6.1f32), Some(8.4f32), Some(3.9f32)]}.into(),
-                ));
+            executor.add(DataChunk::from_pretty(
+                "i f
+                 1 6.1
+                 2 8.4
+                 3 3.9",
+            ));
 
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
-
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(3), Some(4), Some(6), Some(6), Some(8)]}.into(),
-                ));
-                let column2 = Column::new(Arc::new(
-                    array! {F32Array, [
-                        Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)
-                    ]}
-                    .into(),
-                ));
-
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
+            executor.add(DataChunk::from_pretty(
+                "i f
+                 3 6.6
+                 4 0.7
+                 6 5.5
+                 6 5.6
+                 8 7.0",
+            ));
 
             Box::new(executor)
         }
@@ -399,48 +384,29 @@ mod tests {
             };
             let mut executor = MockExecutor::new(schema);
 
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(2), Some(3), Some(6), Some(8)]}.into(),
-                ));
+            executor.add(DataChunk::from_pretty(
+                "i F
+                 2 6.1
+                 3 8.9
+                 6 3.4
+                 8 3.5",
+            ));
 
-                let column2 = Column::new(Arc::new(
-                    array! {F64Array, [Some(6.1f64), Some(8.9f64), Some(3.4f64), Some(3.5f64)]}
-                        .into(),
-                ));
+            executor.add(DataChunk::from_pretty(
+                " i F
+                  9 7.5
+                 10 .
+                 11 8
+                 12 .",
+            ));
 
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
-
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(9), Some(10), Some(11), Some(12)]}.into(),
-                ));
-
-                let column2 = Column::new(Arc::new(
-                    array! {F64Array, [Some(7.5f64), None, Some(8f64), None]}.into(),
-                ));
-
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
-
-            {
-                let column1 = Column::new(Arc::new(
-                    array! {I32Array, [Some(20), Some(30), Some(100), Some(200)]}.into(),
-                ));
-
-                let column2 = Column::new(Arc::new(
-                    array! {F64Array, [Some(5.7f64),  Some(9.6f64), None, Some(8.18f64)]}.into(),
-                ));
-
-                let chunk =
-                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-                executor.add(chunk);
-            }
+            executor.add(DataChunk::from_pretty(
+                "  i F
+                  20 5.7
+                  30 9.6
+                 100 .
+                 200 8.18",
+            ));
 
             Box::new(executor)
         }
@@ -485,20 +451,15 @@ mod tests {
     async fn test_inner_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::Inner);
 
-        let column1 = Column::new(Arc::new(
-            array! {I32Array, [Some(2), Some(3), Some(3), Some(6), Some(6), Some(8)]}.into(),
-        ));
-
-        let column2 = Column::new(Arc::new(array! {F32Array, [Some(8.4f32), Some(3.9f32), Some(6.6f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()));
-
-        let column3 = Column::new(Arc::new(
-            array! {I32Array, [Some(2), Some(3), Some(3), Some(6), Some(6), Some(8)]}.into(),
-        ));
-
-        let column4 = Column::new(Arc::new(array! {F64Array, [Some(6.1f64), Some(8.9f64), Some(8.9f64), Some(3.4f64), Some(3.4f64), Some(3.5f64)]}.into()));
-
-        let expected_chunk = DataChunk::try_from(vec![column1, column2, column3, column4])
-            .expect("Failed to create chunk!");
+        let expected_chunk = DataChunk::from_pretty(
+            "i f   i F
+             2 8.4 2 6.1
+             3 3.9 3 8.9
+             3 6.6 3 8.9
+             6 5.5 6 3.4
+             6 5.6 6 3.4
+             8 7.0 8 3.5",
+        );
 
         test_fixture.do_test(expected_chunk).await;
     }

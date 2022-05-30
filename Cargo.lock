@@ -3760,6 +3760,7 @@ dependencies = [
  "comfy-table",
  "crc32fast",
  "either",
+ "futures",
  "hyper",
  "itertools",
  "lazy_static",

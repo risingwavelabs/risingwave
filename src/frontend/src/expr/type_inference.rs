@@ -162,6 +162,11 @@ fn build_commutative_funcs(
     map.insert(FuncSign::new(expr, vec![arg1, arg0]), ret);
 }
 
+/// This function builds type derived map for all built-in functions that take a fixed number
+/// of arguments.  They can be determined to have one or more type signatures since some are
+/// compatible with more than one type.
+/// Type signatures and arities of variadic functions are checked
+/// [elsewhere](crate::expr::FunctionCall::new).
 fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     use {DataTypeName as T, ExprType as E};
     let mut map = HashMap::new();
@@ -308,6 +313,10 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     map.insert(
         FuncSign::new(E::Like, vec![T::Varchar, T::Varchar]),
         T::Boolean,
+    );
+    map.insert(
+        FuncSign::new(E::SplitPart, vec![T::Varchar, T::Varchar, T::Int32]),
+        T::Varchar,
     );
 
     map
