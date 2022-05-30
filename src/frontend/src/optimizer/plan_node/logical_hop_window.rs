@@ -164,7 +164,7 @@ impl ColPrunable for LogicalHopWindow {
             &input_required_cols,
             self.input().schema().len(),
         );
-        let (new_hop, _) = self.rewrite_with_input(input, input_change);
+        let (new_hop, _) = self.rewrite_with_input(input, input_change.clone());
         let output_cols = {
             // output cols = { cols required by upstream from input node } ∪ { additional window
             // cols }
@@ -190,8 +190,7 @@ impl ColPrunable for LogicalHopWindow {
                 })
                 .collect_vec();
             // this mapping will only keeps required columns
-            let mapping =
-                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+            let mapping = input_change.composite(&new_hop.i2o_col_mapping());
             input_required_cols
                 .iter()
                 .filter_map(|&idx| match idx {
