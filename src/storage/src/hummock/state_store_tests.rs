@@ -15,15 +15,15 @@
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::common::VNodeBitmap;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::sstable::VNODE_BITMAP_LEN;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
@@ -239,7 +239,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
@@ -253,7 +252,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [0; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
@@ -267,7 +265,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 5,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
         )

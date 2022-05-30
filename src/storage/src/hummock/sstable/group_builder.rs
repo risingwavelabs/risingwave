@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::{CompactionGroupId, Prefix};
 use risingwave_hummock_sdk::key::{get_table_id, FullKey};
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::common::VNodeBitmap;
 
 use crate::hummock::multi_builder::CapacitySplitTableBuilder;
 use crate::hummock::value::HummockValue;
