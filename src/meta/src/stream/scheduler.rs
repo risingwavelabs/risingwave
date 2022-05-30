@@ -24,7 +24,7 @@ use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
 use super::record_table_vnode_mappings;
-use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId, WorkerLocations};
+use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::manager::HashMappingManagerRef;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
@@ -213,8 +213,7 @@ where
                 .hash_mapping_manager
                 .get_fragment_hash_mapping(&fragment.fragment_id)
                 .unwrap();
-            type VNodeBitmap = [u8; VNODE_BITMAP_LEN];
-            let mut vnode_bitmaps: HashMap<ParallelUnitId, VNodeBitmap> = HashMap::new();
+            let mut vnode_bitmaps = HashMap::new();
             vnode_mapping
                 .iter()
                 .enumerate()
