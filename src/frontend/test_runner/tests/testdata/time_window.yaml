@@ -121,16 +121,14 @@
       BatchProject { exprs: [$0, $1, ($2 / $3)] }
         BatchHashAgg { group_keys: [$0, $1], aggs: [sum($2), count($2)] }
           BatchExchange { order: [], dist: HashShard([0, 1]) }
-            BatchProject { exprs: [$0, $2, $1] }
-              BatchProject { exprs: [$0, $2, $4] }
-                BatchHopWindow { time_col: $1 slide: 00:01:00 size: 00:10:00 output_indices: [0, 1, 2, 3, 4] }
-                  BatchScan { table: t, columns: [v1, v2, v3] }
+            BatchProject { exprs: [$0, $4, $2] }
+              BatchHopWindow { time_col: $1 slide: 00:01:00 size: 00:10:00 output_indices: [0, 1, 2, 3, 4] }
+                BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v1, window_end, avg], pk_columns: [v1, window_end] }
       StreamProject { exprs: [$0, $1, ($3 / $4)] }
         StreamHashAgg { group_keys: [$0, $1], aggs: [count, sum($2), count($2)] }
           StreamExchange { dist: HashShard([0, 1]) }
-            StreamProject { exprs: [$0, $2, $1, $3] }
-              StreamProject { exprs: [$0, $2, $5, $3] }
-                StreamHopWindow { time_col: $1 slide: 00:01:00 size: 00:10:00 output_indices: [0, 1, 2, 3, 4, 5] }
-                  StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
+            StreamProject { exprs: [$0, $5, $2, $3] }
+              StreamHopWindow { time_col: $1 slide: 00:01:00 size: 00:10:00 output_indices: [0, 1, 2, 3, 4, 5] }
+                StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
