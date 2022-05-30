@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use md5 as lib_md5;
 use risingwave_common::array::{BytesGuard, BytesWriter};
 use risingwave_common::error::Result;
-use md5 as lib_md5;
 
 #[inline(always)]
 pub fn md5(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
@@ -32,7 +32,10 @@ mod tests {
         let cases = [
             ("hello world", "5eb63bbbe01eeed093cb22bb8f5acdc3"),
             ("hello RUST", "917b821a0a5f23ab0cfdb36056d2eb9d"),
-            ("abcdefghijklmnopqrstuvwxyz", "c3fcd3d76192e4007dfb496cca67e13b"),
+            (
+                "abcdefghijklmnopqrstuvwxyz",
+                "c3fcd3d76192e4007dfb496cca67e13b",
+            ),
         ];
 
         for (s, expected) in cases {

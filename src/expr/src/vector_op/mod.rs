@@ -23,6 +23,7 @@ pub mod length;
 pub mod like;
 pub mod lower;
 pub mod ltrim;
+pub mod md5;
 pub mod position;
 pub mod replace;
 pub mod round;
@@ -34,7 +35,6 @@ pub mod translate;
 pub mod trim;
 pub mod tumble;
 pub mod upper;
-pub mod md5;
 
 #[cfg(test)]
 mod tests;
