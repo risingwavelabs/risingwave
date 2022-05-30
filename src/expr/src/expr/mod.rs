@@ -84,7 +84,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position => build_binary_expr_prost(prost),
-        And | Or | IsDistinctFrom => build_nullable_binary_expr_prost(prost),
+        And | Or | IsDistinctFrom | ArrayAccess => build_nullable_binary_expr_prost(prost),
         ToChar => build_to_char_expr(prost),
         Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
         Substr => build_substr_expr(prost),
