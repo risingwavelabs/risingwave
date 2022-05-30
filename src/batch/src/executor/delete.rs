@@ -133,7 +133,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
         Ok(Box::new(Self::new(
             table_id,
             source
-                .batch_task_context()
+                .context()
                 .source_manager_ref()
                 .ok_or_else(|| InternalError("Source manager not found".to_string()))?,
             child,
