@@ -20,3 +20,6 @@ query T
 select (ARRAY['foo', 'bar'])[3];
 ----
 NULL
+
+statement error
+select (ARRAY['foo', 'bar'])[];
