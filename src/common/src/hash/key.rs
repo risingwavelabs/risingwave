@@ -698,7 +698,7 @@ mod tests {
             )),
         ];
 
-        DataChunk::new(columns, None)
+        DataChunk::zooja(columns)
     }
 
     fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
@@ -846,7 +846,7 @@ mod tests {
             .into(),
         ) as ArrayRef)];
 
-        DataChunk::new(columns, None)
+        DataChunk::zooja(columns)
     }
 
     #[test]
