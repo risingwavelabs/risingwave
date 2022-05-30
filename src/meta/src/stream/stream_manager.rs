@@ -296,8 +296,6 @@ where
             table_id_offset: _,
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
-        tracing::debug!(?dispatches, "create_materialized_view");
-
         let nodes = self
             .cluster_manager
             .list_worker_node(
