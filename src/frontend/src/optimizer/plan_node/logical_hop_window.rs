@@ -102,7 +102,7 @@ impl LogicalHopWindow {
         }
     }
 
-    pub fn decompose(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
+    pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
         (
             self.input,
             self.time_col,
@@ -387,7 +387,7 @@ impl ToStream for LogicalHopWindow {
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (hop, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
-        let (input, time_col, window_slide, window_size, mut output_indices) = hop.decompose();
+        let (input, time_col, window_slide, window_size, mut output_indices) = hop.into_parts();
         if !output_indices.contains(&input.schema().len())
             && !output_indices.contains(&(input.schema().len() + 1))
         // When both `window_start` and `window_end` are not in `output_indices`,
