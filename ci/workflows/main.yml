@@ -1,6 +1,6 @@
 steps:
   - label: "build ({{matrix.profile}} mode)"
-    command: "ci/scripts/compute-node-build.sh -t {{matrix.target}} -p {{matrix.profile}}"
+    command: "ci/scripts/build.sh -t {{matrix.target}} -p {{matrix.profile}}"
     key: "build"
     timeout_in_minutes: 15
     plugins:
@@ -27,7 +27,7 @@ steps:
           skip: true
 
   - label: "end-to-end test ({{matrix.profile}} mode)"
-    command: "ci/scripts/e2e-risedev.sh -p {{matrix.profile}}"
+    command: "ci/scripts/e2e-test.sh -p {{matrix.profile}}"
     depends_on: "build"
     timeout_in_minutes: 10
     plugins:
@@ -42,7 +42,7 @@ steps:
           - "release"
 
   - label: "end-to-end source test"
-    command: "ci/scripts/e2e-source.sh"
+    command: "ci/scripts/e2e-source-test.sh"
     depends_on: "build"
     plugins:
       - docker-compose#v3.9.0:
@@ -52,7 +52,7 @@ steps:
     timeout_in_minutes: 5
 
   - label: "unit test"
-    command: "ci/scripts/compute-node-test.sh"
+    command: "ci/scripts/unit-test.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
