@@ -23,7 +23,8 @@ use std::ops::RangeBounds;
 use itertools::Itertools;
 use risingwave_hummock_sdk::is_remote_sst_id;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_pb::hummock::{KeyRange, SstableInfo, VNodeBitmap};
+use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use self::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::shared_buffer_uploader::{UploadTaskId, UploadTaskPayload};
