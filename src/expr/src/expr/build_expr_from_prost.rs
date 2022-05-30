@@ -239,6 +239,7 @@ pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 mod tests {
     use std::vec;
 
+    use risingwave_common::array::{ArrayImpl, Utf8Array};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -301,16 +302,19 @@ mod tests {
         let access = ExprNode {
             expr_type: Type::ArrayAccess as i32,
             return_type: Some(ProstDataType {
-                type_name: TypeName::List as i32,
-                field_type: vec![ProstDataType {
-                    type_name: TypeName::Varchar as i32,
-                    ..Default::default()
-                }],
+                type_name: TypeName::Varchar as i32,
                 ..Default::default()
             }),
             rex_node: Some(RexNode::FuncCall(array_index)),
         };
-        assert!(build_nullable_binary_expr_prost(&access).is_ok());
+        let expr = build_nullable_binary_expr_prost(&access);
+        assert!(expr.is_ok());
+
+        let res = expr.unwrap().eval(&DataChunk::new_dummy(1)).unwrap();
+        assert_eq!(
+            *res,
+            ArrayImpl::Utf8(Utf8Array::from_slice(&vec![Some("foo")]).unwrap())
+        );
     }
 
     #[test]
