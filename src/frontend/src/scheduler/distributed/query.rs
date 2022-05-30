@@ -233,7 +233,11 @@ impl QueryRunner {
                 self.query.query_id, stage_id
             );
         }
-        let mut leaf_stages = leaf_stages.into_iter().collect::<HashSet<StageId>>();
+        let mut stages_has_table_scan = self
+            .query
+            .stage_has_table_scan()
+            .into_iter()
+            .collect::<HashSet<_>>();
 
         // Schedule stages when leaf stages all scheduled
         while let Some(msg) = self.msg_receiver.recv().await {
@@ -244,12 +248,13 @@ impl QueryRunner {
                         self.query.query_id, stage_id
                     );
                     self.scheduled_stages_count += 1;
-                    leaf_stages.remove(&stage_id);
-                    if leaf_stages.is_empty() {
+                    stages_has_table_scan.remove(&stage_id);
+                    if stages_has_table_scan.is_empty() {
                         // Since all the iterators are created during building the leaf tasks in the
                         // backend, we can be sure here that all the
                         // iterator have been created, thus they all successfully pinned a
                         // HummockVersion. So we can now unpin their epoch.
+                        info!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
                             .clone()
                             .unpin_snapshot(self.epoch, self.query.query_id());
