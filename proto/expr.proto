@@ -55,6 +55,10 @@ message ExprNode {
     COALESCE = 217;
     CONCAT_WS = 218;
     ABS = 219;
+    SPLIT_PART = 220;
+    CEIL = 221;
+    FLOOR = 222;
+    TO_CHAR = 223;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -94,6 +98,11 @@ message ConstantValue {
   // interval: encoded to (months, days, milliseconds), big-endianness
   // varchar: encoded accorded to encoding, currently only utf8 is supported.
   bytes body = 1;
+}
+
+// For serializing struct value to vec<bytes>.
+message StructValue {
+  repeated bytes fields = 1;
 }
 
 message FunctionCall {

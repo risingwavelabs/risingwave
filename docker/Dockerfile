@@ -1,8 +1,8 @@
-FROM ubuntu:20.04 as builder
+FROM ubuntu:22.04 as builder
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config bash
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config bash lld
 
 SHELL ["/bin/bash", "-c"]
 
@@ -12,10 +12,7 @@ RUN mkdir -p /risingwave
 
 WORKDIR /risingwave
 
-COPY proto proto
-COPY src src
-COPY rust-toolchain rust-toolchain
-COPY Cargo.toml Cargo.toml
+COPY ./ /risingwave
 
 ENV PATH /root/.cargo/bin/:$PATH
 
@@ -31,8 +28,8 @@ RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release && \
   mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
   cargo clean
 
-FROM ubuntu:20.04 as image-base
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev && rm -rf /var/lib/{apt,dpkg,cache,log}/
+FROM ubuntu:22.04 as image-base
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev ca-certificates && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 FROM image-base as frontend-node
 RUN mkdir -p /risingwave/bin

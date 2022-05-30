@@ -17,7 +17,10 @@ use std::fmt;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
+use super::{
+    ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
+    ToStream,
+};
 use crate::expr::ExprImpl;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -108,6 +111,12 @@ impl_plan_tree_node_for_binary! { LogicalApply }
 
 impl ColPrunable for LogicalApply {
     fn prune_col(&self, _: &[usize]) -> PlanRef {
+        panic!("LogicalApply should be unnested")
+    }
+}
+
+impl PredicatePushdown for LogicalApply {
+    fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
         panic!("LogicalApply should be unnested")
     }
 }

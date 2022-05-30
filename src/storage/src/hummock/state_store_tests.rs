@@ -15,15 +15,15 @@
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::common::VNodeBitmap;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::sstable::VNODE_BITMAP_LEN;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
@@ -154,7 +154,15 @@ async fn test_basic() {
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
     hummock_storage.sync(Some(epoch1)).await.unwrap();
-    meta_client.commit_epoch(epoch1).await.unwrap();
+    meta_client
+        .commit_epoch(
+            epoch1,
+            hummock_storage
+                .local_version_manager
+                .get_uncommitted_ssts(epoch1),
+        )
+        .await
+        .unwrap();
     hummock_storage.wait_epoch(epoch1).await.unwrap();
     let value = hummock_storage
         .get(&Bytes::from("bb"), epoch2)
@@ -200,7 +208,13 @@ async fn test_vnode_filter() {
     let epoch: u64 = 1;
     storage.ingest_batch(batch, epoch).await.unwrap();
     storage.sync(Some(epoch)).await.unwrap();
-    meta_client.commit_epoch(epoch).await.unwrap();
+    meta_client
+        .commit_epoch(
+            epoch,
+            storage.local_version_manager.get_uncommitted_ssts(epoch),
+        )
+        .await
+        .unwrap();
 
     let value_with_dummy_filter = storage
         .get_with_vnode_set(
@@ -208,7 +222,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
@@ -222,7 +235,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [0; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
@@ -236,7 +248,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 5,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
         )

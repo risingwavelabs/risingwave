@@ -20,10 +20,24 @@ use crate::base::SplitMetaData;
 use crate::pulsar::topic::Topic;
 use crate::pulsar::PulsarEnumeratorOffset;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PulsarSplit {
     pub(crate) topic: Topic,
     pub(crate) start_offset: PulsarEnumeratorOffset,
+}
+
+impl PulsarSplit {
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        let start_offset = if start_offset.is_empty() {
+            PulsarEnumeratorOffset::Earliest
+        } else {
+            PulsarEnumeratorOffset::MessageId(start_offset)
+        };
+        Self {
+            topic: self.topic.clone(),
+            start_offset,
+        }
+    }
 }
 
 impl SplitMetaData for PulsarSplit {

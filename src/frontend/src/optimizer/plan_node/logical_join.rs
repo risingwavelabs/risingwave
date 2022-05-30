@@ -22,14 +22,14 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    StreamHashJoin, ToBatch, ToStream,
+    PredicatePushdown, StreamHashJoin, ToBatch, ToStream,
 };
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::batch_nested_loop_join::BatchNestedLoopJoin;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -237,6 +237,133 @@ impl LogicalJoin {
     pub fn is_right_join(&self) -> bool {
         matches!(self.join_type(), JoinType::RightSemi | JoinType::RightAnti)
     }
+
+    /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
+    /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
+    ///
+    /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
+    fn push_down(
+        predicate: &mut Condition,
+        left_col_num: usize,
+        right_col_num: usize,
+        push_left: bool,
+        push_right: bool,
+        push_on: bool,
+    ) -> (Condition, Condition, Condition) {
+        let conjunctions = std::mem::take(&mut predicate.conjunctions);
+        let (mut left, right, mut others) =
+            Condition { conjunctions }.split(left_col_num, right_col_num);
+
+        let mut cannot_push = vec![];
+
+        if !push_left {
+            cannot_push.extend(left);
+            left = Condition::true_cond();
+        };
+
+        let right = if push_right {
+            let mut mapping = ColIndexMapping::with_shift_offset(
+                left_col_num + right_col_num,
+                -(left_col_num as isize),
+            );
+            right.rewrite_expr(&mut mapping)
+        } else {
+            cannot_push.extend(right);
+            Condition::true_cond()
+        };
+
+        let on = if push_on {
+            others.conjunctions.extend(std::mem::take(&mut cannot_push));
+            others
+        } else {
+            cannot_push.extend(others);
+            Condition::true_cond()
+        };
+
+        predicate.conjunctions = cannot_push;
+
+        (left, right, on)
+    }
+
+    fn can_push_left_from_filter(ty: JoinType) -> bool {
+        matches!(
+            ty,
+            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
+        )
+    }
+
+    fn can_push_right_from_filter(ty: JoinType) -> bool {
+        matches!(
+            ty,
+            JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
+        )
+    }
+
+    fn can_push_on_from_filter(ty: JoinType) -> bool {
+        matches!(
+            ty,
+            JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
+        )
+    }
+
+    fn can_push_left_from_on(ty: JoinType) -> bool {
+        matches!(
+            ty,
+            JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
+        )
+    }
+
+    fn can_push_right_from_on(ty: JoinType) -> bool {
+        matches!(
+            ty,
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
+        )
+    }
+
+    /// Try to simplify the outer join with the predicate on the top of the join
+    ///
+    /// now it is just a naive implementation for comparison expression, we can give a more general
+    /// implementation with constant folding in future
+    fn simplify_outer(predicate: &Condition, left_col_num: usize, join_type: JoinType) -> JoinType {
+        let (mut gen_null_in_left, mut gen_null_in_right) = match join_type {
+            JoinType::LeftOuter => (false, true),
+            JoinType::RightOuter => (true, false),
+            JoinType::FullOuter => (true, true),
+            _ => return join_type,
+        };
+
+        for expr in &predicate.conjunctions {
+            if let ExprImpl::FunctionCall(func) = expr {
+                match func.get_expr_type() {
+                    ExprType::Equal
+                    | ExprType::NotEqual
+                    | ExprType::LessThan
+                    | ExprType::LessThanOrEqual
+                    | ExprType::GreaterThan
+                    | ExprType::GreaterThanOrEqual => {
+                        for input in func.inputs() {
+                            if let ExprImpl::InputRef(input) = input {
+                                let idx = input.index;
+                                if idx < left_col_num {
+                                    gen_null_in_left = false;
+                                } else {
+                                    gen_null_in_right = false;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                };
+            }
+        }
+
+        match (gen_null_in_left, gen_null_in_right) {
+            (true, true) => JoinType::FullOuter,
+            (true, false) => JoinType::RightOuter,
+            (false, true) => JoinType::LeftOuter,
+            (false, false) => JoinType::Inner,
+        }
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
@@ -352,6 +479,68 @@ impl ColPrunable for LogicalJoin {
     }
 }
 
+impl PredicatePushdown for LogicalJoin {
+    /// Pushes predicates above and within a join node into the join node and/or its children nodes.
+    ///
+    /// # Which predicates can be pushed
+    ///
+    /// For inner join, we can do all kinds of pushdown.
+    ///
+    /// For left/right semi join, we can push filter to left/right and on-clause,
+    /// and push on-clause to left/right.
+    ///
+    /// For left/right anti join, we can push filter to left/right, but on-clause can not be pushed
+    ///
+    /// ## Outer Join
+    ///
+    /// Preserved Row table
+    /// : The table in an Outer Join that must return all rows.
+    ///
+    /// Null Supplying table
+    /// : This is the table that has nulls filled in for its columns in unmatched rows.
+    ///
+    /// |                          | Preserved Row table | Null Supplying table |
+    /// |--------------------------|---------------------|----------------------|
+    /// | Join predicate (on)      | Not Pushed          | Pushed               |
+    /// | Where predicate (filter) | Pushed              | Not Pushed           |
+    fn predicate_pushdown(&self, mut predicate: Condition) -> PlanRef {
+        let left_col_num = self.left.schema().len();
+        let right_col_num = self.right.schema().len();
+        let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type);
+
+        let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
+            &mut predicate,
+            left_col_num,
+            right_col_num,
+            LogicalJoin::can_push_left_from_filter(join_type),
+            LogicalJoin::can_push_right_from_filter(join_type),
+            LogicalJoin::can_push_on_from_filter(join_type),
+        );
+
+        let mut new_on = self.on.clone().and(on);
+        let (left_from_on, right_from_on, on) = LogicalJoin::push_down(
+            &mut new_on,
+            left_col_num,
+            right_col_num,
+            LogicalJoin::can_push_left_from_on(join_type),
+            LogicalJoin::can_push_right_from_on(join_type),
+            false,
+        );
+        assert!(
+            on.always_true(),
+            "On-clause should not be pushed to on-clause."
+        );
+
+        let left_predicate = left_from_filter.and(left_from_on);
+        let right_predicate = right_from_filter.and(right_from_on);
+
+        let new_left = self.left.predicate_pushdown(left_predicate);
+        let new_right = self.right.predicate_pushdown(right_predicate);
+        let new_join = LogicalJoin::new(new_left, new_right, join_type, new_on);
+        LogicalFilter::create(new_join.into(), predicate)
+    }
+}
+
 impl ToBatch for LogicalJoin {
     fn to_batch(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
@@ -395,21 +584,22 @@ impl ToStream for LogicalJoin {
             self.right.schema().len(),
             self.on.clone(),
         );
+
         let right = self
             .right()
-            .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()))?;
+            .to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                self.right().schema().len(),
+                &predicate.right_eq_indexes(),
+            ))?;
 
         let r2l =
             predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
 
-        let left_dist = r2l
-            .rewrite_required_distribution(right.distribution())
-            .unwrap();
+        let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
+            right.distribution().clone(),
+        ));
 
-        let mut left = self.left().to_stream_with_dist_required(&left_dist)?;
-        if left.distribution() != &left_dist {
-            left = left_dist.enforce(left, Order::any());
-        }
+        let left = self.left().to_stream_with_dist_required(&left_dist)?;
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {

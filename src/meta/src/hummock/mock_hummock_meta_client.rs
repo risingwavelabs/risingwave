@@ -95,17 +95,6 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(|e| e.into())
     }
 
-    async fn add_tables(
-        &self,
-        epoch: HummockEpoch,
-        sstables: Vec<SstableInfo>,
-    ) -> Result<HummockVersion> {
-        self.hummock_manager
-            .add_tables(self.context_id, sstables, epoch)
-            .await
-            .map_err(|e| e.into())
-    }
-
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         self.hummock_manager
             .report_compact_task(&compact_task)
@@ -114,16 +103,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(|e| e.into())
     }
 
-    async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+    async fn commit_epoch(&self, epoch: HummockEpoch, sstables: Vec<SstableInfo>) -> Result<()> {
         self.hummock_manager
-            .commit_epoch(epoch)
-            .await
-            .map_err(|e| e.into())
-    }
-
-    async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        self.hummock_manager
-            .abort_epoch(epoch)
+            .commit_epoch(epoch, sstables)
             .await
             .map_err(|e| e.into())
     }

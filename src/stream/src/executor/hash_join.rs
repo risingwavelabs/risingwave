@@ -844,7 +844,7 @@ mod tests {
         (tx_l, tx_r, Box::new(executor).execute())
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_inner_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -919,7 +919,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_left_semi_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1029,7 +1029,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_inner_join_append_only() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I I
@@ -1108,7 +1108,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_left_semi_join_append_only() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I I
@@ -1187,7 +1187,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_right_semi_join_append_only() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I I
@@ -1266,7 +1266,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_right_semi_join() {
         let chunk_r1 = StreamChunk::from_pretty(
             "  I I
@@ -1376,7 +1376,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_left_anti_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1504,7 +1504,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_right_anti_join() {
         let chunk_r1 = StreamChunk::from_pretty(
             "  I I
@@ -1632,7 +1632,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_inner_join_with_barrier() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1728,7 +1728,103 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
+    async fn test_streaming_hash_inner_join_with_null_and_barrier() {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I I
+             + 1 4
+             + 2 .
+             + 3 .",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I I
+             + 6 .
+             + 3 8",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I I
+             + 2 7
+             + 4 8
+             + 6 9",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I  I
+             + 3 10
+             + 6 11",
+        );
+        let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::Inner }>(false);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
+
+        // push a barrier to left side
+        tx_l.push_barrier(2, false);
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+
+        // join the first right chunk
+        tx_r.push_chunk(chunk_r1);
+
+        // Consume stream chunk
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I I I
+                + 2 . 2 7"
+            )
+        );
+
+        // push a barrier to right side
+        tx_r.push_barrier(2, false);
+
+        // get the aligned barrier here
+        let expected_epoch = Epoch::new_test_epoch(2);
+        assert!(matches!(
+            hash_join.next().await.unwrap().unwrap(),
+            Message::Barrier(Barrier {
+                epoch,
+                mutation: None,
+                ..
+            }) if epoch == expected_epoch
+        ));
+
+        // join the 2nd left chunk
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I I I
+                + 6 . 6 9"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I I I
+                + 3 . 3 10
+                + 3 8 3 10
+                + 6 . 6 11"
+            )
+        );
+    }
+
+    #[tokio::test]
     async fn test_streaming_hash_left_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1809,7 +1905,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_right_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1883,7 +1979,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_left_join_append_only() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I I
@@ -1970,7 +2066,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_right_join_append_only() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I I
@@ -2047,7 +2143,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_full_outer_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -2130,7 +2226,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_full_outer_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -2222,7 +2318,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_streaming_hash_inner_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I

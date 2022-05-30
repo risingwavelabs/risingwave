@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(dead_code)]
+#![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
@@ -30,8 +31,10 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(let_chains)]
 
 pub mod base;
+mod datagen;
 mod filesystem;
 mod kafka;
 pub mod kinesis;
@@ -44,3 +47,10 @@ pub mod aws_utils;
 pub mod dummy_connector;
 mod macros;
 pub mod state;
+
+pub use base::ConnectorState;
+pub use kafka::KAFKA_CONNECTOR;
+pub use kinesis::KINESIS_CONNECTOR;
+pub use nexmark::NEXMARK_CONNECTOR;
+
+pub use crate::pulsar::PULSAR_CONNECTOR;

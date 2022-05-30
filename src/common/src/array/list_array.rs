@@ -106,7 +106,7 @@ impl ArrayBuilder for ListArrayBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<ListArray> {
+    fn finish(self) -> Result<ListArray> {
         Ok(ListArray {
             bitmap: self.bitmap.finish(),
             offsets: self.offsets,

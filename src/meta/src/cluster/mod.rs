@@ -26,7 +26,7 @@ use risingwave_common::try_match_expand;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
@@ -39,7 +39,7 @@ pub type ParallelUnitId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
 pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
 
-const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
+pub const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
 
 #[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
@@ -208,8 +208,8 @@ where
     pub async fn start_heartbeat_checker(
         cluster_manager: ClusterManagerRef<S>,
         check_interval: Duration,
-    ) -> (JoinHandle<()>, UnboundedSender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval = tokio::time::interval(check_interval);
             loop {
@@ -217,7 +217,7 @@ where
                     // Wait for interval
                     _ = min_interval.tick() => {},
                     // Shutdown
-                    _ = shutdown_rx.recv() => {
+                    _ = &mut shutdown_rx => {
                         tracing::info!("Heartbeat checker is shutting down");
                         return;
                     }

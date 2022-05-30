@@ -12,35 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use crate::binder::Binder;
+use crate::catalog::table_catalog::TableCatalog;
+use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
-
-/// Convert column descs to rows which conclude name and type
-pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
-    let mut rows = vec![];
-    for col in columns {
-        rows.extend(col.flatten().into_iter().map(|c| {
-            let type_name = {
-                // If datatype is struct, use type name as struct name
-                if let DataType::Struct { fields: _f } = c.data_type {
-                    c.type_name.clone()
-                } else {
-                    format!("{:?}", &c.data_type)
-                }
-            };
-            Row::new(vec![Some(c.name), Some(type_name)])
-        }));
-    }
-    rows
-}
 
 pub async fn handle_describe(
     context: OptimizerContext,
@@ -52,35 +35,61 @@ pub async fn handle_describe(
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let columns: Vec<ColumnDesc> = {
-        let catalogs = match catalog_reader
+    let (columns, indices): (Vec<ColumnDesc>, Vec<TableCatalog>) = {
+        let (catalogs, indices) = match catalog_reader
             .get_schema_by_name(session.database(), &schema_name)?
             .get_table_by_name(&table_name)
         {
-            Some(table) => &table.columns,
-            None => {
+            Some(table) => (
+                &table.columns,
+                catalog_reader
+                    .get_schema_by_name(session.database(), &schema_name)?
+                    .iter_index()
+                    .filter(|x| x.is_index_on == Some(table.id))
+                    .cloned()
+                    .collect_vec(),
+            ),
+            None => (
                 &catalog_reader
                     .get_source_by_name(session.database(), &schema_name, &table_name)?
-                    .columns
-            }
+                    .columns,
+                vec![],
+            ),
         };
-        catalogs
-            .iter()
-            .filter(|c| !c.is_hidden)
-            .map(|c| c.column_desc.clone())
-            .collect()
+        (
+            catalogs
+                .iter()
+                .filter(|c| !c.is_hidden)
+                .map(|c| c.column_desc.clone())
+                .collect(),
+            indices,
+        )
     };
 
     // Convert all column descs to rows
-    let rows = col_descs_to_rows(columns);
+    let mut rows = col_descs_to_rows(columns);
 
+    // Convert all indexs to rows
+    rows.extend(indices.iter().map(|i| {
+        let s = i
+            .distribution_keys
+            .iter()
+            .map(|c| i.columns[*c].name().to_string())
+            .collect_vec();
+        Row::new(vec![
+            Some(i.name.clone()),
+            Some(format!("index({})", display_comma_separated(&s))),
+        ])
+    }));
+
+    // TODO: recover the original user statement
     Ok(PgResponse::new(
         StatementType::DESCRIBE_TABLE,
         rows.len() as i32,
         rows,
         vec![
-            PgFieldDescriptor::new("name".to_owned(), TypeOid::Varchar),
-            PgFieldDescriptor::new("type".to_owned(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
         ],
     ))
 }
@@ -90,19 +99,20 @@ mod tests {
     use std::collections::HashMap;
     use std::ops::Index;
 
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
     async fn test_describe_handler() {
-        let proto_file = create_proto_file(PROTO_FILE_DATA);
-        let sql = format!(
-            r#"CREATE SOURCE t
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
-            proto_file.path().to_str().unwrap()
-        );
         let frontend = LocalFrontend::new(Default::default()).await;
-        frontend.run_sql(sql).await.unwrap();
+        frontend
+            .run_sql("create table t (v1 int, v2 int);")
+            .await
+            .unwrap();
+
+        frontend
+            .run_sql("create index idx1 on t (v1,v2);")
+            .await
+            .unwrap();
 
         let sql = "describe t";
         let pg_response = frontend.run_sql(sql).await.unwrap();
@@ -118,15 +128,9 @@ mod tests {
             .collect::<HashMap<&str, &str>>();
 
         let expected_columns = maplit::hashmap! {
-            "id" => "Int32",
-            "country.zipcode" => "Varchar",
-            "zipcode" => "Int64",
-            "country.city.address" => "Varchar",
-            "country.address" => "Varchar",
-            "country.city" => ".test.City",
-            "country.city.zipcode" => "Varchar",
-            "rate" => "Float32",
-            "country" => ".test.Country",
+            "v1" => "Int32",
+            "v2" => "Int32",
+            "idx1" => "index(v1, v2)",
         };
 
         assert_eq!(columns, expected_columns);

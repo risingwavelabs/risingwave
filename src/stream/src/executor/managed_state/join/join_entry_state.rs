@@ -97,9 +97,9 @@ impl<S: StateStore> JoinEntryState<S> {
         let mut cached = BTreeMap::new();
         for (raw_key, raw_value) in data {
             let pk_deserializer = RowDeserializer::new(pk_data_types.to_vec());
-            let key = pk_deserializer.deserialize_not_null(&raw_key)?;
+            let key = pk_deserializer.value_decode(raw_key)?;
             let deserializer = JoinRowDeserializer::new(data_types.to_vec());
-            let value = deserializer.deserialize(&raw_value)?;
+            let value = deserializer.deserialize(raw_value)?;
             cached.insert(key, value);
         }
         Ok(cached)
@@ -133,7 +133,8 @@ impl<S: StateStore> JoinEntryState<S> {
         let mut local = write_batch.prefixify(&self.keyspace);
 
         for (pk, v) in std::mem::take(&mut self.flush_buffer) {
-            let key_encoded = pk.serialize_not_null()?;
+            // pk here does not to be memcomparable.
+            let key_encoded = pk.value_encode()?;
 
             match v.into_option() {
                 Some(v) => {
@@ -214,13 +215,12 @@ impl<S: StateStore> JoinEntryState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::*;
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
@@ -230,15 +230,15 @@ mod tests {
             vec![DataType::Int64].into(),
         );
         assert!(!managed_state.is_dirty());
-        let columns = vec![
-            column_nonnull! { I64Array, [3, 2, 1] },
-            column_nonnull! { I64Array, [4, 5, 6] },
-        ];
         let pk_indices = [0];
         let col1 = [1, 2, 3];
         let col2 = [6, 5, 4];
-        let data_chunk_builder = DataChunk::builder().columns(columns);
-        let data_chunk = data_chunk_builder.build();
+        let data_chunk = DataChunk::from_pretty(
+            "I I
+             3 4
+             2 5
+             1 6",
+        );
 
         for row_ref in data_chunk.rows() {
             let row: Row = row_ref.into();

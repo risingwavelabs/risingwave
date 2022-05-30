@@ -15,6 +15,7 @@
 //! Generate docker compose yaml files for risedev components.
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -22,8 +23,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, FrontendConfig,
-    FrontendService, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService, PrometheusConfig,
-    PrometheusGen, PrometheusService, RedPandaConfig,
+    FrontendService, GrafanaConfig, GrafanaGen, MetaNodeConfig, MetaNodeService, MinioConfig,
+    MinioService, PrometheusConfig, PrometheusGen, PrometheusService, RedPandaConfig,
 };
 
 #[serde_with::skip_serializing_none]
@@ -55,14 +56,19 @@ pub struct ComposeFile {
 #[serde(deny_unknown_fields)]
 pub struct DockerImageConfig {
     pub risingwave: String,
-    pub compute_node: String,
-    pub meta_node: String,
-    pub compactor_node: String,
-    pub frontend_node: String,
     pub prometheus: String,
     pub grafana: String,
     pub minio: String,
     pub redpanda: String,
+}
+
+pub struct ComposeConfig {
+    /// Docker compose image config
+    pub image: DockerImageConfig,
+
+    /// The directory to output all configs. If disabled, all config files will be embedded into
+    /// the docker-compose file.
+    pub config_directory: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -72,7 +78,7 @@ pub struct ComposeVolume {
 
 /// Generate compose yaml files for a component.
 pub trait Compose {
-    fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService>;
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService>;
 }
 
 fn get_cmd_args(cmd: &Command, with_argv_0: bool) -> Result<Vec<String>> {
@@ -117,16 +123,29 @@ fn get_cmd_envs(cmd: &Command) -> Result<HashMap<String, String>> {
 }
 
 impl Compose for ComputeNodeConfig {
-    fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService> {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compute-node");
         ComputeNodeService::apply_command_args(&mut command, self)?;
+        command.arg("--config-path").arg("/risingwave.toml");
+
+        std::fs::copy(
+            Path::new("src").join("config").join("risingwave.toml"),
+            Path::new(&config.config_directory).join("risingwave.toml"),
+        )?;
+
         let command = get_cmd_args(&command, true)?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
         Ok(ComposeService {
-            image: image.risingwave.clone(),
+            image: config.image.risingwave.clone(),
+            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
+                .into_iter()
+                .collect(),
+            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
+                .into_iter()
+                .collect(),
             command,
             expose: vec![self.port.to_string(), self.exporter_port.to_string()],
             depends_on: provide_meta_node
@@ -140,13 +159,25 @@ impl Compose for ComputeNodeConfig {
 }
 
 impl Compose for MetaNodeConfig {
-    fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService> {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("meta-node");
         MetaNodeService::apply_command_args(&mut command, self)?;
+        command.arg("--config-path").arg("/risingwave.toml");
         let command = get_cmd_args(&command, true)?;
 
+        std::fs::copy(
+            Path::new("src").join("config").join("risingwave.toml"),
+            Path::new(&config.config_directory).join("risingwave.toml"),
+        )?;
+
         Ok(ComposeService {
-            image: image.risingwave.clone(),
+            image: config.image.risingwave.clone(),
+            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
+                .into_iter()
+                .collect(),
+            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
+                .into_iter()
+                .collect(),
             command,
             expose: vec![
                 self.port.to_string(),
@@ -159,7 +190,7 @@ impl Compose for MetaNodeConfig {
 }
 
 impl Compose for FrontendConfig {
-    fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService> {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("frontend-node");
         FrontendService::apply_command_args(&mut command, self)?;
         let command = get_cmd_args(&command, true)?;
@@ -167,7 +198,10 @@ impl Compose for FrontendConfig {
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
 
         Ok(ComposeService {
-            image: image.risingwave.clone(),
+            image: config.image.risingwave.clone(),
+            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
+                .into_iter()
+                .collect(),
             command,
             ports: vec![format!("{}:{}", self.port, self.port)],
             expose: vec![self.port.to_string()],
@@ -178,16 +212,28 @@ impl Compose for FrontendConfig {
 }
 
 impl Compose for CompactorConfig {
-    fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService> {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
         CompactorService::apply_command_args(&mut command, self)?;
+        command.arg("--config-path").arg("/risingwave.toml");
         let command = get_cmd_args(&command, true)?;
+
+        std::fs::copy(
+            Path::new("src").join("config").join("risingwave.toml"),
+            Path::new(&config.config_directory).join("risingwave.toml"),
+        )?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
         Ok(ComposeService {
-            image: image.risingwave.clone(),
+            image: config.image.risingwave.clone(),
+            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
+                .into_iter()
+                .collect(),
+            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
+                .into_iter()
+                .collect(),
             command,
             expose: vec![self.port.to_string(), self.exporter_port.to_string()],
             depends_on: provide_meta_node
@@ -201,7 +247,7 @@ impl Compose for CompactorConfig {
 }
 
 impl Compose for MinioConfig {
-    fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService> {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("minio");
         MinioService::apply_command_args(&mut command, self)?;
         command.arg("/data");
@@ -220,7 +266,7 @@ mkdir -p "/data/{bucket_name}"
         );
 
         Ok(ComposeService {
-            image: image.minio.clone(),
+            image: config.image.minio.clone(),
             command,
             environment: env,
             entrypoint: Some(entrypoint),
@@ -236,18 +282,21 @@ mkdir -p "/data/{bucket_name}"
 }
 
 impl Compose for RedPandaConfig {
-    fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService> {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("redpanda");
 
         command.args(vec![
             "start",
             "--smp",
-            "1",
+            "4",
             "--reserve-memory",
             "0M",
+            "--memory",
+            "4G",
             "--overprovisioned",
             "--node-id",
             "0",
+            "--check=false",
         ]);
 
         command.arg("--kafka-addr").arg(format!(
@@ -263,12 +312,13 @@ impl Compose for RedPandaConfig {
         let command = get_cmd_args(&command, true)?;
 
         Ok(ComposeService {
-            image: image.redpanda.clone(),
+            image: config.image.redpanda.clone(),
             command,
             expose: vec![
                 self.internal_port.to_string(),
                 self.outside_port.to_string(),
             ],
+            volumes: vec![format!("{}:/var/lib/redpanda/data", self.id)],
             ports: vec![format!("{}:{}", self.outside_port, self.outside_port)],
             ..Default::default()
         })
@@ -276,7 +326,7 @@ impl Compose for RedPandaConfig {
 }
 
 impl Compose for PrometheusConfig {
-    fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService> {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("prometheus");
         command
             .arg("--config.file=/etc/prometheus/prometheus.yml")
@@ -286,27 +336,61 @@ impl Compose for PrometheusConfig {
         PrometheusService::apply_command_args(&mut command, self)?;
         let command = get_cmd_args(&command, false)?;
 
-        let config = PrometheusGen.gen_prometheus_yml(self);
+        let prometheus_config = PrometheusGen.gen_prometheus_yml(self);
 
-        let entrypoint = r#"
-/bin/sh -c '
-set -e
-echo "$$PROMETHEUS_CONFIG" > /etc/prometheus/prometheus.yml
-/bin/prometheus "$$0" "$$@"
-'"#
-        .to_string();
-
-        Ok(ComposeService {
-            image: image.prometheus.clone(),
+        let mut service = ComposeService {
+            image: config.image.prometheus.clone(),
             command,
             expose: vec![self.port.to_string()],
             ports: vec![format!("{}:{}", self.port, self.port)],
             volumes: vec![format!("{}:/prometheus", self.id)],
-            environment: vec![("PROMETHEUS_CONFIG".to_string(), config)]
-                .into_iter()
-                .collect(),
-            entrypoint: Some(entrypoint),
             ..Default::default()
-        })
+        };
+
+        std::fs::write(
+            Path::new(&config.config_directory).join("prometheus.yaml"),
+            prometheus_config,
+        )?;
+        service
+            .volumes
+            .push("./prometheus.yaml:/etc/prometheus/prometheus.yml".into());
+
+        Ok(service)
+    }
+}
+
+impl Compose for GrafanaConfig {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
+        let config_root = Path::new(&config.config_directory);
+        std::fs::write(
+            config_root.join("grafana.ini"),
+            &GrafanaGen.gen_custom_ini(self),
+        )?;
+
+        std::fs::write(
+            config_root.join("grafana-risedev-datasource.yml"),
+            &GrafanaGen.gen_datasource_yml(self)?,
+        )?;
+
+        std::fs::write(
+            config_root.join("grafana-risedev-dashboard.yml"),
+            &GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
+        )?;
+
+        let service = ComposeService {
+            image: config.image.grafana.clone(),
+            expose: vec![self.port.to_string()],
+            ports: vec![format!("{}:{}", self.port, self.port)],
+            volumes: vec![
+                format!("{}:/var/lib/grafana", self.id),
+                "./grafana.ini:/etc/grafana/grafana.ini".to_string(),
+                "./grafana-risedev-datasource.yml:/etc/grafana/provisioning/datasources/grafana-risedev-datasource.yml".to_string(),
+                "./grafana-risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/grafana-risedev-dashboard.yml".to_string(),
+                "./risingwave-dashboard.json:/risingwave-dashboard.json".to_string()
+            ],
+            ..Default::default()
+        };
+
+        Ok(service)
     }
 }

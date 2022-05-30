@@ -21,11 +21,11 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    StreamHopWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::{InputRef, InputRefDisplay};
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone)]
@@ -164,7 +164,7 @@ impl ColPrunable for LogicalHopWindow {
             &input_required_cols,
             self.input().schema().len(),
         );
-        let (new_hop, _) = self.rewrite_with_input(input, input_change);
+        let (new_hop, _) = self.rewrite_with_input(input, input_change.clone());
         let output_cols = {
             // output cols = { cols required by upstream from input node } ∪ { additional window
             // cols }
@@ -190,8 +190,7 @@ impl ColPrunable for LogicalHopWindow {
                 })
                 .collect_vec();
             // this mapping will only keeps required columns
-            let mapping =
-                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+            let mapping = input_change.composite(&new_hop.i2o_col_mapping());
             input_required_cols
                 .iter()
                 .filter_map(|&idx| match idx {
@@ -206,6 +205,12 @@ impl ColPrunable for LogicalHopWindow {
             ColIndexMapping::with_remaining_columns(&output_cols, self.schema().len()),
         )
         .into()
+    }
+}
+
+impl PredicatePushdown for LogicalHopWindow {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 

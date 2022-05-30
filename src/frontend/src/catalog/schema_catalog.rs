@@ -39,7 +39,7 @@ impl SchemaCatalog {
     pub fn create_table(&mut self, prost: &ProstTable) {
         let name = prost.name.clone();
         let id = prost.id.into();
-        let table = prost.into();
+        let table: TableCatalog = prost.into();
 
         self.table_by_name.try_insert(name.clone(), table).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
@@ -77,10 +77,19 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    /// Iterate all materialized views, excluding the indexs.
     pub fn iter_mv(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.associated_source_id.is_none())
+            .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_none())
+            .map(|(_, v)| v)
+    }
+
+    /// Iterate all indexs, excluding the materialized views.
+    pub fn iter_index(&self) -> impl Iterator<Item = &TableCatalog> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_some())
             .map(|(_, v)| v)
     }
 

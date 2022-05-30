@@ -15,6 +15,7 @@
 use std::clone::Clone;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use bytes::Bytes;
 use fail::fail_point;
@@ -24,11 +25,11 @@ use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::StoreLocalStatistic;
 use crate::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
-const DEFAULT_META_CACHE_SHARD_BITS: usize = 5;
-const DEFAULT_META_CACHE_OBJECT_POOL_CAPACITY: usize = 16;
+const MAX_META_CACHE_SHARD_BITS: usize = 5;
+const MIN_BUFFER_SIZE_PER_SHARD: usize = 64 * 1024 * 1024; // 64MB
 const PREFETCH_BLOCK_COUNT: usize = 20;
 
 pub type TableHolder = CachableEntry<HummockSSTableId, Box<Sstable>>;
@@ -49,8 +50,6 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSSTableId, Box<Sstable>>>,
-    /// Statistics.
-    stats: Arc<StateStoreMetrics>,
     prefetch_request: Arc<Mutex<HashMap<u64, Vec<Sender<()>>>>>,
 }
 
@@ -58,21 +57,19 @@ impl SstableStore {
     pub fn new(
         store: ObjectStoreRef,
         path: String,
-        stats: Arc<StateStoreMetrics>,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
-        let meta_cache = Arc::new(LruCache::new(
-            DEFAULT_META_CACHE_SHARD_BITS,
-            meta_cache_capacity,
-            DEFAULT_META_CACHE_OBJECT_POOL_CAPACITY,
-        ));
+        let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
+        while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
+            shard_bits -= 1;
+        }
+        let meta_cache = Arc::new(LruCache::new(shard_bits, meta_cache_capacity));
         Self {
             path,
             store,
             block_cache: BlockCache::new(block_cache_capacity),
             meta_cache,
-            stats,
             prefetch_request: Arc::new(Default::default()),
         }
     }
@@ -87,12 +84,10 @@ impl SstableStore {
         }
 
         if let CachePolicy::Fill = policy {
-            // TODO: use concurrent put object
             for (block_idx, meta) in sst.meta.block_metas.iter().enumerate() {
                 let offset = meta.offset as usize;
                 let len = meta.len as usize;
                 self.add_block_cache(sst.id, block_idx as u64, data.slice(offset..offset + len))
-                    .await
                     .unwrap();
             }
             self.meta_cache
@@ -106,12 +101,15 @@ impl SstableStore {
         &self,
         sst: &Sstable,
         block_index: u64,
+        stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        self.stats.sst_store_block_request_counts.inc();
         loop {
+            stats.cache_data_block_total += 1;
             if let Some(block) = self.block_cache.get(sst.id, block_index) {
                 return Ok(block);
             }
+            stats.cache_data_block_miss += 1;
+            let timer = Instant::now();
             let pending_request = {
                 let mut pending_request = self.prefetch_request.lock().unwrap();
                 if let Some(que) = pending_request.get_mut(&sst.id) {
@@ -138,6 +136,7 @@ impl SstableStore {
             for p in pending_requests {
                 let _ = p.send(());
             }
+            stats.remote_io_time += timer.elapsed().as_secs_f64();
             return ret;
         }
     }
@@ -167,7 +166,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub async fn add_block_cache(
+    pub fn add_block_cache(
         &self,
         sst_id: HummockSSTableId,
         block_idx: u64,
@@ -229,10 +228,11 @@ impl SstableStore {
         sst: &Sstable,
         block_index: u64,
         policy: CachePolicy,
+        stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        self.stats.sst_store_block_request_counts.inc();
-
-        let fetch_block = async move {
+        stats.cache_data_block_total += 1;
+        let fetch_block = async {
+            stats.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
                 .block_metas
@@ -279,27 +279,48 @@ impl SstableStore {
 
     pub async fn prefetch_sstables(&self, sst_ids: Vec<u64>) -> HummockResult<()> {
         let mut results = vec![];
-        for id in sst_ids {
-            let f = self.sstable(id);
+        for sst_id in sst_ids {
+            let id = sst_id;
+            let f = self
+                .meta_cache
+                .lookup_with_request_dedup(sst_id, sst_id, move || async move {
+                    let path = self.get_sst_meta_path(id);
+                    let buf = self
+                        .store
+                        .read(&path, None)
+                        .await
+                        .map_err(HummockError::object_io_error)?;
+                    let size = buf.len();
+                    let meta = SstableMeta::decode(&mut &buf[..])?;
+                    let sst = Box::new(Sstable { id, meta });
+                    Ok((sst, size))
+                });
             results.push(f);
         }
         let _ = try_join_all(results).await?;
         Ok(())
     }
 
-    pub async fn sstable(&self, sst_id: HummockSSTableId) -> HummockResult<TableHolder> {
+    pub async fn sstable(
+        &self,
+        sst_id: HummockSSTableId,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        stats.cache_meta_block_total += 1;
+
         let entry = self
             .meta_cache
             .lookup_with_request_dedup(sst_id, sst_id, || async {
+                stats.cache_meta_block_miss += 1;
                 let path = self.get_sst_meta_path(sst_id);
                 let buf = self
                     .store
                     .read(&path, None)
                     .await
                     .map_err(HummockError::object_io_error)?;
+                let size = buf.len();
                 let meta = SstableMeta::decode(&mut &buf[..])?;
                 let sst = Box::new(Sstable { id: sst_id, meta });
-                let size = sst.encoded_size();
                 Ok((sst, size))
             })
             .await?;
@@ -324,6 +345,14 @@ impl SstableStore {
 
     pub fn store(&self) -> ObjectStoreRef {
         self.store.clone()
+    }
+
+    pub fn get_meta_cache(&self) -> Arc<LruCache<HummockSSTableId, Box<Sstable>>> {
+        self.meta_cache.clone()
+    }
+
+    pub fn get_block_cache(&self) -> BlockCache {
+        self.block_cache.clone()
     }
 
     #[cfg(test)]

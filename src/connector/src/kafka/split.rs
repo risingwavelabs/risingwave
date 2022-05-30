@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::base::SplitMetaData;
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct KafkaSplit {
     pub(crate) topic: String,
     pub(crate) partition: i32,
@@ -53,5 +53,14 @@ impl KafkaSplit {
             start_offset,
             stop_offset,
         }
+    }
+
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        Self::new(
+            self.partition,
+            Some(start_offset.as_str().parse::<i64>().unwrap()),
+            self.stop_offset,
+            self.topic.clone(),
+        )
     }
 }

@@ -167,6 +167,7 @@ pub struct GrafanaConfig {
     phantom_use: Option<String>,
     pub id: String,
     pub address: String,
+    pub listen_address: String,
     pub port: u16,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 }

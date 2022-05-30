@@ -17,10 +17,10 @@ use std::sync::Arc;
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder,
+    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue, Row,
 };
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -62,6 +62,15 @@ impl Expression for ArrayExpression {
             .try_for_each(|row| builder.append_row_ref(row))?;
         builder.finish().map(|a| Arc::new(ArrayImpl::List(a)))
     }
+
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
+        let datums = self
+            .elements
+            .iter()
+            .map(|e| e.eval_row(input))
+            .collect::<Result<Vec<Datum>>>()?;
+        Ok(Some(ListValue::new(datums).to_scalar_value()))
+    }
 }
 
 impl ArrayExpression {
@@ -96,8 +105,8 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::array::{DataChunk, ListValue, Row};
+    use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 
     use super::ArrayExpression;
     use crate::expr::{BoxedExpression, Expression, LiteralExpression};
@@ -111,6 +120,18 @@ mod tests {
 
         let arr = expr.eval(&DataChunk::new_dummy(2)).unwrap();
         assert_eq!(arr.len(), 2);
+    }
+
+    #[test]
+    fn test_eval_row_array_expr() {
+        let expr = ArrayExpression {
+            element_type: Box::new(DataType::Int32),
+            elements: vec![i32_expr(1.into()), i32_expr(2.into())],
+        };
+
+        let scalar_impl = expr.eval_row(&Row::new(vec![])).unwrap().unwrap();
+        let expected = ListValue::new(vec![Some(1.into()), Some(2.into())]).to_scalar_value();
+        assert_eq!(expected, scalar_impl);
     }
 
     fn i32_expr(v: ScalarImpl) -> BoxedExpression {

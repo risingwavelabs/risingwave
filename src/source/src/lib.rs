@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::derive_partial_eq_without_eq)]
+#![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -28,11 +30,11 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
+use madsim::collections::HashMap;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;

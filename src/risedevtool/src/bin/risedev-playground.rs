@@ -313,7 +313,12 @@ fn main() -> Result<()> {
         File::open("risedev.yml")?.read_to_string(&mut content)?;
         content
     };
-    let risedev_config = ConfigExpander::expand(&risedev_config)?;
+
+    let task_name = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "default".to_string());
+
+    let risedev_config = ConfigExpander::expand(&risedev_config, &task_name)?;
     {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);
@@ -326,9 +331,6 @@ fn main() -> Result<()> {
 
     preflight_check()?;
 
-    let task_name = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "default".to_string());
     let (steps, services) = ConfigExpander::select(&risedev_config, &task_name)?;
 
     let mut manager = ProgressManager::new();
@@ -365,7 +367,7 @@ fn main() -> Result<()> {
 
     match task_result {
         Ok((stat, log_buffer)) => {
-            println!("--- summary of startup time ---");
+            println!("---- summary of startup time ----");
             for (task_name, duration) in stat {
                 println!("{}: {:.2}s", task_name, duration.as_secs_f64());
             }

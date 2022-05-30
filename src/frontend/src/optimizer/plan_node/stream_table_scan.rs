@@ -115,7 +115,7 @@ impl StreamTableScan {
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|k| *k as i32)
+                .map(|k| *k as u32)
                 .collect_vec(),
             // Will fill when resolving chain node.
             hash_mapping: None,

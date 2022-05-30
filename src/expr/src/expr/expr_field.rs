@@ -14,9 +14,9 @@
 
 use std::convert::TryFrom;
 
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, Row};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::{ensure, ensure_eq, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -43,6 +43,10 @@ impl Expression for FieldExpression {
         } else {
             Err(internal_error("expects a struct array ref"))
         }
+    }
+
+    fn eval_row(&self, _input: &Row) -> Result<Datum> {
+        Err(internal_error("expects a struct array ref"))
     }
 }
 
@@ -87,38 +91,10 @@ mod tests {
     use risingwave_common::array::{DataChunk, F32Array, I32Array, StructArray};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
-    use risingwave_pb::expr::expr_node::Type::Field;
-    use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
 
     use crate::expr::expr_field::FieldExpression;
-    use crate::expr::test_utils::make_input_ref;
+    use crate::expr::test_utils::{make_field_function, make_i32_literal, make_input_ref};
     use crate::expr::Expression;
-
-    pub fn make_i32_literal(data: i32) -> ExprNode {
-        ExprNode {
-            expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ConstantValue {
-                body: data.to_be_bytes().to_vec(),
-            })),
-        }
-    }
-
-    pub fn make_field_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
-        ExprNode {
-            expr_type: Field as i32,
-            return_type: Some(ProstDataType {
-                type_name: ret as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
-        }
-    }
 
     #[test]
     fn test_field_expr() {

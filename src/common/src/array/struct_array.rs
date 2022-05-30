@@ -19,7 +19,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use prost::Message;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
+use risingwave_pb::expr::StructValue as ProstStructValue;
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
@@ -27,10 +29,10 @@ use super::{
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
+use crate::types::{
+    display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
+};
 
-/// This is a naive implementation of struct array.
-/// We will eventually move to a more efficient flatten implementation.
 #[derive(Debug)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
@@ -105,7 +107,7 @@ impl ArrayBuilder for StructArrayBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<StructArray> {
+    fn finish(self) -> Result<StructArray> {
         let children = self
             .children_array
             .into_iter()
@@ -278,13 +280,13 @@ impl fmt::Display for StructValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{{{}}}",
+            "({})",
             self.fields
                 .iter()
                 .map(|f| {
                     match f {
                         Some(f) => format!("{}", f),
-                        None => "None".to_string(),
+                        None => " ".to_string(),
                     }
                 })
                 .join(", ")
@@ -311,6 +313,22 @@ impl StructValue {
 
     pub fn fields(&self) -> &[Datum] {
         &self.fields
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        let value = ProstStructValue {
+            fields: self
+                .fields
+                .iter()
+                .map(|f| match f {
+                    None => {
+                        vec![]
+                    }
+                    Some(s) => s.to_protobuf(),
+                })
+                .collect_vec(),
+        };
+        value.encode_to_vec()
     }
 }
 
@@ -391,8 +409,14 @@ impl Debug for StructRef<'_> {
 }
 
 impl Display for StructRef<'_> {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StructRef::Indexed { arr: _, idx: _ } => {
+                let v = self.fields_ref().iter().map(display_datum_ref).join(", ");
+                write!(f, "({})", v)
+            }
+            StructRef::ValueRef { val } => write!(f, "({})", val),
+        }
     }
 }
 

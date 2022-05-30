@@ -49,6 +49,42 @@ impl GrafanaService {
         command.current_dir(self.grafana_root.join("bin"));
         Ok(command)
     }
+
+    pub fn write_config_files(
+        config: &GrafanaConfig,
+        config_root: impl AsRef<Path>,
+        prefix_config: impl AsRef<Path>,
+    ) -> Result<()> {
+        let config_root = config_root.as_ref();
+
+        std::fs::write(
+            config_root.join("custom.ini"),
+            &GrafanaGen.gen_custom_ini(config),
+        )?;
+
+        let config_datasources_dir = config_root.join("provisioning").join("datasources");
+        std::fs::remove_dir_all(&config_datasources_dir)?;
+        std::fs::create_dir_all(&config_datasources_dir)?;
+        std::fs::write(
+            config_datasources_dir.join("risedev-prometheus.yml"),
+            &GrafanaGen.gen_datasource_yml(config)?,
+        )?;
+
+        let prefix_config = prefix_config.as_ref();
+        let config_dashboards_dir = config_root.join("provisioning").join("dashboards");
+        std::fs::remove_dir_all(&config_dashboards_dir)?;
+        std::fs::create_dir_all(&config_dashboards_dir)?;
+        std::fs::write(
+            config_dashboards_dir.join("risingwave-dashboard.yaml"),
+            &GrafanaGen.gen_dashboard_yml(config, prefix_config, prefix_config)?,
+        )?;
+        // std::fs::write(
+        //     config_dashboards_dir.join("aws-s3-dashboards.yaml"),
+        //     &GrafanaGen.gen_s3_dashboard_yml(config, prefix_config)?,
+        // )?;
+
+        Ok(())
+    }
 }
 
 impl Task for GrafanaService {
@@ -61,35 +97,10 @@ impl Task for GrafanaService {
             return Err(anyhow!("grafana-server binary not found in {:?}\nDid you enable monitoring feature in `./risedev configure`?", path));
         }
 
-        std::fs::write(
-            self.grafana_root.join("conf").join("custom.ini"),
-            &GrafanaGen.gen_custom_ini(&self.config),
-        )?;
-
-        std::fs::write(
-            self.grafana_root
-                .join("conf")
-                .join("provisioning")
-                .join("datasources")
-                .join("risedev-prometheus.yml"),
-            &GrafanaGen.gen_datasource_yml(&self.config)?,
-        )?;
-
-        std::fs::write(
-            self.grafana_root
-                .join("conf")
-                .join("provisioning")
-                .join("dashboards")
-                .join("risingwave-dashboards.yaml"),
-            &GrafanaGen.gen_dashboard_yml(&self.config)?,
-        )?;
-        std::fs::write(
-            self.grafana_root
-                .join("conf")
-                .join("provisioning")
-                .join("dashboards")
-                .join("aws-s3-dashboards.yaml"),
-            &GrafanaGen.gen_s3_dashboard_yml(&self.config)?,
+        Self::write_config_files(
+            &self.config,
+            self.grafana_root.join("conf"),
+            env::var("PREFIX_CONFIG")?,
         )?;
 
         let cmd = self.grafana()?;

@@ -421,6 +421,30 @@ impl Decimal {
         }
     }
 
+    #[must_use]
+    pub fn ceil(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(d.ceil()),
+            d => *d,
+        }
+    }
+
+    #[must_use]
+    pub fn floor(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(d.floor()),
+            d => *d,
+        }
+    }
+
+    #[must_use]
+    pub fn round(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(d.round()),
+            d => *d,
+        }
+    }
+
     pub fn from_i128_with_scale(num: i128, scale: u32) -> Self {
         Decimal::Normalized(RustDecimal::from_i128_with_scale(num, scale))
     }

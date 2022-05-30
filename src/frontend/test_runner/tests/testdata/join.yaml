@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
@@ -55,6 +57,15 @@
               BatchScan { table: t2, columns: [v1, v2] }
         BatchExchange { order: [], dist: HashShard([1]) }
           BatchScan { table: t3, columns: [v1, v2] }
+  batch_local_plan: |
+    BatchHashJoin { type: Inner, predicate: $3 = $5 }
+      BatchHashJoin { type: Inner, predicate: $0 = $2 }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t1, columns: [v1, v2] }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t2, columns: [v1, v2] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: t3, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [t1_v1, t1_v2, _row_id(hidden), t2_v1, t2_v2, _row_id#1(hidden), t3_v1, t3_v2, _row_id#2(hidden)], pk_columns: [_row_id, _row_id#1, _row_id#2] }
       StreamExchange { dist: HashShard([2, 5, 8]) }
@@ -79,6 +90,13 @@
             BatchScan { table: t1, columns: [v1, v2] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchScan { table: t2, columns: [v1, v2] }
+  batch_local_plan: |
+    BatchProject { exprs: [$1, $3] }
+      BatchHashJoin { type: Inner, predicate: $0 = $2 }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t1, columns: [v1, v2] }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t2, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [t1_v2, t2_v2, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
       StreamExchange { dist: HashShard([2, 3]) }
@@ -100,6 +118,14 @@
             BatchScan { table: t1, columns: [v1, v2] }
         BatchExchange { order: [], dist: Single }
           BatchScan { table: t2, columns: [v1, v2] }
+  batch_local_plan: |
+    BatchProject { exprs: [$1, $3] }
+      BatchNestedLoopJoin { type: Inner, predicate: ($0 > $2) }
+        BatchExchange { order: [], dist: Single }
+          BatchFilter { predicate: ($1 < 10:Int32) }
+            BatchScan { table: t1, columns: [v1, v2] }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t2, columns: [v1, v2] }
 - sql: |
     create table t1 (v1 int, v2 float);
     create table t2 (v3 int, v4 numeric, v5 bigint);
@@ -114,3 +140,61 @@
             StreamTableScan { table: t2, columns: [v3, v4, v5, _row_id], pk_indices: [3] }
   with_config_map:
     RW_FORCE_DELTA_JOIN: "true"
+- sql: |
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v3 int);
+    select * from t1 join t2 using(v1);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchHashJoin { type: Inner, predicate: $0 = $2 }
+        BatchExchange { order: [], dist: HashShard([0]) }
+          BatchScan { table: t1, columns: [v1, v2] }
+        BatchExchange { order: [], dist: HashShard([0]) }
+          BatchScan { table: t2, columns: [v1, v3] }
+- sql: |
+    create table ab (a int, b int);
+    create table bc (b int, c int);
+    create table ca (c int, a int);
+    select * from ab join bc using(b) join ca using(c);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchHashJoin { type: Inner, predicate: $3 = $4 }
+        BatchExchange { order: [], dist: HashShard([3]) }
+          BatchHashJoin { type: Inner, predicate: $1 = $2 }
+            BatchExchange { order: [], dist: HashShard([1]) }
+              BatchScan { table: ab, columns: [a, b] }
+            BatchExchange { order: [], dist: HashShard([0]) }
+              BatchScan { table: bc, columns: [b, c] }
+        BatchExchange { order: [], dist: HashShard([0]) }
+          BatchScan { table: ca, columns: [c, a] }
+- sql: |
+    /* Only push to left */
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
+    select * from t1 left join t2 where t1.v2 > 100;
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftOuter, on: true }
+      LogicalFilter { predicate: ($1 > 100:Int32) }
+        LogicalScan { table: t1, columns: [v1, v2] }
+      LogicalScan { table: t2, columns: [v1, v2] }
+- sql: |
+    /* Only push to right */
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
+    select * from t1 right join t2 where t2.v2 > 100;
+  optimized_logical_plan: |
+    LogicalJoin { type: RightOuter, on: true }
+      LogicalScan { table: t1, columns: [v1, v2] }
+      LogicalFilter { predicate: ($1 > 100:Int32) }
+        LogicalScan { table: t2, columns: [v1, v2] }
+- sql: |
+    /* Push to left, right and on */
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
+    select * from t1, t2 where t1.v1 > 100 and t2.v1 < 1000 and t1.v2 = t2.v2;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: ($1 = $3) }
+      LogicalFilter { predicate: ($0 > 100:Int32) }
+        LogicalScan { table: t1, columns: [v1, v2] }
+      LogicalFilter { predicate: ($0 < 1000:Int32) }
+        LogicalScan { table: t2, columns: [v1, v2] }

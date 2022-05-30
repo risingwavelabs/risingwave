@@ -16,15 +16,14 @@ mod join_entry_state;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
-use bytes::{Buf, BufMut};
+use bytes::Buf;
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
-use risingwave_common::array::Row;
+use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::{Keyspace, StateStore};
 
 /// This is a row with a match degree
@@ -78,19 +77,15 @@ impl JoinRow {
             .collect_vec())
     }
 
-    /// Serialize the `JoinRow` into a binary bytes. All values must not be null.
+    /// Serialize the `JoinRow` into a value encoding bytes.
     pub fn serialize(&self) -> RwResult<Vec<u8>> {
         let mut vec = Vec::with_capacity(10);
 
         // Serialize row.
-        for v in &self.row.0 {
-            vec.extend_from_slice(&serialize_cell(v)?)
-        }
+        vec.extend(self.row.value_encode()?);
 
         // Serialize degree.
-        let mut degree_buf: Vec<u8> = vec![];
-        degree_buf.put_u64_le(self.degree);
-        vec.extend_from_slice(&degree_buf);
+        vec.extend(self.degree.to_le_bytes());
 
         Ok(vec)
     }
@@ -107,18 +102,12 @@ impl JoinRowDeserializer {
         JoinRowDeserializer { data_types: schema }
     }
 
-    /// Deserialize the row from a memcomparable bytes.
-    pub fn deserialize(&self, mut data: &[u8]) -> RwResult<JoinRow> {
-        let mut values = vec![];
-        values.reserve(self.data_types.len());
-        for ty in &self.data_types {
-            values.push(deserialize_cell(&mut data, ty)?);
-        }
+    /// Deserialize the [`JoinRow`] from a value encoding bytes.
+    pub fn deserialize(&self, mut data: impl Buf) -> RwResult<JoinRow> {
+        let deserializer = RowDeserializer::new(self.data_types.clone());
+        let row = deserializer.value_decode(&mut data)?;
         let degree = data.get_u64_le();
-        Ok(JoinRow {
-            row: Row(values),
-            degree,
-        })
+        Ok(JoinRow { row, degree })
     }
 }
 
@@ -184,7 +173,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
     #[allow(dead_code)]
-    pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType<S>> {
+    pub async fn get<'a, 'b>(&'a mut self, key: &'b K) -> Option<&'a HashValueType<S>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -219,9 +208,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return the [`JoinEntryState`] without cached state, if still not
     /// exist, return None.
-    pub async fn get_mut_without_cached<'a>(
+    pub async fn get_mut_without_cached<'a, 'b: 'a>(
         &'a mut self,
-        key: &K,
+        key: &'b K,
     ) -> RwResult<Option<&'a mut HashValueType<S>>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
@@ -291,7 +280,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Get or create a [`JoinEntryState`] without cached state. Should only be called if the key
     /// does not exist in memory or remote storage.
-    pub async fn get_or_init_without_cache(&mut self, key: &K) -> RwResult<&mut JoinEntryState<S>> {
+    pub async fn get_or_init_without_cache<'a, 'b: 'a>(
+        &'a mut self,
+        key: &'b K,
+    ) -> RwResult<&'a mut JoinEntryState<S>> {
         // TODO: we should probably implement a entry function for `LruCache`
         let contains = self.inner.contains(key);
         if contains {

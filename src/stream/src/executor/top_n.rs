@@ -556,7 +556,7 @@ mod tests {
         ))
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_top_n_executor_with_offset() {
         let order_types = create_order_pairs();
         let source = create_source();
@@ -652,7 +652,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_top_n_executor_with_limit() {
         let order_types = create_order_pairs();
         let source = create_source();
@@ -757,7 +757,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_top_n_executor_with_offset_and_limit() {
         let order_types = create_order_pairs();
         let source = create_source();

@@ -17,22 +17,68 @@ pub mod shared_buffer_batch;
 #[allow(dead_code)]
 pub mod shared_buffer_uploader;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::RangeBounds;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::is_remote_sst_id;
+use risingwave_hummock_sdk::key::user_key;
+use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use self::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::shared_buffer_batch::IndexedSharedBufferBatches;
 use crate::hummock::shared_buffer::shared_buffer_uploader::{UploadTaskId, UploadTaskPayload};
-use crate::hummock::utils::range_overlap;
+use crate::hummock::utils::{filter_single_sst, range_overlap};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UncommittedData {
+    Sst(SstableInfo),
+    Batch(SharedBufferBatch),
+}
+
+fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
+    let key_range = info
+        .key_range
+        .as_ref()
+        .expect("local sstable should have key range");
+    assert!(
+        !key_range.inf,
+        "local sstable should not have infinite key range. Sstable info: {:?}",
+        info,
+    );
+    key_range
+}
+
+impl UncommittedData {
+    pub fn start_user_key(&self) -> &[u8] {
+        match self {
+            UncommittedData::Sst(info) => {
+                let key_range = get_sst_key_range(info);
+                user_key(key_range.left.as_slice())
+            }
+            UncommittedData::Batch(batch) => batch.start_user_key(),
+        }
+    }
+
+    pub fn end_user_key(&self) -> &[u8] {
+        match self {
+            UncommittedData::Sst(info) => {
+                let key_range = get_sst_key_range(info);
+                user_key(key_range.right.as_slice())
+            }
+            UncommittedData::Batch(batch) => batch.end_user_key(),
+        }
+    }
+}
+
+/// `{ (end key) -> batch }`
+pub(crate) type KeyIndexedUncommittedData = BTreeMap<Vec<u8>, UncommittedData>;
 
 #[derive(Default, Debug)]
 pub struct SharedBuffer {
-    non_upload_batches: IndexedSharedBufferBatches,
-    replicate_batches: IndexedSharedBufferBatches,
-    uploading_batches: HashMap<UploadTaskId, IndexedSharedBufferBatches>,
-
+    uncommitted_data: KeyIndexedUncommittedData,
+    replicate_batches: BTreeMap<Vec<u8>, SharedBufferBatch>,
+    uploading_tasks: HashMap<UploadTaskId, KeyIndexedUncommittedData>,
     upload_batches_size: usize,
     replicate_batches_size: usize,
 
@@ -42,8 +88,14 @@ pub struct SharedBuffer {
 impl SharedBuffer {
     pub fn write_batch(&mut self, batch: SharedBufferBatch) {
         self.upload_batches_size += batch.size();
-        self.non_upload_batches
-            .insert(batch.end_user_key().to_vec(), batch);
+        let insert_result = self
+            .uncommitted_data
+            .insert(batch.end_user_key().to_vec(), UncommittedData::Batch(batch));
+        assert!(
+            insert_result.is_none(),
+            "duplicate end key and order index when inserting a write batch. Previous data: {:?}",
+            insert_result
+        );
     }
 
     pub fn replicate_batch(&mut self, batch: SharedBufferBatch) {
@@ -52,50 +104,52 @@ impl SharedBuffer {
             .insert(batch.end_user_key().to_vec(), batch);
     }
 
-    // Gets batches from shared buffer that overlap with the given key range.
-    pub fn get_overlap_batches<R, B>(
+    /// Gets batches from shared buffer that overlap with the given key range.
+    /// The return tuple is (replicated batches, uncommitted data).
+    pub fn get_overlap_data<R, B>(
         &self,
         key_range: &R,
-        backward_range: bool,
-    ) -> Vec<SharedBufferBatch>
+        vnode_set: Option<&VNodeBitmap>,
+    ) -> (Vec<SharedBufferBatch>, Vec<UncommittedData>)
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
+        let replicated_batches = self
+            .replicate_batches
+            .range((
+                key_range.start_bound().map(|b| b.as_ref().to_vec()),
+                std::ops::Bound::Unbounded,
+            ))
+            .filter(|(_, batch)| {
+                range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
+            })
+            .map(|(_, batches)| batches.clone())
+            .collect_vec();
+
         let range = (
-            if backward_range {
-                key_range.end_bound().map(|b| b.as_ref().to_vec())
-            } else {
-                key_range.start_bound().map(|b| b.as_ref().to_vec())
-            },
+            key_range.start_bound().map(|b| b.as_ref().to_vec()),
             std::ops::Bound::Unbounded,
         );
-        self.non_upload_batches
-            .range(range.clone())
-            .chain(self.replicate_batches.range(range.clone()))
-            .chain(
-                self.uploading_batches
-                    .values()
-                    .flat_map(|batches| batches.range(range.clone())),
-            )
-            .filter(|m| {
-                range_overlap(
-                    key_range,
-                    m.1.start_user_key(),
-                    m.1.end_user_key(),
-                    backward_range,
-                )
-            })
-            .map(|entry| entry.1.clone())
-            .collect()
-    }
 
-    pub fn delete_batch(&mut self, batches: &[SharedBufferBatch]) {
-        for batch in batches {
-            if let Some(batch) = &self.non_upload_batches.remove(batch.end_user_key()) {
-                self.upload_batches_size -= batch.size();
-            }
-        }
+        let uncommitted_data = self
+            .uncommitted_data
+            .range(range.clone())
+            .chain(
+                self.uploading_tasks
+                    .values()
+                    .flat_map(|payload| payload.range(range.clone())),
+            )
+            .filter(|(_, data)| match data {
+                UncommittedData::Batch(batch) => {
+                    range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
+                }
+                UncommittedData::Sst(info) => filter_single_sst(info, key_range, vnode_set),
+            })
+            .map(|(_, data)| data.clone())
+            .collect_vec();
+
+        (replicated_batches, uncommitted_data)
     }
 
     pub fn clear_replicate_batch(&mut self) {
@@ -103,30 +157,96 @@ impl SharedBuffer {
         self.replicate_batches_size = 0;
     }
 
-    pub fn new_upload_task(
-        &mut self,
-        task_gen: impl Fn(&mut IndexedSharedBufferBatches) -> IndexedSharedBufferBatches,
-    ) -> (UploadTaskId, UploadTaskPayload) {
+    pub fn new_upload_task(&mut self) -> Option<(UploadTaskId, UploadTaskPayload)> {
+        // TODO: use drain_filter when it's stable.
+        let task_keys = self
+            .uncommitted_data
+            .iter()
+            .filter_map(|(key, data)| match data {
+                UncommittedData::Batch(_) => Some(key.clone()),
+                UncommittedData::Sst(_) => None,
+            })
+            .collect_vec();
+        let mut keyed_payload = BTreeMap::new();
+        for key in task_keys {
+            let payload = self.uncommitted_data.remove(&key).unwrap();
+            keyed_payload.insert(key, payload);
+        }
+        if keyed_payload.is_empty() {
+            return None;
+        }
+        let task_payload = keyed_payload
+            .values()
+            .map(|data| match data {
+                UncommittedData::Batch(batch) => batch.clone(),
+                UncommittedData::Sst(_) => unreachable!("SST should not be in task payload"),
+            })
+            .collect_vec();
         let task_id = self.next_upload_task_id;
         self.next_upload_task_id += 1;
-        let indexed_batches = task_gen(&mut self.non_upload_batches);
-        let batches = indexed_batches.values().cloned().collect_vec();
-        self.uploading_batches.insert(task_id, indexed_batches);
-        (task_id, batches)
+        self.uploading_tasks.insert(task_id, keyed_payload);
+        Some((task_id, task_payload))
     }
 
     pub fn fail_upload_task(&mut self, upload_task_id: UploadTaskId) {
-        debug_assert!(self.uploading_batches.contains_key(&upload_task_id));
-        let task_batches = self.uploading_batches.remove(&upload_task_id).unwrap();
-        self.non_upload_batches.extend(task_batches);
+        debug_assert!(
+            self.uploading_tasks.contains_key(&upload_task_id),
+            "the task id should exist {} when fail an upload task",
+            upload_task_id
+        );
+        let payload = self.uploading_tasks.remove(&upload_task_id).unwrap();
+        self.uncommitted_data.extend(payload);
     }
 
-    pub fn succeed_upload_task(&mut self, upload_task_id: UploadTaskId) {
-        debug_assert!(self.uploading_batches.contains_key(&upload_task_id));
-        let task_batches = self.uploading_batches.remove(&upload_task_id).unwrap();
-        for batch in task_batches.into_values() {
-            self.upload_batches_size -= batch.size();
+    pub fn succeed_upload_task(&mut self, upload_task_id: UploadTaskId, new_sst: Vec<SstableInfo>) {
+        debug_assert!(
+            self.uploading_tasks.contains_key(&upload_task_id),
+            "the task_id should exist {} when succeed an upload task",
+            upload_task_id
+        );
+        let payload = self.uploading_tasks.remove(&upload_task_id).unwrap();
+        for sst in new_sst {
+            let data = UncommittedData::Sst(sst);
+            let insert_result = self
+                .uncommitted_data
+                .insert(data.end_user_key().to_vec(), data);
+            assert!(
+                insert_result.is_none(),
+                "duplicate data end key when inserting an SST. Previous data: {:?}",
+                insert_result,
+            );
         }
+        for data in payload.into_values() {
+            match data {
+                UncommittedData::Batch(batch) => {
+                    self.upload_batches_size -= batch.size();
+                }
+                UncommittedData::Sst(_) => unreachable!("SST should not be in task payload"),
+            }
+        }
+    }
+
+    pub fn get_ssts_to_commit(&self) -> Vec<SstableInfo> {
+        assert!(
+            self.uploading_tasks.is_empty(),
+            "when committing sst there should not be uploading task"
+        );
+        let mut ret = Vec::new();
+        for data in self.uncommitted_data.values() {
+            match data {
+                UncommittedData::Batch(_) => {
+                    panic!("there should not be any batch when committing sst");
+                }
+                UncommittedData::Sst(sst) => {
+                    assert!(
+                        is_remote_sst_id(sst.id),
+                        "all sst should be remote when trying to get ssts to commit"
+                    );
+                    ret.push(sst.clone());
+                }
+            }
+        }
+        ret
     }
 
     pub fn size(&self) -> usize {
@@ -211,39 +331,37 @@ mod tests {
         // Get overlap batches and verify
         for key in &keys[0..3] {
             // Single key
-            let overlap_batches =
-                shared_buffer.get_overlap_batches(&(key.clone()..=key.clone()), false);
-            assert_eq!(overlap_batches.len(), 2);
-            assert_eq!(overlap_batches[0], shared_buffer_batch1);
-            assert_eq!(overlap_batches[1], shared_buffer_batch2);
+            let (replicate_batches, overlap_data) =
+                shared_buffer.get_overlap_data(&(key.clone()..=key.clone()), None);
+            assert_eq!(overlap_data.len(), 1);
+            assert_eq!(
+                overlap_data[0],
+                UncommittedData::Batch(shared_buffer_batch1.clone())
+            );
+            assert_eq!(replicate_batches.len(), 1);
+            assert_eq!(replicate_batches[0], shared_buffer_batch2);
 
             // Forward key range
-            let overlap_batches =
-                shared_buffer.get_overlap_batches(&(key.clone()..=keys[3].clone()), false);
-            assert_eq!(overlap_batches.len(), 2);
-            assert_eq!(overlap_batches[0], shared_buffer_batch1);
-            assert_eq!(overlap_batches[1], shared_buffer_batch2);
-
-            // Backward key range
-            let overlap_batches =
-                shared_buffer.get_overlap_batches(&(keys[3].clone()..=key.clone()), true);
-            assert_eq!(overlap_batches.len(), 2);
-            assert_eq!(overlap_batches[0], shared_buffer_batch1);
-            assert_eq!(overlap_batches[1], shared_buffer_batch2);
+            let (replicate_batches, overlap_data) =
+                shared_buffer.get_overlap_data(&(key.clone()..=keys[3].clone()), None);
+            assert_eq!(overlap_data.len(), 1);
+            assert_eq!(
+                overlap_data[0],
+                UncommittedData::Batch(shared_buffer_batch1.clone()),
+            );
+            assert_eq!(replicate_batches.len(), 1);
+            assert_eq!(replicate_batches[0], shared_buffer_batch2);
         }
         // Non-existent key
-        let overlap_batches =
-            shared_buffer.get_overlap_batches(&(large_key.clone()..=large_key.clone()), false);
-        assert!(overlap_batches.is_empty());
+        let (replicate_batches, overlap_data) =
+            shared_buffer.get_overlap_data(&(large_key.clone()..=large_key.clone()), None);
+        assert!(replicate_batches.is_empty());
+        assert!(overlap_data.is_empty());
 
         // Non-existent key range forward
-        let overlap_batches =
-            shared_buffer.get_overlap_batches(&(keys[3].clone()..=large_key.clone()), false);
-        assert!(overlap_batches.is_empty());
-
-        // Non-existent key range backward
-        let overlap_batches =
-            shared_buffer.get_overlap_batches(&(large_key.clone()..=keys[3].clone()), true);
-        assert!(overlap_batches.is_empty());
+        let (replicate_batches, overlap_data) =
+            shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key.clone()), None);
+        assert!(replicate_batches.is_empty());
+        assert!(overlap_data.is_empty());
     }
 }

@@ -57,20 +57,20 @@ message MaterializeNode {
   // Column IDs of input schema
   repeated int32 column_ids = 4;
   // Hash keys of the materialize node, which is a subset of pk.
-  repeated int32 distribution_keys = 5;
+  repeated uint32 distribution_keys = 5;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
 // Local and global aggregator distinguish with each other in PlanNode definition.
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
-  repeated int32 distribution_keys = 2;
+  repeated uint32 distribution_keys = 2;
   repeated uint32 table_ids = 3;
   bool append_only = 4;
 }
 
 message HashAggNode {
-  repeated int32 distribution_keys = 1;
+  repeated uint32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated uint32 table_ids = 3;
   bool append_only = 4;
@@ -81,7 +81,7 @@ message TopNNode {
   // 0 means no limit as limit of 0 means this node should be optimized away
   uint64 limit = 2;
   uint64 offset = 3;
-  repeated int32 distribution_keys = 4;
+  repeated uint32 distribution_keys = 4;
 }
 
 message HashJoinNode {
@@ -89,7 +89,7 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
-  repeated int32 distribution_keys = 5;
+  repeated uint32 distribution_keys = 5;
   // Whether to use delta join for this hash join node. When enabled, arrangement will be created
   // on-the-fly within the plan.
   // TODO: remove this in the future when we have a separate DeltaHashJoin node.
@@ -159,7 +159,7 @@ message ChainNode {
 message BatchPlanNode {
   plan_common.TableRefId table_ref_id = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
-  repeated int32 distribution_keys = 3;
+  repeated uint32 distribution_keys = 3;
   common.ParallelUnitMapping hash_mapping = 4;
   uint32 parallel_unit_id = 5;
 }
@@ -179,6 +179,8 @@ message ArrangeNode {
   uint32 table_id = 2;
   // Info about the arrangement
   ArrangementInfo table_info = 3;
+  // Hash keys of the materialize node, which is a subset of pk.
+  repeated uint32 distribution_keys = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
@@ -294,6 +296,9 @@ message StreamActor {
   repeated uint32 upstream_actor_id = 6;
   // Placement rule for actor, need to stay on the same node as upstream.
   bool same_worker_node_as_upstream = 7;
+  // Vnodes that the executors in this actor own. If this actor is the only actor in its fragment, `vnode_bitmap`
+  // will be empty.
+  bytes vnode_bitmap = 8;
 }
 
 enum FragmentType {

@@ -27,7 +27,7 @@ pub enum KinesisOffset {
     None,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct KinesisSplit {
     pub(crate) shard_id: String,
     pub(crate) start_position: KinesisOffset,
@@ -59,5 +59,18 @@ impl KinesisSplit {
             start_position,
             end_position,
         }
+    }
+
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        let start_offset = if start_offset.is_empty() {
+            KinesisOffset::Earliest
+        } else {
+            KinesisOffset::SequenceNumber(start_offset)
+        };
+        Self::new(
+            self.shard_id.clone(),
+            start_offset,
+            self.end_position.clone(),
+        )
     }
 }

@@ -12,75 +12,140 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::ErrorCode::{self, InternalError};
+mod delete;
+mod filter;
+mod generate_series;
+mod generic_exchange;
+mod hash_agg;
+mod hop_window;
+mod insert;
+mod join;
+mod limit;
+mod merge_sort_exchange;
+pub mod monitor;
+mod order_by;
+mod project;
+mod row_seq_scan;
+mod sort_agg;
+#[cfg(test)]
+pub mod test_utils;
+mod top_n;
+mod trace;
+mod update;
+mod values;
+
+pub use delete::*;
+pub use filter::*;
+use futures::stream::BoxStream;
+pub use generate_series::*;
+pub use generic_exchange::*;
+pub use hash_agg::*;
+pub use hop_window::*;
+pub use insert::*;
+pub use join::*;
+pub use limit::*;
+pub use merge_sort_exchange::*;
+pub use monitor::*;
+pub use order_by::*;
+pub use project::*;
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
+pub use row_seq_scan::*;
+pub use sort_agg::*;
+pub use top_n::*;
+pub use trace::*;
+pub use update::*;
+pub use values::*;
 
-use crate::executor2::{
-    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    GenerateSeriesExecutor2Builder, HashAggExecutor2Builder, HashJoinExecutor2Builder,
-    HopWindowExecutor2, InsertExecutor2, LimitExecutor2, MergeSortExchangeExecutor2,
-    NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder,
-    SortAggExecutor2, SortMergeJoinExecutor2, TopNExecutor2, TraceExecutor2, UpdateExecutor,
-    ValuesExecutor2,
-};
-use crate::task::{BatchEnvironment, TaskId};
+use crate::task::{BatchTaskContext, TaskId};
 
-#[cfg(test)]
-pub mod test_utils;
+pub type BoxedExecutor = Box<dyn Executor>;
+pub type BoxedDataChunkStream = BoxStream<'static, Result<DataChunk>>;
 
-/// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor` from
-/// proto and global environment
+pub struct ExecutorInfo {
+    pub schema: Schema,
+    pub id: String,
+}
+
+/// Refactoring of `Executor` using `Stream`.
+pub trait Executor: Send + 'static {
+    /// Returns the schema of the executor's return data.
+    ///
+    /// Schema must be available before `init`.
+    fn schema(&self) -> &Schema;
+
+    /// Identity string of the executor
+    fn identity(&self) -> &str;
+
+    /// Executes to return the data chunk stream.
+    ///
+    /// The implementation should guaranteed that each `DataChunk`'s cardinality is not zero.
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream;
+}
+
+/// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor`
+/// from proto and global environment.
+#[async_trait::async_trait]
 pub trait BoxedExecutorBuilder {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2>;
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor>;
 }
 
-#[allow(dead_code)]
-struct NotImplementedBuilder;
-
-impl BoxedExecutorBuilder for NotImplementedBuilder {
-    fn new_boxed_executor2(_source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
-        Err(ErrorCode::NotImplemented("Executor not implemented".to_string(), None.into()).into())
-    }
-}
-
-pub struct ExecutorBuilder<'a> {
+pub struct ExecutorBuilder<'a, C> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
-    env: BatchEnvironment,
+    context: C,
     epoch: u64,
 }
 
-macro_rules! build_executor2 {
+macro_rules! build_executor {
     ($source: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $source.plan_node().get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor2($source)
+                    <$data_type>::new_boxed_executor($source)
                 },
             )*
         }
     }
 }
 
-impl<'a> ExecutorBuilder<'a> {
-    pub fn new(
-        plan_node: &'a PlanNode,
-        task_id: &'a TaskId,
-        env: BatchEnvironment,
-        epoch: u64,
-    ) -> Self {
+impl<'a, C: Clone> ExecutorBuilder<'a, C> {
+    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, context: C, epoch: u64) -> Self {
         Self {
             plan_node,
             task_id,
-            env,
+            context,
             epoch,
         }
     }
 
-    pub fn build2(&self) -> Result<BoxedExecutor2> {
-        self.try_build2().map_err(|e| {
+    #[must_use]
+    pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
+        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
+    }
+
+    pub fn plan_node(&self) -> &PlanNode {
+        self.plan_node
+    }
+
+    pub fn context(&self) -> &C {
+        &self.context
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+}
+
+impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
+    pub async fn build(&self) -> Result<BoxedExecutor> {
+        self.try_build().await.map_err(|e| {
             InternalError(format!(
                 "[PlanNode: {:?}] Failed to build executor: {}",
                 self.plan_node.get_node_body(),
@@ -90,47 +155,31 @@ impl<'a> ExecutorBuilder<'a> {
         })
     }
 
-    #[must_use]
-    pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(plan_node, self.task_id, self.env.clone(), self.epoch)
-    }
-
-    fn try_build2(&self) -> Result<BoxedExecutor2> {
-        let real_executor = build_executor2! { self,
-            NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
-            NodeBody::Insert => InsertExecutor2,
-            NodeBody::Delete => DeleteExecutor2,
+    async fn try_build(&self) -> Result<BoxedExecutor> {
+        let real_executor = build_executor! { self,
+            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::Insert => InsertExecutor,
+            NodeBody::Delete => DeleteExecutor,
+            NodeBody::Exchange => GenericExchangeExecutorBuilder,
             NodeBody::Update => UpdateExecutor,
-            NodeBody::Exchange => ExchangeExecutor2,
-            NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectExecutor2,
-            NodeBody::SortAgg => SortAggExecutor2,
-            NodeBody::OrderBy => OrderByExecutor2,
-            NodeBody::TopN => TopNExecutor2,
-            NodeBody::Limit => LimitExecutor2,
-            NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
-            NodeBody::HashJoin => HashJoinExecutor2Builder,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
-            NodeBody::HashAgg => HashAggExecutor2Builder,
-            NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
-            NodeBody::GenerateSeries => GenerateSeriesExecutor2Builder,
-            NodeBody::HopWindow => HopWindowExecutor2,
-        }?;
+            NodeBody::Filter => FilterExecutor,
+            NodeBody::Project => ProjectExecutor,
+            NodeBody::SortAgg => SortAggExecutor,
+            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::TopN => TopNExecutor,
+            NodeBody::Limit => LimitExecutor,
+            NodeBody::Values => ValuesExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::HashJoin => HashJoinExecutorBuilder,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
+            NodeBody::GenerateSeries => GenerateSeriesExecutorBuilder,
+            NodeBody::HopWindow => HopWindowExecutor,
+        }
+        .await?;
         let input_desc = real_executor.identity().to_string();
-        Ok(Box::new(TraceExecutor2::new(real_executor, input_desc)))
-    }
-
-    pub fn plan_node(&self) -> &PlanNode {
-        self.plan_node
-    }
-
-    pub fn global_batch_env(&self) -> &BatchEnvironment {
-        &self.env
-    }
-
-    pub fn epoch(&self) -> u64 {
-        self.epoch
+        Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
     }
 }
 
@@ -139,7 +188,7 @@ mod tests {
     use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
-    use crate::task::{BatchEnvironment, TaskId};
+    use crate::task::{ComputeNodeContext, TaskId};
 
     #[test]
     fn test_clone_for_plan() {
@@ -151,8 +200,12 @@ mod tests {
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
-        let builder =
-            ExecutorBuilder::new(&plan_node, task_id, BatchEnvironment::for_test(), u64::MAX);
+        let builder = ExecutorBuilder::new(
+            &plan_node,
+            task_id,
+            ComputeNodeContext::new_for_test(),
+            u64::MAX,
+        );
         let child_plan = &PlanNode {
             ..Default::default()
         };
