@@ -229,8 +229,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .collect::<Result<Vec<_>>>()?;
 
             let mut has_next = false;
+            let mut xxlen = 0;
             for (key, states) in result.by_ref().take(cardinality) {
                 has_next = true;
+                xxlen += 1;
                 key.deserialize_to_builders(&mut group_builders[..])?;
                 states
                     .into_iter()
@@ -247,7 +249,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
 
-            let output = DataChunk::new(columns, None);
+            let output = DataChunk::tai(columns, xxlen, None);
             yield output;
         }
     }

@@ -149,7 +149,9 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                         .create_array_builder(K_PROCESSING_WINDOW_SIZE)
                 })
                 .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+            let mut xxlen = 0;
             while want_to_produce > 0 && !self.min_heap.is_empty() {
+                xxlen += 1;
                 let top_elem = self.min_heap.pop().unwrap();
                 let child_idx = top_elem.chunk_idx;
                 let cur_chunk = top_elem.chunk;
@@ -181,7 +183,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                 .into_iter()
                 .map(|builder| Ok(Column::new(Arc::new(builder.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
-            let chunk = DataChunk::new(columns, None);
+            let chunk = DataChunk::tai(columns, xxlen, None);
             yield chunk
         }
     }

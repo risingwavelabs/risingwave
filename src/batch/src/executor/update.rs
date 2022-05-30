@@ -105,7 +105,7 @@ impl UpdateExecutor {
                     .map(|expr| expr.eval(&data_chunk).map(Column::new))
                     .collect::<Result<Vec<_>>>()?;
 
-                DataChunk::new(columns, None)
+                DataChunk::tai(columns, len, None)
             };
 
             // Merge two data chunks into (U-, U+) pairs.
@@ -155,7 +155,7 @@ impl UpdateExecutor {
             array_builder.append(Some(rows_updated as i64))?;
 
             let array = array_builder.finish()?;
-            let ret_chunk = DataChunk::new(vec![array.into()], None);
+            let ret_chunk = DataChunk::tai(vec![array.into()], 1, None);
 
             yield ret_chunk
         }

@@ -173,7 +173,7 @@ impl NestedLoopJoinExecutor {
             .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
             .collect::<Result<Vec<Column>>>()?;
 
-        Ok(DataChunk::new(result_columns, None))
+        Ok(DataChunk::tai(result_columns, num_tuples, None))
     }
 
     /// Create constant data chunk (one tuple repeat `num_tuples` times).
@@ -551,6 +551,7 @@ impl NestedLoopJoinExecutor {
     /// If two normal chunk, the result is undefined.
     fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
         assert_eq!(left.capacity(), right.capacity());
+        let xxlen = left.capacity(); // TODO(tai-zooja)
         let mut concated_columns = Vec::with_capacity(left.columns().len() + right.columns().len());
         concated_columns.extend_from_slice(left.columns());
         concated_columns.extend_from_slice(right.columns());
@@ -567,7 +568,7 @@ impl NestedLoopJoinExecutor {
                 .into())
             }
         };
-        let data_chunk = DataChunk::new(concated_columns, vis);
+        let data_chunk = DataChunk::tai(concated_columns, xxlen, vis);
         Ok(data_chunk)
     }
 }
@@ -605,8 +606,9 @@ mod tests {
         }
         let chunk1: DataChunk = DataChunk::zooja(columns.clone());
         let bool_vec = vec![true, false, true, false, false];
-        let chunk2 = DataChunk::new(
+        let chunk2 = DataChunk::tai(
             columns.clone(),
+            length,
             Some((bool_vec.clone()).try_into().unwrap()),
         );
         let chunk = NestedLoopJoinExecutor::concatenate(&chunk1, &chunk2).unwrap();

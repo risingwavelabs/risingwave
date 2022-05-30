@@ -105,8 +105,9 @@ where
             }
 
             let arr = builder.finish()?;
+            let xxlen = arr.len();
             let columns = vec![Column::new(Arc::new(arr.into()))];
-            let chunk: DataChunk = DataChunk::new(columns, None);
+            let chunk: DataChunk = DataChunk::tai(columns, xxlen, None);
 
             yield chunk;
         }

@@ -18,7 +18,7 @@ use std::vec;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, I32Array};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
@@ -81,12 +81,10 @@ impl ValuesExecutor {
                 yield DataChunk::new_dummy(cardinality);
             } else {
                 while !self.rows.is_empty() {
-                    let one_row_array = I32Array::from_slice(&[Some(1)])?;
                     // We need a one row chunk rather than an empty chunk because constant
                     // expression's eval result is same size as input chunk
                     // cardinality.
-                    let one_row_chunk =
-                        DataChunk::new(vec![Column::new(Arc::new(one_row_array.into()))], None);
+                    let one_row_chunk = DataChunk::new_dummy(1);
 
                     let chunk_size = self.chunk_size.min(self.rows.len());
                     let mut array_builders = self.schema.create_array_builders(chunk_size)?;
@@ -102,7 +100,8 @@ impl ValuesExecutor {
                         .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
                         .collect::<Result<Vec<Column>>>()?;
 
-                    let chunk = DataChunk::new(columns, None);
+                    let xxlen = columns[0].array().len(); // no-column handled above
+                    let chunk = DataChunk::tai(columns, xxlen, None);
 
                     yield chunk
                 }

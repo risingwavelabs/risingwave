@@ -80,7 +80,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
         let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
 
         let (ops, columns, _visibility) = chunk.into_inner();
-        let data_chunk = DataChunk::new(columns, None);
+        let data_chunk = DataChunk::tai(columns, ops.len(), None);
 
         let pred_output = self
             .expr

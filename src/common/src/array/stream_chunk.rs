@@ -84,7 +84,7 @@ impl StreamChunk {
             assert_eq!(col.array_ref().len(), ops.len());
         }
 
-        let data = DataChunk::new(columns, visibility);
+        let data = DataChunk::tai(columns, ops.len(), visibility);
         StreamChunk { ops, data }
     }
 

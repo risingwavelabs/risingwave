@@ -230,7 +230,10 @@ impl DataChunkBuilder {
         )?;
         match columns.is_empty() {
             true => Ok(DataChunk::new_dummy(cardinality)),
-            false => Ok(DataChunk::new(columns, None)),
+            false => {
+                let xxlen = columns[0].array().len();
+                Ok(DataChunk::tai(columns, xxlen, None))
+            }
         }
     }
 

@@ -92,7 +92,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
         let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
 
         let (ops, columns, visibility) = chunk.into_inner();
-        let data_chunk = DataChunk::new(columns, visibility);
+        let data_chunk = DataChunk::tai(columns, ops.len(), visibility);
 
         let projected_columns = self
             .exprs

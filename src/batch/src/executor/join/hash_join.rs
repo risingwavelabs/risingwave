@@ -652,7 +652,8 @@ mod tests {
                 unreachable!()
             };
 
-            DataChunk::new(keep_columns, vis)
+            let ttlen = keep_columns[0].array().len();
+            DataChunk::tai(keep_columns, ttlen, vis)
         }
 
         async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool) {
