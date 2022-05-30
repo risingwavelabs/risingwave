@@ -115,7 +115,7 @@ macro_rules! build_executor {
     }
 }
 
-impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
+impl<'a, C: Clone> ExecutorBuilder<'a, C> {
     pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, context: C, epoch: u64) -> Self {
         Self {
             plan_node,
@@ -125,6 +125,25 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         }
     }
 
+    #[must_use]
+    pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
+        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
+    }
+
+    pub fn plan_node(&self) -> &PlanNode {
+        self.plan_node
+    }
+
+    pub fn context(&self) -> &C {
+        &self.context
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+}
+
+impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
         self.try_build().await.map_err(|e| {
             InternalError(format!(
@@ -134,11 +153,6 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             ))
             .into()
         })
-    }
-
-    #[must_use]
-    pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
     }
 
     async fn try_build(&self) -> Result<BoxedExecutor> {
@@ -166,18 +180,6 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         .await?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
-    }
-
-    pub fn plan_node(&self) -> &PlanNode {
-        self.plan_node
-    }
-
-    pub fn batch_task_context(&self) -> &C {
-        &self.context
-    }
-
-    pub fn epoch(&self) -> u64 {
-        self.epoch
     }
 }
 

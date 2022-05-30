@@ -28,11 +28,9 @@ pub enum AlignedMessage {
 
 #[try_stream(ok = AlignedMessage, error = StreamExecutorError)]
 pub async fn barrier_align(mut left: BoxedMessageStream, mut right: BoxedMessageStream) {
-    // TODO: handle stream end
-    use madsim::rand::{Rng, SeedableRng};
-    let mut rng = madsim::rand::rngs::StdRng::from_entropy();
+    use madsim::rand::Rng;
     loop {
-        let prefer_left: bool = rng.gen();
+        let prefer_left: bool = madsim::rand::thread_rng().gen();
         let select_result = if prefer_left {
             select(left.next(), right.next()).await
         } else {

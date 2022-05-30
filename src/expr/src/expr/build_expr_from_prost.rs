@@ -19,7 +19,7 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::expr_binary_bytes::new_substr_start;
+use crate::expr::expr_binary_bytes::{new_substr_start, new_to_char};
 use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
@@ -224,6 +224,15 @@ pub fn build_split_part_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         nth_expr,
         ret_type,
     ))
+}
+
+pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_children_and_return_type(prost)?;
+    ensure!(children.len() == 2);
+    let data_expr = expr_build_from_prost(&children[0])?;
+    // TODO: Optimize for const template.
+    let tmpl_expr = expr_build_from_prost(&children[1])?;
+    Ok(new_to_char(data_expr, tmpl_expr, ret_type))
 }
 
 #[cfg(test)]
