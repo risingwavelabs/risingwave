@@ -113,7 +113,7 @@ fn build_array_access_expr(
         DataType::Timestampz => array_access_expression!(PrimitiveArray::<i64>),
         DataType::Interval => array_access_expression!(IntervalArray),
         DataType::Struct { .. } => array_access_expression!(StructArray),
-        DataType::List { .. } => todo!()
+        DataType::List { .. } => todo!(),
     }
 }
 
