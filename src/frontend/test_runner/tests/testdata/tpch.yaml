@@ -1069,18 +1069,19 @@
               BatchExchange { order: [], dist: Single }
                 BatchSimpleAgg { aggs: [sum($0)] }
                   BatchProject { exprs: [($1 * $0)] }
-                    BatchHashJoin { type: Inner, predicate: $2 = $3 }
-                      BatchExchange { order: [], dist: HashShard([2]) }
-                        BatchProject { exprs: [$1, $2, $4] }
-                          BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                            BatchExchange { order: [], dist: HashShard([0]) }
-                              BatchScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost] }
-                            BatchExchange { order: [], dist: HashShard([0]) }
-                              BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
-                      BatchExchange { order: [], dist: HashShard([0]) }
-                        BatchProject { exprs: [$0] }
-                          BatchFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
-                            BatchScan { table: nation, columns: [n_nationkey, n_name] }
+                    BatchProject { exprs: [$0, $1] }
+                      BatchHashJoin { type: Inner, predicate: $2 = $3 }
+                        BatchExchange { order: [], dist: HashShard([2]) }
+                          BatchProject { exprs: [$1, $2, $4] }
+                            BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost] }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchProject { exprs: [$0] }
+                            BatchFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
+                              BatchScan { table: nation, columns: [n_nationkey, n_name] }
 - id: tpch_q12
   before:
     - create_tables
@@ -1215,14 +1216,15 @@
       BatchSimpleAgg { aggs: [sum($0), sum($1)] }
         BatchExchange { order: [], dist: Single }
           BatchSimpleAgg { aggs: [sum($0), sum($1)] }
-            BatchProject { exprs: [Case(Like($4, 'PROMO%':Varchar), ($1 * (1:Int32 - $2)), 0:Int32::Decimal), ($1 * (1:Int32 - $2))] }
-              BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                BatchExchange { order: [], dist: HashShard([0]) }
-                  BatchProject { exprs: [$0, $1, $2] }
-                    BatchFilter { predicate: ($3 >= '1995-09-01':Varchar::Date) AND ($3 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
-                      BatchScan { table: lineitem, columns: [l_partkey, l_extendedprice, l_discount, l_shipdate] }
-                BatchExchange { order: [], dist: HashShard([0]) }
-                  BatchScan { table: part, columns: [p_partkey, p_type] }
+            BatchProject { exprs: [Case(Like($2, 'PROMO%':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))] }
+              BatchProject { exprs: [$1, $2, $4] }
+                BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchProject { exprs: [$0, $1, $2] }
+                      BatchFilter { predicate: ($3 >= '1995-09-01':Varchar::Date) AND ($3 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
+                        BatchScan { table: lineitem, columns: [l_partkey, l_extendedprice, l_discount, l_shipdate] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchScan { table: part, columns: [p_partkey, p_type] }
   stream_plan: |
     StreamMaterialize { columns: [promo_revenue, agg#0(hidden), agg#1(hidden), agg#2(hidden)], pk_columns: [agg#0, agg#1, agg#2] }
       StreamProject { exprs: [((100.00:Decimal * $1) / $2), $0, $1, $2] }
@@ -1590,16 +1592,17 @@
     BatchSimpleAgg { aggs: [sum($0)] }
       BatchExchange { order: [], dist: Single }
         BatchSimpleAgg { aggs: [sum($0)] }
-          BatchProject { exprs: [($2 * (1:Int32 - $3))] }
-            BatchFilter { predicate: ((((((($5 = 'Brand#52':Varchar) AND In($7, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($6 <= 5:Int32)) OR ((((($5 = 'Brand#24':Varchar) AND In($7, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($6 <= 10:Int32))) OR ((((($5 = 'Brand#32':Varchar) AND In($7, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($6 <= 15:Int32))) }
-              BatchHashJoin { type: Inner, predicate: $0 = $4 }
-                BatchExchange { order: [], dist: HashShard([0]) }
-                  BatchProject { exprs: [$0, $1, $2, $3] }
-                    BatchFilter { predicate: In($5, 'AIR':Varchar, 'AIR REG':Varchar) AND ($4 = 'DELIVER IN PERSON':Varchar) }
-                      BatchScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice, l_discount, l_shipinstruct, l_shipmode] }
-                BatchExchange { order: [], dist: HashShard([0]) }
-                  BatchFilter { predicate: ($2 >= 1:Int32) }
-                    BatchScan { table: part, columns: [p_partkey, p_brand, p_size, p_container] }
+          BatchProject { exprs: [($0 * (1:Int32 - $1))] }
+            BatchProject { exprs: [$2, $3] }
+              BatchFilter { predicate: ((((((($5 = 'Brand#52':Varchar) AND In($7, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($6 <= 5:Int32)) OR ((((($5 = 'Brand#24':Varchar) AND In($7, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($6 <= 10:Int32))) OR ((((($5 = 'Brand#32':Varchar) AND In($7, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($6 <= 15:Int32))) }
+                BatchHashJoin { type: Inner, predicate: $0 = $4 }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchProject { exprs: [$0, $1, $2, $3] }
+                      BatchFilter { predicate: In($5, 'AIR':Varchar, 'AIR REG':Varchar) AND ($4 = 'DELIVER IN PERSON':Varchar) }
+                        BatchScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice, l_discount, l_shipinstruct, l_shipmode] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchFilter { predicate: ($2 >= 1:Int32) }
+                      BatchScan { table: part, columns: [p_partkey, p_brand, p_size, p_container] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), revenue], pk_columns: [agg#0, revenue] }
       StreamSimpleAgg { aggs: [count, sum($0)] }
@@ -1886,19 +1889,20 @@
         BatchHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1] }
-              BatchNestedLoopJoin { type: Inner, predicate: ($1 > $2) }
-                BatchExchange { order: [], dist: Single }
-                  BatchProject { exprs: [$1, $2] }
-                    BatchHashJoin { type: LeftAnti, predicate: $0 = $3 }
-                      BatchExchange { order: [], dist: HashShard([0]) }
-                        BatchFilter { predicate: In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
-                          BatchScan { table: customer, columns: [c_custkey, c_phone, c_acctbal] }
-                      BatchExchange { order: [], dist: HashShard([0]) }
-                        BatchScan { table: orders, columns: [o_custkey] }
-                BatchProject { exprs: [($0 / $1)] }
-                  BatchSimpleAgg { aggs: [sum($0), sum($1)] }
-                    BatchExchange { order: [], dist: Single }
-                      BatchSimpleAgg { aggs: [sum($0), count($0)] }
-                        BatchProject { exprs: [$1] }
-                          BatchFilter { predicate: ($1 > 0.00:Decimal) AND In(Substr($0, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
-                            BatchScan { table: customer, columns: [c_phone, c_acctbal] }
+              BatchProject { exprs: [$0, $1] }
+                BatchNestedLoopJoin { type: Inner, predicate: ($1 > $2) }
+                  BatchExchange { order: [], dist: Single }
+                    BatchProject { exprs: [$1, $2] }
+                      BatchHashJoin { type: LeftAnti, predicate: $0 = $3 }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchFilter { predicate: In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                            BatchScan { table: customer, columns: [c_custkey, c_phone, c_acctbal] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: orders, columns: [o_custkey] }
+                  BatchProject { exprs: [($0 / $1)] }
+                    BatchSimpleAgg { aggs: [sum($0), sum($1)] }
+                      BatchExchange { order: [], dist: Single }
+                        BatchSimpleAgg { aggs: [sum($0), count($0)] }
+                          BatchProject { exprs: [$1] }
+                            BatchFilter { predicate: ($1 > 0.00:Decimal) AND In(Substr($0, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                              BatchScan { table: customer, columns: [c_phone, c_acctbal] }
