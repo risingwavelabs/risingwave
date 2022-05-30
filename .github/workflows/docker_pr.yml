@@ -91,6 +91,9 @@ jobs:
         uses: docker/setup-qemu-action@v1
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
+      - name: Get current date
+        id: date
+        run: echo "::set-output name=date::$(date +%Y%m%d)"
       - name: Build risingwave
         uses: docker/build-push-action@v2
         with:
@@ -98,7 +101,7 @@ jobs:
           file: ./docker/Dockerfile
           target: risingwave
           push: false
-          tags: ghcr.io/singularity-data/risingwave
+          tags: ghcr.io/singularity-data/risingwave:latest,ghcr.io/singularity-data/risingwave:nightly-${{ steps.date.outputs.date }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max,compression=uncompressed
       - # Temp fix
@@ -116,7 +119,7 @@ jobs:
           file: ./docker/Dockerfile
           target: compute-node
           push: false
-          tags: ghcr.io/singularity-data/compute-node
+          tags: ghcr.io/singularity-data/compute-node:latest,ghcr.io/singularity-data/compute-node:nightly-${{ steps.date.outputs.date }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=inline
       - name: Build meta-node
@@ -126,7 +129,7 @@ jobs:
           file: ./docker/Dockerfile
           target: meta-node
           push: false
-          tags: ghcr.io/singularity-data/meta-node
+          tags: ghcr.io/singularity-data/meta-node:latest,ghcr.io/singularity-data/meta-node:nightly-${{ steps.date.outputs.date }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=inline
       - name: Build frontend-node
@@ -136,7 +139,7 @@ jobs:
           file: ./docker/Dockerfile
           target: frontend-node
           push: false
-          tags: ghcr.io/singularity-data/frontend-node
+          tags: ghcr.io/singularity-data/frontend-node:latest,ghcr.io/singularity-data/frontend-node:nightly-${{ steps.date.outputs.date }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=inline
       - name: Build compactor
@@ -146,6 +149,6 @@ jobs:
           file: ./docker/Dockerfile
           target: compactor-node
           push: false
-          tags: ghcr.io/singularity-data/compactor-node
+          tags: ghcr.io/singularity-data/compactor-node:latest,ghcr.io/singularity-data/compactor-node:nightly-${{ steps.date.outputs.date }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=inline

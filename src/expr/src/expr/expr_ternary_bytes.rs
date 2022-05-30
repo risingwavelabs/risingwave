@@ -20,6 +20,7 @@ use risingwave_common::types::DataType;
 use crate::expr::template::TernaryBytesExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::replace::replace;
+use crate::vector_op::split_part::split_part;
 use crate::vector_op::substr::substr_start_for;
 use crate::vector_op::translate::translate;
 
@@ -74,13 +75,46 @@ pub fn new_translate_expr(
     )
 }
 
+pub fn new_split_part_expr(
+    string_expr: BoxedExpression,
+    delimiter_expr: BoxedExpression,
+    nth_expr: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    Box::new(
+        TernaryBytesExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
+            string_expr,
+            delimiter_expr,
+            nth_expr,
+            return_type,
+            split_part,
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::types::{Datum, ScalarImpl};
 
     use super::*;
     use crate::expr::LiteralExpression;
+
+    fn test_evals_dummy(expr: BoxedExpression, expected: Datum, is_negative_len: bool) {
+        let res = expr.eval(&DataChunk::new_dummy(1));
+        if is_negative_len {
+            assert!(res.is_err());
+        } else {
+            assert_eq!(res.unwrap().to_datum(), expected);
+        }
+
+        let res = expr.eval_row(&Row::new(vec![]));
+        if is_negative_len {
+            assert!(res.is_err());
+        } else {
+            assert_eq!(res.unwrap(), expected);
+        }
+    }
 
     #[test]
     fn test_substr_start_end() {
@@ -132,12 +166,8 @@ mod tests {
                 Box::new(LiteralExpression::new(DataType::Int32, len)),
                 DataType::Varchar,
             );
-            let res = expr.eval(&DataChunk::new_dummy(1));
-            if is_negative_len {
-                assert!(res.is_err());
-            } else {
-                assert_eq!(res.unwrap().to_datum(), expected);
-            }
+
+            test_evals_dummy(expr, expected, is_negative_len);
         }
     }
 
@@ -174,11 +204,8 @@ mod tests {
                 )),
                 DataType::Varchar,
             );
-            let res = expr.eval(&DataChunk::new_dummy(1)).unwrap();
-            assert_eq!(
-                res.to_datum(),
-                Some(ScalarImpl::from(String::from(expected)))
-            );
+
+            test_evals_dummy(expr, Some(ScalarImpl::from(String::from(expected))), false);
         }
     }
 }

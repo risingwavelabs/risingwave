@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_frontend::stream_fragmenter::StreamFragmenter;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -254,8 +253,13 @@ fn make_stream_node() -> StreamNode {
     }
 }
 
+// TODO: enable this test with madsim
+// NOTE: frontend is not yet available with madsim
+#[cfg(not(madsim))]
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
+    use risingwave_frontend::stream_fragmenter::StreamFragmenter;
+
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);

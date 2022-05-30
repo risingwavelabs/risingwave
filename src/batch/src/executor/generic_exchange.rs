@@ -14,13 +14,13 @@
 
 use std::marker::PhantomData;
 
-use futures::stream::select_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
@@ -93,8 +93,9 @@ impl CreateSource for DefaultCreateSource {
 
 pub struct GenericExchangeExecutorBuilder {}
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(
@@ -155,6 +156,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> GenericExchangeExecutor<CS
         }
     }
 }
+
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
 async fn data_chunk_stream(mut source: Box<dyn ExchangeSource>) {
     loop {

@@ -41,7 +41,7 @@ pub use expr_literal::*;
 use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::build_expr_from_prost::*;
@@ -63,6 +63,8 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// * `input` - input data of the Project Executor
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
 
+    fn eval_row(&self, input: &Row) -> Result<Datum>;
+
     fn boxed(self) -> BoxedExpression
     where
         Self: Sized + Send + 'static,
@@ -78,7 +80,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 
     match prost.get_expr_type()? {
         Cast | Upper | Lower | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull | Neg | Ascii | Abs => build_unary_expr_prost(prost),
+        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position => build_binary_expr_prost(prost),
@@ -92,6 +94,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
         ConcatWs => ConcatWsExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
+        SplitPart => build_split_part_expr(prost),
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),
