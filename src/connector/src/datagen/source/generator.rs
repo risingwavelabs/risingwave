@@ -16,9 +16,10 @@ use std::collections::HashMap;
 use anyhow::Result;
 use bytes::Bytes;
 use serde_json::{Map, Value};
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, Duration, Instant};
 
 use super::field_generator::FieldGeneratorImpl;
+use super::DEFUALT_DATAGEN_INTERVAL;
 use crate::SourceMessage;
 
 pub struct DatagenEventGenerator {
@@ -53,10 +54,14 @@ impl DatagenEventGenerator {
     }
 
     pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        sleep(Duration::from_secs(1)).await;
+        let now = Instant::now();
         let mut res = vec![];
-
+        let mut generated_count: u64 = 0;
+        // if generating data time beyond 1s then just return the result
         for i in 0..self.partition_size {
+            if now.elapsed().as_millis() >= DEFUALT_DATAGEN_INTERVAL {
+                break;
+            }
             let map: Map<String, Value> = self
                 .fields_map
                 .iter_mut()
@@ -69,10 +74,20 @@ impl DatagenEventGenerator {
                 offset: (self.events_so_far + i).to_string(),
                 split_id: self.split_id.clone(),
             };
-
+            generated_count += 1;
             res.push(msg);
         }
-        self.events_so_far += self.partition_size;
+
+        self.events_so_far += generated_count;
+
+        // if left time < 1s then wait
+        if now.elapsed().as_millis() < DEFUALT_DATAGEN_INTERVAL {
+            sleep(Duration::from_millis(
+                (DEFUALT_DATAGEN_INTERVAL - now.elapsed().as_millis()) as u64,
+            ))
+            .await;
+        }
+
         Ok(Some(res))
     }
 }
