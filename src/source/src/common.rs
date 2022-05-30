@@ -47,6 +47,6 @@ pub(crate) trait SourceChunkBuilder {
 
     fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {
         let columns = Self::build_columns(column_desc, rows)?;
-        Ok(DataChunk::tai(columns, rows.len(), None))
+        Ok(DataChunk::new(columns, rows.len(), None))
     }
 }

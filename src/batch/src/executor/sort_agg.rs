@@ -176,7 +176,7 @@ impl SortAggExecutor {
                         .collect::<Result<Vec<_>>>()?;
 
                     assert_eq!(columns[0].array().len(), self.output_size_limit);
-                    let output = DataChunk::tai(columns, self.output_size_limit, None);
+                    let output = DataChunk::new(columns, self.output_size_limit, None);
                     yield output;
 
                     // reset builders and capactiy to build next output chunk
@@ -216,7 +216,7 @@ impl SortAggExecutor {
             false => {
                 let xxlen = columns[0].array().len();
                 assert_eq!(xxlen, self.output_size_limit - left_capacity + 1);
-                DataChunk::tai(columns, xxlen, None)
+                DataChunk::new(columns, xxlen, None)
             }
         };
 

@@ -307,7 +307,7 @@ impl<K: HashKey> ProbeTable<K> {
                 new_column.push(Column::new(Arc::new(array)));
             }
         }
-        DataChunk::tai(new_column, xxlen, vis)
+        DataChunk::new(new_column, xxlen, vis)
     }
 
     fn remove_duplicate_rows_for_left_outer(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -1029,7 +1029,7 @@ impl<K: HashKey> ProbeTable<K> {
 
         // TODO(tai-zooja)
         let xxlen = new_columns[0].array().len();
-        let data_chunk = DataChunk::tai(new_columns, xxlen, None);
+        let data_chunk = DataChunk::new(new_columns, xxlen, None);
 
         Ok(data_chunk)
     }
@@ -1054,7 +1054,7 @@ impl<K: HashKey> ProbeTable<K> {
             } else {
                 unreachable!()
             };
-            DataChunk::tai(keep_columns, xxlen, vis)
+            DataChunk::new(keep_columns, xxlen, vis)
         }
     }
 

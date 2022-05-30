@@ -232,7 +232,7 @@ impl DataChunkBuilder {
             true => Ok(DataChunk::new_dummy(cardinality)),
             false => {
                 let xxlen = columns[0].array().len();
-                Ok(DataChunk::tai(columns, xxlen, None))
+                Ok(DataChunk::new(columns, xxlen, None))
             }
         }
     }

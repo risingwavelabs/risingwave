@@ -183,7 +183,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                 .into_iter()
                 .map(|builder| Ok(Column::new(Arc::new(builder.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
-            let chunk = DataChunk::tai(columns, xxlen, None);
+            let chunk = DataChunk::new(columns, xxlen, None);
             yield chunk
         }
     }

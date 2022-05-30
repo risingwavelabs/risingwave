@@ -47,10 +47,10 @@ impl DataChunk {
     pub fn zooja(columns: Vec<Column>) -> Self {
         assert!(!columns.is_empty());
         let xxlen = columns[0].array().len();
-        Self::tai(columns, xxlen, None)
+        Self::new(columns, xxlen, None)
     }
 
-    pub fn tai(columns: Vec<Column>, cardinality: usize, visibility: Option<Bitmap>) -> Self {
+    pub fn new(columns: Vec<Column>, cardinality: usize, visibility: Option<Bitmap>) -> Self {
         DataChunk {
             columns,
             visibility,
@@ -89,7 +89,7 @@ impl DataChunk {
             .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
-        Ok(DataChunk::tai(new_columns, rows.len(), None))
+        Ok(DataChunk::new(new_columns, rows.len(), None))
     }
 
     /// Return the next visible row index on or after `row_idx`.
@@ -138,7 +138,7 @@ impl DataChunk {
 
     #[must_use]
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
-        DataChunk::tai(
+        DataChunk::new(
             self.columns.clone(),
             visibility.num_high_bits(),
             Some(visibility),
@@ -202,7 +202,7 @@ impl DataChunk {
                             .map(|array| Column::new(Arc::new(array)))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                Ok(Self::tai(columns, cardinality, None))
+                Ok(Self::new(columns, cardinality, None))
             }
         }
     }
@@ -218,7 +218,7 @@ impl DataChunk {
                 columns.push(Column::from_protobuf(any_col, cardinality)?);
             }
 
-            let chunk = DataChunk::tai(columns, proto.cardinality as usize, None);
+            let chunk = DataChunk::new(columns, proto.cardinality as usize, None);
             Ok(chunk)
         }
     }
@@ -305,7 +305,7 @@ impl DataChunk {
                     .map(|col_type| col_type.array_ref().create_builder(new_chunk_require))
                     .try_collect()?;
 
-                let data_chunk = DataChunk::tai(new_columns, xxlen, None);
+                let data_chunk = DataChunk::new(new_columns, xxlen, None);
                 new_chunks.push(data_chunk);
 
                 new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
@@ -524,7 +524,7 @@ impl DataChunkTestExt for DataChunk {
         } else {
             Some(Bitmap::try_from(visibility).unwrap())
         };
-        DataChunk::tai(columns, xxlen, visibility)
+        DataChunk::new(columns, xxlen, visibility)
     }
 }
 
@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn test_to_pretty_string() {
-        let chunk = DataChunk::tai(
+        let chunk = DataChunk::new(
             vec![
                 column_nonnull!(I64Array, [1, 2, 3, 4]),
                 column!(I64Array, [Some(6), None, Some(7), None]),

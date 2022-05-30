@@ -214,7 +214,7 @@ impl HopWindowExecutor {
             let data_chunk = data_chunk?;
             let hop_start = hop_expr.eval(&data_chunk)?;
             let xxlen = hop_start.len();
-            let hop_start_chunk = DataChunk::tai(vec![Column::new(hop_start)], xxlen, None);
+            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], xxlen, None);
             let (origin_cols, visibility) = data_chunk.into_parts();
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
@@ -227,7 +227,7 @@ impl HopWindowExecutor {
                     Column::new(window_start_col),
                     Column::new(window_end_col),
                 ]);
-                let new_chunk = DataChunk::tai(new_cols, xxlen, None);
+                let new_chunk = DataChunk::new(new_cols, xxlen, None);
                 yield new_chunk;
             }
         }

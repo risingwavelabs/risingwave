@@ -249,7 +249,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
 
-            let output = DataChunk::tai(columns, xxlen, None);
+            let output = DataChunk::new(columns, xxlen, None);
             yield output;
         }
     }

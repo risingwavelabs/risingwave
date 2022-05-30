@@ -106,7 +106,7 @@ where
         }
         let new_visibility = new_visibility.finish();
         if new_visibility.num_high_bits() > 0 {
-            Some(DataChunk::tai(
+            Some(DataChunk::new(
                 columns,
                 new_visibility.num_high_bits(),
                 Some(new_visibility),

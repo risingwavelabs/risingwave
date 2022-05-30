@@ -101,7 +101,7 @@ impl ValuesExecutor {
                         .collect::<Result<Vec<Column>>>()?;
 
                     let xxlen = columns[0].array().len(); // no-column handled above
-                    let chunk = DataChunk::tai(columns, xxlen, None);
+                    let chunk = DataChunk::new(columns, xxlen, None);
 
                     yield chunk
                 }

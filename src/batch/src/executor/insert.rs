@@ -120,7 +120,7 @@ impl InsertExecutor {
             array_builder.append(Some(rows_inserted as i64))?;
 
             let array = array_builder.finish()?;
-            let ret_chunk = DataChunk::tai(vec![array.into()], 1, None);
+            let ret_chunk = DataChunk::new(vec![array.into()], 1, None);
 
             yield ret_chunk
         }
