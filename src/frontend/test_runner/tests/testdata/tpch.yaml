@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - id: create_tables
   sql: |
     CREATE TABLE supplier (
@@ -510,9 +512,10 @@
   batch_plan: |
     BatchSimpleAgg { aggs: [sum($0)] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [($1 * $2)] }
-          BatchFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($2 >= (0.08:Decimal - 0.01:Decimal)) AND ($2 <= (0.08:Decimal + 0.01:Decimal)) AND ($0 < 24:Int32) }
-            BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_shipdate] }
+        BatchSimpleAgg { aggs: [sum($0)] }
+          BatchProject { exprs: [($1 * $2)] }
+            BatchFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($2 >= (0.08:Decimal - 0.01:Decimal)) AND ($2 <= (0.08:Decimal + 0.01:Decimal)) AND ($0 < 24:Int32) }
+              BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_shipdate] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), revenue], pk_columns: [agg#0, revenue] }
       StreamSimpleAgg { aggs: [count, sum($0)] }
@@ -1064,8 +1067,8 @@
           BatchProject { exprs: [($0 * 0.0001000000:Decimal)] }
             BatchSimpleAgg { aggs: [sum($0)] }
               BatchExchange { order: [], dist: Single }
-                BatchProject { exprs: [($1 * $0)] }
-                  BatchProject { exprs: [$0, $1] }
+                BatchSimpleAgg { aggs: [sum($0)] }
+                  BatchProject { exprs: [($1 * $0)] }
                     BatchHashJoin { type: Inner, predicate: $2 = $3 }
                       BatchExchange { order: [], dist: HashShard([2]) }
                         BatchProject { exprs: [$1, $2, $4] }
@@ -1211,8 +1214,8 @@
     BatchProject { exprs: [((100.00:Decimal * $0) / $1)] }
       BatchSimpleAgg { aggs: [sum($0), sum($1)] }
         BatchExchange { order: [], dist: Single }
-          BatchProject { exprs: [Case(Like($2, 'PROMO%':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))] }
-            BatchProject { exprs: [$1, $2, $4] }
+          BatchSimpleAgg { aggs: [sum($0), sum($1)] }
+            BatchProject { exprs: [Case(Like($4, 'PROMO%':Varchar), ($1 * (1:Int32 - $2)), 0:Int32::Decimal), ($1 * (1:Int32 - $2))] }
               BatchHashJoin { type: Inner, predicate: $0 = $3 }
                 BatchExchange { order: [], dist: HashShard([0]) }
                   BatchProject { exprs: [$0, $1, $2] }
@@ -1297,12 +1300,13 @@
             BatchExchange { order: [], dist: HashShard([0]) }
               BatchSimpleAgg { aggs: [max($0)] }
                 BatchExchange { order: [], dist: Single }
-                  BatchProject { exprs: [$1] }
-                    BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
-                      BatchExchange { order: [], dist: HashShard([0]) }
-                        BatchProject { exprs: [$0, ($1 * (1:Int32 - $2))] }
-                          BatchFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                            BatchScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
+                  BatchSimpleAgg { aggs: [max($0)] }
+                    BatchProject { exprs: [$1] }
+                      BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchProject { exprs: [$0, ($1 * (1:Int32 - $2))] }
+                            BatchFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                              BatchScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
   stream_plan: |
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, _row_id(hidden), l_suppkey(hidden), agg#0(hidden), agg#1(hidden)], pk_columns: [_row_id, l_suppkey, agg#0, agg#1], order_descs: [s_suppkey, _row_id, l_suppkey, agg#0, agg#1] }
       StreamExchange { dist: HashShard([5, 6, 7, 8]) }
@@ -1422,22 +1426,23 @@
     BatchProject { exprs: [RoundDigit(($0 / 7.0:Decimal), 16:Int32)] }
       BatchSimpleAgg { aggs: [sum($0)] }
         BatchExchange { order: [], dist: Single }
-          BatchProject { exprs: [$1] }
-            BatchFilter { predicate: ($0 < (0.2:Decimal * ($2 / $3))) }
-              BatchProject { exprs: [$5, $6, $27, $28] }
-                BatchHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26], aggs: [sum($27), count($27)] }
-                  BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27] }
-                    BatchHashJoin { type: LeftOuter, predicate: $18 = $28 }
-                      BatchExchange { order: [], dist: HashShard([18]) }
-                        BatchHashJoin { type: Inner, predicate: $2 = $18 }
-                          BatchExchange { order: [], dist: HashShard([2]) }
-                            BatchScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-                          BatchExchange { order: [], dist: HashShard([1]) }
-                            BatchFilter { predicate: ($4 = 'Brand#13':Varchar) AND ($7 = 'JUMBO PKG':Varchar) }
-                              BatchScan { table: part, columns: [_row_id, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
-                      BatchExchange { order: [], dist: HashShard([1]) }
-                        BatchProject { exprs: [$1, $0] }
-                          BatchScan { table: lineitem, columns: [l_partkey, l_quantity] }
+          BatchSimpleAgg { aggs: [sum($0)] }
+            BatchProject { exprs: [$1] }
+              BatchFilter { predicate: ($0 < (0.2:Decimal * ($2 / $3))) }
+                BatchProject { exprs: [$5, $6, $27, $28] }
+                  BatchHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26], aggs: [sum($27), count($27)] }
+                    BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27] }
+                      BatchHashJoin { type: LeftOuter, predicate: $18 = $28 }
+                        BatchExchange { order: [], dist: HashShard([18]) }
+                          BatchHashJoin { type: Inner, predicate: $2 = $18 }
+                            BatchExchange { order: [], dist: HashShard([2]) }
+                              BatchScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+                            BatchExchange { order: [], dist: HashShard([1]) }
+                              BatchFilter { predicate: ($4 = 'Brand#13':Varchar) AND ($7 = 'JUMBO PKG':Varchar) }
+                                BatchScan { table: part, columns: [_row_id, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
+                        BatchExchange { order: [], dist: HashShard([1]) }
+                          BatchProject { exprs: [$1, $0] }
+                            BatchScan { table: lineitem, columns: [l_partkey, l_quantity] }
   stream_plan: |
     StreamMaterialize { columns: [avg_yearly, agg#0(hidden), agg#1(hidden)], pk_columns: [agg#0, agg#1] }
       StreamProject { exprs: [RoundDigit(($1 / 7.0:Decimal), 16:Int32), $0, $1] }
@@ -1584,8 +1589,8 @@
   batch_plan: |
     BatchSimpleAgg { aggs: [sum($0)] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [($0 * (1:Int32 - $1))] }
-          BatchProject { exprs: [$2, $3] }
+        BatchSimpleAgg { aggs: [sum($0)] }
+          BatchProject { exprs: [($2 * (1:Int32 - $3))] }
             BatchFilter { predicate: ((((((($5 = 'Brand#52':Varchar) AND In($7, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($6 <= 5:Int32)) OR ((((($5 = 'Brand#24':Varchar) AND In($7, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($6 <= 10:Int32))) OR ((((($5 = 'Brand#32':Varchar) AND In($7, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($6 <= 15:Int32))) }
               BatchHashJoin { type: Inner, predicate: $0 = $4 }
                 BatchExchange { order: [], dist: HashShard([0]) }
@@ -1881,19 +1886,19 @@
         BatchHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1] }
-              BatchProject { exprs: [$0, $1] }
-                BatchNestedLoopJoin { type: Inner, predicate: ($1 > $2) }
-                  BatchExchange { order: [], dist: Single }
-                    BatchProject { exprs: [$1, $2] }
-                      BatchHashJoin { type: LeftAnti, predicate: $0 = $3 }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchFilter { predicate: In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
-                            BatchScan { table: customer, columns: [c_custkey, c_phone, c_acctbal] }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchScan { table: orders, columns: [o_custkey] }
-                  BatchProject { exprs: [($0 / $1)] }
-                    BatchSimpleAgg { aggs: [sum($0), count($0)] }
-                      BatchExchange { order: [], dist: Single }
+              BatchNestedLoopJoin { type: Inner, predicate: ($1 > $2) }
+                BatchExchange { order: [], dist: Single }
+                  BatchProject { exprs: [$1, $2] }
+                    BatchHashJoin { type: LeftAnti, predicate: $0 = $3 }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchFilter { predicate: In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                          BatchScan { table: customer, columns: [c_custkey, c_phone, c_acctbal] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchScan { table: orders, columns: [o_custkey] }
+                BatchProject { exprs: [($0 / $1)] }
+                  BatchSimpleAgg { aggs: [sum($0), sum($1)] }
+                    BatchExchange { order: [], dist: Single }
+                      BatchSimpleAgg { aggs: [sum($0), count($0)] }
                         BatchProject { exprs: [$1] }
                           BatchFilter { predicate: ($1 > 0.00:Decimal) AND In(Substr($0, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
                             BatchScan { table: customer, columns: [c_phone, c_acctbal] }

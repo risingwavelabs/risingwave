@@ -1,6 +1,10 @@
 ## Overview
 
-This directory contains RisingWave design documents that are intended to be used by developers to understand how we design and implement RisingWave. To learn about how to use RisingWave, check out the [RisingWave user documentation](https://www.risingwave.dev).
+This directory contains RisingWave design documents that are intended to be used by contributors to understand our development process, and how we design and implement RisingWave. To learn about how to use RisingWave, check out the [RisingWave user documentation](https://www.risingwave.dev).
+
+## Developer guide
+
+After you learn about the basics of RisingWave, take a look at our [developer guide](developer-guide.md). It'll help you up to speed with the development process.
 
 ## Table of Contents
 
@@ -14,7 +18,6 @@ This directory contains RisingWave design documents that are intended to be used
 * [Data Model and Encoding](./data-model-and-encoding.md)
 * Local state and cache of stateful operator
 
-## Contribution Guide
 
 ## Images
 

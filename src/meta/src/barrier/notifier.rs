@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-
 use risingwave_common::error::{Result, RwError};
 use tokio::sync::oneshot;
-
-use crate::model::ActorId;
 
 /// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
@@ -62,65 +58,6 @@ impl Notifier {
     pub fn notify_finished(self) {
         if let Some(tx) = self.finished {
             tx.send(()).ok();
-        }
-    }
-}
-
-/// Stores the notifiers for commands that are not finished yet. Essentially for
-/// `CreateMaterializedView`.
-#[derive(Default)]
-pub(super) struct UnfinishedNotifiers(HashMap<u64, (HashSet<ActorId>, Vec<Notifier>)>);
-
-impl UnfinishedNotifiers {
-    /// Add a command with current `epoch` and `notifiers`, that needs to wait for actors with
-    /// `actor_ids` to report finishing.
-    /// If `actor_ids` is empty, [`Notifier::notify_finished`] will be called immediately.
-    pub fn add(
-        &mut self,
-        epoch: u64,
-        actor_ids: impl IntoIterator<Item = ActorId>,
-        notifiers: impl IntoIterator<Item = Notifier>,
-    ) {
-        let actor_ids: HashSet<_> = actor_ids.into_iter().collect();
-
-        if actor_ids.is_empty() {
-            // The barrier can be finished immediately.
-            notifiers.into_iter().for_each(Notifier::notify_finished);
-        } else {
-            tracing::debug!(
-                "actors to be finished for DDL with epoch {}: {:?}",
-                epoch,
-                actor_ids
-            );
-
-            let notifiers = notifiers.into_iter().collect();
-            let old = self.0.insert(epoch, (actor_ids, notifiers));
-            assert!(old.is_none());
-        }
-    }
-
-    /// Tell that the command with `epoch` has been reported to be finished on given `actors`. If
-    /// we've finished on all actors, [`Notifier::notify_finished`] will be called.
-    pub fn finish_actors(&mut self, epoch: u64, actors: impl IntoIterator<Item = ActorId>) {
-        use std::collections::hash_map::Entry;
-
-        match self.0.entry(epoch) {
-            Entry::Occupied(mut o) => {
-                actors.into_iter().for_each(|a| {
-                    tracing::debug!("finish actor {} for DDL with epoch {}", a, epoch);
-                    o.get_mut().0.remove(&a);
-                });
-
-                // All actors finished.
-                if o.get().0.is_empty() {
-                    tracing::debug!("finish all actors for DDL with epoch {}!", epoch);
-
-                    let notifiers = o.remove().1;
-                    notifiers.into_iter().for_each(Notifier::notify_finished);
-                }
-            }
-
-            Entry::Vacant(_) => todo!("handle finish report after meta recovery"),
         }
     }
 }

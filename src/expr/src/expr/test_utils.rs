@@ -14,10 +14,10 @@
 
 use itertools::Itertools;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType;
-use risingwave_pb::expr::expr_node::Type::InputRef;
+use risingwave_pb::data::{DataType as ProstDataType, DataType};
+use risingwave_pb::expr::expr_node::Type::{Field, InputRef};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 
 pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[i32]) -> ExprNode {
     let mut exprs = Vec::new();
@@ -44,5 +44,29 @@ pub fn make_input_ref(idx: i32, ret: TypeName) -> ExprNode {
             ..Default::default()
         }),
         rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
+    }
+}
+
+pub fn make_i32_literal(data: i32) -> ExprNode {
+    ExprNode {
+        expr_type: Type::ConstantValue as i32,
+        return_type: Some(ProstDataType {
+            type_name: TypeName::Int32 as i32,
+            ..Default::default()
+        }),
+        rex_node: Some(RexNode::Constant(ConstantValue {
+            body: data.to_be_bytes().to_vec(),
+        })),
+    }
+}
+
+pub fn make_field_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
+    ExprNode {
+        expr_type: Field as i32,
+        return_type: Some(ProstDataType {
+            type_name: ret as i32,
+            ..Default::default()
+        }),
+        rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
     }
 }

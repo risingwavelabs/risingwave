@@ -26,7 +26,7 @@ if [ "$ETCD_SYSTEM" = "darwin-amd64" ] || [ "$ETCD_SYSTEM" = "darwin-arm64" ] ||
     unzip "${ETCD_DOWNLOAD_PATH_OTHER}" -d "${PREFIX_TMP}"
 else
     curl -L "${ETCD_DOWNLOAD_URL_LINUX}" -o "${ETCD_DOWNLOAD_PATH_LINUX}"
-    tar -xf "${ETCD_DOWNLOAD_PATH_LINUX}" -C "${PREFIX_TMP}"
+    tar -xf "${ETCD_DOWNLOAD_PATH_LINUX}" -C "${PREFIX_TMP}" --no-same-owner
 fi
 
 mv "${PREFIX_TMP}/${ETCD_RELEASE}" "${PREFIX_BIN}/etcd"

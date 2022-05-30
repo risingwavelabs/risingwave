@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -51,6 +52,7 @@ mod meta_client;
 pub mod test_utils;
 extern crate core;
 extern crate risingwave_common;
+
 mod config;
 
 use std::ffi::OsString;

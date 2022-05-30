@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -75,9 +74,6 @@ pub struct SharedBufferBatch {
     epoch: HummockEpoch,
 }
 
-/// `{ end key -> batch }`
-pub(crate) type IndexedSharedBufferBatches = BTreeMap<Vec<u8>, SharedBufferBatch>;
-
 impl SharedBufferBatch {
     pub fn new(
         sorted_items: Vec<SharedBufferItem>,
@@ -133,12 +129,16 @@ impl SharedBufferBatch {
         }
     }
 
+    pub fn into_directed_iter<D: HummockIteratorDirection>(self) -> SharedBufferBatchIterator<D> {
+        SharedBufferBatchIterator::<D>::new(self.inner)
+    }
+
     pub fn into_forward_iter(self) -> SharedBufferBatchIterator<Forward> {
-        SharedBufferBatchIterator::<Forward>::new(self.inner)
+        self.into_directed_iter()
     }
 
     pub fn into_backward_iter(self) -> SharedBufferBatchIterator<Backward> {
-        SharedBufferBatchIterator::<Backward>::new(self.inner)
+        self.into_directed_iter()
     }
 
     pub fn get_payload(&self) -> &[SharedBufferItem] {

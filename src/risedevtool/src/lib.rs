@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(exit_status_error)]
 #![feature(let_chains)]
 #![feature(let_else)]
@@ -26,6 +27,8 @@ pub mod service_config;
 pub use service_config::*;
 mod compose;
 pub use compose::*;
+mod compose_deploy;
+pub use compose_deploy::*;
 
 mod task;
 pub mod util;

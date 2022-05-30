@@ -134,6 +134,10 @@ impl BlockCache {
         hasher.finish()
     }
 
+    pub fn size(&self) -> usize {
+        self.inner.get_memory_usage()
+    }
+
     #[cfg(test)]
     pub fn clear(&self) {
         self.inner.clear();

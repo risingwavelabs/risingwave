@@ -25,11 +25,12 @@ mod my_stats;
 pub use my_stats::MyHistogram;
 
 mod local_metrics;
-mod object_metrics;
-mod process_linux;
 pub use local_metrics::StoreLocalStatistic;
+
+mod object_metrics;
 pub use object_metrics::ObjectStoreMetrics;
 
+mod process_linux;
 pub use self::process_linux::monitor_process;
 
 /// Define extension method `print` used in `print_statistics`.

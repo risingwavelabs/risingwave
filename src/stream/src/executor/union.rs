@@ -14,10 +14,10 @@
 
 use std::sync::Arc;
 
-use futures::stream::select_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::select_all;
 
 use super::*;
 use crate::executor::{BoxedMessageStream, ExecutorInfo};
@@ -104,7 +104,7 @@ mod tests {
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn union() {
         let streams = vec![
             try_stream! {

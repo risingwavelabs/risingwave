@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     /* bind typed literal */
     select int '1';
@@ -70,7 +72,8 @@
     BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = $0))] }
       BatchSimpleAgg { aggs: [min($0)] }
         BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [v1] }
+          BatchSimpleAgg { aggs: [min($0)] }
+            BatchScan { table: t, columns: [v1] }
 - sql: |
     /* in-list with non-const: scalar subquery */
     create table t (v1 int);
@@ -84,7 +87,8 @@
             BatchScan { table: b, columns: [b2] }
           BatchSimpleAgg { aggs: [min($0)] }
             BatchExchange { order: [], dist: Single }
-              BatchScan { table: t, columns: [v1] }
+              BatchSimpleAgg { aggs: [min($0)] }
+                BatchScan { table: t, columns: [v1] }
 - sql: |
     /* in-list with non-const: correlated ref */
     create table t (v1 int);
@@ -110,18 +114,18 @@
 - sql: |
     values(round(42.4382));
   batch_plan: |
-    BatchValues { rows: [[RoundDigit(42.4382:Decimal, 0:Int32)]] }
+    BatchValues { rows: [[Round(42.4382:Decimal)]] }
 - sql: |
     values(round(42));
   batch_plan: |
-    BatchValues { rows: [[RoundDigit(42:Int32::Decimal, 0:Int32)]] }
+    BatchValues { rows: [[Round(42:Int32::Decimal)]] }
 - sql: |
     values(round(42, 2));
   batch_plan: |
     BatchValues { rows: [[RoundDigit(42:Int32::Decimal, 2:Int32)]] }
 - sql: |
     values(round('abc'));
-  binder_error: 'Feature is not yet implemented: RoundDigit[Varchar, Int32], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: 'Feature is not yet implemented: Round[Varchar], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - sql: |
     values(extract(hour from timestamp '2001-02-16 20:38:40'));
   batch_plan: |
@@ -222,7 +226,7 @@
 - sql: |
     create table t (v1 int);
     select coalesce() from t;
-  binder_error: 'Bind error: Coalesce function must contain at least 1 argument'
+  binder_error: 'Bind error: Function `Coalesce` takes at least 1 arguments (0 given)'
 - sql: |
     create table t (v1 int);
     select coalesce(1,'a') from t;
@@ -252,4 +256,4 @@
 - sql: |
     create table t (v1 int);
     select concat_ws() from t;
-  binder_error: 'Bind error: ConcatWs function must contain at least 2 arguments'
+  binder_error: 'Bind error: Function `ConcatWs` takes at least 2 arguments (0 given)'

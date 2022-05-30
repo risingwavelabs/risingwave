@@ -69,7 +69,7 @@ where
         let mut iter = self.table.iter(epoch).await?;
 
         while let Some(data_chunk) = iter
-            .collect_data_chunk(&self.table, Some(self.batch_size))
+            .collect_data_chunk(self.schema(), Some(self.batch_size))
             .await?
         {
             // Filter out rows
@@ -148,7 +148,7 @@ mod test {
     use super::*;
     use crate::executor::mview::test_utils::gen_basic_table;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_basic() {
         let test_batch_size = 50;
         let test_batch_count = 5;

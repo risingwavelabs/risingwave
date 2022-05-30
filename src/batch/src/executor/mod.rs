@@ -12,41 +12,88 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::ErrorCode::{self, InternalError};
+mod delete;
+mod filter;
+mod generate_series;
+mod generic_exchange;
+mod hash_agg;
+mod hop_window;
+mod insert;
+mod join;
+mod limit;
+mod merge_sort_exchange;
+pub mod monitor;
+mod order_by;
+mod project;
+mod row_seq_scan;
+mod sort_agg;
+#[cfg(test)]
+pub mod test_utils;
+mod top_n;
+mod trace;
+mod update;
+mod values;
+
+pub use delete::*;
+pub use filter::*;
+use futures::stream::BoxStream;
+pub use generate_series::*;
+pub use generic_exchange::*;
+pub use hash_agg::*;
+pub use hop_window::*;
+pub use insert::*;
+pub use join::*;
+pub use limit::*;
+pub use merge_sort_exchange::*;
+pub use monitor::*;
+pub use order_by::*;
+pub use project::*;
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
+pub use row_seq_scan::*;
+pub use sort_agg::*;
+pub use top_n::*;
+pub use trace::*;
+pub use update::*;
+pub use values::*;
 
-use crate::executor2::{
-    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2,
-    GenerateSeriesExecutor2Builder, GenericExchangeExecutor2Builder, HashAggExecutor2Builder,
-    HashJoinExecutor2Builder, HopWindowExecutor2, InsertExecutor2, LimitExecutor2,
-    MergeSortExchangeExecutor2Builder, NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2,
-    RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2, TopNExecutor2,
-    TraceExecutor2, UpdateExecutor, ValuesExecutor2,
-};
 use crate::task::{BatchTaskContext, TaskId};
 
-#[cfg(test)]
-pub mod test_utils;
+pub type BoxedExecutor = Box<dyn Executor>;
+pub type BoxedDataChunkStream = BoxStream<'static, Result<DataChunk>>;
 
-/// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor` from
-/// proto and global environment
-pub trait BoxedExecutorBuilder {
-    fn new_boxed_executor2<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2>;
+pub struct ExecutorInfo {
+    pub schema: Schema,
+    pub id: String,
 }
 
-#[allow(dead_code)]
-struct NotImplementedBuilder;
+/// Refactoring of `Executor` using `Stream`.
+pub trait Executor: Send + 'static {
+    /// Returns the schema of the executor's return data.
+    ///
+    /// Schema must be available before `init`.
+    fn schema(&self) -> &Schema;
 
-impl BoxedExecutorBuilder for NotImplementedBuilder {
-    fn new_boxed_executor2<C: BatchTaskContext>(
-        _source: &ExecutorBuilder<C>,
-    ) -> Result<BoxedExecutor2> {
-        Err(ErrorCode::NotImplemented("Executor not implemented".to_string(), None.into()).into())
-    }
+    /// Identity string of the executor
+    fn identity(&self) -> &str;
+
+    /// Executes to return the data chunk stream.
+    ///
+    /// The implementation should guaranteed that each `DataChunk`'s cardinality is not zero.
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream;
+}
+
+/// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor`
+/// from proto and global environment.
+#[async_trait::async_trait]
+pub trait BoxedExecutorBuilder {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor>;
 }
 
 pub struct ExecutorBuilder<'a, C> {
@@ -56,12 +103,12 @@ pub struct ExecutorBuilder<'a, C> {
     epoch: u64,
 }
 
-macro_rules! build_executor2 {
+macro_rules! build_executor {
     ($source: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $source.plan_node().get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor2($source)
+                    <$data_type>::new_boxed_executor($source)
                 },
             )*
         }
@@ -78,8 +125,8 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         }
     }
 
-    pub fn build2(&self) -> Result<BoxedExecutor2> {
-        self.try_build2().map_err(|e| {
+    pub async fn build(&self) -> Result<BoxedExecutor> {
+        self.try_build().await.map_err(|e| {
             InternalError(format!(
                 "[PlanNode: {:?}] Failed to build executor: {}",
                 self.plan_node.get_node_body(),
@@ -94,30 +141,31 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
     }
 
-    fn try_build2(&self) -> Result<BoxedExecutor2> {
-        let real_executor = build_executor2! { self,
-            NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
-            NodeBody::Insert => InsertExecutor2,
-            NodeBody::Delete => DeleteExecutor2,
-            NodeBody::Exchange => GenericExchangeExecutor2Builder,
+    async fn try_build(&self) -> Result<BoxedExecutor> {
+        let real_executor = build_executor! { self,
+            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::Insert => InsertExecutor,
+            NodeBody::Delete => DeleteExecutor,
+            NodeBody::Exchange => GenericExchangeExecutorBuilder,
             NodeBody::Update => UpdateExecutor,
-            NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectExecutor2,
-            NodeBody::SortAgg => SortAggExecutor2,
-            NodeBody::OrderBy => OrderByExecutor2,
-            NodeBody::TopN => TopNExecutor2,
-            NodeBody::Limit => LimitExecutor2,
-            NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
-            NodeBody::HashJoin => HashJoinExecutor2Builder,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
-            NodeBody::HashAgg => HashAggExecutor2Builder,
-            NodeBody::MergeSortExchange => MergeSortExchangeExecutor2Builder,
-            NodeBody::GenerateSeries => GenerateSeriesExecutor2Builder,
-            NodeBody::HopWindow => HopWindowExecutor2,
-        }?;
+            NodeBody::Filter => FilterExecutor,
+            NodeBody::Project => ProjectExecutor,
+            NodeBody::SortAgg => SortAggExecutor,
+            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::TopN => TopNExecutor,
+            NodeBody::Limit => LimitExecutor,
+            NodeBody::Values => ValuesExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::HashJoin => HashJoinExecutorBuilder,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
+            NodeBody::GenerateSeries => GenerateSeriesExecutorBuilder,
+            NodeBody::HopWindow => HopWindowExecutor,
+        }
+        .await?;
         let input_desc = real_executor.identity().to_string();
-        Ok(Box::new(TraceExecutor2::new(real_executor, input_desc)))
+        Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
     }
 
     pub fn plan_node(&self) -> &PlanNode {

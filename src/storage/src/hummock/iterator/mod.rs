@@ -19,6 +19,7 @@ pub use forward_concat::*;
 mod backward_concat;
 mod concat_inner;
 pub use backward_concat::*;
+pub use concat_inner::ConcatIteratorInner;
 mod backward_merge;
 pub use backward_merge::*;
 mod backward_user;
@@ -117,12 +118,13 @@ pub type BoxedForwardHummockIterator = Box<dyn ForwardHummockIterator>;
 pub type BoxedBackwardHummockIterator = Box<dyn BackwardHummockIterator>;
 pub type BoxedHummockIterator<D> = Box<dyn HummockIterator<Direction = D>>;
 
+#[derive(PartialEq, Eq, Debug)]
 pub enum DirectionEnum {
     Forward,
     Backward,
 }
 
-pub trait HummockIteratorDirection: Sync + Send {
+pub trait HummockIteratorDirection: Sync + Send + 'static {
     fn direction() -> DirectionEnum;
 }
 

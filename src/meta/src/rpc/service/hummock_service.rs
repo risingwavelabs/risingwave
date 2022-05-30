@@ -89,24 +89,6 @@ where
         }
     }
 
-    async fn add_tables(
-        &self,
-        request: Request<AddTablesRequest>,
-    ) -> Result<Response<AddTablesResponse>, Status> {
-        let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .add_tables(req.context_id, req.tables, req.epoch)
-            .await;
-        match result {
-            Ok(version) => Ok(Response::new(AddTablesResponse {
-                status: None,
-                version: Some(version),
-            })),
-            Err(e) => Err(tonic_err(e)),
-        }
-    }
-
     async fn report_compaction_tasks(
         &self,
         request: Request<ReportCompactionTasksRequest>,
@@ -162,30 +144,6 @@ where
             return Err(tonic_err(e));
         }
         Ok(Response::new(UnpinSnapshotResponse { status: None }))
-    }
-
-    async fn commit_epoch(
-        &self,
-        request: Request<CommitEpochRequest>,
-    ) -> Result<Response<CommitEpochResponse>, Status> {
-        let req = request.into_inner();
-        let result = self.hummock_manager.commit_epoch(req.epoch).await;
-        match result {
-            Ok(_) => Ok(Response::new(CommitEpochResponse { status: None })),
-            Err(e) => Err(tonic_err(e)),
-        }
-    }
-
-    async fn abort_epoch(
-        &self,
-        request: Request<AbortEpochRequest>,
-    ) -> Result<Response<AbortEpochResponse>, Status> {
-        let req = request.into_inner();
-        let result = self.hummock_manager.abort_epoch(req.epoch).await;
-        match result {
-            Ok(_) => Ok(Response::new(AbortEpochResponse { status: None })),
-            Err(e) => Err(tonic_err(e)),
-        }
     }
 
     async fn get_new_table_id(

@@ -17,12 +17,13 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
+use risingwave_common::error::{internal_error, Result as RwResult};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 #[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectorState, SplitImpl, SplitMetaData};
+use crate::{SplitImpl, SplitMetaData};
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -102,19 +103,17 @@ impl<S: StateStore> SourceStateHandler<S> {
 
     pub async fn try_recover_from_state_store(
         &self,
-        stream_source_splits: &SplitImpl,
+        stream_source_split: &SplitImpl,
         epoch: u64,
-    ) -> Result<ConnectorState> {
-        match self.restore_states(stream_source_splits.id(), epoch).await {
-            Ok(Some(s)) => {
-                ConnectorState::restore_from_bytes(&s).map_err(|e| anyhow!(e.to_string()))
-            }
-            Ok(None) => Err(anyhow!(
-                "cannot found state for {:?}, epoch: {:?}",
-                stream_source_splits,
-                epoch
+    ) -> RwResult<Option<SplitImpl>> {
+        let connector_type = stream_source_split.get_type();
+        match self.restore_states(stream_source_split.id(), epoch).await {
+            Ok(Some(s)) => Ok(Some(
+                SplitImpl::restore_from_bytes(connector_type, &s)
+                    .map_err(|e| internal_error(e.to_string()))?,
             )),
-            Err(e) => Err(anyhow!(e.to_string())),
+            Ok(None) => Ok(None),
+            Err(e) => Err(internal_error(e.to_string())),
         }
     }
 }

@@ -22,7 +22,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::Epoch as ProstEpoch;
-use risingwave_pb::stream_service::inject_barrier_response::FinishedCreateMview;
+use risingwave_pb::stream_service::inject_barrier_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
     UpdateActorsRequest,
@@ -36,7 +36,7 @@ use crate::barrier::{Command, GlobalBarrierManager};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
-pub type RecoveryResult = (Epoch, HashSet<ActorId>, Vec<FinishedCreateMview>);
+pub type RecoveryResult = (Epoch, HashSet<ActorId>, Vec<CreateMviewProgress>);
 
 impl<S> GlobalBarrierManager<S>
 where
@@ -121,7 +121,7 @@ where
             self.fragment_manager.all_chain_actor_ids().await,
             responses
                 .into_iter()
-                .flat_map(|r| r.finished_create_mviews)
+                .flat_map(|r| r.create_mview_progress)
                 .collect(),
         );
     }

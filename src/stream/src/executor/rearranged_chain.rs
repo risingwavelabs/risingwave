@@ -23,8 +23,10 @@ use risingwave_common::catalog::Schema;
 use tokio::sync::Mutex;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream};
-use crate::task::{ActorId, FinishCreateMviewNotifier};
+use super::{
+    expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
+};
+use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, `ChainExecutor` is mainly used to implement MV on MV
@@ -40,7 +42,7 @@ pub struct RearrangedChainExecutor {
 
     upstream_indices: Arc<[usize]>,
 
-    notifier: FinishCreateMviewNotifier,
+    progress: CreateMviewProgress,
 
     actor_id: ActorId,
 
@@ -99,7 +101,7 @@ impl RearrangedChainExecutor {
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
         upstream_indices: Vec<usize>,
-        notifier: FinishCreateMviewNotifier,
+        progress: CreateMviewProgress,
         schema: Schema,
     ) -> Self {
         Self {
@@ -111,13 +113,13 @@ impl RearrangedChainExecutor {
             snapshot,
             upstream,
             upstream_indices: upstream_indices.into(),
-            actor_id: notifier.actor_id,
-            notifier,
+            actor_id: progress.actor_id(),
+            progress,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         // 0. Project the upstream with `upstream_indices`.
         let upstream_indices = self.upstream_indices.clone();
         let mut upstream = self
@@ -126,11 +128,7 @@ impl RearrangedChainExecutor {
             .map(move |result| result.map(|msg| mapping(&upstream_indices, msg)));
 
         // 1. Poll the upstream to get the first barrier.
-        let first_msg = upstream.next().await.unwrap()?;
-        let first_barrier = first_msg
-            .as_barrier()
-            .cloned()
-            .expect("the first message received by chain must be a barrier");
+        let first_barrier = expect_first_barrier(&mut upstream).await?;
         let create_epoch = first_barrier.epoch;
 
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
@@ -139,7 +137,7 @@ impl RearrangedChainExecutor {
         let to_consume_snapshot = first_barrier.is_to_add_output(self.actor_id);
 
         // The first barrier message should be propagated.
-        yield first_msg;
+        yield Message::Barrier(first_barrier.clone());
 
         if to_consume_snapshot {
             // If we need to consume the snapshot ...
@@ -186,12 +184,15 @@ impl RearrangedChainExecutor {
             #[for_await]
             for rearranged_msg in &mut rearranged {
                 match rearranged_msg? {
-                    // If we received a phantom barrier, check whether we catches up with the
-                    // progress of upstream MV.
+                    // If we received a phantom barrier, update the progress and check whether we
+                    // catches up with the progress of upstream MV.
                     //
                     // Note that there's no phantom barrier in the snapshot. So we must have already
                     // consumed the whole snapshot and be on the upstream now.
                     RearrangedMessage::PhantomBarrier(barrier) => {
+                        // Update the progress since we've consumed all chunks before this phantom.
+                        self.progress.update(barrier.epoch.curr);
+
                         if barrier.epoch.curr >= last_rearranged_epoch.curr {
                             // Stop the background rearrangement task.
                             stop_rearrange_tx.take().unwrap().send(()).map_err(|_| {
@@ -212,13 +213,17 @@ impl RearrangedChainExecutor {
 
             // 7. Rearranged task finished.
             // The reason for finish must be that we told it to stop.
-            tracing::debug!(actor = self.actor_id, "rearranged task finished");
+            tracing::trace!(actor = self.actor_id, "rearranged task finished");
             if stop_rearrange_tx.is_some() {
                 tracing::error!(actor = self.actor_id, "rearrangement finished passively");
             }
 
             // 8. Consume remainings.
-            let mut notifier = Some(self.notifier);
+            let mut finish_on_barrier = |msg: &Message| {
+                if msg.as_barrier().is_some() {
+                    self.progress.finish();
+                }
+            };
 
             // Note that there may still be some messages in `rearranged`. However the rearranged
             // barriers must be ignored, we should take the phantoms.
@@ -226,14 +231,8 @@ impl RearrangedChainExecutor {
             for msg in rearranged {
                 let msg: RearrangedMessage = msg?;
                 let Some(msg) = msg.phantom_into() else { continue };
-
-                let is_barrier = msg.as_barrier().is_some();
+                finish_on_barrier(&msg);
                 yield msg;
-
-                if is_barrier && let Some(notifier) = notifier.take()  {
-                    // Notify about the finish after the first barrier.
-                    notifier.notify(create_epoch.curr);
-                }
             }
 
             // Now we take back the remaining upstream. There should be no contention since
@@ -241,18 +240,13 @@ impl RearrangedChainExecutor {
             let mut remaining_upstream = upstream.try_lock().unwrap();
 
             // Consume remaining upstream.
-            tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream");
+            tracing::trace!(actor = self.actor_id, "begin to consume remaining upstream");
 
             #[for_await]
             for msg in &mut *remaining_upstream {
                 let msg: Message = msg?;
-                let is_barrier = msg.as_barrier().is_some();
+                finish_on_barrier(&msg);
                 yield msg;
-
-                if is_barrier && let Some(notifier) = notifier.take()  {
-                    // Notify about the finish after the first barrier.
-                    notifier.notify(create_epoch.curr);
-                }
             }
         } else {
             // If there's no need to consume the snapshot ...
