@@ -13,6 +13,7 @@
 // limitations under the License.
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::fmt::Debug;
 use std::future::Future;
 use std::path::Path;
 
@@ -21,29 +22,20 @@ use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
 use num_traits::FromPrimitive;
 use risingwave_common::array::Op;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{
     DataType, Datum, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
 };
 use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
-use thiserror::Error;
 use url::Url;
 
 use crate::{Event, SourceColumnDesc, SourceParser};
 
+const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
+
 pub fn unix_epoch_days() -> i32 {
     NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()
-}
-
-#[derive(Error, Debug)]
-pub enum AvroSchemaParseError {
-    #[error("{0}. schema location is not support.")]
-    UnSupportSchemaLocation(String),
-    #[error("{0}.illegal schema file format.")]
-    IllegalSchemaFile(String),
-    #[error("{0}.illegal schema location. Format must be {1} ")]
-    IllegalSchemaPath(String, String),
 }
 
 #[derive(Debug)]
@@ -52,7 +44,7 @@ pub struct AvroParser {
 }
 
 impl AvroParser {
-    async fn new(schema_location: &str, props: HashMap<String, String>) -> anyhow::Result<Self> {
+    pub async fn new(schema_location: &str, props: HashMap<String, String>) -> Result<Self> {
         let url = Url::parse(schema_location)
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", schema_location, e)))
             .unwrap();
@@ -74,7 +66,7 @@ impl AvroParser {
                     Some(props),
                 )
                 .await,
-                _ => Err(anyhow::Error::from(ProtocolError(format!(
+                _ => Err(RwError::from(ProtocolError(format!(
                     "path scheme {} is not supported",
                     url_schema
                 )))),
@@ -228,21 +220,25 @@ impl SourceParser for AvroParser {
 pub async fn read_schema_from_s3(
     location: String,
     properties: HashMap<String, String>,
-) -> anyhow::Result<String> {
+) -> Result<String> {
     let s3_url = Url::parse(location.as_str());
     if let Ok(url) = s3_url {
         let bucket = if let Some(bucket) = url.domain() {
             bucket
         } else {
-            return Err(anyhow::Error::from(
-                AvroSchemaParseError::IllegalSchemaPath(
-                    url.to_string(),
-                    "s3://bucket_name/file_name".to_string(),
-                ),
-            ));
+            return Err(RwError::from(InternalError(format!(
+                "Illegal Avro schema path {}",
+                url
+            ))));
         };
+        if properties.get(AVRO_SCHEMA_LOCATION_S3_REGION).is_none() {
+            return Err(RwError::from(InvalidConfigValue {
+                config_entry: AVRO_SCHEMA_LOCATION_S3_REGION.to_string(),
+                config_value: "NONE".to_string(),
+            }));
+        }
         let key = url.path().replace('/', "");
-        let config = AwsConfigV2::from(properties);
+        let config = AwsConfigV2::from(properties.clone());
         let sdk_config = config.load_config(None).await;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
         let schema_content = s3_client
@@ -260,21 +256,33 @@ pub async fn read_schema_from_s3(
                     if let Ok(str) = schema_str {
                         Ok(str.to_string())
                     } else {
-                        Err(schema_str.err().unwrap().into())
+                        let schema_decode_err =
+                            anyhow::Error::from(schema_str.err().unwrap()).to_string();
+                        Err(RwError::from(InternalError(format!(
+                            "Avro schema not valid utf8 {}",
+                            schema_decode_err
+                        ))))
                     }
                 } else {
-                    Err(body.err().unwrap().into())
+                    let read_schema_err = body.err().unwrap().to_string();
+                    Err(RwError::from(InternalError(format!(
+                        "Read Avro schema file from s3 {}",
+                        read_schema_err
+                    ))))
                 }
             }
-            Err(err) => Err(anyhow::Error::from(err)),
+            Err(err) => Err(RwError::from(InternalError(err.to_string()))),
         }
     } else {
-        Err(anyhow::Error::from(s3_url.err().unwrap()))
+        Err(RwError::from(InternalError(format!(
+            "Illegal S3 Path {}",
+            s3_url.err().unwrap()
+        ))))
     }
 }
 
 /// Read avro schema file from local file.For on-premise or testing.
-pub async fn read_schema_from_local(path: String) -> anyhow::Result<String> {
+pub async fn read_schema_from_local(path: String) -> Result<String> {
     let content_rs = std::fs::read_to_string(path.as_str());
     if let Ok(content) = content_rs {
         Ok(content)
@@ -287,10 +295,10 @@ pub async fn load_schema_async<F, Fut>(
     f: F,
     schema_path: String,
     properties: Option<HashMap<String, String>>,
-) -> anyhow::Result<Schema>
+) -> Result<Schema>
 where
     F: Fn(String, Option<HashMap<String, String>>) -> Fut,
-    Fut: Future<Output = anyhow::Result<String>>,
+    Fut: Future<Output = Result<String>>,
 {
     let file_extension = Path::new(schema_path.as_str())
         .extension()
@@ -298,28 +306,35 @@ where
 
     if let Some(extension) = file_extension {
         if !extension.eq("avsc") {
-            Err(anyhow::Error::from(
-                AvroSchemaParseError::IllegalSchemaFile(schema_path.to_string()),
-            ))
+            Err(RwError::from(InternalError(
+                "Please specify the correct schema file XXX.avsc".to_string(),
+            )))
         } else {
             let read_schema_rs = f(schema_path, properties).await;
             let schema_content = if let Ok(content) = read_schema_rs {
                 content
             } else {
-                return Err(read_schema_rs.err().unwrap());
+                return Err(RwError::from(InternalError(format!(
+                    "Load Avro schema file error {}",
+                    anyhow::Error::from(read_schema_rs.err().unwrap())
+                ))));
             };
             let schema_rs = Schema::parse_str(schema_content.as_str());
             if let Ok(avro_schema) = schema_rs {
                 Ok(avro_schema)
             } else {
                 let schema_parse_err = schema_rs.err().unwrap();
-                Err(anyhow::Error::from(schema_parse_err))
+                Err(RwError::from(InternalError(format!(
+                    "Avro schema parse error {}",
+                    anyhow::Error::from(schema_parse_err)
+                ))))
             }
         }
     } else {
-        Err(anyhow::Error::from(
-            AvroSchemaParseError::IllegalSchemaFile(schema_path.to_string()),
-        ))
+        Err(RwError::from(InternalError(format!(
+            "Illegal Avro schema path. {}",
+            schema_path
+        ))))
     }
 }
 
@@ -333,6 +348,7 @@ mod test {
     use apache_avro::{Codec, Schema, Writer};
     use chrono::NaiveDate;
     use risingwave_common::catalog::ColumnId;
+    use risingwave_common::error;
     use risingwave_common::error::ErrorCode::InternalError;
     use risingwave_common::error::RwError;
     use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl};
@@ -383,7 +399,7 @@ mod test {
         println!("schema rs = {:?}", schema_rs);
     }
 
-    async fn new_avro_parser_from_local(file_name: &str) -> anyhow::Result<AvroParser> {
+    async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
         let schema_path = "file://".to_owned() + &test_data_path(file_name);
         AvroParser::new(schema_path.as_str(), HashMap::new()).await
     }

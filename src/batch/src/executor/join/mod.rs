@@ -12,12 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod chunked_data;
+pub mod hash_join;
+mod hash_join_state;
+pub mod nested_loop_join;
+mod row_level_iter;
+mod sort_merge_join;
+
+pub use chunked_data::*;
+pub use hash_join::*;
+pub use nested_loop_join::*;
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
+pub use sort_merge_join::*;
 
 use crate::executor::join::JoinType::Inner;
-
-mod chunked_data;
-pub mod row_level_iter;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(super) enum JoinType {
     Inner,

@@ -1250,35 +1250,30 @@ fn parse_create_table() {
             assert_eq!(
                 columns,
                 vec![
-                    ColumnDef {
-                        name: "name".into(),
-                        data_type: DataType::Varchar(Some(100)),
-                        collation: None,
-                        options: vec![ColumnOptionDef {
+                    ColumnDef::new(
+                        "name".into(),
+                        DataType::Varchar(Some(100)),
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull
                         }],
-                    },
-                    ColumnDef {
-                        name: "lat".into(),
-                        data_type: DataType::Double,
-                        collation: None,
-                        options: vec![ColumnOptionDef {
+                    ),
+                    ColumnDef::new(
+                        "lat".into(),
+                        DataType::Double,
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::Null
                         }],
-                    },
-                    ColumnDef {
-                        name: "lng".into(),
-                        data_type: DataType::Double,
-                        collation: None,
-                        options: vec![],
-                    },
-                    ColumnDef {
-                        name: "constrained".into(),
-                        data_type: DataType::Int(None),
-                        collation: None,
-                        options: vec![
+                    ),
+                    ColumnDef::new("lng".into(), DataType::Double, None, vec![],),
+                    ColumnDef::new(
+                        "constrained".into(),
+                        DataType::Int(None),
+                        None,
+                        vec![
                             ColumnOptionDef {
                                 name: None,
                                 option: ColumnOption::Null
@@ -1300,12 +1295,12 @@ fn parse_create_table() {
                                 option: ColumnOption::Check(verified_expr("constrained > 0")),
                             }
                         ],
-                    },
-                    ColumnDef {
-                        name: "ref".into(),
-                        data_type: DataType::Int(None),
-                        collation: None,
-                        options: vec![ColumnOptionDef {
+                    ),
+                    ColumnDef::new(
+                        "ref".into(),
+                        DataType::Int(None),
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::ForeignKey {
                                 foreign_table: ObjectName(vec!["othertable".into()]),
@@ -1313,13 +1308,13 @@ fn parse_create_table() {
                                 on_delete: None,
                                 on_update: None,
                             }
-                        }]
-                    },
-                    ColumnDef {
-                        name: "ref2".into(),
-                        data_type: DataType::Int(None),
-                        collation: None,
-                        options: vec![ColumnOptionDef {
+                        }],
+                    ),
+                    ColumnDef::new(
+                        "ref2".into(),
+                        DataType::Int(None),
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::ForeignKey {
                                 foreign_table: ObjectName(vec!["othertable2".into()]),
@@ -1327,8 +1322,8 @@ fn parse_create_table() {
                                 on_delete: Some(ReferentialAction::Cascade),
                                 on_update: Some(ReferentialAction::NoAction),
                             }
-                        },]
-                    }
+                        },],
+                    ),
                 ]
             );
             assert_eq!(

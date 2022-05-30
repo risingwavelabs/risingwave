@@ -168,7 +168,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<DecimalArray> {
+    fn finish(self) -> Result<DecimalArray> {
         Ok(DecimalArray {
             bitmap: self.bitmap.finish(),
             data: self.data,

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use risingwave_pb::hummock::Level;
+use risingwave_pb::hummock::{Level, SstableInfo};
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::SearchResult;
@@ -45,6 +46,78 @@ impl MinOverlappingPicker {
             overlap_strategy,
             level,
         }
+    }
+}
+
+impl MinOverlappingPicker {
+    // For example:
+    //  L1:      [(k0, k4),  (k5, k7), (k8, k9)]
+    //  L2:      [(k0, k1), (k2, k6)]
+    // If we only choose file (k0, k4), (k0, k1), (k2, k6), the file (k5, k7) will compact with the
+    // result of their compaction task again. So a better strategy is choosing (k0, k4), (k0, k1),
+    // (k2, k6), (k5, k7) all in one task.
+    fn try_expand_input(
+        &self,
+        levels: &[Level],
+        level_handlers: &mut [LevelHandler],
+        select_input_ssts: Vec<SstableInfo>,
+        target_input_ssts: &[SstableInfo],
+    ) -> Vec<SstableInfo> {
+        assert_eq!(select_input_ssts.len(), 1);
+        let select_overlap_files = self
+            .overlap_strategy
+            .check_base_level_overlap(target_input_ssts, &levels[self.level].table_infos);
+        if select_overlap_files
+            .iter()
+            .any(|table| level_handlers[self.level].is_pending_compact(&table.id))
+        {
+            return select_input_ssts;
+        }
+        if select_overlap_files.len() == select_input_ssts.len() {
+            return select_input_ssts;
+        }
+        let mut target_input_ids = HashSet::with_capacity(target_input_ssts.len());
+        for table in target_input_ssts {
+            target_input_ids.insert(table.id);
+        }
+        let select_table_id = select_input_ssts[0].id;
+        let target_level = self.level + 1;
+        let mut select_overlap_results = vec![];
+        for table in select_overlap_files {
+            if table.id == select_table_id {
+                select_overlap_results.push(table);
+                continue;
+            }
+
+            let mut info = self.overlap_strategy.create_overlap_info();
+            info.update(&table);
+            let target_overlap_files =
+                info.check_multiple_overlap(&levels[target_level].table_infos);
+            if target_overlap_files
+                .iter()
+                .any(|other| !target_input_ids.contains(&other.id))
+            {
+                continue;
+            }
+            select_overlap_results.push(table);
+        }
+
+        // Check again because there may be a file does not overlap with any other files in target
+        // level but the range between it and another file would overlap more files in
+        // target level.
+        if select_overlap_results.len() > select_input_ssts.len() {
+            let target_overlap_files = self.overlap_strategy.check_base_level_overlap(
+                &select_overlap_results,
+                &levels[target_level].table_infos,
+            );
+            if target_overlap_files
+                .iter()
+                .all(|table| target_input_ids.contains(&table.id))
+            {
+                return select_overlap_results;
+            }
+        }
+        select_input_ssts
     }
 }
 
@@ -80,12 +153,20 @@ impl CompactionPicker for MinOverlappingPicker {
         if scores.is_empty() {
             return None;
         }
-        scores.sort_by_key(|x| x.0);
-        let (_, table) = scores.first().unwrap();
-        let select_input_ssts = vec![table.clone()];
+        let (_, table) = scores.iter().min_by(|x, y| x.0.cmp(&y.0)).unwrap();
+        let mut select_input_ssts = vec![table.clone()];
         let target_input_ssts = self
             .overlap_strategy
             .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos);
+        if !target_input_ssts.is_empty() {
+            let expand_select_ssts = self.try_expand_input(
+                levels,
+                level_handlers,
+                select_input_ssts,
+                &target_input_ssts,
+            );
+            select_input_ssts = expand_select_ssts;
+        }
         level_handlers[self.level].add_pending_task(self.compact_task_id, &select_input_ssts);
         if !target_input_ssts.is_empty() {
             level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
@@ -180,5 +261,53 @@ pub mod tests {
         assert_eq!(ret.select_level.table_infos[0].id, 1);
         assert_eq!(ret.target_level.table_infos[0].id, 5);
         assert_eq!(ret.target_level.table_infos[1].id, 6);
+    }
+
+    #[test]
+    fn test_expand_l1_files() {
+        let picker = MinOverlappingPicker::new(0, 1, Arc::new(RangeOverlapStrategy::default()));
+        let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(0, 1, 50, 99, 2),
+                    generate_table(1, 1, 100, 149, 2),
+                    generate_table(2, 1, 150, 249, 2),
+                ],
+            },
+            Level {
+                level_idx: 2,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(4, 1, 50, 199, 1),
+                    generate_table(5, 1, 200, 399, 1),
+                ],
+            },
+        ];
+        let mut levels_handler = vec![
+            LevelHandler::new(0),
+            LevelHandler::new(1),
+            LevelHandler::new(2),
+        ];
+
+        // pick a non-overlapping files. It means that this file could be trival move to next level.
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+        assert_eq!(ret.select_level.level_idx, 1);
+        assert_eq!(ret.target_level.level_idx, 2);
+
+        assert_eq!(ret.select_level.table_infos.len(), 2);
+        assert_eq!(ret.select_level.table_infos[0].id, 0);
+        assert_eq!(ret.select_level.table_infos[1].id, 1);
+
+        assert_eq!(ret.target_level.table_infos.len(), 1);
+        assert_eq!(ret.target_level.table_infos[0].id, 4);
     }
 }

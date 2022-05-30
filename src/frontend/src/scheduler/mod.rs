@@ -16,15 +16,16 @@ use std::sync::Arc;
 
 use crate::session::SessionImpl;
 
-#[allow(dead_code)]
-mod execution;
+mod distributed;
 mod hummock_snapshot_manager;
 pub use hummock_snapshot_manager::*;
-#[allow(dead_code)]
 pub mod plan_fragmenter;
 mod query_manager;
 pub use query_manager::*;
+mod local;
 pub mod worker_node_manager;
+pub use local::*;
+mod task_context;
 
 /// Context for mpp query execution.
 pub struct ExecutionContext {

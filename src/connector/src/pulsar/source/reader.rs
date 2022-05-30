@@ -29,8 +29,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::base::{SourceMessage, SplitReader};
 use crate::pulsar::split::PulsarSplit;
-use crate::pulsar::PulsarEnumeratorOffset;
-use crate::{ConnectorStateV2, PulsarProperties, SplitImpl};
+use crate::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
+use crate::{Column, ConnectorState, SplitImpl};
 
 struct PulsarSingleSplitReader {
     pulsar: Pulsar<TokioExecutor>,
@@ -166,31 +166,19 @@ const PULSAR_MAX_FETCH_MESSAGES: u32 = 1024;
 
 #[async_trait]
 impl SplitReader for PulsarSplitReader {
-    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
-        let mut stream = self
-            .messages
-            .borrow_mut()
-            .ready_chunks(PULSAR_MAX_FETCH_MESSAGES as usize);
+    type Properties = PulsarProperties;
 
-        let chunk: Vec<Message<Vec<u8>>> = match stream.next().await {
-            None => return Ok(None),
-            Some(chunk) => chunk,
-        };
-
-        let ret = chunk.into_iter().map(SourceMessage::from).collect();
-
-        Ok(Some(ret))
-    }
-}
-
-impl PulsarSplitReader {
-    pub async fn new(props: PulsarProperties, state: ConnectorStateV2) -> Result<Self>
+    async fn new(
+        props: PulsarProperties,
+        state: ConnectorState,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {
         let (tx, rx) = mpsc::unbounded_channel();
         let rx = UnboundedReceiverStream::from(rx);
-        let splits = try_match_expand!(state, ConnectorStateV2::Splits).map_err(|e| anyhow!(e))?;
+        let splits = state.unwrap();
 
         let pulsar_splits: Vec<PulsarSplit> = splits
             .into_iter()
@@ -222,7 +210,25 @@ impl PulsarSplitReader {
             messages: rx,
         })
     }
+
+    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
+        let mut stream = self
+            .messages
+            .borrow_mut()
+            .ready_chunks(PULSAR_MAX_FETCH_MESSAGES as usize);
+
+        let chunk: Vec<Message<Vec<u8>>> = match stream.next().await {
+            None => return Ok(None),
+            Some(chunk) => chunk,
+        };
+
+        let ret = chunk.into_iter().map(SourceMessage::from).collect();
+
+        Ok(Some(ret))
+    }
 }
+
+impl PulsarSplitReader {}
 
 impl Drop for PulsarSplitReader {
     fn drop(&mut self) {

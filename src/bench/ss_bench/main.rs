@@ -22,11 +22,10 @@ use operations::*;
 use risingwave_common::config::StorageConfig;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_storage::hummock::compactor::CompactorContext;
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
+use risingwave_storage::hummock::compactor::{get_remote_sstable_id_generator, CompactorContext};
+use risingwave_storage::monitor::{ObjectStoreMetrics, Print, StateStoreMetrics};
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
-
-use crate::utils::display_stats::print_statistics;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {
@@ -61,10 +60,6 @@ pub(crate) struct Opts {
 
     #[clap(long, default_value_t = 0)]
     compact_level_after_write: u32,
-
-    #[clap(long)]
-    // since we want to enable async checkpoint as the default
-    async_checkpoint_disabled: bool,
 
     #[clap(long)]
     write_conflict_detection_enabled: bool,
@@ -140,23 +135,26 @@ fn preprocess_options(opts: &mut Opts) {
 async fn main() {
     let mut opts = Opts::parse();
     let state_store_stats = Arc::new(StateStoreMetrics::unused());
+    let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
 
     println!("Configurations before preprocess:\n {:?}", &opts);
     preprocess_options(&mut opts);
     println!("Configurations after preprocess:\n {:?}", &opts);
 
     let config = Arc::new(StorageConfig {
-        shared_buffer_threshold: opts.shared_buffer_threshold_mb * (1 << 20),
-        shared_buffer_capacity: opts.shared_buffer_capacity_mb * (1 << 20),
+        shared_buffer_capacity_mb: opts.shared_buffer_capacity_mb,
         bloom_false_positive: opts.bloom_false_positive,
-        sstable_size: opts.table_size_mb * (1 << 20),
-        block_size: opts.block_size_kb * (1 << 10),
+        sstable_size_mb: opts.table_size_mb,
+        block_size_kb: opts.block_size_kb,
         share_buffers_sync_parallelism: opts.share_buffers_sync_parallelism,
         data_directory: "hummock_001".to_string(),
-        async_checkpoint_enabled: !opts.async_checkpoint_disabled,
         write_conflict_detection_enabled: opts.write_conflict_detection_enabled,
-        block_cache_capacity: opts.block_cache_capacity_mb as usize * (1 << 20),
-        meta_cache_capacity: opts.meta_cache_capacity_mb as usize * (1 << 20),
+        block_cache_capacity_mb: opts.block_cache_capacity_mb as usize,
+        meta_cache_capacity_mb: opts.meta_cache_capacity_mb as usize,
+        disable_remote_compactor: true,
+        enable_local_spill: false,
+        local_object_store: "memory".to_string(),
+        share_buffer_compaction_worker_threads_number: 1,
     });
 
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -170,6 +168,7 @@ async fn main() {
         config.clone(),
         mock_hummock_meta_client.clone(),
         state_store_stats.clone(),
+        object_store_stats.clone(),
     )
     .await
     .expect("Failed to get state_store");
@@ -182,6 +181,12 @@ async fn main() {
                 sstable_store: hummock.inner().sstable_store(),
                 stats: state_store_stats.clone(),
                 is_share_buffer_compact: false,
+                sstable_id_generator: get_remote_sstable_id_generator(
+                    mock_hummock_meta_client.clone(),
+                ),
+                compaction_executor: Some(Arc::new(CompactionExecutor::new(Some(
+                    config.share_buffer_compaction_worker_threads_number as usize,
+                )))),
             }),
             hummock.inner().local_version_manager().clone(),
         ));
@@ -192,6 +197,7 @@ async fn main() {
     });
 
     if opts.statistics {
-        print_statistics(&state_store_stats);
+        state_store_stats.print();
+        object_store_stats.print();
     }
 }

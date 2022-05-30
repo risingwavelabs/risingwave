@@ -18,8 +18,8 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::task::{ActorId, FinishCreateMviewNotifier};
+use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
+use crate::task::{ActorId, CreateMviewProgress};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV
@@ -32,7 +32,7 @@ pub struct ChainExecutor {
 
     upstream_indices: Vec<usize>,
 
-    notifier: FinishCreateMviewNotifier,
+    progress: CreateMviewProgress,
 
     actor_id: ActorId,
 
@@ -58,7 +58,7 @@ impl ChainExecutor {
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
         upstream_indices: Vec<usize>,
-        notifier: FinishCreateMviewNotifier,
+        progress: CreateMviewProgress,
         schema: Schema,
     ) -> Self {
         Self {
@@ -70,21 +70,18 @@ impl ChainExecutor {
             snapshot,
             upstream,
             upstream_indices,
-            actor_id: notifier.actor_id,
-            notifier,
+            actor_id: progress.actor_id(),
+            progress,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         let mut upstream = self.upstream.execute();
 
         // 1. Poll the upstream to get the first barrier.
-        let first_msg = upstream.next().await.unwrap()?;
-        let barrier = first_msg
-            .as_barrier()
-            .expect("the first message received by chain must be a barrier");
-        let epoch = barrier.epoch;
+        let barrier = expect_first_barrier(&mut upstream).await?;
+        let prev_epoch = barrier.epoch.prev;
 
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
         // and begin to consume the snapshot.
@@ -92,13 +89,13 @@ impl ChainExecutor {
         let to_consume_snapshot = barrier.is_to_add_output(self.actor_id);
 
         // The first barrier message should be propagated.
-        yield first_msg;
+        yield Message::Barrier(barrier);
 
         // 2. Consume the snapshot if needed. Note that the snapshot is already projected, so
         // there's no mapping required.
         if to_consume_snapshot {
             // Init the snapshot with reading epoch.
-            let snapshot = self.snapshot.execute_with_epoch(epoch.prev);
+            let snapshot = self.snapshot.execute_with_epoch(prev_epoch);
 
             #[for_await]
             for msg in snapshot {
@@ -106,8 +103,8 @@ impl ChainExecutor {
             }
         }
 
-        // 3. Report that we've finished the creation (for a workaround).
-        self.notifier.notify(epoch.curr);
+        // 3. Report that we've finished the creation.
+        self.progress.finish();
 
         // 4. Continuously consume the upstream.
         #[for_await]
@@ -148,9 +145,9 @@ mod test {
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Barrier, Executor, Message, PkIndices};
-    use crate::task::{FinishCreateMviewNotifier, LocalBarrierManager};
+    use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_basic() {
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let first = Box::new(
@@ -176,12 +173,10 @@ mod test {
         ));
 
         let barrier_manager = LocalBarrierManager::for_test();
-        let notifier = FinishCreateMviewNotifier {
-            barrier_manager: Arc::new(parking_lot::Mutex::new(barrier_manager)),
-            actor_id: 0,
-        };
+        let progress =
+            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
 
-        let chain = ChainExecutor::new(first, second, vec![0], notifier, schema);
+        let chain = ChainExecutor::new(first, second, vec![0], progress, schema);
 
         let mut chain = Box::new(chain).execute();
 

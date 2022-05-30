@@ -14,7 +14,7 @@ statement ok
 create materialized view mv2 as select round(avg(v1), 1) as avg_v1, sum(v2) as sum_v2, count(v3) as count_v3 from t1;
 
 statement ok
-create materialized view mv3 as select sum(v1) as sum_v1, min(v1) as min_v1, max(v1) as max_v1 from t4 group by v3;
+create materialized view mv3 as select sum(v1) as sum_v1, min(v1) as min_v1, max(v1) as max_v1, v3 from t4 group by v3;
 
 query RII
 select avg_v1, sum_v2, count_v3 from mv2;

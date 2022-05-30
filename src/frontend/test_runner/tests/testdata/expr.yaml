@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     /* bind typed literal */
     select int '1';
@@ -35,6 +37,18 @@
     LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))] }
       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
+    /* bind is distinct from */
+    SELECT 1 IS DISTINCT FROM 2
+  logical_plan: |
+    LogicalProject { exprs: [IsDistinctFrom(1:Int32, 2:Int32)] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* bind is not distinct from */
+    SELECT 1 IS NOT DISTINCT FROM 2
+  logical_plan: |
+    LogicalProject { exprs: [Not(IsDistinctFrom(1:Int32, 2:Int32))] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
     /* in-list with aligned types */
     SELECT 1::real in (3, 1.0, 2);
   batch_plan: |
@@ -51,6 +65,44 @@
     SELECT true in (3, 1.0, 2);
   binder_error: 'Bind error: types Boolean and Int32 cannot be matched'
 - sql: |
+    /* in-list with non-const: agg */
+    create table t (v1 int);
+    SELECT 1 in (3, 0.5*2, min(v1)) from t;
+  batch_plan: |
+    BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = $0))] }
+      BatchSimpleAgg { aggs: [min($0)] }
+        BatchExchange { order: [], dist: Single }
+          BatchSimpleAgg { aggs: [min($0)] }
+            BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* in-list with non-const: scalar subquery */
+    create table t (v1 int);
+    create table b (b1 int, b2 int);
+    SELECT b2 from b where 1 in (3, 1.0, (select min(v1) from t));
+  batch_plan: |
+    BatchProject { exprs: [$0] }
+      BatchFilter { predicate: (In(1:Int32::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR (1:Int32 = $1)) }
+        BatchNestedLoopJoin { type: LeftOuter, predicate: true }
+          BatchExchange { order: [], dist: Single }
+            BatchScan { table: b, columns: [b2] }
+          BatchSimpleAgg { aggs: [min($0)] }
+            BatchExchange { order: [], dist: Single }
+              BatchSimpleAgg { aggs: [min($0)] }
+                BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* in-list with non-const: correlated ref */
+    create table t (v1 int);
+    create table b (b1 int, b2 int);
+    SELECT b2 from b where exists (select 2 from t where v1 in (3, 1.0, b1));
+  batch_plan: |
+    BatchProject { exprs: [$1] }
+      BatchNestedLoopJoin { type: LeftSemi, predicate: (In($2::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR ($3 = $0)) }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: b, columns: [b1, b2] }
+        BatchExchange { order: [], dist: Single }
+          BatchProject { exprs: [$0, $0] }
+            BatchScan { table: t, columns: [v1] }
+- sql: |
     select +1.0, -2.0;
   batch_plan: |
     BatchProject { exprs: [1.0:Decimal, Neg(2.0:Decimal)] }
@@ -62,18 +114,18 @@
 - sql: |
     values(round(42.4382));
   batch_plan: |
-    BatchValues { rows: [[RoundDigit(42.4382:Decimal, 0:Int32)]] }
+    BatchValues { rows: [[Round(42.4382:Decimal)]] }
 - sql: |
     values(round(42));
   batch_plan: |
-    BatchValues { rows: [[RoundDigit(42:Int32::Decimal, 0:Int32)]] }
+    BatchValues { rows: [[Round(42:Int32::Decimal)]] }
 - sql: |
     values(round(42, 2));
   batch_plan: |
     BatchValues { rows: [[RoundDigit(42:Int32::Decimal, 2:Int32)]] }
 - sql: |
     values(round('abc'));
-  binder_error: 'Feature is not yet implemented: RoundDigit[Varchar, Int32], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: 'Feature is not yet implemented: Round[Varchar], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - sql: |
     values(extract(hour from timestamp '2001-02-16 20:38:40'));
   batch_plan: |
@@ -105,9 +157,9 @@
       BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
       StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), $1] }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     /* case searched form without else */
     create table t (v1 int);
@@ -142,9 +194,9 @@
       BatchProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
       StreamProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0), $1] }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     create table t (v1 int);
     select nullif(v1, 1, 2) from t;
@@ -161,9 +213,9 @@
       BatchProject { exprs: [Coalesce($0, 1:Int32)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
       StreamProject { exprs: [Coalesce($0, 1:Int32), $1] }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1.2) from t;
@@ -174,8 +226,34 @@
 - sql: |
     create table t (v1 int);
     select coalesce() from t;
-  binder_error: 'Bind error: Coalesce function must contain at least 1 argument'
+  binder_error: 'Bind error: Function `Coalesce` takes at least 1 arguments (0 given)'
 - sql: |
     create table t (v1 int);
     select coalesce(1,'a') from t;
   binder_error: 'Bind error: types Int32 and Varchar cannot be matched'
+- sql: |
+    create table t (v1 varchar);
+    select concat_ws(v1, 1) as expr from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [ConcatWs($0, 1:Int32::Varchar)] }
+        BatchScan { table: t, columns: [v1] }
+  stream_plan: |
+    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
+      StreamProject { exprs: [ConcatWs($0, 1:Int32::Varchar), $1] }
+        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
+- sql: |
+    create table t (v1 varchar);
+    select concat_ws(v1, 1.2) from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [ConcatWs($0, 1.2:Decimal::Varchar)] }
+        BatchScan { table: t, columns: [v1] }
+- sql: |
+    create table t (v1 int);
+    select concat_ws(v1, 1.2) from t;
+  binder_error: 'Bind error: cannot cast type Int32 to Varchar in Implicit context'
+- sql: |
+    create table t (v1 int);
+    select concat_ws() from t;
+  binder_error: 'Bind error: Function `ConcatWs` takes at least 2 arguments (0 given)'

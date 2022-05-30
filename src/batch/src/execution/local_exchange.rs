@@ -18,7 +18,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_rpc_client::ExchangeSource;
 
-use crate::task::{BatchEnvironment, TaskId, TaskOutput, TaskOutputId};
+use crate::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 
 /// Exchange data from a local task execution.
 pub struct LocalExchangeSource {
@@ -29,8 +29,12 @@ pub struct LocalExchangeSource {
 }
 
 impl LocalExchangeSource {
-    pub fn create(output_id: TaskOutputId, env: BatchEnvironment, task_id: TaskId) -> Result<Self> {
-        let task_output = env.task_manager().take_output(&output_id.to_prost())?;
+    pub fn create<C: BatchTaskContext>(
+        output_id: TaskOutputId,
+        context: C,
+        task_id: TaskId,
+    ) -> Result<Self> {
+        let task_output = context.get_task_output(output_id)?;
         Ok(Self {
             task_output,
             task_id,
@@ -126,7 +130,7 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
 
         // Start a server.
-        let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+        let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
         let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
             rpc_called: rpc_called.clone(),
         });
@@ -136,7 +140,7 @@ mod tests {
             tonic::transport::Server::builder()
                 .add_service(exchange_svc)
                 .serve_with_shutdown(addr, async move {
-                    shutdown_recv.recv().await;
+                    shutdown_recv.await.unwrap();
                 })
                 .await
                 .unwrap();

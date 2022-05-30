@@ -13,73 +13,111 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::{CatalogVersion, DatabaseId, SchemaId, TableId};
+use risingwave_common::catalog::{CatalogVersion, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::table::Info as TableInfo;
-use risingwave_pb::meta::{Catalog, Database, Schema, Table};
-use risingwave_pb::plan_common::{DatabaseRefId, SchemaRefId, TableRefId};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
-use super::NotificationManagerRef;
-use crate::model::{CatalogVersionGenerator, MetadataModel};
-use crate::storage::MetaStore;
+use super::IdCategory;
+use crate::manager::MetaSrvEnv;
+use crate::model::{MetadataModel, Transactional};
+use crate::storage::{MetaStore, Transaction};
 
-/// [`StoredCatalogManager`] manages meta operations including retrieving catalog info, creating
-/// a table and dropping a table. Besides, it contains a cache for meta info in the `core`.
-pub struct StoredCatalogManager<S> {
-    meta_store: Arc<S>,
-    notification_manager: NotificationManagerRef,
+pub type DatabaseId = u32;
+pub type SchemaId = u32;
+pub type TableId = u32;
+pub type SourceId = u32;
+pub type RelationId = u32;
 
-    core: Mutex<CatalogManagerCore>,
+pub type Catalog = (Vec<Database>, Vec<Schema>, Vec<Table>, Vec<Source>);
+
+pub struct CatalogManager<S: MetaStore> {
+    env: MetaSrvEnv<S>,
+    core: Mutex<CatalogManagerCore<S>>,
 }
 
-pub type StoredCatalogManagerRef<S> = Arc<StoredCatalogManager<S>>;
+pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
-impl<S> StoredCatalogManager<S>
+impl<S> CatalogManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        meta_store: Arc<S>,
-        notification_manager: NotificationManagerRef,
-    ) -> Result<Self> {
-        let databases = Database::list(&*meta_store).await?;
-        let schemas = Schema::list(&*meta_store).await?;
-        let tables = Table::list(&*meta_store).await?;
-        let version = CatalogVersionGenerator::new(&*meta_store).await?;
-
-        let core = Mutex::new(CatalogManagerCore::new(databases, schemas, tables, version));
-        Ok(Self {
-            meta_store,
-            notification_manager,
-            core,
-        })
+    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
+        let catalog_manager = Self {
+            core: Mutex::new(CatalogManagerCore::new(env.clone()).await?),
+            env,
+        };
+        catalog_manager.init().await?;
+        Ok(catalog_manager)
     }
 
-    pub async fn get_catalog(&self) -> Catalog {
+    // Create default database and schema.
+    async fn init(&self) -> Result<()> {
+        let mut database = Database {
+            name: DEFAULT_DATABASE_NAME.to_string(),
+            ..Default::default()
+        };
+        if !self.core.lock().await.has_database(&database) {
+            database.id = self
+                .env
+                .id_gen_manager()
+                .generate::<{ IdCategory::Database }>()
+                .await? as u32;
+            self.create_database(&database).await?;
+        }
+        let databases = Database::list(self.env.meta_store())
+            .await?
+            .into_iter()
+            .filter(|db| db.name == DEFAULT_DATABASE_NAME)
+            .collect::<Vec<Database>>();
+        assert_eq!(1, databases.len());
+
+        let mut schema = Schema {
+            name: DEFAULT_SCHEMA_NAME.to_string(),
+            database_id: databases[0].id,
+            ..Default::default()
+        };
+        if !self.core.lock().await.has_schema(&schema) {
+            schema.id = self
+                .env
+                .id_gen_manager()
+                .generate::<{ IdCategory::Schema }>()
+                .await? as u32;
+            self.create_schema(&schema).await?;
+        }
+        Ok(())
+    }
+
+    /// Used in `NotificationService::subscribe`.
+    /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
+    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore<S>> {
+        self.core.lock().await
+    }
+
+    pub async fn get_catalog(&self) -> Result<Catalog> {
         let core = self.core.lock().await;
-        core.get_catalog()
+        core.get_catalog().await
     }
 
-    pub async fn create_database(&self, mut database: Database) -> Result<CatalogVersion> {
+    pub async fn create_database(&self, database: &Database) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let database_id = DatabaseId::from(&database.database_ref_id);
-        if !core.has_database(&database_id) {
-            let version = core.new_version_id(&*self.meta_store).await?;
-            database.version = version;
+        if !core.has_database(database) {
+            database.insert(self.env.meta_store()).await?;
+            core.add_database(database);
 
-            database.insert(&*self.meta_store).await?;
-            core.add_database(database.clone());
-
-            // Notify frontends to create database.
-            self.notification_manager
-                .notify_frontend(Operation::Add, Info::Database(database))
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
                 .await;
 
             Ok(version)
@@ -90,17 +128,16 @@ where
         }
     }
 
-    pub async fn delete_database(&self, database_ref_id: &DatabaseRefId) -> Result<CatalogVersion> {
+    pub async fn drop_database(&self, database_id: DatabaseId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let database_id = DatabaseId::from(&Some(database_ref_id.clone()));
-        if core.has_database(&database_id) {
-            Database::delete(&*self.meta_store, database_ref_id).await?;
-            let version = core.new_version_id(&*self.meta_store).await?;
-            let mut database = core.delete_database(&database_id).unwrap();
-            database.version = version;
+        let database = Database::select(self.env.meta_store(), &database_id).await?;
+        if let Some(database) = database {
+            Database::delete(self.env.meta_store(), &database_id).await?;
+            core.drop_database(&database);
 
-            // Notify frontends to delete database.
-            self.notification_manager
+            let version = self
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
@@ -112,22 +149,16 @@ where
         }
     }
 
-    pub async fn create_schema(&self, mut schema: Schema) -> Result<CatalogVersion> {
+    pub async fn create_schema(&self, schema: &Schema) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let exist = core
-            .schemas
-            .values()
-            .any(|s| s.schema_name == schema.schema_name);
-        if !exist {
-            let version = core.new_version_id(&*self.meta_store).await?;
-            schema.version = version;
+        if !core.has_schema(schema) {
+            schema.insert(self.env.meta_store()).await?;
+            core.add_schema(schema);
 
-            schema.insert(&*self.meta_store).await?;
-            core.add_schema(schema.clone());
-
-            // Notify frontends to create schema.
-            self.notification_manager
-                .notify_frontend(Operation::Add, Info::Schema(schema))
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
                 .await;
 
             Ok(version)
@@ -138,18 +169,16 @@ where
         }
     }
 
-    pub async fn delete_schema(&self, schema_ref_id: &SchemaRefId) -> Result<CatalogVersion> {
+    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let schema_id = SchemaId::from(&Some(schema_ref_id.clone()));
-        if core.has_schema(&schema_id) {
-            Schema::delete(&*self.meta_store, schema_ref_id).await?;
-            let version = core.new_version_id(&*self.meta_store).await?;
+        let schema = Schema::select(self.env.meta_store(), &schema_id).await?;
+        if let Some(schema) = schema {
+            Schema::delete(self.env.meta_store(), &schema_id).await?;
+            core.drop_schema(&schema);
 
-            let mut schema = core.delete_schema(&schema_id).unwrap();
-            schema.version = version;
-
-            // Notify frontends to delete schema.
-            self.notification_manager
+            let version = self
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Schema(schema))
                 .await;
 
@@ -161,29 +190,73 @@ where
         }
     }
 
-    pub async fn create_table(&self, mut table: Table) -> Result<CatalogVersion> {
+    pub async fn start_create_table_procedure(&self, table: &Table) -> Result<()> {
         let mut core = self.core.lock().await;
-        let exist = core
-            .tables
-            .values()
-            .any(|t| t.table_name == table.table_name);
-        if !exist {
-            let version = core.new_version_id(&*self.meta_store).await?;
-            table.version = version;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        if !core.has_table(table) && !core.has_in_progress_creation(&key) {
+            core.mark_creating(&key);
+            for &dependent_relation_id in &table.dependent_relations {
+                core.increase_ref_count(dependent_relation_id);
+            }
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "table already exists or in creating procedure".to_string(),
+            )))
+        }
+    }
 
-            table.insert(&*self.meta_store).await?;
-            core.add_table(table.clone());
+    pub async fn finish_create_table_procedure(&self, table: &Table) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        if !core.has_table(table) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            table.insert(self.env.meta_store()).await?;
+            core.add_table(table);
 
-            if let TableInfo::MaterializedView(mview_info) = table.get_info().unwrap() {
-                for table_ref_id in &mview_info.dependent_tables {
-                    let dependent_table_id = TableId::from(&Some(table_ref_id.clone()));
-                    core.increase_ref_count(dependent_table_id);
-                }
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "table already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn cancel_create_table_procedure(&self, table: &Table) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        if !core.has_table(table) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            for &dependent_relation_id in &table.dependent_relations {
+                core.decrease_ref_count(dependent_relation_id);
+            }
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "table already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn create_table(&self, table: &Table) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        if !core.has_table(table) {
+            table.insert(self.env.meta_store()).await?;
+            core.add_table(table);
+            for &dependent_relation_id in &table.dependent_relations {
+                core.increase_ref_count(dependent_relation_id);
             }
 
-            // Notify frontends to create table.
-            self.notification_manager
-                .notify_frontend(Operation::Add, Info::Table(table))
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
 
             Ok(version)
@@ -194,45 +267,30 @@ where
         }
     }
 
-    pub async fn delete_table(&self, table_ref_id: &TableRefId) -> Result<CatalogVersion> {
+    pub async fn drop_table(&self, table_id: TableId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let table_id = TableId::from(&Some(table_ref_id.clone()));
-        if core.has_table(&table_id) {
-            match core.get_ref_count(&table_id) {
+        let table = Table::select(self.env.meta_store(), &table_id).await?;
+        if let Some(table) = table {
+            match core.get_ref_count(table_id) {
                 Some(ref_count) => Err(CatalogError(
                     anyhow!(
-                        "Fail to delete table {} because {} other table(s) depends on it.",
-                        table_id.table_id(),
+                        "Fail to delete table `{}` because {} other relation(s) depend on it.",
+                        table.name,
                         ref_count
                     )
                     .into(),
                 )
                 .into()),
                 None => {
-                    Table::delete(&*self.meta_store, table_ref_id).await?;
-                    let version = core.new_version_id(&*self.meta_store).await?;
-
-                    let mut table = core.delete_table(&table_id).unwrap();
-                    let dependent_tables: Vec<TableId> = if let TableInfo::MaterializedView(
-                        mview_info,
-                    ) = table.get_info().unwrap()
-                    {
-                        mview_info
-                            .dependent_tables
-                            .clone()
-                            .into_iter()
-                            .map(|table_ref_id| TableId::from(&Some(table_ref_id)))
-                            .collect()
-                    } else {
-                        Default::default()
-                    };
-                    for dependent_table_id in dependent_tables {
-                        core.decrease_ref_count(dependent_table_id);
+                    Table::delete(self.env.meta_store(), &table_id).await?;
+                    core.drop_table(&table);
+                    for &dependent_relation_id in &table.dependent_relations {
+                        core.decrease_ref_count(dependent_relation_id);
                     }
-                    table.version = version;
 
-                    // Notify frontends to delete table.
-                    self.notification_manager
+                    let version = self
+                        .env
+                        .notification_manager()
                         .notify_frontend(Operation::Delete, Info::Table(table))
                         .await;
 
@@ -245,123 +303,455 @@ where
             )))
         }
     }
+
+    pub async fn start_create_source_procedure(&self, source: &Source) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if !core.has_source(source) && !core.has_in_progress_creation(&key) {
+            core.mark_creating(&key);
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exists or in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn finish_create_source_procedure(&self, source: &Source) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if !core.has_source(source) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            source.insert(self.env.meta_store()).await?;
+            core.add_source(source);
+
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn cancel_create_source_procedure(&self, source: &Source) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if !core.has_source(source) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn create_source(&self, source: &Source) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        if !core.has_source(source) {
+            source.insert(self.env.meta_store()).await?;
+            core.add_source(source);
+
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exists".to_string(),
+            )))
+        }
+    }
+
+    pub async fn drop_source(&self, source_id: SourceId) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let source = Source::select(self.env.meta_store(), &source_id).await?;
+        if let Some(source) = source {
+            match core.get_ref_count(source_id) {
+                Some(ref_count) => Err(CatalogError(
+                    anyhow!(
+                        "Fail to delete source `{}` because {} other relation(s) depend on it.",
+                        source.name,
+                        ref_count
+                    )
+                    .into(),
+                )
+                .into()),
+                None => {
+                    Source::delete(self.env.meta_store(), &source_id).await?;
+                    core.drop_source(&source);
+
+                    let version = self
+                        .env
+                        .notification_manager()
+                        .notify_frontend(Operation::Delete, Info::Source(source))
+                        .await;
+
+                    Ok(version)
+                }
+            }
+        } else {
+            Err(RwError::from(InternalError(
+                "source doesn't exist".to_string(),
+            )))
+        }
+    }
+
+    pub async fn start_create_materialized_source_procedure(
+        &self,
+        source: &Source,
+        mview: &Table,
+    ) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let source_key = (source.database_id, source.schema_id, source.name.clone());
+        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+        if !core.has_source(source)
+            && !core.has_table(mview)
+            && !core.has_in_progress_creation(&source_key)
+            && !core.has_in_progress_creation(&mview_key)
+        {
+            core.mark_creating(&source_key);
+            core.mark_creating(&mview_key);
+            ensure!(mview.dependent_relations.is_empty());
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source or table already exist".to_string(),
+            )))
+        }
+    }
+
+    pub async fn finish_create_materialized_source_procedure(
+        &self,
+        source: &Source,
+        mview: &Table,
+    ) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let source_key = (source.database_id, source.schema_id, source.name.clone());
+        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+        if !core.has_source(source)
+            && !core.has_table(mview)
+            && core.has_in_progress_creation(&source_key)
+            && core.has_in_progress_creation(&mview_key)
+        {
+            core.unmark_creating(&source_key);
+            core.unmark_creating(&mview_key);
+
+            let mut transaction = Transaction::default();
+            source.upsert_in_transaction(&mut transaction)?;
+            mview.upsert_in_transaction(&mut transaction)?;
+            core.env.meta_store().txn(transaction).await?;
+            core.add_source(source);
+            core.add_table(mview);
+
+            self.env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
+                .await;
+            // Currently frontend uses source's version
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+                .await;
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn cancel_create_materialized_source_procedure(
+        &self,
+        source: &Source,
+        mview: &Table,
+    ) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let source_key = (source.database_id, source.schema_id, source.name.clone());
+        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+        if !core.has_source(source)
+            && !core.has_table(mview)
+            && core.has_in_progress_creation(&source_key)
+            && core.has_in_progress_creation(&mview_key)
+        {
+            core.unmark_creating(&source_key);
+            core.unmark_creating(&mview_key);
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn drop_materialized_source(
+        &self,
+        source_id: SourceId,
+        mview_id: TableId,
+    ) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let mview = Table::select(self.env.meta_store(), &mview_id).await?;
+        let source = Source::select(self.env.meta_store(), &source_id).await?;
+        match (mview, source) {
+            (Some(mview), Some(source)) => {
+                // decrease associated source's ref count first to avoid deadlock
+                if let Some(OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id)) =
+                    mview.optional_associated_source_id
+                {
+                    if associated_source_id != source_id {
+                        return Err(RwError::from(InternalError(
+                            "mview's associated source id doesn't match source id".to_string(),
+                        )));
+                    }
+                } else {
+                    return Err(RwError::from(InternalError(
+                        "mview do not have associated source id".to_string(),
+                    )));
+                }
+                // check ref count
+                if let Some(ref_count) = core.get_ref_count(mview_id) {
+                    return Err(CatalogError(
+                        anyhow!(
+                            "Fail to delete table `{}` because {} other relation(s) depend on it.",
+                            mview.name,
+                            ref_count
+                        )
+                        .into(),
+                    )
+                    .into());
+                }
+                if let Some(ref_count) = core.get_ref_count(source_id) {
+                    return Err(CatalogError(
+                        anyhow!(
+                            "Fail to delete source `{}` because {} other relation(s) depend on it.",
+                            source.name,
+                            ref_count
+                        )
+                        .into(),
+                    )
+                    .into());
+                }
+
+                // now is safe to delete both mview and source
+                let mut transaction = Transaction::default();
+                mview.delete_in_transaction(&mut transaction)?;
+                source.delete_in_transaction(&mut transaction)?;
+                core.env.meta_store().txn(transaction).await?;
+                core.drop_table(&mview);
+                core.drop_source(&source);
+                for &dependent_relation_id in &mview.dependent_relations {
+                    core.decrease_ref_count(dependent_relation_id);
+                }
+
+                self.env
+                    .notification_manager()
+                    .notify_frontend(Operation::Delete, Info::Table(mview))
+                    .await;
+                let version = self
+                    .env
+                    .notification_manager()
+                    .notify_frontend(Operation::Delete, Info::Source(source))
+                    .await;
+                Ok(version)
+            }
+
+            _ => Err(RwError::from(InternalError(
+                "table or source doesn't exist".to_string(),
+            ))),
+        }
+    }
+
+    pub async fn list_tables(
+        &self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+    ) -> Result<Vec<TableId>> {
+        let core = self.core.lock().await;
+        let tables = Table::list(core.env.meta_store()).await?;
+        Ok(tables
+            .iter()
+            .filter(|t| t.database_id == database_id && t.schema_id == schema_id)
+            .map(|t| t.id)
+            .collect())
+    }
+
+    pub async fn list_sources(
+        &self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+    ) -> Result<Vec<SourceId>> {
+        let core = self.core.lock().await;
+        let sources = Source::list(core.env.meta_store()).await?;
+        Ok(sources
+            .iter()
+            .filter(|s| s.database_id == database_id && s.schema_id == schema_id)
+            .map(|s| s.id)
+            .collect())
+    }
 }
+
+type DatabaseKey = String;
+type SchemaKey = (DatabaseId, String);
+type TableKey = (DatabaseId, SchemaId, String);
+type SourceKey = (DatabaseId, SchemaId, String);
+type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`CatalogManagerCore`] caches meta catalog information and maintains dependent relationship
 /// between tables.
-struct CatalogManagerCore {
-    databases: HashMap<DatabaseId, Database>,
-    schemas: HashMap<SchemaId, Schema>,
-    tables: HashMap<TableId, Table>,
-    table_ref_count: HashMap<TableId, usize>,
-    catalog_version: CatalogVersionGenerator,
+pub struct CatalogManagerCore<S: MetaStore> {
+    env: MetaSrvEnv<S>,
+    /// Cached database key information.
+    databases: HashSet<DatabaseKey>,
+    /// Cached schema key information.
+    schemas: HashSet<SchemaKey>,
+    /// Cached source key information.
+    sources: HashSet<SourceKey>,
+    /// Cached table key information.
+    tables: HashSet<TableKey>,
+    /// Relation refer count mapping.
+    relation_ref_count: HashMap<RelationId, usize>,
+
+    // In-progress creation tracker
+    in_progress_creation_tracker: HashSet<RelationKey>,
 }
 
-impl CatalogManagerCore {
-    fn new(
-        databases: Vec<Database>,
-        schemas: Vec<Schema>,
-        tables: Vec<Table>,
-        catalog_version: CatalogVersionGenerator,
-    ) -> Self {
-        let mut table_ref_count = HashMap::new();
-        let databases = HashMap::from_iter(
-            databases
-                .into_iter()
-                .map(|database| (DatabaseId::from(&database.database_ref_id), database)),
-        );
-        let schemas = HashMap::from_iter(
+impl<S> CatalogManagerCore<S>
+where
+    S: MetaStore,
+{
+    async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
+        let databases = Database::list(env.meta_store()).await?;
+        let schemas = Schema::list(env.meta_store()).await?;
+        let sources = Source::list(env.meta_store()).await?;
+        let tables = Table::list(env.meta_store()).await?;
+
+        let mut relation_ref_count = HashMap::new();
+
+        let databases = HashSet::from_iter(databases.into_iter().map(|database| (database.name)));
+        let schemas = HashSet::from_iter(
             schemas
                 .into_iter()
-                .map(|schema| (SchemaId::from(&schema.schema_ref_id), schema)),
+                .map(|schema| (schema.database_id, schema.name)),
         );
-        let tables = HashMap::from_iter(tables.into_iter().map(|table| {
-            if let TableInfo::MaterializedView(mview_info) = table.get_info().unwrap() {
-                let dependencies = mview_info.get_dependent_tables();
-                for table_ref_id in dependencies {
-                    let table_id = TableId::from(&Some(table_ref_id.clone()));
-                    *table_ref_count.entry(table_id).or_insert(0) += 1;
-                }
+        let sources = HashSet::from_iter(
+            sources
+                .into_iter()
+                .map(|source| (source.database_id, source.schema_id, source.name)),
+        );
+        let tables = HashSet::from_iter(tables.into_iter().map(|table| {
+            for depend_relation_id in &table.dependent_relations {
+                relation_ref_count.entry(*depend_relation_id).or_insert(0);
             }
-
-            (TableId::from(&table.table_ref_id), table)
+            (table.database_id, table.schema_id, table.name)
         }));
-        Self {
+
+        let in_progress_creation_tracker = HashSet::new();
+
+        Ok(Self {
+            env,
             databases,
             schemas,
+            sources,
             tables,
-            table_ref_count,
-            catalog_version,
-        }
+            relation_ref_count,
+            in_progress_creation_tracker,
+        })
     }
 
-    async fn new_version_id<S>(&mut self, store: &S) -> Result<CatalogVersion>
-    where
-        S: MetaStore,
-    {
-        let version = self.catalog_version.next();
-        self.catalog_version.insert(store).await?;
-        Ok(version)
+    pub async fn get_catalog(&self) -> Result<Catalog> {
+        Ok((
+            Database::list(self.env.meta_store()).await?,
+            Schema::list(self.env.meta_store()).await?,
+            Table::list(self.env.meta_store()).await?,
+            Source::list(self.env.meta_store()).await?,
+        ))
     }
 
-    fn get_catalog(&self) -> Catalog {
-        Catalog {
-            version: self.catalog_version.version(),
-            databases: self.databases.values().cloned().collect(),
-            schemas: self.schemas.values().cloned().collect(),
-            tables: self.tables.values().cloned().collect(),
-        }
+    pub async fn list_sources(&self) -> Result<Vec<Source>> {
+        Source::list(self.env.meta_store()).await
     }
 
-    fn has_database(&self, database_id: &DatabaseId) -> bool {
-        self.databases.contains_key(database_id)
+    fn has_database(&self, database: &Database) -> bool {
+        self.databases.contains(database.get_name())
     }
 
-    fn add_database(&mut self, database: Database) {
-        let database_id = DatabaseId::from(&database.database_ref_id);
-        self.databases.insert(database_id, database);
+    fn add_database(&mut self, database: &Database) {
+        self.databases.insert(database.name.clone());
     }
 
-    fn delete_database(&mut self, database_id: &DatabaseId) -> Option<Database> {
-        self.databases.remove(database_id)
+    fn drop_database(&mut self, database: &Database) -> bool {
+        self.databases.remove(database.get_name())
     }
 
-    fn has_schema(&self, schema_id: &SchemaId) -> bool {
-        self.schemas.contains_key(schema_id)
+    fn has_schema(&self, schema: &Schema) -> bool {
+        self.schemas
+            .contains(&(schema.database_id, schema.name.clone()))
     }
 
-    fn add_schema(&mut self, schema: Schema) {
-        let schema_id = SchemaId::from(&schema.schema_ref_id);
-        self.schemas.insert(schema_id, schema);
+    fn add_schema(&mut self, schema: &Schema) {
+        self.schemas
+            .insert((schema.database_id, schema.name.clone()));
     }
 
-    fn delete_schema(&mut self, schema_id: &SchemaId) -> Option<Schema> {
-        self.schemas.remove(schema_id)
+    fn drop_schema(&mut self, schema: &Schema) -> bool {
+        self.schemas
+            .remove(&(schema.database_id, schema.name.clone()))
     }
 
-    fn has_table(&self, table_id: &TableId) -> bool {
-        self.tables.contains_key(table_id)
+    fn has_table(&self, table: &Table) -> bool {
+        self.tables
+            .contains(&(table.database_id, table.schema_id, table.name.clone()))
     }
 
-    fn add_table(&mut self, table: Table) {
-        let table_id = TableId::from(&table.table_ref_id);
-        self.tables.insert(table_id, table);
+    fn add_table(&mut self, table: &Table) {
+        self.tables
+            .insert((table.database_id, table.schema_id, table.name.clone()));
     }
 
-    fn delete_table(&mut self, table_id: &TableId) -> Option<Table> {
-        self.tables.remove(table_id)
+    fn drop_table(&mut self, table: &Table) -> bool {
+        self.tables
+            .remove(&(table.database_id, table.schema_id, table.name.clone()))
     }
 
-    fn get_ref_count(&self, table_id: &TableId) -> Option<usize> {
-        self.table_ref_count.get(table_id).cloned()
+    fn has_source(&self, source: &Source) -> bool {
+        self.sources
+            .contains(&(source.database_id, source.schema_id, source.name.clone()))
     }
 
-    fn increase_ref_count(&mut self, table_id: TableId) {
-        *self.table_ref_count.entry(table_id).or_insert(0) += 1;
+    fn add_source(&mut self, source: &Source) {
+        self.sources
+            .insert((source.database_id, source.schema_id, source.name.clone()));
     }
 
-    fn decrease_ref_count(&mut self, table_id: TableId) {
-        match self.table_ref_count.entry(table_id) {
+    fn drop_source(&mut self, source: &Source) -> bool {
+        self.sources
+            .remove(&(source.database_id, source.schema_id, source.name.clone()))
+    }
+
+    pub async fn get_source(&self, id: SourceId) -> Result<Option<Source>> {
+        Source::select(self.env.meta_store(), &id).await
+    }
+
+    fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
+        self.relation_ref_count.get(&relation_id).cloned()
+    }
+
+    fn increase_ref_count(&mut self, relation_id: RelationId) {
+        *self.relation_ref_count.entry(relation_id).or_insert(0) += 1;
+    }
+
+    fn decrease_ref_count(&mut self, relation_id: RelationId) {
+        match self.relation_ref_count.entry(relation_id) {
             Entry::Occupied(mut o) => {
                 *o.get_mut() -= 1;
                 if *o.get() == 0 {
@@ -370,5 +760,18 @@ impl CatalogManagerCore {
             }
             Entry::Vacant(_) => unreachable!(),
         }
+    }
+
+    fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
+        self.in_progress_creation_tracker
+            .contains(&relation.clone())
+    }
+
+    fn mark_creating(&mut self, relation: &RelationKey) {
+        self.in_progress_creation_tracker.insert(relation.clone());
+    }
+
+    fn unmark_creating(&mut self, relation: &RelationKey) {
+        self.in_progress_creation_tracker.remove(&relation.clone());
     }
 }

@@ -42,6 +42,15 @@ pub struct ComputeNodeConfig {
     pub storage: StorageConfig,
 }
 
+pub fn load_config(path: &str) -> ComputeNodeConfig {
+    if path.is_empty() {
+        tracing::warn!("risingwave.toml not found, using default config.");
+        return ComputeNodeConfig::default();
+    }
+
+    ComputeNodeConfig::init(path.to_owned().into()).unwrap()
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FrontendConfig {
@@ -52,8 +61,8 @@ pub struct FrontendConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerConfig {
-    #[serde(default = "default::heartbeat_interval")]
-    pub heartbeat_interval: u32,
+    #[serde(default = "default::heartbeat_interval_ms")]
+    pub heartbeat_interval_ms: u32,
 }
 
 impl Default for ServerConfig {
@@ -65,8 +74,8 @@ impl Default for ServerConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BatchConfig {
-    #[serde(default = "default::chunk_size")]
-    pub chunk_size: u32,
+    // #[serde(default = "default::chunk_size")]
+    // pub chunk_size: u32,
 }
 
 impl Default for BatchConfig {
@@ -78,8 +87,10 @@ impl Default for BatchConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StreamingConfig {
-    #[serde(default = "default::chunk_size")]
-    pub chunk_size: u32,
+    // #[serde(default = "default::chunk_size")]
+    // pub chunk_size: u32,
+    #[serde(default = "default::checkpoint_interval_ms")]
+    pub checkpoint_interval_ms: u32,
 }
 
 impl Default for StreamingConfig {
@@ -93,12 +104,12 @@ impl Default for StreamingConfig {
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     /// Target size of the SSTable.
-    #[serde(default = "default::sst_size")]
-    pub sstable_size: u32,
+    #[serde(default = "default::sst_size_mb")]
+    pub sstable_size_mb: u32,
 
     /// Size of each block in bytes in SST.
-    #[serde(default = "default::block_size")]
-    pub block_size: u32,
+    #[serde(default = "default::block_size_kb")]
+    pub block_size_kb: u32,
 
     /// False positive probability of bloom filter.
     #[serde(default = "default::bloom_false_positive")]
@@ -108,34 +119,44 @@ pub struct StorageConfig {
     #[serde(default = "default::share_buffers_sync_parallelism")]
     pub share_buffers_sync_parallelism: u32,
 
-    /// Size threshold to trigger shared buffer flush.
-    #[serde(default = "default::shared_buffer_threshold")]
-    pub shared_buffer_threshold: u32,
+    /// Worker threads number of dedicated tokio runtime for share buffer compaction. 0 means use
+    /// tokio's default value (number of CPU core).
+    #[serde(default = "default::share_buffer_compaction_worker_threads_number")]
+    pub share_buffer_compaction_worker_threads_number: u32,
 
+    // /// Size threshold to trigger shared buffer flush.
+    // #[serde(default = "default::shared_buffer_threshold")]
+    // pub shared_buffer_threshold: u32,
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
-    #[serde(default = "default::shared_buffer_capacity")]
-    pub shared_buffer_capacity: u32,
+    #[serde(default = "default::shared_buffer_capacity_mb")]
+    pub shared_buffer_capacity_mb: u32,
 
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::data_directory")]
     pub data_directory: String,
-
-    /// Whether to enable async checkpoint
-    #[serde(default = "default::async_checkpoint_enabled")]
-    pub async_checkpoint_enabled: bool,
 
     /// Whether to enable write conflict detection
     #[serde(default = "default::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
 
     /// Capacity of sstable block cache.
-    #[serde(default = "default::block_cache_capacity")]
-    pub block_cache_capacity: usize,
+    #[serde(default = "default::block_cache_capacity_mb")]
+    pub block_cache_capacity_mb: usize,
 
     /// Capacity of sstable meta cache.
-    #[serde(default = "default::meta_cache_capacity")]
-    pub meta_cache_capacity: usize,
+    #[serde(default = "default::meta_cache_capacity_mb")]
+    pub meta_cache_capacity_mb: usize,
+
+    #[serde(default = "default::disable_remote_compactor")]
+    pub disable_remote_compactor: bool,
+
+    #[serde(default = "default::enable_local_spill")]
+    pub enable_local_spill: bool,
+
+    /// Local object store root. We should call `get_local_object_store` to get the object store.
+    #[serde(default = "default::local_object_store")]
+    pub local_object_store: String,
 }
 
 impl Default for StorageConfig {
@@ -176,7 +197,7 @@ impl FrontendConfig {
 
 mod default {
 
-    pub fn heartbeat_interval() -> u32 {
+    pub fn heartbeat_interval_ms() -> u32 {
         1000
     }
 
@@ -184,20 +205,23 @@ mod default {
         1024
     }
 
-    pub fn sst_size() -> u32 {
-        // 256MB
-        268435456
+    pub fn sst_size_mb() -> u32 {
+        256
     }
 
-    pub fn block_size() -> u32 {
-        65536
+    pub fn block_size_kb() -> u32 {
+        16
     }
 
     pub fn bloom_false_positive() -> f64 {
-        0.1
+        0.01
     }
 
     pub fn share_buffers_sync_parallelism() -> u32 {
+        2
+    }
+
+    pub fn share_buffer_compaction_worker_threads_number() -> u32 {
         2
     }
 
@@ -206,71 +230,39 @@ mod default {
         201326592
     }
 
-    pub fn shared_buffer_capacity() -> u32 {
-        // 256MB
-        268435456
+    pub fn shared_buffer_capacity_mb() -> u32 {
+        1024
     }
 
     pub fn data_directory() -> String {
         "hummock_001".to_string()
     }
 
-    pub fn async_checkpoint_enabled() -> bool {
-        true
-    }
-
     pub fn write_conflict_detection_enabled() -> bool {
         cfg!(debug_assertions)
     }
 
-    pub fn block_cache_capacity() -> usize {
-        // 256 MB
-        268435456
+    pub fn block_cache_capacity_mb() -> usize {
+        256
     }
 
-    pub fn meta_cache_capacity() -> usize {
-        // 64 MB
-        67108864
+    pub fn meta_cache_capacity_mb() -> usize {
+        64
     }
-}
 
-#[cfg(test)]
-mod tests {
+    pub fn disable_remote_compactor() -> bool {
+        false
+    }
 
-    #[test]
-    fn test_default() {
-        use super::*;
+    pub fn enable_local_spill() -> bool {
+        true
+    }
 
-        let cfg = ComputeNodeConfig::default();
-        assert_eq!(cfg.server.heartbeat_interval, default::heartbeat_interval());
+    pub fn local_object_store() -> String {
+        "tempdisk".to_string()
+    }
 
-        let cfg: ComputeNodeConfig = toml::from_str("").unwrap();
-        assert_eq!(cfg.storage.block_size, default::block_size());
-
-        let partial_toml_str = r#"
-        [server]
-        heartbeat_interval = 10
-        
-        [batch]
-        chunk_size = 256
-        
-        [streaming]
-        
-        [storage]
-        sstable_size = 1024
-        data_directory = "test"
-        async_checkpoint_enabled = false
-    "#;
-        let cfg: ComputeNodeConfig = toml::from_str(partial_toml_str).unwrap();
-        assert_eq!(cfg.server.heartbeat_interval, 10);
-        assert_eq!(cfg.batch.chunk_size, 256);
-        assert_eq!(cfg.storage.sstable_size, 1024);
-        assert_eq!(cfg.storage.block_size, default::block_size());
-        assert_eq!(
-            cfg.storage.bloom_false_positive,
-            default::bloom_false_positive()
-        );
-        assert_eq!(cfg.storage.data_directory, "test");
-        assert!(!cfg.storage.async_checkpoint_enabled);
+    pub fn checkpoint_interval_ms() -> u32 {
+        100
     }
 }

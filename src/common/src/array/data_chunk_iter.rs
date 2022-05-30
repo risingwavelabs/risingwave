@@ -15,64 +15,54 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops;
 
+use bytes::Buf;
 use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
+use crate::error::{ErrorCode, Result as RwResult};
 use crate::hash::HashCode;
 use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
     serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
 };
 use crate::util::sort_util::OrderType;
+use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 impl DataChunk {
     /// Get an iterator for visible rows.
     pub fn rows(&self) -> impl Iterator<Item = RowRef> {
         DataChunkRefIter {
             chunk: self,
-            idx: 0,
+            idx: Some(0),
         }
     }
 }
 
 struct DataChunkRefIter<'a> {
     chunk: &'a DataChunk,
-    idx: usize,
+    /// `None` means finished
+    idx: Option<usize>,
 }
 
 impl<'a> Iterator for DataChunkRefIter<'a> {
     type Item = RowRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.chunk.visibility() {
-            Some(bitmap) => {
-                loop {
-                    let idx = self.idx;
-                    if idx >= self.chunk.capacity() {
-                        return None;
-                    }
-                    // SAFETY: idx is checked.
-                    let vis = unsafe { bitmap.is_set_unchecked(idx) };
-                    self.idx += 1;
-                    if vis {
-                        return Some(RowRef {
+        match self.idx {
+            None => None,
+            Some(idx) => {
+                self.idx = self.chunk.next_visible_row_idx(idx);
+                match self.idx {
+                    None => None,
+                    Some(idx) => {
+                        self.idx = Some(idx + 1);
+                        Some(RowRef {
                             chunk: self.chunk,
                             idx,
-                        });
+                        })
                     }
                 }
-            }
-            None => {
-                let idx = self.idx;
-                if idx >= self.chunk.capacity() {
-                    return None;
-                }
-                self.idx += 1;
-                Some(RowRef {
-                    chunk: self.chunk,
-                    idx,
-                })
             }
         }
     }
@@ -256,7 +246,7 @@ impl Row {
         Ok(serializer.into_inner())
     }
 
-    /// Deserialize a datum in the row to a memcomparable bytes. The datum must not be null.
+    /// Serialize a datum in the row to a memcomparable bytes. The datum must not be null.
     ///
     /// !Panics
     ///
@@ -265,6 +255,17 @@ impl Row {
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serialize_datum_into(&self.0[datum_idx], &mut serializer)?;
         Ok(serializer.into_inner())
+    }
+
+    /// Serialize the row into a value encode bytes.
+    ///
+    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
+    pub fn value_encode(&self) -> RwResult<Vec<u8>> {
+        let mut vec = vec![];
+        for v in &self.0 {
+            vec.extend(serialize_datum(v)?);
+        }
+        Ok(vec)
     }
 
     /// Return number of cells in the row.
@@ -287,6 +288,26 @@ impl Row {
         }
         HashCode(hasher.finish())
     }
+
+    /// Compute hash value of a row on corresponding indices.
+    pub fn hash_by_indices<H>(&self, hash_indices: &[usize], hash_builder: &H) -> RwResult<HashCode>
+    where
+        H: BuildHasher,
+    {
+        let mut hasher = hash_builder.build_hasher();
+        for idx in hash_indices {
+            let datum = self.0.get(*idx);
+            match datum {
+                Some(datum) => datum.hash(&mut hasher),
+                None => {
+                    return Err(
+                        ErrorCode::InternalError(format!("index {} out of row bound", idx)).into(),
+                    )
+                }
+            }
+        }
+        Ok(HashCode(hasher.finish()))
+    }
 }
 
 /// Deserializer of the `Row`.
@@ -302,8 +323,7 @@ impl RowDeserializer {
 
     /// Deserialize the row from a memcomparable bytes.
     pub fn deserialize(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
-        let mut values = vec![];
-        values.reserve(self.data_types.len());
+        let mut values = Vec::with_capacity(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for ty in &self.data_types {
             values.push(deserialize_datum_from(ty, &mut deserializer)?);
@@ -313,8 +333,7 @@ impl RowDeserializer {
 
     /// Deserialize the row from a memcomparable bytes. All values are not null.
     pub fn deserialize_not_null(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
-        let mut values = vec![];
-        values.reserve(self.data_types.len());
+        let mut values = Vec::with_capacity(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for ty in &self.data_types {
             values.push(deserialize_datum_not_null_from(
@@ -338,6 +357,15 @@ impl RowDeserializer {
         let mut deserializer = memcomparable::Deserializer::new(data);
         let datum = deserialize_datum_from(&self.data_types[datum_idx], &mut deserializer)?;
         Ok(datum)
+    }
+
+    /// Deserialize the row from a value encoding bytes.
+    pub fn value_decode(&self, mut data: impl Buf) -> RwResult<Row> {
+        let mut values = Vec::with_capacity(self.data_types.len());
+        for ty in &self.data_types {
+            values.push(deserialize_datum(&mut data, ty)?);
+        }
+        Ok(Row(values))
     }
 }
 

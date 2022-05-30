@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{Statement, TableAlias};
 
 pub mod bind_context;
 mod delete;
@@ -25,6 +27,7 @@ mod select;
 mod set_expr;
 mod statement;
 mod struct_field;
+mod update;
 mod values;
 
 pub use bind_context::BindContext;
@@ -38,6 +41,7 @@ pub use relation::{
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
+pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
@@ -54,6 +58,8 @@ pub struct Binder {
     upper_contexts: Vec<BindContext>,
 
     next_subquery_id: usize,
+    /// Map the cte's name to its Relation::Subquery.
+    cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
 }
 
 impl Binder {
@@ -64,6 +70,7 @@ impl Binder {
             context: BindContext::new(),
             upper_contexts: vec![],
             next_subquery_id: 0,
+            cte_to_relation: HashMap::new(),
         }
     }
 

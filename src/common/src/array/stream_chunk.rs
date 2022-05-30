@@ -93,7 +93,7 @@ impl StreamChunk {
     pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> Result<Self> {
         let mut array_builders = data_types
             .iter()
-            .map(|data_type| data_type.create_array_builder(1))
+            .map(|data_type| data_type.create_array_builder(rows.len()))
             .collect::<Result<Vec<_>>>()?;
         let mut ops = vec![];
 

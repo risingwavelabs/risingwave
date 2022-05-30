@@ -21,7 +21,7 @@ lazy_static::lazy_static! {
     pub static ref UNIX_SINGULARITY_DATE_EPOCH: SystemTime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200);
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Epoch(pub u64);
 
 /// `INVALID_EPOCH` defines the invalid epoch value.

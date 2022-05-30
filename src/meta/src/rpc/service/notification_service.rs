@@ -96,7 +96,7 @@ where
                 tx.send(Ok(SubscribeResponse {
                     status: None,
                     operation: Operation::Snapshot as i32,
-                    info: Some(Info::FeSnapshot(meta_snapshot)),
+                    info: Some(Info::Snapshot(meta_snapshot)),
                     version: self.env.notification_manager().current_version().await,
                 }))
                 .unwrap();

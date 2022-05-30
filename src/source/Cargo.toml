@@ -5,7 +5,7 @@ version = "0.1.7"
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/apache/avro.git", branch = "branch-1.11", features = ["snappy", "zstandard", "bzip", "xz"] }
+apache-avro = { git = "https://github.com/singularity-data/avro", branch = "master", features = ["snappy", "zstandard", "bzip", "xz"] }
 async-stream = "0.3"
 async-trait = "0.1"
 aws-config = { version = "0.11.0", default-features = false, features = ["rt-tokio", "native-tls"] }
@@ -20,6 +20,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
+madsim = "=0.2.0-alpha.3"
 maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
@@ -44,9 +45,9 @@ smallvec = "1"
 static_assertions = "1"
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
-tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 twox-hash = "1"
 url = "2"

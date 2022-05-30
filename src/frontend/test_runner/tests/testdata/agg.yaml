@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     values(sum(1));
   binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
@@ -23,16 +25,27 @@
         BatchHashAgg { group_keys: [$0], aggs: [min($1), max($2), count($0)] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchScan { table: t, columns: [v1, v2, v3] }
+  batch_local_plan: |
+    BatchProject { exprs: [$0, ($1 + ($2 * $3))] }
+      BatchHashAgg { group_keys: [$0], aggs: [min($1), max($2), count($0)] }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v1, agg], pk_columns: [v1] }
       StreamProject { exprs: [$0, ($2 + ($3 * $4))] }
         StreamHashAgg { group_keys: [$0], aggs: [count, min($1), max($2), count($0)] }
           StreamExchange { dist: HashShard([0]) }
-            StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
+            StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) as agg from t;
   batch_plan: |
+    BatchProject { exprs: [($0 + ($1 * $2))] }
+      BatchSimpleAgg { aggs: [min($0), max($1), sum($2)] }
+        BatchExchange { order: [], dist: Single }
+          BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
+            BatchScan { table: t, columns: [v1, v2, v3] }
+  batch_local_plan: |
     BatchProject { exprs: [($0 + ($1 * $2))] }
       BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
         BatchExchange { order: [], dist: Single }
@@ -42,7 +55,7 @@
       StreamProject { exprs: [($1 + ($2 * $3)), $0, $1, $2, $3] }
         StreamSimpleAgg { aggs: [count, min($0), max($1), count($2)] }
           StreamExchange { dist: Single }
-            StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
+            StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
@@ -58,16 +71,22 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, ($1 * ($2::Decimal / $3))] }
         BatchHashAgg { group_keys: [$0], aggs: [min($1), sum($2), count($2)] }
-          BatchProject { exprs: [$2, $0, ($0 + $1)] }
-            BatchExchange { order: [], dist: HashShard([2]) }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [$2, $0, ($0 + $1)] }
               BatchScan { table: t, columns: [v1, v2, v3] }
+  batch_local_plan: |
+    BatchProject { exprs: [$0, ($1 * ($2::Decimal / $3))] }
+      BatchHashAgg { group_keys: [$0], aggs: [min($1), sum($2), count($2)] }
+        BatchExchange { order: [], dist: Single }
+          BatchProject { exprs: [$2, $0, ($0 + $1)] }
+            BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v3, agg], pk_columns: [v3] }
       StreamProject { exprs: [$0, ($2 * ($3::Decimal / $4))] }
         StreamHashAgg { group_keys: [$0], aggs: [count, min($1), sum($2), count($2)] }
-          StreamProject { exprs: [$2, $0, ($0 + $1), $3] }
-            StreamExchange { dist: HashShard([2]) }
-              StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [$2, $0, ($0 + $1), $3] }
+              StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
     /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int);
@@ -76,7 +95,7 @@
     LogicalProject { exprs: [$1, $2] }
       LogicalAgg { group_keys: [0], agg_calls: [min($1), sum($0)] }
         LogicalProject { exprs: [($1 + $2), $1] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int, v3 int);
@@ -85,7 +104,7 @@
     LogicalProject { exprs: [$1, $2] }
       LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2)] }
         LogicalProject { exprs: [(($1 + $2) / $3), $1, ($1 * $2)] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2, v3] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
 - sql: |
     /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int);
@@ -94,7 +113,7 @@
     LogicalProject { exprs: [$0] }
       LogicalAgg { group_keys: [0], agg_calls: [] }
         LogicalProject { exprs: [($1 + $2)] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* test logical_agg with complex group expression */
     /* should complain about nested agg call */
@@ -109,7 +128,7 @@
     LogicalProject { exprs: [($0 + $1)] }
       LogicalAgg { group_keys: [0, 1], agg_calls: [] }
         LogicalProject { exprs: [$1, $2] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v1 + v2;
@@ -118,6 +137,12 @@
     create table t(v1 int, v2 int);
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;
   batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0), sum($1)] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [count($0), sum($0)] }
+          BatchProject { exprs: [($0 + $1)] }
+            BatchScan { table: t, columns: [v1, v2] }
+  batch_local_plan: |
     BatchSimpleAgg { aggs: [count($0), sum($0)] }
       BatchExchange { order: [], dist: Single }
         BatchProject { exprs: [($0 + $1)] }
@@ -127,7 +152,7 @@
       StreamSimpleAgg { aggs: [count, count($0), sum($0)] }
         StreamExchange { dist: Single }
           StreamProject { exprs: [($0 + $1), $2] }
-            StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+            StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v2 + v3) / count(v2 + v3) + max(v1) as agg from t group by v1;
@@ -135,16 +160,16 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, (($1 / $2) + $3)] }
         BatchHashAgg { group_keys: [$0], aggs: [sum($1), count($1), max($0)] }
-          BatchProject { exprs: [$0, ($1 + $2)] }
-            BatchExchange { order: [], dist: HashShard([0]) }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [$0, ($1 + $2)] }
               BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v1, agg], pk_columns: [v1] }
       StreamProject { exprs: [$0, (($2 / $3) + $4)] }
         StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1), max($0)] }
-          StreamProject { exprs: [$0, ($1 + $2), $3] }
-            StreamExchange { dist: HashShard([0]) }
-              StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [$0, ($1 + $2), $3] }
+              StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
     create table t (v1 real not null);
     select v1, count(*) from t group by v1;
@@ -157,9 +182,10 @@
     create table t (v1 real not null);
     select count(*) from t;
   batch_plan: |
-    BatchSimpleAgg { aggs: [count] }
+    BatchSimpleAgg { aggs: [sum($0)] }
       BatchExchange { order: [], dist: Single }
-        BatchScan { table: t, columns: [] }
+        BatchSimpleAgg { aggs: [count] }
+          BatchScan { table: t, columns: [] }
 - sql: |
     /* having with agg call */
     create table t (v1 real not null);
@@ -169,7 +195,8 @@
       BatchFilter { predicate: ($0 > 5:Int32) }
         BatchSimpleAgg { aggs: [sum($0)] }
           BatchExchange { order: [], dist: Single }
-            BatchScan { table: t, columns: [v1] }
+            BatchSimpleAgg { aggs: [sum($0)] }
+              BatchScan { table: t, columns: [v1] }
 - sql: |
     /* having with group column */
     create table t (v1 real not null);
@@ -179,7 +206,7 @@
       LogicalFilter { predicate: ($0 > 5:Int32) }
         LogicalAgg { group_keys: [0], agg_calls: [] }
           LogicalProject { exprs: [$1] }
-            LogicalScan { table: t, columns: [_row_id#0, v1] }
+            LogicalScan { table: t, columns: [_row_id, v1] }
 - sql: |
     /* having with non-group column */
     create table t (v1 real not null, v2 int);
@@ -192,7 +219,7 @@
   logical_plan: |
     LogicalAgg { group_keys: [0], agg_calls: [] }
       LogicalProject { exprs: [$1] }
-        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* distinct with agg */
     create table t (v1 int, v2 int);
@@ -202,4 +229,56 @@
       LogicalProject { exprs: [$1] }
         LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
           LogicalProject { exprs: [$2, $1] }
-            LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+            LogicalScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    /* arguments out-of-order */
+    create table t(v1 int, v2 int, v3 int);
+    select count(v3), min(v2), max(v1) from t;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0), min($1), max($2)] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [count($0), min($1), max($2)] }
+          BatchProject { exprs: [$2, $1, $0] }
+            BatchScan { table: t, columns: [v1, v2, v3] }
+- sql: |
+    /* simple-agg arguments out-of-order */
+    create table t(v1 int, v2 int, v3 int);
+    select min(v1) + max(v3) * count(v2) as agg from t;
+  batch_plan: |
+    BatchProject { exprs: [($0 + ($1 * $2))] }
+      BatchSimpleAgg { aggs: [min($0), max($1), sum($2)] }
+        BatchExchange { order: [], dist: Single }
+          BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
+            BatchProject { exprs: [$0, $2, $1] }
+              BatchScan { table: t, columns: [v1, v2, v3] }
+- sql: |
+    /* simple-agg with single distribution */
+    create table t(v1 int);
+    select sum(c1) from (select sum(v1) as c1 from t);
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0)] }
+      BatchSimpleAgg { aggs: [sum($0)] }
+        BatchExchange { order: [], dist: Single }
+          BatchSimpleAgg { aggs: [sum($0)] }
+            BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* simple-agg with some shard distribution */
+    create table t(v1 int);
+    select sum(v1) from t;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0)] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [sum($0)] }
+          BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* simple-agg with hash shard distribution */
+    create table t(v1 int, v2 int);
+    select sum(c1) from (select v1, sum(v2) as c1 from t group by v1);
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0)] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [sum($0)] }
+          BatchProject { exprs: [$1] }
+            BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+              BatchExchange { order: [], dist: HashShard([0]) }
+                BatchScan { table: t, columns: [v1, v2] }

@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
+use super::{CheckedAdd, IntervalUnit};
 use crate::error::ErrorCode::{InternalError, IoError};
 use crate::error::{Result, RwError};
 use crate::util::value_encoding::error::ValueEncodingError;
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
 pub const UNIX_EPOCH_DAYS: i32 = 719_163;
+const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 macro_rules! impl_chrono_wrapper {
     ($({ $variant_name:ident, $chrono:ty, $_array:ident, $_builder:ident }),*) => {
@@ -185,21 +189,6 @@ impl NaiveDateTimeWrapper {
         let nsecs = (timestamp_micro % 1_000_000) as u32 * 1000;
         Self::with_secs_nsecs(secs, nsecs).map_err(|e| RwError::from(InternalError(e.to_string())))
     }
-
-    pub fn parse_from_str(s: &str) -> Result<Self> {
-        Ok(NaiveDateTimeWrapper::new(
-            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-        ))
-    }
-
-    pub fn sub(&self, rhs: NaiveDateTimeWrapper) -> Duration {
-        self.0 - rhs.0
-    }
-
-    pub fn add(&self, duration: Duration) -> Self {
-        NaiveDateTimeWrapper::new(self.0 + duration)
-    }
 }
 
 impl TryFrom<NaiveDateWrapper> for NaiveDateTimeWrapper {
@@ -207,5 +196,63 @@ impl TryFrom<NaiveDateWrapper> for NaiveDateTimeWrapper {
 
     fn try_from(date: NaiveDateWrapper) -> Result<Self> {
         Ok(NaiveDateTimeWrapper::new(date.0.and_hms(0, 0, 0)))
+    }
+}
+
+/// return the days of the `year-month`
+fn get_mouth_days(year: i32, month: usize) -> i32 {
+    if is_leap_year(year) {
+        LEAP_DAYS[month]
+    } else {
+        NORMAL_DAYS[month]
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
+    fn checked_add(&self, rhs: IntervalUnit) -> Result<NaiveDateTimeWrapper> {
+        let mut date = self.0.date();
+        if rhs.get_months() != 0 {
+            // NaiveDate don't support add months. We need calculate manually
+            let mut day = date.day() as i32;
+            let mut month = date.month() as i32;
+            let mut year = date.year();
+            // Calculate the number of year in this interval
+            let interval_months = rhs.get_months();
+            let year_diff = interval_months / 12;
+            year += year_diff;
+
+            // Calculate the number of month in this interval except the added year
+            // The range of month_diff is (-12, 12) (The month is negative when the interval is
+            // negative)
+            let month_diff = interval_months - year_diff * 12;
+            // The range of new month is (-12, 24) ( original month:[1, 12] + month_diff:(-12, 12) )
+            month += month_diff;
+            // Process the overflow months
+            if month > 12 {
+                year += 1;
+                month -= 12;
+            } else if month <= 0 {
+                year -= 1;
+                month += 12;
+            }
+
+            // Fix the days after changing date.
+            // For example, 1970.1.31 + 1 month = 1970.2.28
+            day = min(day, get_mouth_days(year, month as usize));
+            date = NaiveDate::from_ymd(year, month as u32, day as u32);
+        }
+        let mut datetime = NaiveDateTime::new(date, self.0.time());
+        datetime = datetime
+            .checked_add_signed(Duration::days(rhs.get_days().into()))
+            .ok_or_else(|| InternalError("Date out of range".to_string()))?;
+        datetime = datetime
+            .checked_add_signed(Duration::milliseconds(rhs.get_ms()))
+            .ok_or_else(|| InternalError("Date out of range".to_string()))?;
+
+        Ok(NaiveDateTimeWrapper::new(datetime))
     }
 }

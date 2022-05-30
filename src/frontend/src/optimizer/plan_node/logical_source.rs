@@ -19,10 +19,13 @@ use std::rc::Rc;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
-use super::{ColPrunable, LogicalProject, PlanBase, PlanRef, StreamSource, ToBatch, ToStream};
+use super::{
+    ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamSource,
+    ToBatch, ToStream,
+};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::session::OptimizerContextRef;
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -82,7 +85,13 @@ impl fmt::Display for LogicalSource {
 impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping)
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
+
+impl PredicatePushdown for LogicalSource {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 

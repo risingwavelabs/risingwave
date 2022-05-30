@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{ConnectorError, InternalError};
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
@@ -28,10 +28,11 @@ use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
     DropSourceRequest as ComputeNodeDropSourceRequest,
 };
+use risingwave_rpc_client::StreamClient;
 
 use crate::barrier::BarrierManagerRef;
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId, StreamClient};
+use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
@@ -70,8 +71,10 @@ where
             }
         };
 
-        let properties = ConnectorProperties::new(info.properties.clone())?;
+        let properties = ConnectorProperties::extract(info.properties.clone())
+            .map_err(|e| RwError::from(ConnectorError(e.to_string())))?;
         SplitEnumeratorImpl::create(properties)
+            .await
             .to_rw_result()?
             .list_splits()
             .await
@@ -95,15 +98,15 @@ where
             } else {
                 let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
                 let source = catalog_guard.get_source(*source_id).await?.ok_or_else(|| {
-                        RwError::from(InternalError(format!(
-                            "could not find source catalog for {}",
-                            source_id
-                        )))
-                    })?;
+                    RwError::from(InternalError(format!(
+                        "could not find source catalog for {}",
+                        source_id
+                    )))
+                })?;
                 self.fetch_splits_for_source(&source).await
             }
         }))
-        .await?;
+            .await?;
         let mut result = HashMap::new();
 
         for (splits, fragments) in source_splits.into_iter().zip_eq(actors.into_values()) {
@@ -141,7 +144,7 @@ where
         let all_stream_clients = try_join_all(
             all_compute_nodes
                 .iter()
-                .map(|worker| self.env.stream_clients().get(worker)),
+                .map(|worker| self.env.stream_client_pool().get(worker)),
         )
         .await?
         .into_iter();

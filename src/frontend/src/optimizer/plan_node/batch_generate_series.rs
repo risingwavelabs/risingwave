@@ -16,11 +16,12 @@ use std::fmt;
 
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::GenerateTimeSeriesNode;
+use risingwave_pb::batch_plan::GenerateSeriesNode;
 
 use super::{
     LogicalGenerateSeries, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
 };
+use crate::expr::Expr;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
@@ -35,7 +36,7 @@ impl_plan_tree_node_for_leaf!(BatchGenerateSeries);
 
 impl BatchGenerateSeries {
     pub fn new(logical: LogicalGenerateSeries) -> Self {
-        Self::with_dist(logical, Distribution::Any)
+        Self::with_dist(logical, Distribution::Single)
     }
 
     pub fn with_dist(logical: LogicalGenerateSeries, dist: Distribution) -> Self {
@@ -64,10 +65,10 @@ impl ToDistributedBatch for BatchGenerateSeries {
 
 impl ToBatchProst for BatchGenerateSeries {
     fn to_batch_prost_body(&self) -> NodeBody {
-        NodeBody::GenerateTimeSeries(GenerateTimeSeriesNode {
-            start: self.logical.start.to_string(),
-            stop: self.logical.stop.to_string(),
-            step: Some(self.logical.step.into()),
+        NodeBody::GenerateSeries(GenerateSeriesNode {
+            start: Some(self.logical.start.to_expr_proto()),
+            stop: Some(self.logical.stop.to_expr_proto()),
+            step: Some(self.logical.step.to_expr_proto()),
         })
     }
 }

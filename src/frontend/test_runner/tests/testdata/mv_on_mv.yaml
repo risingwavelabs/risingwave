@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - id: create_tables
   sql: |
     create table t1(v1 int not null, v2 int not null);
@@ -10,10 +12,10 @@
   sql: |
     select m1.v1 as m1v1, m1.v2 as m1v2, m2.v1 as m2v1, m2.v2 as m2v2 from m1 join m2 on m1.v1 = m2.v1;
   stream_plan: |
-    StreamMaterialize { columns: [m1v1, m1v2, _row_id#0(hidden), m2v1, m2v2, _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
+    StreamMaterialize { columns: [m1v1, m1v2, _row_id(hidden), m2v1, m2v2, _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
       StreamExchange { dist: HashShard([2, 5]) }
         StreamHashJoin { type: Inner, predicate: $0 = $3 }
           StreamExchange { dist: HashShard([0]) }
-            StreamTableScan { table: m1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+            StreamTableScan { table: m1, columns: [v1, v2, _row_id], pk_indices: [2] }
           StreamExchange { dist: HashShard([0]) }
-            StreamTableScan { table: m2, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+            StreamTableScan { table: m2, columns: [v1, v2, _row_id], pk_indices: [2] }

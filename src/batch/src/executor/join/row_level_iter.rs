@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::StreamExt;
 use risingwave_common::array::{DataChunk, RowRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -23,11 +24,11 @@ use crate::executor::BoxedExecutor;
 /// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table`
 /// without call executor. The executor is only called when building `inner_table`.
 pub(crate) struct RowLevelIter {
-    data_source: BoxedExecutor,
+    data_source: Option<BoxedExecutor>,
     /// Buffering of inner table. TODO: Spill to disk or more fine-grained memory management to
     /// avoid OOM.
     data: Vec<DataChunk>,
-
+    schema: Schema,
     /// Pos of chunk in inner table.
     chunk_idx: usize,
     /// Pos of row in current chunk.
@@ -42,9 +43,11 @@ pub(crate) struct RowLevelIter {
 
 impl RowLevelIter {
     pub fn new(data_source: BoxedExecutor) -> Self {
+        let schema = data_source.schema().clone();
         Self {
-            data_source,
+            data_source: Some(data_source),
             data: vec![],
+            schema,
             chunk_idx: 0,
             build_matched: None,
             row_idx: 0,
@@ -54,8 +57,9 @@ impl RowLevelIter {
 
     /// Called in the first probe and load all data of inner relation into buffer.
     pub async fn load_data(&mut self) -> Result<()> {
-        self.data_source.open().await?;
-        while let Some(chunk) = self.data_source.next().await? {
+        let mut source_stream = self.data_source.take().unwrap().execute();
+        while let Some(chunk) = source_stream.next().await {
+            let chunk = chunk?;
             // Assuming all data are visible.
             if chunk.cardinality() > 0 {
                 self.data.push(chunk.compact()?);
@@ -64,7 +68,7 @@ impl RowLevelIter {
         self.build_matched = Some(ChunkedData::<bool>::with_chunk_sizes(
             self.data.iter().map(|c| c.capacity()),
         )?);
-        self.data_source.close().await
+        Ok(())
     }
 
     /// Copied from hash join. Consider remove the duplication.
@@ -139,7 +143,7 @@ impl RowLevelIter {
     }
 
     pub fn get_schema(&self) -> &Schema {
-        self.data_source.schema()
+        &self.schema
     }
 
     pub fn set_cur_row_matched(&mut self, val: bool) {

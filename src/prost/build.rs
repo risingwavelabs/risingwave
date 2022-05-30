@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stream_plan",
         "stream_service",
         "hummock",
+        "user",
     ];
     let protos: Vec<String> = proto_files
         .iter()
@@ -39,12 +40,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     // Build protobuf structs.
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let out_dir = PathBuf::from("./src");
     let file_descriptor_set_path: PathBuf = out_dir.join("file_descriptor_set.bin");
     tonic_build::configure()
         .file_descriptor_set_path(file_descriptor_set_path.as_path())
         .compile_well_known_types(true)
         .type_attribute(".", "#[derive(prost_helpers::AnyPB)]")
+        .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])
         .expect("Failed to compile grpc!");
 
@@ -52,8 +54,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let descriptor_set = std::fs::read(file_descriptor_set_path)?;
     pbjson_build::Builder::new()
         .register_descriptors(&descriptor_set)?
+        .out_dir(out_dir.as_path())
         .build(&["."])
         .expect("Failed to compile serde");
 
+    // Tweak the serde files so that they can be compiled in our project.
+    // By adding a `use crate::module::*`
+    let rewrite_files = proto_files;
+    for serde_proto_file in &rewrite_files {
+        let out_file = out_dir.join(format!("{}.serde.rs", serde_proto_file));
+        let file_content = String::from_utf8(std::fs::read(&out_file)?)?;
+        let module_path_id = serde_proto_file.replace('.', "::");
+        std::fs::write(
+            &out_file,
+            format!("use crate::{}::*;\n{}", module_path_id, file_content),
+        )?;
+    }
     Ok(())
 }

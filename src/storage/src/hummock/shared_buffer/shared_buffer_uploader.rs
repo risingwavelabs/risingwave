@@ -13,18 +13,22 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
+use futures::FutureExt;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 
-use super::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::compactor::{Compactor, CompactorContext};
+use crate::hummock::compaction_executor::CompactionExecutor;
+use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
@@ -65,7 +69,9 @@ pub struct SharedBufferUploader {
 
     sstable_store: SstableStoreRef,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    next_local_sstable_id: Arc<AtomicU64>,
     stats: Arc<StateStoreMetrics>,
+    compaction_executor: Option<Arc<CompactionExecutor>>,
 }
 
 impl SharedBufferUploader {
@@ -78,13 +84,22 @@ impl SharedBufferUploader {
         stats: Arc<StateStoreMetrics>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
     ) -> Self {
+        let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
+            None
+        } else {
+            Some(Arc::new(CompactionExecutor::new(Some(
+                options.share_buffer_compaction_worker_threads_number as usize,
+            ))))
+        };
         Self {
             options,
             write_conflict_detector,
             uploader_rx,
             sstable_store,
             hummock_meta_client,
+            next_local_sstable_id: Arc::new(AtomicU64::new(0)),
             stats,
+            compaction_executor,
         }
     }
 
@@ -110,25 +125,22 @@ impl SharedBufferUploader {
             } in item.tasks
             {
                 // If a previous task failed, this task will also fail
-                if failed {
-                    task_results.insert(
-                        (epoch, task_id),
-                        Err(HummockError::shared_buffer_error(
-                            "failed due to previous failure",
-                        )),
-                    );
+                let result = if failed {
+                    Err(HummockError::shared_buffer_error(
+                        "failed due to previous failure",
+                    ))
                 } else {
-                    match self.flush(epoch, &payload).await {
-                        Ok(tables) => {
-                            task_results.insert((epoch, task_id), Ok(tables));
-                        }
-                        Err(e) => {
-                            error!("Failed to flush shared buffer: {:?}", e);
-                            failed = true;
-                            task_results.insert((epoch, task_id), Err(e));
-                        }
-                    }
+                    self.flush(epoch, false, &payload).await.inspect_err(|e| {
+                        error!("Failed to flush shared buffer: {:?}", e);
+                        failed = true;
+                    })
                 };
+                assert!(
+                    task_results.insert((epoch, task_id), result).is_none(),
+                    "Upload task duplicate. epoch: {:?}, task_id: {:?}",
+                    epoch,
+                    task_id,
+                );
             }
             item.notifier
                 .send(task_results)
@@ -140,16 +152,11 @@ impl SharedBufferUploader {
     async fn flush(
         &mut self,
         epoch: HummockEpoch,
-        batches: &Vec<SharedBufferBatch>,
+        is_local: bool,
+        payload: &UploadTaskPayload,
     ) -> HummockResult<Vec<SstableInfo>> {
-        if batches.is_empty() {
+        if payload.is_empty() {
             return Ok(vec![]);
-        }
-
-        if let Some(detector) = &self.write_conflict_detector {
-            for batch in batches {
-                detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
-            }
         }
 
         // Compact buffers into SSTs
@@ -159,11 +166,24 @@ impl SharedBufferUploader {
             sstable_store: self.sstable_store.clone(),
             stats: self.stats.clone(),
             is_share_buffer_compact: true,
+            sstable_id_generator: if is_local {
+                let atomic = self.next_local_sstable_id.clone();
+                Arc::new(move || {
+                    {
+                        let atomic = atomic.clone();
+                        async move { Ok(get_local_sst_id(atomic.fetch_add(1, Relaxed))) }
+                    }
+                    .boxed()
+                })
+            } else {
+                get_remote_sstable_id_generator(self.hummock_meta_client.clone())
+            },
+            compaction_executor: self.compaction_executor.as_ref().cloned(),
         };
 
         let tables = Compactor::compact_shared_buffer(
             Arc::new(mem_compactor_ctx),
-            batches,
+            payload,
             self.stats.clone(),
         )
         .await?;
@@ -182,11 +202,11 @@ impl SharedBufferUploader {
             })
             .collect();
 
-        // Add all tables at once.
-        self.hummock_meta_client
-            .add_tables(epoch, uploaded_sst_info.clone())
-            .await
-            .map_err(HummockError::meta_error)?;
+        if let Some(detector) = &self.write_conflict_detector {
+            for batch in payload {
+                detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
+            }
+        }
 
         Ok(uploaded_sst_info)
     }

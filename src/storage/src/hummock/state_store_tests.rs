@@ -15,25 +15,23 @@
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::common::VNodeBitmap;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
-use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
-use crate::hummock::sstable::VNODE_BITMAP_LEN;
+use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
-use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
 use crate::store::StateStore;
 
 #[tokio::test]
 async fn test_basic() {
-    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -156,7 +154,15 @@ async fn test_basic() {
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
     hummock_storage.sync(Some(epoch1)).await.unwrap();
-    meta_client.commit_epoch(epoch1).await.unwrap();
+    meta_client
+        .commit_epoch(
+            epoch1,
+            hummock_storage
+                .local_version_manager
+                .get_uncommitted_ssts(epoch1),
+        )
+        .await
+        .unwrap();
     hummock_storage.wait_epoch(epoch1).await.unwrap();
     let value = hummock_storage
         .get(&Bytes::from("bb"), epoch2)
@@ -173,8 +179,7 @@ async fn test_basic() {
 
 #[tokio::test]
 async fn test_vnode_filter() {
-    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -203,7 +208,13 @@ async fn test_vnode_filter() {
     let epoch: u64 = 1;
     storage.ingest_batch(batch, epoch).await.unwrap();
     storage.sync(Some(epoch)).await.unwrap();
-    meta_client.commit_epoch(epoch).await.unwrap();
+    meta_client
+        .commit_epoch(
+            epoch,
+            storage.local_version_manager.get_uncommitted_ssts(epoch),
+        )
+        .await
+        .unwrap();
 
     let value_with_dummy_filter = storage
         .get_with_vnode_set(
@@ -211,7 +222,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
@@ -225,7 +235,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [0; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
@@ -239,7 +248,6 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 5,
-                maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
         )
@@ -250,12 +258,10 @@ async fn test_vnode_filter() {
 
 #[tokio::test]
 async fn test_state_store_sync() {
-    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
+    let sstable_store = mock_sstable_store();
 
     let mut config = default_config_for_test();
-    config.shared_buffer_capacity = 64;
-    config.shared_buffer_threshold = 64;
+    config.shared_buffer_capacity_mb = 64;
     config.write_conflict_detection_enabled = false;
 
     let hummock_options = Arc::new(config);
@@ -344,8 +350,7 @@ async fn test_state_store_sync() {
 /// Fix this when we finished epoch management.
 #[ignore]
 async fn test_reload_storage() {
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;

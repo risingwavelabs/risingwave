@@ -14,13 +14,14 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::{CompactionGroupId, Prefix};
 use risingwave_hummock_sdk::key::{get_table_id, FullKey};
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::common::VNodeBitmap;
 
 use crate::hummock::multi_builder::CapacitySplitTableBuilder;
 use crate::hummock::value::HummockValue;
@@ -79,15 +80,32 @@ impl KeyValueGrouping for CompactionGroupGrouping {
 }
 
 /// Groups key value by virtual node
-pub struct VirtualNodeGrouping {}
+pub struct VirtualNodeGrouping {
+    vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
+}
+
+impl VirtualNodeGrouping {
+    pub fn new(vnode2unit: Arc<HashMap<u32, Vec<u32>>>) -> Self {
+        VirtualNodeGrouping { vnode2unit }
+    }
+}
 
 impl KeyValueGrouping for VirtualNodeGrouping {
     fn group(
         &self,
-        _full_key: &FullKey<&[u8]>,
-        _value: &HummockValue<&[u8]>,
+        full_key: &FullKey<&[u8]>,
+        value: &HummockValue<&[u8]>,
     ) -> Option<KeyValueGroupId> {
-        todo!()
+        if let Some(table_id) = get_table_id(full_key.inner()) {
+            self.vnode2unit.get(&table_id).map(|mapping| {
+                mapping[match value {
+                    HummockValue::Put(meta, _) => meta.vnode,
+                    HummockValue::Delete(meta) => meta.vnode,
+                } as usize] as KeyValueGroupId
+            })
+        } else {
+            None
+        }
     }
 }
 

@@ -1,17 +1,19 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     create table t (v int not null);
     select * from t limit 4;
   logical_plan: |
     LogicalLimit { limit: 4, offset: 0 }
       LogicalProject { exprs: [$1] }
-        LogicalScan { table: t, columns: [_row_id#0, v] }
+        LogicalScan { table: t, columns: [_row_id, v] }
 - sql: |
     create table t (v int not null);
     select * from t offset 4;
   logical_plan: |
     LogicalLimit { limit: 9223372036854775807, offset: 4 }
       LogicalProject { exprs: [$1] }
-        LogicalScan { table: t, columns: [_row_id#0, v] }
+        LogicalScan { table: t, columns: [_row_id, v] }
 - sql: |
     create table t (v int not null);
     select * from ( select * from t limit 5 ) limit 4;
@@ -20,4 +22,4 @@
       LogicalProject { exprs: [$0] }
         LogicalLimit { limit: 5, offset: 0 }
           LogicalProject { exprs: [$1] }
-            LogicalScan { table: t, columns: [_row_id#0, v] }
+            LogicalScan { table: t, columns: [_row_id, v] }

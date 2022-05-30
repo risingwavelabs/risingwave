@@ -16,22 +16,23 @@ use async_trait::async_trait;
 
 use crate::base::SplitEnumerator;
 use crate::nexmark::split::NexmarkSplit;
-use crate::NexmarkProperties;
+use crate::nexmark::NexmarkProperties;
 
 pub struct NexmarkSplitEnumerator {
     split_num: i32,
 }
 
-impl NexmarkSplitEnumerator {
-    pub fn new(properties: &NexmarkProperties) -> anyhow::Result<NexmarkSplitEnumerator> {
-        let split_num = properties.split_num.unwrap_or(1);
-        Ok(Self { split_num })
-    }
-}
+impl NexmarkSplitEnumerator {}
 
 #[async_trait]
 impl SplitEnumerator for NexmarkSplitEnumerator {
+    type Properties = Box<NexmarkProperties>;
     type Split = NexmarkSplit;
+
+    async fn new(properties: Box<NexmarkProperties>) -> anyhow::Result<NexmarkSplitEnumerator> {
+        let split_num = properties.split_num.unwrap_or(1);
+        Ok(Self { split_num })
+    }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<NexmarkSplit>> {
         let mut splits = vec![];

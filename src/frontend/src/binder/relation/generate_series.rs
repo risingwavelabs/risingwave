@@ -19,11 +19,12 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::FunctionArg;
 
 use super::{Binder, Result};
-use crate::expr::ExprImpl;
+use crate::expr::{Expr, ExprImpl};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundGenerateSeriesFunction {
     pub(crate) args: Vec<ExprImpl>,
+    pub(crate) data_type: DataType,
 }
 
 impl Binder {
@@ -33,18 +34,26 @@ impl Binder {
     ) -> Result<BoundGenerateSeriesFunction> {
         let args = args.into_iter();
 
-        // generate_series ( start timestamp, stop timestamp, step interval )
+        // generate_series ( start timestamp, stop timestamp, step interval ) or
+        // generate_series ( start i32, stop i32, step i32 )
         if args.len() != 3 {
             return Err(ErrorCode::BindError(
                 "the length of args of generate series funciton should be 3".to_string(),
             )
             .into());
         }
-        // Todo(d2lark) check 2 or 3 args are same type
+
+        let exprs: Vec<_> = args
+            .map(|arg| self.bind_function_arg(arg))
+            .flatten_ok()
+            .try_collect()?;
+
+        let data_type = type_check(&exprs)?;
+
         let columns = [(
             false,
             Field {
-                data_type: DataType::Timestamp,
+                data_type: data_type.clone(),
                 name: "generate_series".to_string(),
                 sub_fields: vec![],
                 type_name: "".to_string(),
@@ -54,11 +63,24 @@ impl Binder {
 
         self.bind_context(columns, "generate_series".to_string(), None)?;
 
-        let exprs: Vec<_> = args
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        Ok(BoundGenerateSeriesFunction {
+            args: exprs,
+            data_type,
+        })
+    }
+}
 
-        Ok(BoundGenerateSeriesFunction { args: exprs })
+fn type_check(exprs: &[ExprImpl]) -> Result<DataType> {
+    let mut exprs = exprs.iter();
+    let Some((start, stop,step)) = exprs.next_tuple() else {
+        return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into())
+    };
+    match (start.return_type(), stop.return_type(), step.return_type()) {
+        (DataType::Int32, DataType::Int32, DataType::Int32) => Ok(DataType::Int32),
+        (DataType::Timestamp, DataType::Timestamp, DataType::Interval) => Ok(DataType::Timestamp),
+        _ => Err(ErrorCode::BindError(
+            "Invalid arguments for Generate series function".to_string(),
+        )
+        .into()),
     }
 }

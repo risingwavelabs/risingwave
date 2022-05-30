@@ -88,6 +88,9 @@ impl std::fmt::Debug for FunctionCall {
 impl FunctionCall {
     /// Create a `FunctionCall` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
+    // The functions listed here are all variadic.  Type signatures of functions that take a fixed
+    // number of arguments are checked
+    // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> Result<Self> {
         let return_type = match func_type {
             ExprType::Case => {
@@ -108,13 +111,38 @@ impl FunctionCall {
             }
             ExprType::Coalesce => {
                 if inputs.is_empty() {
-                    return Err(ErrorCode::BindError(
-                        "Coalesce function must contain at least 1 argument".into(),
-                    )
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `Coalesce` takes at least {} arguments ({} given)",
+                        1, 0
+                    ))
                     .into());
                 }
                 align_types(inputs.iter_mut())
             }
+            ExprType::ConcatWs => {
+                let expected = 2;
+                let actual = inputs.len();
+                if actual < expected {
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `ConcatWs` takes at least {} arguments ({} given)",
+                        expected, actual
+                    ))
+                    .into());
+                }
+
+                inputs = inputs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, input)| match i {
+                        // 0-th arg must be string
+                        0 => input.cast_implicit(DataType::Varchar),
+                        // subsequent can be any type
+                        _ => input.cast_explicit(DataType::Varchar),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(DataType::Varchar)
+            }
+
             _ => infer_type(
                 func_type,
                 inputs.iter().map(|expr| expr.return_type()).collect(),

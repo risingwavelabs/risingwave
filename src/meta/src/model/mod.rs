@@ -14,10 +14,9 @@
 
 mod barrier;
 mod catalog;
-mod catalog_v2;
 mod cluster;
-mod hash_mapping;
 mod stream;
+mod user;
 
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
@@ -25,12 +24,11 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 pub use barrier::*;
 pub use catalog::*;
-pub use catalog_v2::*;
 pub use cluster::*;
-pub use hash_mapping::*;
 use prost::Message;
 use risingwave_common::error::Result;
 pub use stream::*;
+pub use user::*;
 
 use crate::storage::{self, MetaStore, Transaction};
 
@@ -42,97 +40,6 @@ pub type DispatcherId = u64;
 
 /// A global, unique identifier of a fragment
 pub type FragmentId = u32;
-
-/// Id of an Actor, maybe local or global
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
-pub enum LocalActorId {
-    /// The global allocated id of a fragment.
-    Global(u32),
-    /// The local id of a fragment, need to be converted to global id if being used in the meta
-    /// service.
-    Local(u32),
-}
-
-/// Id of a fragment, maybe local or global
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
-pub enum LocalFragmentId {
-    /// The global allocated id of a fragment.
-    Global(u32),
-    /// The local id of a fragment, need to be converted to global id if being used in the meta
-    /// service.
-    Local(u32),
-}
-
-impl LocalActorId {
-    pub fn as_global_id(&self) -> u32 {
-        match self {
-            Self::Global(id) => *id,
-            _ => panic!("actor id is not global id"),
-        }
-    }
-
-    pub fn as_local_id(&self) -> u32 {
-        match self {
-            Self::Local(id) => *id,
-            _ => panic!("actor id is not local id"),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn is_global(&self) -> bool {
-        matches!(self, Self::Global(_))
-    }
-
-    #[allow(dead_code)]
-    pub fn is_local(&self) -> bool {
-        matches!(self, Self::Local(_))
-    }
-
-    /// Convert local id to global id. Panics if the actor id is not local, or actor id >=
-    /// len.
-    pub fn to_global_id(self, offset: u32, len: u32) -> Self {
-        let id = self.as_local_id();
-        assert!(id < len, "actor id {} is out of range (len: {})", id, len);
-        Self::Global(id + offset)
-    }
-}
-
-impl LocalFragmentId {
-    pub fn as_global_id(&self) -> u32 {
-        match self {
-            Self::Global(id) => *id,
-            _ => panic!("fragment id is not global id"),
-        }
-    }
-
-    pub fn as_local_id(&self) -> u32 {
-        match self {
-            Self::Local(id) => *id,
-            _ => panic!("fragment id is not local id"),
-        }
-    }
-
-    pub fn is_global(&self) -> bool {
-        matches!(self, Self::Global(_))
-    }
-
-    pub fn is_local(&self) -> bool {
-        matches!(self, Self::Local(_))
-    }
-
-    /// Convert local id to global id. Panics if the fragment id is not local, or fragment id >=
-    /// len.
-    pub fn to_global_id(self, offset: u32, len: u32) -> Self {
-        let id = self.as_local_id();
-        assert!(
-            id < len,
-            "fragment id {} is out of range (len: {})",
-            id,
-            len
-        );
-        Self::Global(id + offset)
-    }
-}
 
 pub trait Transactional {
     fn upsert_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()>;

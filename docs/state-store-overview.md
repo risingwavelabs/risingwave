@@ -9,7 +9,7 @@
     - [Write Path](#write-path)
     - [Read Path](#read-path)
     - [Compaction](#compaction)
-    - [Hummock Manager](#hummock-manager)
+    - [Transaction Management with Hummock Manager](#transaction-management-with-hummock-manager)
     - [Checkpointing in Streaming](#checkpointing-in-streaming)
 
 <!-- Created by https://github.com/ekalinin/github-markdown-toc -->
@@ -24,7 +24,7 @@ Reading this document requires prior knowledge of LSM-Tree-based KV storage engi
 
 ![Overview of Architecture](images/state-store-overview/state-store-overview-01.svg)
 
-Hummock consists of manager service on meta node, clients on compute nodes, and a shared storage to store files (SSTs). Every time a new write batch is produced, Hummock client will upload those files to shared storage, and notify the Hummock manager of the new data. With compaction going on, new files will be added and unused files will be vacuumed. The Hummock manager will take care of the lifecycle of a file — is a file is being used? can we delete a file? etc.
+Hummock consists of manager service on meta node, clients on worker nodes (including compute nodes, frontend nodes, and compactor nodes), and a shared storage to store files (SSTs). Every time a new write batch is produced, Hummock client will upload those files to shared storage, and notify the Hummock manager of the new data. With compaction going on, new files will be added and unused files will be vacuumed. The Hummock manager will take care of the lifecycle of a file — is a file is being used? can we delete a file? etc.
 
 Streaming state store has distinguished workload characteristics.
 
@@ -112,7 +112,7 @@ To read from Hummock, we need a ***version*** (a consistent state of list of SST
 
 For every read operation (`scan`, `get`), we will first select SSTs that might contain the required keys.
 
-For `scan`, we simply select by overlapping key range. For point get, we will filter SSTs further by Bloom filter. After that, we will compose a single `MergeIterator` over all SSTs. The `MergeIterator` will return all keys in range along with their epoches. Then, we will create `UserIterator` over `MergeIterator`, and for all user keys, the user iterator will pick the first full key whose epoch <= read epoch. Therefore, users can perform snapshot read from Hummock based on the given epoch. The snapshot should be acquired beforehand and released afterwards.
+For `scan`, we simply select by overlapping key range. For point get, we will filter SSTs further by Bloom filter. After that, we will compose a single `MergeIterator` over all SSTs. The `MergeIterator` will return all keys in range along with their epochs. Then, we will create `UserIterator` over `MergeIterator`, and for all user keys, the user iterator will pick the first full key whose epoch <= read epoch. Therefore, users can perform snapshot read from Hummock based on the given epoch. The snapshot should be acquired beforehand and released afterwards.
 
 ![Read Path](images/state-store-overview/state-store-overview-03.svg)
 
@@ -128,7 +128,9 @@ Hummock implements the following iterators:
 
 ### Compaction
 
-Currently, Hummock is using a compaction strategy similar to leveled-compaction in RocksDB. In the future, we will migrate to a compaction scheme that can “understand” how data are distributed in streaming executors for better data locality.
+Currently, Hummock is using a compaction strategy similar to leveled-compaction in RocksDB. It will compact data using consistent hash (docs and implementation TBD), so that data on shared storage distribute in the same way as how stream executors use them.
+
+Compaction is done on a special worker node called compactor node. The standalone compactor listens for compaction jobs from meta node, compacts one or more SSTs into new ones, and reports completion to the meta node. (In Hummock in-memory mode, compactor will be running as a thread inside compute node.)
 
 To support MVCC read without affecting compaction, we track the epoch low watermark in Hummock snapshots. A user key-value pair will be retained if (1) it is the latest, or (2) it belongs to an epoch above the low watermark.
 
@@ -138,7 +140,7 @@ To support MVCC read without affecting compaction, we track the epoch low waterm
 
 In this part, we discuss how Hummock coordinates between multiple compute nodes. We will introduce key concepts like “snapshot”, “version”, and give examples on how Hummock manages them.
 
-Every operation on the LSM-tree yields a new ***version*** on Hummock manager, e.g., adding new L0 SSTs and compactions. In streaming, each stream barrier is associated with an ***epoch***. When the barrier flows across the system and collected by the stream manager, we can start doing ***checkpoint*** on this epoch. SSTs produced in a single checkpoint are associated with an ***uncommitted epoch***. After all worker nodes complete compacting L0 SSTs to Hummock, Hummock manager considers the epoch committed. Therefore, apart from the list of files in LSM, a version also contains committed epoch number `max_committed_epoch` and SSTs in uncommitted epochs. As a result, both an ***operation on LSM*** and a ***streaming checkpoint*** will yield a new ***version*** in Hummock manager.
+Every operation on the LSM-tree yields a new ***version*** on Hummock manager, e.g., adding new L0 SSTs and compactions. In streaming, each stream barrier is associated with an ***epoch***. When the barrier flows across the system and collected by the stream manager, we can start doing ***checkpoint*** on this epoch. SSTs produced in a single checkpoint are associated with an ***uncommitted epoch***. After all compute nodes flush shared buffers to shared storage, Hummock manager considers the epoch committed. Therefore, apart from the list of files in LSM, a version also contains committed epoch number `max_committed_epoch` and SSTs in uncommitted epochs. As a result, both an ***operation on LSM*** and a ***streaming checkpoint*** will yield a new ***version*** in Hummock manager.
 
 Currently, there is only one checkpoint happening in the system at the same time. In the future, we might support more checkpoint optimizations including concurrent checkpointing.
 

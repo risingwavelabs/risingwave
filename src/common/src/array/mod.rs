@@ -125,10 +125,10 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 /// `Array` must be built with an `ArrayBuilder`. The array trait provides several
 /// unified interface on an array, like `len`, `value_at` and `iter`.
 ///
-/// The `Builder` associated type is the builder for this array. The `Iter` associated
-/// type is the iterator of this array. And the `RefItem` is the item you could
-/// retrieve from this array.
+/// The `Builder` associated type is the builder for this array.
 ///
+/// The `Iter` associated type is the iterator of this array. And the `RefItem` is
+/// the item you could retrieve from this array.
 /// For example, `PrimitiveArray` could return an `Option<u32>`, and `Utf8Array` will
 /// return an `Option<&str>`.
 ///
@@ -208,6 +208,9 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     }
 }
 
+/// The creation of [`Array`] typically does not rely on [`DataType`].
+/// For now the exceptions are list and struct, which require type details
+/// as they decide the layout of the array.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArrayMeta {
     Simple, // Simple array without given any extra metadata.

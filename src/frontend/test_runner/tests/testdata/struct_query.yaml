@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     create materialized view t as select country from s;
     select * from t;
@@ -5,8 +7,8 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: t, columns: [country] }
   stream_plan: |
-    StreamMaterialize { columns: [country, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamTableScan { table: t, columns: [country, _row_id#0], pk_indices: [1] }
+    StreamMaterialize { columns: [country, _row_id(hidden)], pk_columns: [_row_id] }
+      StreamTableScan { table: t, columns: [country, _row_id], pk_indices: [1] }
   create_source:
     row_format: protobuf
     name: s
@@ -33,7 +35,7 @@
     select (t).country.city,(t).country,(country).city.address from t;
   logical_plan: |
     LogicalProject { exprs: [Field($1, 1:Int32), $1, Field(Field($1, 1:Int32), 0:Int32)] }
-      LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+      LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -60,7 +62,7 @@
     select (t).country1.city.*,(t.country2).*,(country3).city.* from t;
   logical_plan: |
     LogicalProject { exprs: [Field(Field($1, 1:Int32), 0:Int32), Field(Field($1, 1:Int32), 1:Int32), Field($2, 0:Int32), Field($2, 1:Int32), Field($2, 2:Int32), Field(Field($3, 1:Int32), 0:Int32), Field(Field($3, 1:Int32), 1:Int32)] }
-      LogicalScan { table: t, columns: [id, country1, country2, country3, zipcode, rate, _row_id#0] }
+      LogicalScan { table: t, columns: [id, country1, country2, country3, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -90,7 +92,7 @@
   logical_plan: |
     LogicalProject { exprs: [Field($0, 1:Int32)] }
       LogicalProject { exprs: [Field($1, 1:Int32)] }
-        LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+        LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -120,7 +122,7 @@
       LogicalProject { exprs: [$0] }
         LogicalAgg { group_keys: [], agg_calls: [min($0)] }
           LogicalProject { exprs: [Field($1, 1:Int32)] }
-            LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+            LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -149,8 +151,8 @@
     LogicalProject { exprs: [$0, $1, $2, $3, $4] }
       LogicalJoin { type: Inner, on: (Field($0, 1:Int32) = Field($2, 2:Int32)) }
         LogicalProject { exprs: [Field($1, 1:Int32)] }
-          LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
-        LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+          LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
+        LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -179,7 +181,7 @@
     LogicalProject { exprs: [($0 + ($1 * $2))] }
       LogicalAgg { group_keys: [], agg_calls: [min($0), max($0), count($1)] }
         LogicalProject { exprs: [Field(Field($1, 1:Int32), 0:Int32), $2] }
-          LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+          LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -209,7 +211,7 @@
       LogicalAgg { group_keys: [], agg_calls: [count($0), count($1)] }
         LogicalProject { exprs: [1:Int32, Field(Field($1, 1:Int32), 1:Int32)] }
           LogicalFilter { predicate: (Field(Field($1, 1:Int32), 0:Int32) > 1:Int32) }
-            LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+            LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -258,7 +260,7 @@
 - sql: |
     create materialized view t as select * from s;
     select avg(country) from t;
-  binder_error: 'Feature is not yet implemented: No function matches to avg(Struct { fields: [Varchar, Varchar] }), No tracking issue'
+  binder_error: 'Invalid input syntax: Invalid aggregation: avg(Struct { fields: [Varchar, Varchar] })'
   create_source:
     row_format: protobuf
     name: s
@@ -316,10 +318,10 @@
           string zipcode = 3;
         }
 - sql: |
-    insert into s values (1,2,(1,2,(1,2,3)));
+    insert into s values (1,2,(1,2,(1,2,null)));
   logical_plan: |
     LogicalInsert { table: s }
-      LogicalValues { rows: [[1:Int32, 2:Int32, {Some(Int32(1)), Some(Int32(2)), Some(Struct(StructValue { fields: [Some(Int32(1)), Some(Int32(2)), Some(Int32(3))] }))}:Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }]], schema: Schema { fields: [:Int32, :Int32, :Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }] } }
+      LogicalValues { rows: [[1:Int32, 2:Int32, (1, 2, (1, 2,  )):Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }]], schema: Schema { fields: [:Int32, :Int32, :Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }] } }
   create_source:
     row_format: protobuf
     name: s
@@ -346,8 +348,8 @@
     select * from s where s.v3 = (1,2,(1,2,3));
   logical_plan: |
     LogicalProject { exprs: [$1, $2, $3] }
-      LogicalFilter { predicate: ($3 = {Some(Int32(1)), Some(Int32(2)), Some(Struct(StructValue { fields: [Some(Int32(1)), Some(Int32(2)), Some(Int32(3))] }))}:Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }) }
-        LogicalScan { table: s, columns: [_row_id#0, v1, v2, v3] }
+      LogicalFilter { predicate: ($3 = (1, 2, (1, 2, 3)):Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }) }
+        LogicalScan { table: s, columns: [_row_id, v1, v2, v3] }
   create_source:
     row_format: protobuf
     name: s

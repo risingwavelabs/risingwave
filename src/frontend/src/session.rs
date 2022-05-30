@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Formatter;
 use std::marker::Sync;
 use std::path::PathBuf;
@@ -23,26 +22,26 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{Session, SessionManager};
+use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{ComputeClientPool, MetaClient};
 use risingwave_sqlparser::parser::Parser;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
+use crate::handler::dml::IMPLICIT_FLUSH;
 use crate::handler::handle;
-use crate::handler::query::IMPLICIT_FLUSH;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::{HummockSnapshotManager, QueryManager};
+use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -127,12 +126,13 @@ pub struct FrontendEnv {
     catalog_reader: CatalogReader,
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 impl FrontendEnv {
     pub async fn init(
         opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
         Self::with_meta_client(meta_client, opts).await
     }
@@ -146,21 +146,26 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
-        let query_manager =
-            QueryManager::new(worker_node_manager.clone(), hummock_snapshot_manager);
+        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let query_manager = QueryManager::new(
+            worker_node_manager.clone(),
+            hummock_snapshot_manager.clone(),
+            compute_client_pool,
+        );
         Self {
             meta_client,
             catalog_writer,
             catalog_reader,
             worker_node_manager,
             query_manager,
+            hummock_snapshot_manager,
         }
     }
 
     pub async fn with_meta_client(
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
         let config = load_config(opts);
         tracing::info!("Starting frontend node with config {:?}", config);
 
@@ -177,7 +182,7 @@ impl FrontendEnv {
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval as u64),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         );
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
@@ -193,9 +198,11 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
+            compute_client_pool,
         );
 
         let observer_manager = ObserverManager::new(
@@ -204,7 +211,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
-            hummock_snapshot_manager,
+            hummock_snapshot_manager.clone(),
         )
         .await;
         let observer_join_handle = observer_manager.start().await?;
@@ -218,6 +225,7 @@ impl FrontendEnv {
                 worker_node_manager,
                 meta_client: frontend_meta_client,
                 query_manager,
+                hummock_snapshot_manager,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -254,6 +262,10 @@ impl FrontendEnv {
     pub fn query_manager(&self) -> &QueryManager {
         &self.query_manager
     }
+
+    pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManagerRef {
+        &self.hummock_snapshot_manager
+    }
 }
 
 pub struct SessionImpl {
@@ -276,6 +288,13 @@ impl ConfigEntry {
     /// Only used for boolean configurations.
     pub fn is_set(&self, default: bool) -> bool {
         self.str_val.parse().unwrap_or(default)
+    }
+
+    pub fn get_val<V>(&self, default: V) -> V
+    where
+        for<'a> V: TryFrom<&'a str, Error = RwError>,
+    {
+        V::try_from(&self.str_val).unwrap_or(default)
     }
 }
 
@@ -334,18 +353,14 @@ pub struct SessionManagerImpl {
     env: FrontendEnv,
     observer_join_handle: JoinHandle<()>,
     heartbeat_join_handle: JoinHandle<()>,
-    _heartbeat_shutdown_sender: UnboundedSender<()>,
+    _heartbeat_shutdown_sender: Sender<()>,
 }
 
 impl SessionManager for SessionManagerImpl {
-    fn connect(
-        &self,
-        database: &str,
-    ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
-        Ok(Arc::new(SessionImpl::new(
-            self.env.clone(),
-            database.to_string(),
-        )))
+    type Session = SessionImpl;
+
+    fn connect(&self, database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        Ok(SessionImpl::new(self.env.clone(), database.to_string()).into())
     }
 }
 
@@ -373,9 +388,12 @@ impl Session for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<PgResponse, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql)?;
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
+            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
+            e
+        })?;
         // With pgwire, there would be at most 1 statement in the vec.
         assert!(stmts.len() <= 1);
         if stmts.is_empty() {
@@ -387,7 +405,10 @@ impl Session for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt).await?;
+        let rsp = handle(self, stmt).await.map_err(|e| {
+            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+            e
+        })?;
         Ok(rsp)
     }
 }

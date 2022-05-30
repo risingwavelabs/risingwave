@@ -22,7 +22,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
@@ -53,13 +53,17 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()>;
 
-    async fn create_materialized_view(&self, table: ProstTable, plan: StreamNode) -> Result<()>;
+    async fn create_materialized_view(
+        &self,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<()>;
 
     async fn create_materialized_source(
         &self,
         source: ProstSource,
         table: ProstTable,
-        plan: StreamNode,
+        graph: StreamFragmentGraph,
     ) -> Result<()>;
 
     async fn create_source(&self, source: ProstSource) -> Result<()>;
@@ -107,10 +111,14 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     // TODO: maybe here to pass a materialize plan node
-    async fn create_materialized_view(&self, table: ProstTable, plan: StreamNode) -> Result<()> {
+    async fn create_materialized_view(
+        &self,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_materialized_view(table, plan)
+            .create_materialized_view(table, graph)
             .await?;
         self.wait_version(version).await
     }
@@ -119,11 +127,11 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         source: ProstSource,
         table: ProstTable,
-        plan: StreamNode,
+        graph: StreamFragmentGraph,
     ) -> Result<()> {
         let (_, _, version) = self
             .meta_client
-            .create_materialized_source(source, table, plan)
+            .create_materialized_source(source, table, graph)
             .await?;
         self.wait_version(version).await
     }

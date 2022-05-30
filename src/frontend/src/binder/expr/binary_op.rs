@@ -24,7 +24,7 @@ impl Binder {
         left: Expr,
         op: BinaryOperator,
         right: Expr,
-    ) -> Result<FunctionCall> {
+    ) -> Result<ExprImpl> {
         let bound_left = self.bind_expr(left)?;
         let bound_right = self.bind_expr(right)?;
         let func_type = match op {
@@ -45,15 +45,15 @@ impl Binder {
             BinaryOperator::NotLike => return self.bind_not_like(bound_left, bound_right),
             _ => return Err(ErrorCode::NotImplemented(format!("{:?}", op), 112.into()).into()),
         };
-        FunctionCall::new(func_type, vec![bound_left, bound_right])
+        Ok(FunctionCall::new(func_type, vec![bound_left, bound_right])?.into())
     }
 
     /// Apply a NOT on top of LIKE.
-    fn bind_not_like(&mut self, left: ExprImpl, right: ExprImpl) -> Result<FunctionCall> {
+    fn bind_not_like(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
         Ok(FunctionCall::new(
             ExprType::Not,
             vec![FunctionCall::new(ExprType::Like, vec![left, right])?.into()],
-        )
-        .unwrap())
+        )?
+        .into())
     }
 }

@@ -11,16 +11,20 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![allow(dead_code)]
+use std::cmp::Ordering;
+use std::collections::btree_map;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
+use futures::Stream;
+use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::RwError;
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
-use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
+use super::cell_based_table::{CellBasedTable, CellBasedTableStreamingIter};
 use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
@@ -29,6 +33,9 @@ use crate::{Keyspace, StateStore};
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
+    keyspace: Keyspace<S>,
+
+    column_descs: Vec<ColumnDesc>,
     // /// Ordering of primary key (for assertion)
     order_types: Vec<OrderType>,
 
@@ -43,15 +50,21 @@ impl<S: StateStore> StateTable<S> {
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
+        dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
+        let cell_based_keyspace = keyspace.clone();
+        let cell_based_column_descs = column_descs.clone();
         Self {
+            keyspace,
+            column_descs,
             order_types: order_types.clone(),
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
-                keyspace,
-                column_descs,
+                cell_based_keyspace,
+                cell_based_column_descs,
                 Some(OrderedRowSerializer::new(order_types)),
                 Arc::new(StateStoreMetrics::unused()),
+                dist_key_indices,
             ),
         }
     }
@@ -102,390 +115,116 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    pub async fn iter(&self, _pk: Row) -> StorageResult<StateTableRowIter<S>> {
-        todo!()
+    pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
+        let mem_table_iter = self.mem_table.buffer.iter();
+        Ok(StateTableRowIter::into_stream(
+            &self.keyspace,
+            self.column_descs.clone(),
+            mem_table_iter,
+            &self.order_types,
+            epoch,
+        ))
     }
 }
 
-pub struct StateTableRowIter<S: StateStore> {
-    cell_based_iter: CellBasedTableRowIter<S>,
-    mem_table: MemTable,
+pub trait RowStream<'a> = Stream<Item = StorageResult<Option<Row>>> + 'a;
+
+struct StateTableRowIter<S: StateStore> {
+    _phantom: PhantomData<S>,
 }
 
+/// `StateTableRowIter` is able to read the just written data (uncommited data).
+/// It will merge the result of `mem_table_iter` and `cell_based_streaming_iter`.
 impl<S: StateStore> StateTableRowIter<S> {
-    async fn new(
-        _keyspace: Keyspace<S>,
-        _table_descs: Vec<ColumnDesc>,
-        _epoch: u64,
-        _stats: Arc<StateStoreMetrics>,
-    ) -> StorageResult<Self> {
-        todo!()
-    }
+    /// This function scans kv pairs from the `shared_storage`(`cell_based_table`) and
+    /// memory(`mem_table`). If a record exist in both `cell_based_table` and `mem_table`, result
+    /// `mem_table` is returned according to the operation(RowOp) on it.
+    #[try_stream(ok = Option<Row>, error = StorageError)]
+    async fn into_stream<'a>(
+        keyspace: &'a Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        mut mem_table_iter: MemTableIter<'a>,
+        order_types_vec: &'a [OrderType],
+        epoch: u64,
+    ) {
+        let mut cell_based_table_iter =
+            CellBasedTableStreamingIter::new(keyspace, table_descs, epoch).await?;
+        let pk_serializer = OrderedRowSerializer::new(order_types_vec.to_vec());
+        let mem_table_next =
+            |mem_table_iter: &mut MemTableIter<'a>| -> StorageResult<Option<(Vec<u8>, RowOp)>> {
+                mem_table_iter
+                    .next()
+                    .map::<StorageResult<(Vec<u8>, RowOp)>, _>(|(k, v)| {
+                        Ok((serialize_pk(k, &pk_serializer).map_err(err)?, v.clone()))
+                    })
+                    .transpose()
+            };
 
-    async fn next(&mut self) -> StorageResult<Option<Row>> {
-        todo!()
+        let mut cell_based_table_item = cell_based_table_iter.next().await.map_err(err)?;
+        let mut mem_table_item = mem_table_next(&mut mem_table_iter)?;
+        loop {
+            match (cell_based_table_item.as_mut(), mem_table_item.as_mut()) {
+                (None, None) => {
+                    yield None;
+                }
+                (Some((_, row)), None) => {
+                    yield Some(std::mem::take(row));
+                    cell_based_table_item = cell_based_table_iter.next().await.map_err(err)?;
+                }
+                (None, Some((_, row_op))) => {
+                    match row_op {
+                        RowOp::Insert(row) | RowOp::Update((_, row)) => {
+                            yield Some(std::mem::take(row));
+                        }
+                        _ => {}
+                    }
+                    mem_table_item = mem_table_next(&mut mem_table_iter)?;
+                }
+                (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
+                    match cell_based_pk.cmp(&mem_table_pk) {
+                        Ordering::Less => {
+                            // cell_based_table_item will be return
+                            yield Some(std::mem::take(cell_based_row));
+                            cell_based_table_item =
+                                cell_based_table_iter.next().await.map_err(err)?;
+                        }
+                        Ordering::Equal => {
+                            // mem_table_item will be return, while both cell_based_streaming_iter
+                            // and mem_table_iter need to execute next()
+                            // once.
+                            match mem_table_row_op {
+                                RowOp::Insert(row) => yield Some(row.clone()),
+                                RowOp::Delete(_) => {}
+                                RowOp::Update((old_row, new_row)) => {
+                                    debug_assert!(old_row == cell_based_row);
+                                    yield Some(std::mem::take(new_row));
+                                }
+                            }
+                            cell_based_table_item =
+                                cell_based_table_iter.next().await.map_err(err)?;
+                            mem_table_item = mem_table_next(&mut mem_table_iter)?;
+                        }
+                        Ordering::Greater => {
+                            // mem_table_item will be return
+                            match mem_table_row_op {
+                                RowOp::Insert(row) => {
+                                    yield Some(std::mem::take(row));
+                                }
+                                RowOp::Delete(_) => {}
+                                RowOp::Update(_) => {
+                                    unreachable!();
+                                }
+                            }
+                            mem_table_item = mem_table_next(&mut mem_table_iter)?;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
+type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
 
 fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::StateTable(rw.into())
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_common::catalog::ColumnId;
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
-
-    use super::*;
-    use crate::memory::MemoryStateStore;
-
-    #[tokio::test]
-    async fn test_state_table() -> StorageResult<()> {
-        let state_store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
-        let column_descs = vec![
-            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
-        ];
-        let order_types = vec![OrderType::Ascending];
-        let mut state_table = StateTable::new(keyspace.clone(), column_descs, order_types);
-        let mut epoch: u64 = 0;
-        state_table
-            .insert(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(1_i32.into()),
-                    Some(11_i32.into()),
-                    Some(111_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(2_i32.into())]),
-                Row(vec![
-                    Some(2_i32.into()),
-                    Some(22_i32.into()),
-                    Some(222_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(3_i32.into())]),
-                Row(vec![
-                    Some(3_i32.into()),
-                    Some(33_i32.into()),
-                    Some(333_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        // test read visibility
-        let row1 = state_table
-            .get_row(&Row(vec![Some(1_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row1,
-            Some(Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into())
-            ]))
-        );
-
-        let row2 = state_table
-            .get_row(&Row(vec![Some(2_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row2,
-            Some(Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into())
-            ]))
-        );
-
-        state_table
-            .delete(
-                Row(vec![Some(2_i32.into())]),
-                Row(vec![
-                    Some(2_i32.into()),
-                    Some(22_i32.into()),
-                    Some(222_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        let row2_delete = state_table
-            .get_row(&Row(vec![Some(2_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row2_delete, None);
-
-        state_table.commit(epoch).await.unwrap();
-
-        let row2_delete_commit = state_table
-            .get_row(&Row(vec![Some(2_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row2_delete_commit, None);
-
-        epoch += 1;
-        state_table
-            .delete(
-                Row(vec![Some(3_i32.into())]),
-                Row(vec![
-                    Some(3_i32.into()),
-                    Some(33_i32.into()),
-                    Some(333_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        state_table
-            .insert(
-                Row(vec![Some(4_i32.into())]),
-                Row(vec![Some(4_i32.into()), None, None]),
-            )
-            .unwrap();
-        state_table
-            .insert(Row(vec![Some(5_i32.into())]), Row(vec![None, None, None]))
-            .unwrap();
-
-        let row4 = state_table
-            .get_row(&Row(vec![Some(4_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row4, Some(Row(vec![Some(4_i32.into()), None, None])));
-
-        let row5 = state_table
-            .get_row(&Row(vec![Some(5_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row5, Some(Row(vec![None, None, None])));
-
-        let non_exist_row = state_table
-            .get_row(&Row(vec![Some(0_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(non_exist_row, None);
-
-        state_table
-            .delete(
-                Row(vec![Some(4_i32.into())]),
-                Row(vec![Some(4_i32.into()), None, None]),
-            )
-            .unwrap();
-
-        state_table.commit(epoch).await.unwrap();
-
-        let row3_delete = state_table
-            .get_row(&Row(vec![Some(3_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row3_delete, None);
-
-        let row4_delete = state_table
-            .get_row(&Row(vec![Some(4_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row4_delete, None);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_state_table_update_insert() -> StorageResult<()> {
-        let state_store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
-        let column_descs = vec![
-            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
-            ColumnDesc::unnamed(ColumnId::from(4), DataType::Int32),
-        ];
-        let order_types = vec![OrderType::Ascending];
-        let mut state_table = StateTable::new(keyspace.clone(), column_descs, order_types);
-        let mut epoch: u64 = 0;
-        state_table
-            .insert(
-                Row(vec![Some(6_i32.into())]),
-                Row(vec![
-                    Some(6_i32.into()),
-                    Some(66_i32.into()),
-                    Some(666_i32.into()),
-                    Some(6666_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        state_table
-            .insert(
-                Row(vec![Some(7_i32.into())]),
-                Row(vec![Some(7_i32.into()), None, Some(777_i32.into()), None]),
-            )
-            .unwrap();
-        state_table.commit(epoch).await.unwrap();
-
-        epoch += 1;
-        state_table
-            .delete(
-                Row(vec![Some(6_i32.into())]),
-                Row(vec![
-                    Some(6_i32.into()),
-                    Some(66_i32.into()),
-                    Some(666_i32.into()),
-                    Some(6666_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(6_i32.into())]),
-                Row(vec![
-                    Some(6666_i32.into()),
-                    None,
-                    None,
-                    Some(6666_i32.into()),
-                ]),
-            )
-            .unwrap();
-
-        state_table
-            .delete(
-                Row(vec![Some(7_i32.into())]),
-                Row(vec![Some(7_i32.into()), None, Some(777_i32.into()), None]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(7_i32.into())]),
-                Row(vec![None, Some(77_i32.into()), Some(7777_i32.into()), None]),
-            )
-            .unwrap();
-        let row6 = state_table
-            .get_row(&Row(vec![Some(6_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row6,
-            Some(Row(vec![
-                Some(6666_i32.into()),
-                None,
-                None,
-                Some(6666_i32.into())
-            ]))
-        );
-
-        let row7 = state_table
-            .get_row(&Row(vec![Some(7_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row7,
-            Some(Row(vec![
-                None,
-                Some(77_i32.into()),
-                Some(7777_i32.into()),
-                None
-            ]))
-        );
-
-        state_table.commit(epoch).await.unwrap();
-
-        let row6_commit = state_table
-            .get_row(&Row(vec![Some(6_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row6_commit,
-            Some(Row(vec![
-                Some(6666_i32.into()),
-                None,
-                None,
-                Some(6666_i32.into())
-            ]))
-        );
-        let row7_commit = state_table
-            .get_row(&Row(vec![Some(7_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(
-            row7_commit,
-            Some(Row(vec![
-                None,
-                Some(77_i32.into()),
-                Some(7777_i32.into()),
-                None
-            ]))
-        );
-
-        epoch += 1;
-
-        state_table
-            .insert(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(1_i32.into()),
-                    Some(2_i32.into()),
-                    Some(3_i32.into()),
-                    Some(4_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table.commit(epoch).await.unwrap();
-        // one epoch: delete (1, 2, 3, 4), insert (5, 6, 7, None), delete(5, 6, 7, None)
-        state_table
-            .delete(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(1_i32.into()),
-                    Some(2_i32.into()),
-                    Some(3_i32.into()),
-                    Some(4_i32.into()),
-                ]),
-            )
-            .unwrap();
-        state_table
-            .insert(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(5_i32.into()),
-                    Some(6_i32.into()),
-                    Some(7_i32.into()),
-                    None,
-                ]),
-            )
-            .unwrap();
-        state_table
-            .delete(
-                Row(vec![Some(1_i32.into())]),
-                Row(vec![
-                    Some(5_i32.into()),
-                    Some(6_i32.into()),
-                    Some(7_i32.into()),
-                    None,
-                ]),
-            )
-            .unwrap();
-
-        let row1 = state_table
-            .get_row(&Row(vec![Some(1_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row1, None);
-        state_table.commit(epoch).await.unwrap();
-
-        let row1_commit = state_table
-            .get_row(&Row(vec![Some(1_i32.into())]), epoch)
-            .await
-            .unwrap();
-        assert_eq!(row1_commit, None);
-        Ok(())
-    }
 }

@@ -37,7 +37,7 @@ pub use compactor_manager::*;
 pub use hummock_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 pub use vacuum::*;
@@ -54,7 +54,7 @@ pub async fn start_hummock_workers<S>(
     vacuum_trigger: Arc<VacuumTrigger<S>>,
     notification_manager: NotificationManagerRef,
     compaction_scheduler: CompactionSchedulerRef<S>,
-) -> Vec<(JoinHandle<()>, UnboundedSender<()>)>
+) -> Vec<(JoinHandle<()>, Sender<()>)>
 where
     S: MetaStore,
 {
@@ -75,13 +75,13 @@ pub async fn subscribe_cluster_membership_change<S>(
     hummock_manager: Arc<HummockManager<S>>,
     compactor_manager: Arc<CompactorManager>,
     notification_manager: NotificationManagerRef,
-) -> (JoinHandle<()>, UnboundedSender<()>)
+) -> (JoinHandle<()>, Sender<()>)
 where
     S: MetaStore,
 {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     notification_manager.insert_local_sender(tx).await;
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         loop {
             let worker_node = tokio::select! {
@@ -93,7 +93,7 @@ where
                         Some(LocalNotification::WorkerDeletion(worker_node)) => worker_node
                     }
                 }
-                _ = shutdown_rx.recv() => {
+                _ = &mut shutdown_rx => {
                     return;
                 }
             };
@@ -124,30 +124,17 @@ where
 /// Starts a task to accept compaction request.
 fn start_compaction_scheduler<S>(
     compaction_scheduler: CompactionSchedulerRef<S>,
-) -> (JoinHandle<()>, UnboundedSender<()>)
+) -> (JoinHandle<()>, Sender<()>)
 where
     S: MetaStore,
 {
-    // TODO: remove this periodic trigger after #2121
-    let request_sender = compaction_scheduler.request_sender();
-    tokio::spawn(async move {
-        let mut min_interval = tokio::time::interval(Duration::from_secs(10));
-        loop {
-            min_interval.tick().await;
-            if request_sender.send(0.into()).is_err() {
-                tracing::info!("Stop periodic compaction trigger");
-                return;
-            }
-        }
-    });
-
     // Start compaction scheduler
-    let shutdown_sender = compaction_scheduler.shutdown_sender();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
-        compaction_scheduler.start().await;
+        compaction_scheduler.start(shutdown_rx).await;
     });
 
-    (join_handle, shutdown_sender)
+    (join_handle, shutdown_tx)
 }
 
 /// Vacuum is triggered at this rate.
@@ -155,13 +142,11 @@ const VACUUM_TRIGGER_INTERVAL: Duration = Duration::from_secs(30);
 /// Orphan SST will be deleted after this interval.
 const ORPHAN_SST_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
 /// Starts a task to periodically vacuum hummock.
-pub fn start_vacuum_scheduler<S>(
-    vacuum: Arc<VacuumTrigger<S>>,
-) -> (JoinHandle<()>, UnboundedSender<()>)
+pub fn start_vacuum_scheduler<S>(vacuum: Arc<VacuumTrigger<S>>) -> (JoinHandle<()>, Sender<()>)
 where
     S: MetaStore,
 {
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         let mut min_trigger_interval = tokio::time::interval(VACUUM_TRIGGER_INTERVAL);
         loop {
@@ -169,7 +154,7 @@ where
                 // Wait for interval
                 _ = min_trigger_interval.tick() => {},
                 // Shutdown vacuum
-                _ = shutdown_rx.recv() => {
+                _ = &mut shutdown_rx => {
                     tracing::info!("Vacuum is shutting down");
                     return;
                 }

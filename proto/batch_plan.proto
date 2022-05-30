@@ -37,11 +37,15 @@ message FilterScanNode {
 message InsertNode {
   plan_common.TableRefId table_source_ref_id = 1;
   repeated int32 column_ids = 2;
-  bool frontend_v2 = 3;
 }
 
 message DeleteNode {
   plan_common.TableRefId table_source_ref_id = 1;
+}
+
+message UpdateNode {
+  plan_common.TableRefId table_source_ref_id = 1;
+  repeated expr.ExprNode exprs = 2;
 }
 
 message ValuesNode {
@@ -50,20 +54,6 @@ message ValuesNode {
   }
   repeated ExprTuple tuples = 1;
   repeated plan_common.Field fields = 2;
-}
-
-message CreateTableNode {
-  plan_common.TableRefId table_ref_id = 1;
-  repeated plan_common.ColumnDesc column_descs = 2;
-  // Other fields not included yet:
-  // primarykey_col_ids, dist_type, distkey_col_id, append_only
-
-
-  // We re-use the CreateTableNode for creating materialized views.
-  oneof info {
-    plan_common.TableSourceInfo table_source = 3;
-    plan_common.MaterializedViewInfo materialized_view = 4;
-  }
 }
 
 message OrderByNode {
@@ -79,20 +69,6 @@ message TopNNode {
 message LimitNode {
   uint32 limit = 1;
   uint32 offset = 2;
-}
-
-message CreateSourceNode {
-  plan_common.TableRefId table_ref_id = 1;
-  repeated plan_common.ColumnDesc column_descs = 2;
-  plan_common.StreamSourceInfo info = 3;
-}
-
-message DropSourceNode {
-  plan_common.TableRefId table_ref_id = 1;
-}
-
-message DropTableNode {
-  plan_common.TableRefId table_ref_id = 1;
 }
 
 message NestedLoopJoinNode {
@@ -130,16 +106,10 @@ message HopWindowNode {
   data.IntervalUnit window_size = 3;
 }
 
-message GenerateInt32SeriesNode {
-  int32 start = 1;
-  int32 stop = 2;
-  int32 step = 3;
-}
-
-message GenerateTimeSeriesNode {
-  string start = 1;
-  string stop = 2;
-  data.IntervalUnit step = 3;
+message GenerateSeriesNode {
+  expr.ExprNode start = 1;
+  expr.ExprNode stop = 2;
+  expr.ExprNode step = 3;
 }
 
 // Task is a running instance of Stage.
@@ -178,28 +148,23 @@ message PlanNode {
   oneof node_body {
     InsertNode insert = 2;
     DeleteNode delete = 3;
-    ProjectNode project = 4;
-    CreateTableNode create_table = 5;
-    DropTableNode drop_table = 6;
+    UpdateNode update = 4;
+    ProjectNode project = 5;
     HashAggNode hash_agg = 7;
     FilterNode filter = 8;
     ExchangeNode exchange = 9;
     OrderByNode order_by = 10;
     NestedLoopJoinNode nested_loop_join = 11;
-    CreateSourceNode create_source = 12;
-    SourceScanNode source_scan = 13;
     TopNNode top_n = 14;
     SortAggNode sort_agg = 15;
     RowSeqScanNode row_seq_scan = 16;
     LimitNode limit = 17;
     ValuesNode values = 18;
     HashJoinNode hash_join = 19;
-    DropSourceNode drop_source = 20;
     MergeSortExchangeNode merge_sort_exchange = 21;
     SortMergeJoinNode sort_merge_join = 22;
-    GenerateInt32SeriesNode generate_int32_series = 23;
     HopWindowNode hop_window = 25;
-    GenerateTimeSeriesNode generate_time_series = 26;
+    GenerateSeriesNode generate_series = 26;
   }
   string identity = 24;
 }

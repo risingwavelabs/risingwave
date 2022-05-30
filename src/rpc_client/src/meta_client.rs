@@ -37,15 +37,13 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
-    AbortEpochRequest, AbortEpochResponse, AddTablesRequest, AddTablesResponse, CommitEpochRequest,
-    CommitEpochResponse, CompactTask, GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot,
-    HummockVersion, PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
+    CompactTask, GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot, HummockVersion,
+    PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
     ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
     ReportVacuumTaskResponse, SstableInfo, SubscribeCompactTasksRequest,
     SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
     UnpinVersionRequest, UnpinVersionResponse, VacuumTask,
 };
-use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -56,8 +54,9 @@ use risingwave_pb::meta::{
     FlushResponse, HeartbeatRequest, HeartbeatResponse, ListAllNodesRequest, ListAllNodesResponse,
     SubscribeRequest, SubscribeResponse,
 };
-use risingwave_pb::stream_plan::StreamNode;
-use tokio::sync::mpsc::{Receiver, UnboundedSender};
+use risingwave_pb::stream_plan::StreamFragmentGraph;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
@@ -155,11 +154,11 @@ impl MetaClient {
     pub async fn create_materialized_view(
         &self,
         table: ProstTable,
-        plan: StreamNode,
+        graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
-            stream_node: Some(plan),
+            fragment_graph: Some(graph),
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -188,11 +187,11 @@ impl MetaClient {
         &self,
         source: ProstSource,
         table: ProstTable,
-        plan: StreamNode,
+        graph: StreamFragmentGraph,
     ) -> Result<(TableId, u32, CatalogVersion)> {
         let request = CreateMaterializedSourceRequest {
             materialized_view: Some(table),
-            stream_node: Some(plan),
+            fragment_graph: Some(graph),
             source: Some(source),
         };
         let resp = self.inner.create_materialized_source(request).await?;
@@ -261,8 +260,8 @@ impl MetaClient {
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
-    ) -> (JoinHandle<()>, UnboundedSender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval_ticker = tokio::time::interval(min_interval);
             loop {
@@ -270,7 +269,7 @@ impl MetaClient {
                     // Wait for interval
                     _ = min_interval_ticker.tick() => {},
                     // Shutdown
-                    _ = shutdown_rx.recv() => {
+                    _ = &mut shutdown_rx => {
                         tracing::info!("Heartbeat loop is shutting down");
                         return;
                     }
@@ -357,20 +356,6 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.table_id)
     }
 
-    async fn add_tables(
-        &self,
-        epoch: HummockEpoch,
-        sstables: Vec<SstableInfo>,
-    ) -> Result<HummockVersion> {
-        let req = AddTablesRequest {
-            context_id: self.worker_id(),
-            tables: sstables,
-            epoch,
-        };
-        let resp = self.inner.add_tables(req).await?;
-        Ok(resp.version.unwrap())
-    }
-
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         let req = ReportCompactionTasksRequest {
             compact_task: Some(compact_task),
@@ -379,16 +364,8 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        let req = CommitEpochRequest { epoch };
-        self.inner.commit_epoch(req).await?;
-        Ok(())
-    }
-
-    async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        let req = AbortEpochRequest { epoch };
-        self.inner.abort_epoch(req).await?;
-        Ok(())
+    async fn commit_epoch(&self, _epoch: HummockEpoch, _sstables: Vec<SstableInfo>) -> Result<()> {
+        unimplemented!("Only meta service can commit_epoch in production.")
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
@@ -412,7 +389,6 @@ impl HummockMetaClient for MetaClient {
 pub struct GrpcMetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
-    pub catalog_client: CatalogServiceClient<Channel>,
     pub ddl_client: DdlServiceClient<Channel>,
     pub hummock_client: HummockManagerServiceClient<Channel>,
     pub notification_client: NotificationServiceClient<Channel>,
@@ -430,7 +406,6 @@ impl GrpcMetaClient {
             .to_rw_result_with(|| format!("failed to connect to {}", addr))?;
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
-        let catalog_client = CatalogServiceClient::new(channel.clone());
         let ddl_client = DdlServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
@@ -438,7 +413,6 @@ impl GrpcMetaClient {
         Ok(Self {
             cluster_client,
             heartbeat_client,
-            catalog_client,
             ddl_client,
             hummock_client,
             notification_client,
@@ -489,13 +463,10 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
-            ,{ hummock_client, add_tables, AddTablesRequest, AddTablesResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
-            ,{ hummock_client, commit_epoch, CommitEpochRequest, CommitEpochResponse }
-            ,{ hummock_client, abort_epoch, AbortEpochRequest, AbortEpochResponse }
         }
     };
 }

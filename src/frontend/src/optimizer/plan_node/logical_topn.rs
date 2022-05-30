@@ -18,10 +18,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{
+    gen_filter_and_pushdown, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
+    ToBatch, ToStream,
+};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
-use crate::optimizer::property::{Distribution, FieldOrder, Order};
-use crate::utils::ColIndexMapping;
+use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -124,7 +127,7 @@ impl ColPrunable for LogicalTopN {
         };
 
         let input_required_cols = {
-            let mut tmp = order_required_cols.clone();
+            let mut tmp = order_required_cols;
             tmp.union_with(&input_required_bitset);
             tmp.ones().collect_vec()
         };
@@ -146,7 +149,7 @@ impl ColPrunable for LogicalTopN {
         let new_input = self.input.prune_col(&input_required_cols);
         let top_n = Self::new(new_input, self.limit, self.offset, new_order).into();
 
-        if order_required_cols.is_subset(&input_required_bitset) {
+        if input_required_cols == required_cols {
             top_n
         } else {
             let src_size = top_n.schema().len();
@@ -154,7 +157,14 @@ impl ColPrunable for LogicalTopN {
                 top_n,
                 ColIndexMapping::with_remaining_columns(required_cols, src_size),
             )
+            .into()
         }
+    }
+}
+
+impl PredicatePushdown for LogicalTopN {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 
@@ -181,7 +191,7 @@ impl ToStream for LogicalTopN {
         // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
         let input = self
             .input()
-            .to_stream_with_dist_required(&Distribution::Single)?;
+            .to_stream_with_dist_required(&RequiredDist::single())?;
         Ok(StreamTopN::new(self.clone_with_input(input)).into())
     }
 

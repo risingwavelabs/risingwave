@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t (v1 real not null);
 
 statement ok
@@ -15,6 +18,9 @@ insert into t values ('NaN');
 
 statement ok
 insert into t values ('-NaN');
+
+statement ok
+flush;
 
 query RI
 select v1, count(*) from t group by v1 order by v1;

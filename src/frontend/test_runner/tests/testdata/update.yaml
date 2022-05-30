@@ -1,0 +1,38 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
+- sql: |
+    create table t (v1 int, v2 int);
+    update t set v1 = 0;
+  batch_plan: |
+    BatchUpdate { table: t, exprs: [$0, 0:Int32, $2] }
+      BatchScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    create table t (v1 int, v2 int);
+    update t set v1 = true;
+  binder_error: 'Bind error: cannot cast type Boolean to Int32 in Assign context'
+- sql: |
+    create table t (v1 int, v2 int);
+    update t set v1 = v2 + 1;
+  batch_plan: |
+    BatchUpdate { table: t, exprs: [$0, ($2 + 1:Int32), $2] }
+      BatchScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    create table t (v1 int, v2 real);
+    update t set v1 = v2;
+  batch_plan: |
+    BatchUpdate { table: t, exprs: [$0, $2::Int32, $2] }
+      BatchScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    create table t (v1 int, v2 int);
+    update t set v1 = v2 + 1 where v2 > 0;
+  batch_plan: |
+    BatchUpdate { table: t, exprs: [$0, ($2 + 1:Int32), $2] }
+      BatchFilter { predicate: ($2 > 0:Int32) }
+        BatchScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    create table t (v1 int, v2 int);
+    update t set (v1, v2) = (v2 + 1, v1 - 1) where v1 != v2;
+  batch_plan: |
+    BatchUpdate { table: t, exprs: [$0, ($2 + 1:Int32), ($1 - 1:Int32)] }
+      BatchFilter { predicate: ($1 <> $2) }
+        BatchScan { table: t, columns: [_row_id, v1, v2] }

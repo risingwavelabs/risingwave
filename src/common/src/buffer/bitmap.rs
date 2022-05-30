@@ -33,13 +33,14 @@
 //! This is called a "validity bitmap" in the Arrow documentation.
 //! This file is adapted from [arrow-rs](https://github.com/apache/arrow-rs)
 
-use std::mem;
 use std::ops::{BitAnd, BitOr};
 
+use bytes::Bytes;
+use itertools::Itertools;
+use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::Buffer as ProstBuffer;
 
 use crate::array::{Array, BoolArray};
-use crate::buffer::Buffer;
 use crate::error::{Result, RwError};
 use crate::util::bit_util;
 
@@ -81,15 +82,15 @@ impl BitmapBuilder {
         self
     }
 
-    pub fn finish(&mut self) -> Bitmap {
+    pub fn finish(mut self) -> Bitmap {
         if self.len % 8 != 0 {
             self.data.push(self.head);
         }
         let num_high_bits = self.num_high_bits;
-        let bits = Buffer::from_slice(self.data.as_slice()).unwrap();
+
         Bitmap {
             num_bits: self.len(),
-            bits,
+            bits: self.data.into(),
             num_high_bits,
         }
     }
@@ -101,7 +102,7 @@ impl BitmapBuilder {
 
 #[derive(Clone)]
 pub struct Bitmap {
-    pub bits: Buffer,
+    pub bits: Bytes,
 
     // The useful bits in the bitmap. The total number of bits will usually
     // be larger than the useful bits due to byte-padding.
@@ -129,12 +130,29 @@ impl std::fmt::Debug for Bitmap {
 
 impl Bitmap {
     pub fn new(num_bits: usize) -> Result<Self> {
-        let len = Bitmap::num_of_bytes(num_bits);
-        Ok(Bitmap {
-            bits: Buffer::with_default(len)?,
+        let len = Self::num_of_bytes(num_bits);
+        Ok(Self {
+            bits: vec![0; len].into(),
             num_bits,
             num_high_bits: 0,
         })
+    }
+
+    pub fn from_bytes_with_num_bits(buf: Bytes, num_bits: usize) -> Self {
+        assert!(num_bits <= buf.len() << 3);
+
+        let num_high_bits = buf.iter().map(|x| x.count_ones()).sum::<u32>() as usize;
+        Self {
+            num_bits,
+            bits: buf,
+            num_high_bits,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn from_bytes(buf: Bytes) -> Self {
+        let num_bits = buf.len() << 3;
+        Self::from_bytes_with_num_bits(buf, num_bits)
     }
 
     /// Return the next set bit index on or after `bit_idx`.
@@ -196,30 +214,12 @@ impl Bitmap {
         Ok(unsafe { self.is_set_unchecked(idx) })
     }
 
-    pub fn buffer_ref(&self) -> &Buffer {
+    pub fn bytes_ref(&self) -> &Bytes {
         &self.bits
     }
 
-    pub fn into_buffer(self) -> Buffer {
+    pub fn into_bytes(self) -> Bytes {
         self.bits
-    }
-
-    /// Returns the total number of bytes of memory occupied by the buffers owned by this [Bitmap].
-    pub fn get_buffer_memory_size(&self) -> usize {
-        self.bits.capacity()
-    }
-
-    /// Returns the total number of bytes of memory occupied physically by this [Bitmap].
-    pub fn get_array_memory_size(&self) -> usize {
-        self.bits.capacity() + mem::size_of_val(self)
-    }
-
-    pub fn to_protobuf(&self) -> ProstBuffer {
-        let mut buf = ProstBuffer::default();
-        for b in self.iter() {
-            buf.body.push(b as u8);
-        }
-        buf
     }
 
     pub fn iter(&self) -> BitmapIter<'_> {
@@ -250,7 +250,14 @@ impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
     type Output = Result<Bitmap>;
 
     fn bitand(self, rhs: &'b Bitmap) -> Result<Bitmap> {
-        Ok(Bitmap::from((&self.bits & &rhs.bits)?))
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let bits = self
+            .bits
+            .iter()
+            .zip_eq(rhs.bits.iter())
+            .map(|(&a, &b)| a & b)
+            .collect();
+        Ok(Bitmap::from_bytes_with_num_bits(bits, self.num_bits))
     }
 }
 
@@ -258,18 +265,14 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
     type Output = Result<Bitmap>;
 
     fn bitor(self, rhs: &'b Bitmap) -> Result<Bitmap> {
-        Ok(Bitmap::from((&self.bits | &rhs.bits)?))
-    }
-}
-
-impl From<Buffer> for Bitmap {
-    fn from(buf: Buffer) -> Self {
-        let num_high_bits = buf.as_slice().iter().map(|x| x.count_ones()).sum::<u32>() as usize;
-        Self {
-            num_bits: buf.len() << 3,
-            bits: buf,
-            num_high_bits,
-        }
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let bits = self
+            .bits
+            .iter()
+            .zip_eq(rhs.bits.iter())
+            .map(|(&a, &b)| a | b)
+            .collect();
+        Ok(Bitmap::from_bytes_with_num_bits(bits, self.num_bits))
     }
 }
 
@@ -297,16 +300,30 @@ impl TryFrom<Vec<bool>> for Bitmap {
     }
 }
 
+impl Bitmap {
+    pub fn to_protobuf(&self) -> ProstBuffer {
+        let last_byte_num_bits = ((self.num_bits % 8) as u8).to_be_bytes();
+        let body = last_byte_num_bits
+            .into_iter()
+            .chain(self.bits.iter().copied())
+            .collect();
+
+        ProstBuffer {
+            body,
+            compression: CompressionType::None as i32,
+        }
+    }
+}
+
 impl TryFrom<&ProstBuffer> for Bitmap {
     type Error = RwError;
 
     fn try_from(buf: &ProstBuffer) -> Result<Bitmap> {
-        let mut builder = BitmapBuilder::default();
-        buf.get_body().as_slice().iter().for_each(|e| {
-            builder.append(*e == 1_u8);
-        });
+        let last_byte_num_bits = u8::from_be_bytes(buf.body[..1].try_into().unwrap());
+        let bits = Bytes::copy_from_slice(&buf.body[1..]); // TODO: avoid this allocation
+        let num_bits = (bits.len() << 3) - ((8 - last_byte_num_bits) % 8) as usize;
 
-        Ok(builder.finish())
+        Ok(Self::from_bytes_with_num_bits(bits, num_bits))
     }
 }
 
@@ -321,18 +338,18 @@ impl PartialEq for Bitmap {
         // Note: If you new a Buffer without init, the PartialEq may have UB due to uninit mem cuz
         // we are comparing bytes by bytes instead of bits by bits.
         let length = (self.num_bits + 7) / 8;
-        self.bits.as_slice()[..length] == other.bits.as_slice()[..length]
+        self.bits[..length] == other.bits[..length]
     }
 }
 
 pub struct BitmapIter<'a> {
-    bits: &'a Buffer,
+    bits: &'a Bytes,
     idx: usize,
     num_bits: usize,
 }
 
 impl<'a> BitmapIter<'a> {
-    pub fn try_from(value: &'a Buffer, num_bits: usize) -> Result<Self> {
+    pub fn try_from(value: &'a Bytes, num_bits: usize) -> Result<Self> {
         ensure!(value.len() >= Bitmap::num_of_bytes(num_bits));
         Ok(Self {
             bits: value,
@@ -363,45 +380,51 @@ mod tests {
 
     #[test]
     fn test_bitmap_builder() {
-        let bitmap1 = BitmapBuilder::default()
-            .append(false)
-            .append(true)
-            .append(true)
-            .append(false)
-            .append(true)
-            .append(false)
-            .append(true)
-            .append(false)
-            .append(true)
-            .append(false)
-            .append(true)
-            .append(true)
-            .append(false)
-            .append(true)
-            .append(false)
-            .append(true)
-            .finish();
+        let bitmap1 = {
+            let mut builder = BitmapBuilder::default();
+            builder
+                .append(false)
+                .append(true)
+                .append(true)
+                .append(false)
+                .append(true)
+                .append(false)
+                .append(true)
+                .append(false)
+                .append(true)
+                .append(false)
+                .append(true)
+                .append(true)
+                .append(false)
+                .append(true)
+                .append(false)
+                .append(true);
+            builder.finish()
+        };
         let byte1 = 0b0101_0110_u8;
         let byte2 = 0b1010_1101_u8;
-        let expected = Bitmap::from(Buffer::try_from([byte1, byte2]).unwrap());
+        let expected = Bitmap::from_bytes(Bytes::copy_from_slice(&[byte1, byte2]));
         assert_eq!(bitmap1, expected);
         assert_eq!(
             bitmap1.num_high_bits(),
             (byte1.count_ones() + byte2.count_ones()) as usize
         );
 
-        let bitmap2 = BitmapBuilder::default()
-            .append(false)
-            .append(true)
-            .append(true)
-            .append(false)
-            .append(true)
-            .append(false)
-            .append(true)
-            .append(false)
-            .finish();
+        let bitmap2 = {
+            let mut builder = BitmapBuilder::default();
+            builder
+                .append(false)
+                .append(true)
+                .append(true)
+                .append(false)
+                .append(true)
+                .append(false)
+                .append(true)
+                .append(false);
+            builder.finish()
+        };
         let byte1 = 0b0101_0110_u8;
-        let expected = Bitmap::from(Buffer::try_from([byte1]).unwrap());
+        let expected = Bitmap::from_bytes(Bytes::copy_from_slice(&[byte1]));
         assert_eq!(bitmap2, expected);
     }
 
@@ -414,27 +437,27 @@ mod tests {
 
     #[test]
     fn test_bitwise_and() {
-        let bitmap1 = Bitmap::from(Buffer::try_from([0b01101010]).unwrap());
-        let bitmap2 = Bitmap::from(Buffer::try_from([0b01001110]).unwrap());
+        let bitmap1 = Bitmap::from_bytes(Bytes::from_static(&[0b01101010]));
+        let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
         assert_eq!(
-            Bitmap::from(Buffer::try_from([0b01001010]).unwrap()),
+            Bitmap::from_bytes(Bytes::from_static(&[0b01001010])),
             (&bitmap1 & &bitmap2).unwrap()
         );
     }
 
     #[test]
     fn test_bitwise_or() {
-        let bitmap1 = Bitmap::from(Buffer::try_from([0b01101010]).unwrap());
-        let bitmap2 = Bitmap::from(Buffer::try_from([0b01001110]).unwrap());
+        let bitmap1 = Bitmap::from_bytes(Bytes::from_static(&[0b01101010]));
+        let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
         assert_eq!(
-            Bitmap::from(Buffer::try_from([0b01101110]).unwrap()),
+            Bitmap::from_bytes(Bytes::from_static(&[0b01101110])),
             (&bitmap1 | &bitmap2).unwrap()
         );
     }
 
     #[test]
     fn test_bitmap_is_set() {
-        let bitmap = Bitmap::from(Buffer::try_from([0b01001010]).unwrap());
+        let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b01001010]));
         assert!(!bitmap.is_set(0).unwrap());
         assert!(bitmap.is_set(1).unwrap());
         assert!(!bitmap.is_set(2).unwrap());
@@ -448,7 +471,7 @@ mod tests {
     #[test]
     fn test_bitmap_iter() -> Result<()> {
         {
-            let bitmap = Bitmap::from(Buffer::try_from([0b01001010]).unwrap());
+            let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b01001010]));
             let mut booleans = vec![];
             for b in bitmap.iter() {
                 booleans.push(b as u8);
@@ -466,22 +489,23 @@ mod tests {
 
     #[test]
     fn test_bitmap_from_protobuf() {
-        let bitmap_bytes = vec![0u8, 1, 0, 1, 0, 0, 1, 0];
+        let bitmap_bytes = vec![3u8 /* len % 8 */, 0b0101_0010, 0b110];
         let buf = ProstBuffer {
-            body: bitmap_bytes.clone(),
-            ..Default::default()
+            body: bitmap_bytes,
+            compression: CompressionType::None as _,
         };
         let bitmap: Bitmap = (&buf).try_into().unwrap();
         let actual_bytes: Vec<u8> = bitmap.iter().map(|b| b as u8).collect();
-        assert_eq!(actual_bytes, bitmap_bytes);
-        assert_eq!(bitmap.num_high_bits(), 3);
+
+        assert_eq!(actual_bytes, vec![0, 1, 0, 0, 1, 0, 1, 0, /*  */ 0, 1, 1]); // in reverse order
+        assert_eq!(bitmap.num_high_bits(), 5);
     }
 
     #[test]
     fn test_bitmap_from_buffer() {
         let byte1 = 0b0110_1010_u8;
         let byte2 = 0b1011_0101_u8;
-        let bitmap = Bitmap::from(Buffer::try_from([0b0110_1010, 0b1011_0101]).unwrap());
+        let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b0110_1010, 0b1011_0101]));
         let expected = Bitmap::try_from(vec![
             false, true, false, true, false, true, true, false, true, false, true, false, true,
             true, false, true,

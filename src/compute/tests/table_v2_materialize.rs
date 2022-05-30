@@ -12,23 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(generators)]
+#![feature(proc_macro_hygiene, stmt_expr_attributes)]
 use std::sync::Arc;
 
 use futures::stream::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_batch::executor::{CreateTableExecutor, Executor as BatchExecutor};
-use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
-use risingwave_batch::executor2::monitor::BatchMetrics;
-use risingwave_batch::executor2::{
-    DeleteExecutor2, Executor2, InsertExecutor2, RowSeqScanExecutor2,
+use risingwave_batch::executor::monitor::BatchMetrics;
+use risingwave_batch::executor::{
+    BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
+    RowSeqScanExecutor,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::batch_plan::create_table_node::Info;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
@@ -36,11 +38,10 @@ use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
-// use risingwave_storage::table::mview::MViewTable;
-use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
+use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
-    Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
+    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -60,26 +61,24 @@ impl SingleChunkExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BatchExecutor for SingleChunkExecutor {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        Ok(self.chunk.take())
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        Ok(())
-    }
-
     fn schema(&self) -> &Schema {
         &self.schema
     }
 
     fn identity(&self) -> &str {
         &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl SingleChunkExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        yield self.chunk.unwrap()
     }
 }
 
@@ -88,46 +87,31 @@ impl BatchExecutor for SingleChunkExecutor {
 #[tokio::test]
 async fn test_table_v2_materialize() -> Result<()> {
     let memory_state_store = MemoryStateStore::new();
-    let _state_store_impl = StateStoreImpl::MemoryStateStore(
-        memory_state_store
-            .clone()
-            .monitored(Arc::new(StateStoreMetrics::unused())),
-    );
     let source_manager = Arc::new(MemSourceManager::default());
     let source_table_id = TableId::default();
-    let table_columns = vec![
-        // data
-        ProstColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Double as i32,
-                ..Default::default()
-            }),
-            column_id: 0,
-            ..Default::default()
-        },
+    let table_columns: Vec<ColumnDesc> = vec![
         // row id
         ProstColumnDesc {
             column_type: Some(DataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            column_id: 0,
+            ..Default::default()
+        }
+        .into(),
+        // data
+        ProstColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Double as i32,
+                ..Default::default()
+            }),
             column_id: 1,
             ..Default::default()
-        },
+        }
+        .into(),
     ];
-
-    // Create table v2 using `CreateTableExecutor`
-    let mut create_table = CreateTableExecutor::new(
-        source_table_id,
-        source_manager.clone(),
-        table_columns,
-        "CreateTableExecutor".to_string(),
-        Info::TableSource(Default::default()),
-    );
-    // Execute
-    create_table.open().await?;
-    create_table.next().await?;
-    create_table.close().await?;
+    source_manager.create_table_source(&source_table_id, table_columns)?;
 
     // Ensure the source exists
     let source_desc = source_manager.get_source(&source_table_id)?;
@@ -155,13 +139,14 @@ async fn test_table_v2_materialize() -> Result<()> {
         keyspace,
         all_column_ids.clone(),
         all_schema.clone(),
-        PkIndices::from([1]),
+        PkIndices::from([0]),
         barrier_rx,
         1,
         1,
         "SourceExecutor".to_string(),
         Arc::new(StreamingMetrics::unused()),
         vec![],
+        u64::MAX,
     )?;
 
     // Create a `Materialize` to write the changes to storage
@@ -169,9 +154,10 @@ async fn test_table_v2_materialize() -> Result<()> {
     let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
-        vec![OrderPair::new(1, OrderType::Ascending)],
+        vec![OrderPair::new(0, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
+        vec![0usize],
     )
     .boxed()
     .execute();
@@ -181,15 +167,16 @@ async fn test_table_v2_materialize() -> Result<()> {
     //
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
-    let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
-    let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let insert_inner: Box<dyn BatchExecutor> =
-        Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
-    let insert = Box::new(InsertExecutor2::new(
+    let chunk = DataChunk::from_pretty(
+        "F
+         1.14
+         5.14",
+    );
+    let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let insert = Box::new(InsertExecutor::new(
         source_table_id,
         source_manager.clone(),
-        Box::new(ExecutorWrapper::from(insert_inner)),
-        false,
+        insert_inner,
     ));
 
     tokio::spawn(async move {
@@ -218,12 +205,12 @@ async fn test_table_v2_materialize() -> Result<()> {
         Arc::new(StateStoreMetrics::unused()),
     );
 
-    let scan = Box::new(RowSeqScanExecutor2::new(
-        table.clone(),
+    let scan = Box::new(RowSeqScanExecutor::new(
+        table.schema().clone(),
+        table.iter(u64::MAX).await?,
         1024,
         true,
         "RowSeqExecutor2".to_string(),
-        u64::MAX,
         Arc::new(BatchMetrics::unused()),
     ));
     let mut stream = scan.execute();
@@ -250,13 +237,13 @@ async fn test_table_v2_materialize() -> Result<()> {
     let mut col_row_ids = vec![];
     match message {
         Message::Chunk(c) => {
-            let col_data = c.columns()[0].array_ref().as_float64();
-            assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
-            assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
-
-            let col_row_id = c.columns()[1].array_ref().as_int64();
+            let col_row_id = c.columns()[0].array_ref().as_int64();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
             col_row_ids.push(col_row_id.value_at(1).unwrap());
+
+            let col_data = c.columns()[1].array_ref().as_float64();
+            assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
+            assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
         }
         Message::Barrier(_) => panic!(),
     }
@@ -277,19 +264,19 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to get the data now!
-    let scan = Box::new(RowSeqScanExecutor2::new(
-        table.clone(),
+    let scan = Box::new(RowSeqScanExecutor::new(
+        table.schema().clone(),
+        table.iter(u64::MAX).await?,
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
-        u64::MAX,
         Arc::new(BatchMetrics::unused()),
     ));
 
     let mut stream = scan.execute();
     let result = stream.next().await.unwrap().unwrap();
 
-    let col_data = result.columns()[0].array_ref().as_float64();
+    let col_data = result.columns()[1].array_ref().as_float64();
     assert_eq!(col_data.len(), 2);
     assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
     assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
@@ -300,16 +287,15 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Delete some data using `DeleteExecutor`, assuming we are inserting into the "mv"
     let columns = vec![
-        column_nonnull! { F64Array, [1.14] },
         column_nonnull! { I64Array, [ col_row_ids[0]] }, // row id column
+        column_nonnull! { F64Array, [1.14] },
     ];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let delete_inner: Box<dyn BatchExecutor> =
-        Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
-    let delete = Box::new(DeleteExecutor2::new(
+    let delete_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let delete = Box::new(DeleteExecutor::new(
         source_table_id,
         source_manager.clone(),
-        Box::new(ExecutorWrapper::from(delete_inner)),
+        delete_inner,
     ));
 
     tokio::spawn(async move {
@@ -322,11 +308,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     let message = materialize.next().await.unwrap()?;
     match message {
         Message::Chunk(c) => {
-            let col_data = c.columns()[0].array_ref().as_float64();
-            assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
-
-            let col_row_id = c.columns()[1].array_ref().as_int64();
+            let col_row_id = c.columns()[0].array_ref().as_int64();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
+
+            let col_data = c.columns()[1].array_ref().as_float64();
+            assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
         }
         Message::Barrier(_) => panic!(),
     }
@@ -346,18 +332,18 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to see the deletion now!
-    let scan = Box::new(RowSeqScanExecutor2::new(
-        table.clone(),
+    let scan = Box::new(RowSeqScanExecutor::new(
+        table.schema().clone(),
+        table.iter(u64::MAX).await?,
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
-        u64::MAX,
         Arc::new(BatchMetrics::unused()),
     ));
 
     let mut stream = scan.execute();
     let result = stream.next().await.unwrap().unwrap();
-    let col_data = result.columns()[0].array_ref().as_float64();
+    let col_data = result.columns()[1].array_ref().as_float64();
     assert_eq!(col_data.len(), 1);
     assert_eq!(col_data.value_at(0).unwrap(), 5.14.into_ordered());
 

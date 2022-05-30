@@ -73,7 +73,7 @@ impl ObserverManager {
         let mut catalog_guard = self.catalog.write();
         catalog_guard.clear();
         match resp.info {
-            Some(Info::FeSnapshot(snapshot)) => {
+            Some(Info::Snapshot(snapshot)) => {
                 for db in snapshot.database {
                     catalog_guard.create_database(db)
                 }
@@ -101,27 +101,31 @@ impl ObserverManager {
         Ok(())
     }
 
-    fn handle_catalog_v2_notification(&mut self, resp: SubscribeResponse) {
+    fn handle_catalog_notification(&mut self, resp: SubscribeResponse) {
+        let Some(info) = resp.info.as_ref() else {
+            return;
+        };
+
         let mut catalog_guard = self.catalog.write();
-        match &resp.info {
-            Some(Info::DatabaseV2(database)) => match resp.operation() {
+        match info {
+            Info::Database(database) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database.clone()),
                 Operation::Delete => catalog_guard.drop_database(database.id),
                 _ => panic!("receive an unsupported notify {:?}", resp.clone()),
             },
-            Some(Info::SchemaV2(schema)) => match resp.operation() {
+            Info::Schema(schema) => match resp.operation() {
                 Operation::Add => catalog_guard.create_schema(schema.clone()),
                 Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
-            Some(Info::TableV2(table)) => match resp.operation() {
+            Info::Table(table) => match resp.operation() {
                 Operation::Add => catalog_guard.create_table(table),
                 Operation::Delete => {
                     catalog_guard.drop_table(table.database_id, table.schema_id, table.id.into())
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
-            Some(Info::Source(source)) => match resp.operation() {
+            Info::Source(source) => match resp.operation() {
                 Operation::Add => catalog_guard.create_source(source.clone()),
                 Operation::Delete => {
                     catalog_guard.drop_source(source.database_id, source.schema_id, source.id)
@@ -141,34 +145,28 @@ impl ObserverManager {
     }
 
     pub async fn handle_notification(&mut self, resp: SubscribeResponse) {
-        match &resp.info {
-            Some(Info::Database(_)) | Some(Info::Schema(_)) | Some(Info::Table(_)) => {
-                panic!(
-                    "received a deprecated catalog notification from meta {:?}",
-                    resp
-                );
+        let Some(info) = resp.info.as_ref() else {
+            return;
+        };
+
+        match info {
+            Info::Database(_) | Info::Schema(_) | Info::Table(_) | Info::Source(_) => {
+                self.handle_catalog_notification(resp);
             }
-            Some(Info::DatabaseV2(_))
-            | Some(Info::SchemaV2(_))
-            | Some(Info::TableV2(_))
-            | Some(Info::Source(_)) => {
-                self.handle_catalog_v2_notification(resp);
-            }
-            Some(Info::Node(node)) => {
+            Info::Node(node) => {
                 self.update_worker_node_manager(resp.operation(), node.clone());
             }
-            Some(Info::FeSnapshot(_)) => {
+            Info::Snapshot(_) => {
                 panic!(
-                    "receiving an FeSnapshot in the middle is unsupported now {:?}",
+                    "receiving a snapshot in the middle is unsupported now {:?}",
                     resp
                 )
             }
-            Some(Info::HummockSnapshot(hummock_snapshot)) => {
+            Info::HummockSnapshot(hummock_snapshot) => {
                 self.hummock_snapshot_manager
                     .update_snapshot_status(hummock_snapshot.epoch)
                     .await;
             }
-            None => panic!("receive an unsupported notify {:?}", resp),
         }
     }
 

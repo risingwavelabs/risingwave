@@ -37,6 +37,7 @@ pub enum StatementType {
     DESCRIBE_TABLE,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
+    DROP_INDEX,
     DROP_SOURCE,
     DROP_SCHEMA,
     DROP_DATABASE,
@@ -46,6 +47,8 @@ pub enum StatementType {
     SET_OPTION,
     SHOW_PARAMETERS,
     SHOW_COMMAND,
+    START_TRANSACTION,
+    ABORT,
     FLUSH,
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").

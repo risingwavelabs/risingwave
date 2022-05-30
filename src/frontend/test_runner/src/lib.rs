@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::derive_partial_eq_without_eq)]
 //! Data-driven tests.
 #![feature(let_chains)]
 
@@ -64,6 +65,9 @@ pub struct TestCase {
     /// Proto JSON of generated batch plan
     pub batch_plan_proto: Option<String>,
 
+    /// Batch plan for local execution `.gen_batch_local_plan()`
+    pub batch_local_plan: Option<String>,
+
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
@@ -112,6 +116,9 @@ pub struct TestCaseResult {
     /// Proto JSON of generated batch plan
     pub batch_plan_proto: Option<String>,
 
+    /// Batch plan for local execution `.gen_batch_local_plan()`
+    pub batch_local_plan: Option<String>,
+
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
@@ -149,6 +156,7 @@ impl TestCaseResult {
             logical_plan: self.logical_plan,
             optimized_logical_plan: self.optimized_logical_plan,
             batch_plan: self.batch_plan,
+            batch_local_plan: self.batch_local_plan,
             stream_plan: self.stream_plan,
             stream_plan_proto: self.stream_plan_proto,
             batch_plan_proto: self.batch_plan_proto,
@@ -242,7 +250,10 @@ impl TestCase {
         for stmt in statements {
             let context = OptimizerContext::new(session.clone());
             match stmt.clone() {
-                Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
+                Statement::Query(_)
+                | Statement::Insert { .. }
+                | Statement::Delete { .. }
+                | Statement::Update { .. } => {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
@@ -347,6 +358,15 @@ impl TestCase {
             }
         }
 
+        if self.batch_local_plan.is_some() {
+            let batch_plan = logical_plan.gen_batch_local_plan()?;
+
+            // Only generate batch_plan if it is specified in test case
+            if self.batch_local_plan.is_some() {
+                ret.batch_local_plan = Some(explain_plan(&batch_plan));
+            }
+        }
+
         if self.stream_plan.is_some() || self.stream_plan_proto.is_some() {
             let q = if let Statement::Query(q) = stmt {
                 q.as_ref().clone()
@@ -398,6 +418,11 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &actual.optimized_logical_plan,
     )?;
     check_option_plan_eq("batch_plan", &expected.batch_plan, &actual.batch_plan)?;
+    check_option_plan_eq(
+        "batch_local_plan",
+        &expected.batch_local_plan,
+        &actual.batch_local_plan,
+    )?;
     check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
     check_option_plan_eq(
         "stream_plan_proto",

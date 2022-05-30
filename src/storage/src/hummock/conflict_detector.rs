@@ -26,7 +26,7 @@ use crate::hummock::HummockEpoch;
 
 pub struct ConflictDetector {
     // epoch -> key-sets
-    epoch_history: DashMap<HummockEpoch, HashSet<Bytes>>,
+    epoch_history: DashMap<HummockEpoch, Option<HashSet<Bytes>>>,
     epoch_watermark: AtomicCell<HummockEpoch>,
 }
 
@@ -56,17 +56,20 @@ impl ConflictDetector {
     pub fn set_watermark(&self, epoch: HummockEpoch) {
         loop {
             let current_watermark = self.get_epoch_watermark();
-            assert!(
-                epoch > current_watermark,
-                "not allowed to set epoch watermark to equal to or lower than current watermark: current is {}, epoch to set {}",
-                current_watermark,
-                epoch
-            );
+            if epoch <= current_watermark {
+                return;
+            }
             if self
                 .epoch_watermark
                 .compare_exchange(current_watermark, epoch)
                 .is_ok()
             {
+                self.epoch_history.retain(|x, value| {
+                    if x <= &(epoch) {
+                        assert!(value.is_none(), "epoch is not sync : {}", x);
+                    }
+                    x > &(epoch)
+                });
                 return;
             }
         }
@@ -86,11 +89,17 @@ impl ConflictDetector {
             epoch
         );
 
-        let mut written_key = self.epoch_history.entry(epoch).or_insert(HashSet::new());
+        let mut written_key = self
+            .epoch_history
+            .entry(epoch)
+            .or_insert(Some(HashSet::new()));
 
         for (key, value) in kv_pairs.iter() {
             assert!(
-                written_key.insert(key.clone()),
+                written_key
+                    .as_mut()
+                    .unwrap_or_else(|| panic!("write to an archived epoch: {}", epoch))
+                    .insert(key.clone()),
                 "key {:?} is written again after previously written, value is {:?}",
                 key,
                 value,
@@ -100,8 +109,21 @@ impl ConflictDetector {
 
     /// Archives an epoch. An archived epoch cannot be written anymore.
     pub fn archive_epoch(&self, epoch: HummockEpoch) {
-        self.epoch_history.remove(&epoch);
-        self.set_watermark(epoch);
+        assert!(
+            epoch > self.get_epoch_watermark(),
+            "write to an archived epoch: {} , current_epoch :{}",
+            epoch,
+            self.get_epoch_watermark(),
+        );
+
+        if let Some(written_key) = self.epoch_history.get(&epoch) {
+            assert!(
+                written_key.is_some(),
+                "epoch has been archived: epoch is {}",
+                epoch
+            );
+        }
+        self.epoch_history.insert(epoch, None);
     }
 }
 
@@ -228,8 +250,10 @@ mod test {
             .as_slice(),
             233,
         );
-        assert!(!detector.epoch_history.get(&233).unwrap().is_empty());
+        assert!(detector.epoch_history.get(&233).unwrap().is_some());
         detector.archive_epoch(233);
+        assert!(detector.epoch_history.get(&233).unwrap().is_none());
+        detector.set_watermark(233);
         assert!(detector.epoch_history.get(&233).is_none());
     }
 
@@ -246,7 +270,7 @@ mod test {
             .as_slice(),
             233,
         );
-        detector.archive_epoch(233);
+        detector.set_watermark(233);
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),

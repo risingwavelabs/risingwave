@@ -28,9 +28,18 @@ pub enum AlignedMessage {
 
 #[try_stream(ok = AlignedMessage, error = StreamExecutorError)]
 pub async fn barrier_align(mut left: BoxedMessageStream, mut right: BoxedMessageStream) {
-    // TODO: handle stream end
+    use madsim::rand::Rng;
     loop {
-        match select(left.next(), right.next()).await {
+        let prefer_left: bool = madsim::rand::thread_rng().gen();
+        let select_result = if prefer_left {
+            select(left.next(), right.next()).await
+        } else {
+            match select(right.next(), left.next()).await {
+                Either::Left(x) => Either::Right(x),
+                Either::Right(x) => Either::Left(x),
+            }
+        };
+        match select_result {
             Either::Left((None, _)) => {
                 // left stream end, passthrough right chunks
                 while let Some(msg) = right.next().await {
@@ -91,12 +100,12 @@ mod tests {
 
     use async_stream::try_stream;
     use futures::TryStreamExt;
-    use madsim::time::sleep;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use tokio::time::sleep;
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_barrier_align() {
         let left = try_stream! {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
@@ -127,7 +136,7 @@ mod tests {
         );
     }
 
-    #[madsim::test]
+    #[tokio::test]
     #[should_panic]
     async fn left_barrier_right_end_1() {
         let left = try_stream! {
@@ -143,7 +152,7 @@ mod tests {
         let _output: Vec<_> = barrier_align(left, right).try_collect().await.unwrap();
     }
 
-    #[madsim::test]
+    #[tokio::test]
     #[should_panic]
     async fn left_barrier_right_end_2() {
         let left = try_stream! {

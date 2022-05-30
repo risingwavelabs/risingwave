@@ -31,7 +31,6 @@ message ExprNode {
     IN = 24;
     // date functions
     EXTRACT = 101;
-    PG_SLEEP = 102;
     TUMBLE_START = 103;
     // other functions
     CAST = 201;
@@ -54,6 +53,13 @@ message ExprNode {
     ASCII = 215;
     TRANSLATE = 216;
     COALESCE = 217;
+    CONCAT_WS = 218;
+    ABS = 219;
+    SPLIT_PART = 220;
+    CEIL = 221;
+    FLOOR = 222;
+    TO_CHAR = 223;
+
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
@@ -61,14 +67,17 @@ message ExprNode {
     IS_NOT_FALSE = 304;
     IS_NULL = 305;
     IS_NOT_NULL = 306;
+    IS_DISTINCT_FROM = 307;
     // Unary operators
     NEG = 401;
     // Nested selection operators
     FIELD = 501;
+    // Array expression.
+    ARRAY = 521;
+    ARRAY_ACCESS = 522;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;
-    STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
@@ -89,6 +98,11 @@ message ConstantValue {
   // interval: encoded to (months, days, milliseconds), big-endianness
   // varchar: encoded accorded to encoding, currently only utf8 is supported.
   bytes body = 1;
+}
+
+// For serializing struct value to vec<bytes>.
+message StructValue {
+  repeated bytes fields = 1;
 }
 
 message FunctionCall {

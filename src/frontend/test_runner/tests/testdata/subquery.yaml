@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 from (select * from t) where v2 > 1;
@@ -5,7 +7,7 @@
     LogicalProject { exprs: [$0] }
       LogicalFilter { predicate: ($1 > 1:Int32) }
         LogicalProject { exprs: [$1, $2] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* merge and then eliminate */
     create table t (v1 bigint, v2 double precision);
@@ -13,7 +15,7 @@
   logical_plan: |
     LogicalProject { exprs: [$0, $1] }
       LogicalProject { exprs: [$1, $2] }
-        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
     LogicalScan { table: t, columns: [v1, v2] }
 - sql: |
@@ -27,7 +29,7 @@
     LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: ($0 > 1:Int32) }
         LogicalProject { exprs: [$2, $1] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* consecutive projects are merged */
     create table t (v1 bigint, v2 double precision);
@@ -35,7 +37,7 @@
   logical_plan: |
     LogicalProject { exprs: [$0, 2:Int32] }
       LogicalProject { exprs: [$1, $2, 1:Int32] }
-        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, 2:Int32] }
       LogicalScan { table: t, columns: [v1] }
@@ -45,7 +47,7 @@
   logical_plan: |
     LogicalProject { exprs: [$0, $1] }
       LogicalProject { exprs: [$1, $2] }
-        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
     LogicalScan { table: t, columns: [v1, v2] }
 - sql: |
@@ -56,8 +58,8 @@
     LogicalProject { exprs: [$0, $1, $3, $4] }
       LogicalJoin { type: Inner, on: true }
         LogicalProject { exprs: [$1, $2] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
-        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* table alias */
     create table t (v1 bigint, v2 double precision);
@@ -66,8 +68,8 @@
     LogicalProject { exprs: [$0, $1, $3, $4] }
       LogicalJoin { type: Inner, on: ($0 = $3) }
         LogicalProject { exprs: [$1, $2] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
-        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* alias less columns than available */
     create table t (v1 bigint, v2 double precision);
@@ -76,8 +78,8 @@
     LogicalProject { exprs: [$0, $1, $3, $4] }
       LogicalJoin { type: Inner, on: ($0 = $3) }
         LogicalProject { exprs: [$1, $2] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
-        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* alias more columns than available */
     create table t (v1 bigint, v2 double precision);

@@ -18,10 +18,11 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use crate::binder::{Binder, BoundSetExpr};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::stream_fragmenter::StreamFragmenter;
 
 /// Generate create MV plan, return plan and mv table info.
 pub fn gen_create_mv_plan(
@@ -57,7 +58,7 @@ pub fn gen_create_mv_plan(
     }
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    plan_root.set_required_dist(Distribution::any().clone());
+    plan_root.set_required_dist(RequiredDist::Any);
     let materialize = plan_root.gen_create_mv_plan(table_name)?;
     let table = materialize.table().to_prost(schema_id, database_id);
     let plan: PlanRef = materialize.into();
@@ -72,15 +73,17 @@ pub async fn handle_create_mv(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let (table, stream_plan) = {
+    let (table, graph) = {
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
         let stream_plan = plan.to_stream_prost();
-        (table, stream_plan)
+        let graph = StreamFragmenter::build_graph(stream_plan);
+
+        (table, graph)
     };
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .create_materialized_view(table, stream_plan)
+        .create_materialized_view(table, graph)
         .await?;
 
     Ok(PgResponse::empty_result(
@@ -96,7 +99,7 @@ pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
-    use crate::catalog::gen_row_id_column_name;
+    use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
@@ -148,7 +151,7 @@ pub mod tests {
         let city_type = DataType::Struct {
             fields: vec![DataType::Varchar, DataType::Varchar].into(),
         };
-        let row_id_col_name = gen_row_id_column_name(0);
+        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "country.zipcode" => DataType::Varchar,

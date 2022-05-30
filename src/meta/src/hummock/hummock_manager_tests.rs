@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
-use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionRefId,
@@ -111,9 +111,20 @@ async fn test_hummock_pin_unpin() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2;
+    let sst_num = 2usize;
+
+    // Construct vnode mappings for generating compaction tasks.
+    let parallel_units = cluster_manager
+        .list_parallel_units(Some(ParallelUnitType::Hash))
+        .await;
+    env.hash_mapping_manager()
+        .build_fragment_hash_mapping(1, &parallel_units);
+    for table_id in 1..sst_num + 2 {
+        env.hash_mapping_manager()
+            .set_fragment_state_table(1, table_id as u32);
+    }
 
     // No compaction task available.
     let task = hummock_manager.get_compact_task().await.unwrap();
@@ -123,15 +134,9 @@ async fn test_hummock_compaction_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     hummock_manager
-        .add_tables(context_id, original_tables.clone(), epoch)
+        .commit_epoch(epoch, original_tables.clone())
         .await
         .unwrap();
-
-    // No compaction task available. Uncommitted sst won't be compacted.
-    let task = hummock_manager.get_compact_task().await.unwrap();
-    assert_eq!(task, None);
-
-    hummock_manager.commit_epoch(epoch).await.unwrap();
 
     // check safe epoch in hummock version
     let version_id1 = CurrentHummockVersionId::get(env.meta_store())
@@ -250,10 +255,9 @@ async fn test_hummock_table() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
-        .add_tables(context_id, original_tables.clone(), epoch)
+        .commit_epoch(epoch, original_tables.clone())
         .await
         .unwrap();
-    hummock_manager.commit_epoch(epoch).await.unwrap();
 
     let pinned_version = hummock_manager
         .pin_version(context_id, u64::MAX)
@@ -284,28 +288,18 @@ async fn test_hummock_transaction() {
     let mut committed_tables = vec![];
 
     // Add and commit tables in epoch1.
-    // BEFORE:  uncommitted_epochs = [], committed_epochs = []
-    // RUNNING: uncommitted_epochs = [epoch1], committed_epochs = []
-    // AFTER:   uncommitted_epochs = [], committed_epochs = [epoch1]
+    // BEFORE:  committed_epochs = []
+    // AFTER:   committed_epochs = [epoch1]
     let epoch1: u64 = 1;
     {
         // Add tables in epoch1
         let tables_in_epoch1 = generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
-        hummock_manager
-            .add_tables(context_id, tables_in_epoch1.clone(), epoch1)
-            .await
-            .unwrap();
-
         // Get tables before committing epoch1. No tables should be returned.
-        let mut pinned_version = hummock_manager
+        let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap();
-        let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
-        assert_eq!(epoch1, uncommitted_epoch.epoch);
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
-        uncommitted_epoch.tables.sort_unstable_by_key(|e| e.id);
-        assert_eq!(tables_in_epoch1, uncommitted_epoch.tables);
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
 
         hummock_manager
@@ -314,7 +308,10 @@ async fn test_hummock_transaction() {
             .unwrap();
 
         // Commit epoch1
-        hummock_manager.commit_epoch(epoch1).await.unwrap();
+        hummock_manager
+            .commit_epoch(epoch1, tables_in_epoch1.clone())
+            .await
+            .unwrap();
         committed_tables.extend(tables_in_epoch1.clone());
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
@@ -322,7 +319,6 @@ async fn test_hummock_transaction() {
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap();
-        assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -336,28 +332,18 @@ async fn test_hummock_transaction() {
     }
 
     // Add and commit tables in epoch2.
-    // BEFORE:  uncommitted_epochs = [], committed_epochs = [epoch1]
-    // RUNNING: uncommitted_epochs = [epoch2], committed_epochs = [epoch1]
-    // AFTER:   uncommitted_epochs = [], committed_epochs = [epoch1, epoch2]
+    // BEFORE:  committed_epochs = [epoch1]
+    // AFTER:   committed_epochs = [epoch1, epoch2]
     let epoch2 = epoch1 + 1;
     {
         // Add tables in epoch2
         let tables_in_epoch2 = generate_test_tables(epoch2, get_sst_ids(&hummock_manager, 2).await);
-        hummock_manager
-            .add_tables(context_id, tables_in_epoch2.clone(), epoch2)
-            .await
-            .unwrap();
-
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
-        let mut pinned_version = hummock_manager
+        let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap();
-        let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
-        assert_eq!(epoch2, uncommitted_epoch.epoch);
-        uncommitted_epoch.tables.sort_unstable_by_key(|e| e.id);
-        assert_eq!(tables_in_epoch2, uncommitted_epoch.tables);
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -369,7 +355,10 @@ async fn test_hummock_transaction() {
             .unwrap();
 
         // Commit epoch2
-        hummock_manager.commit_epoch(epoch2).await.unwrap();
+        hummock_manager
+            .commit_epoch(epoch2, tables_in_epoch2.clone())
+            .await
+            .unwrap();
         committed_tables.extend(tables_in_epoch2);
 
         // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
@@ -378,121 +367,7 @@ async fn test_hummock_transaction() {
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap();
-        assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
-        assert_eq!(
-            get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(&pinned_version)
-        );
-        hummock_manager
-            .unpin_version(context_id, vec![pinned_version.id])
-            .await
-            .unwrap();
-    }
-
-    // Add tables in epoch3 and epoch4. Abort epoch3, commit epoch4.
-    // BEFORE:  uncommitted_epochs = [], committed_epochs = [epoch1, epoch2]
-    // RUNNING: uncommitted_epochs = [epoch3, epoch4], committed_epochs = [epoch1, epoch2]
-    // AFTER:   uncommitted_epochs = [], committed_epochs = [epoch1, epoch2, epoch4]
-    let epoch3 = epoch2 + 1;
-    let epoch4 = epoch3 + 1;
-    {
-        // Add tables in epoch3 and epoch4
-        let tables_in_epoch3 = generate_test_tables(epoch3, get_sst_ids(&hummock_manager, 2).await);
-        hummock_manager
-            .add_tables(context_id, tables_in_epoch3.clone(), epoch3)
-            .await
-            .unwrap();
-        let tables_in_epoch4 = generate_test_tables(epoch4, get_sst_ids(&hummock_manager, 2).await);
-        hummock_manager
-            .add_tables(context_id, tables_in_epoch4.clone(), epoch4)
-            .await
-            .unwrap();
-
-        // Get tables before committing epoch3 and epoch4. tables_in_epoch1 and tables_in_epoch2
-        // should be returned
-        let mut pinned_version = hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .unwrap();
-        let uncommitted_epoch3 = pinned_version
-            .uncommitted_epochs
-            .iter_mut()
-            .find(|e| e.epoch == epoch3)
-            .unwrap();
-        uncommitted_epoch3.tables.sort_unstable_by_key(|e| e.id);
-        assert_eq!(tables_in_epoch3, uncommitted_epoch3.tables);
-        let uncommitted_epoch4 = pinned_version
-            .uncommitted_epochs
-            .iter_mut()
-            .find(|e| e.epoch == epoch4)
-            .unwrap();
-        uncommitted_epoch4.tables.sort_unstable_by_key(|e| e.id);
-        assert_eq!(tables_in_epoch4, uncommitted_epoch4.tables);
-        assert_eq!(pinned_version.max_committed_epoch, epoch2);
-        assert_eq!(
-            get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(&pinned_version)
-        );
-
-        // Abort epoch3
-        hummock_manager.abort_epoch(epoch3).await.unwrap();
-
-        // Uncommitted SSTs should be marked for deletion
-        println!("{}", pinned_version.id);
-        let mut sstables_to_delete = hummock_manager
-            .get_ssts_to_delete(pinned_version.id)
-            .await
-            .unwrap();
-        sstables_to_delete.sort_unstable();
-        assert_eq!(
-            get_sorted_sstable_ids(&tables_in_epoch3),
-            sstables_to_delete
-        );
-        hummock_manager
-            .unpin_version(context_id, vec![pinned_version.id])
-            .await
-            .unwrap();
-
-        // Get tables after aborting epoch3. tables_in_epoch1 and tables_in_epoch2 should be
-        // returned
-        let mut pinned_version = hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .unwrap();
-        assert!(pinned_version
-            .uncommitted_epochs
-            .iter_mut()
-            .all(|e| e.epoch != epoch3));
-        let uncommitted_epoch4 = pinned_version
-            .uncommitted_epochs
-            .iter_mut()
-            .find(|e| e.epoch == epoch4)
-            .unwrap();
-        uncommitted_epoch4.tables.sort_unstable_by_key(|e| e.id);
-        assert_eq!(tables_in_epoch4, uncommitted_epoch4.tables);
-        assert_eq!(pinned_version.max_committed_epoch, epoch2);
-        assert_eq!(
-            get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(&pinned_version)
-        );
-        hummock_manager
-            .unpin_version(context_id, vec![pinned_version.id])
-            .await
-            .unwrap();
-
-        // Commit epoch4
-        hummock_manager.commit_epoch(epoch4).await.unwrap();
-        committed_tables.extend(tables_in_epoch4);
-
-        // Get tables after committing epoch4. tables_in_epoch1, tables_in_epoch2, tables_in_epoch4
-        // should be returned.
-        let pinned_version = hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .unwrap();
-        assert!(pinned_version.uncommitted_epochs.is_empty());
-        assert_eq!(pinned_version.max_committed_epoch, epoch4);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)
@@ -586,21 +461,16 @@ async fn test_context_id_validation() {
     let invalid_context_id = HummockContextId::MAX;
     let context_id = worker_node.id;
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
+    let _original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
 
     // Invalid context id is rejected.
     let error = hummock_manager
-        .add_tables(invalid_context_id, original_tables.clone(), epoch)
+        .pin_version(invalid_context_id, u64::MAX)
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InvalidContext(_)));
 
     // Valid context id is accepted.
-    hummock_manager
-        .add_tables(context_id, original_tables.clone(), epoch)
-        .await
-        .unwrap();
-
     hummock_manager
         .pin_version(context_id, u64::MAX)
         .await
@@ -649,7 +519,7 @@ async fn test_hummock_manager_basic() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
-        .add_tables(context_id_1, original_tables.clone(), epoch)
+        .commit_epoch(epoch, original_tables.clone())
         .await
         .unwrap();
 
@@ -750,7 +620,7 @@ async fn test_retryable_pin_version() {
         );
         // Increase the version
         hummock_manager
-            .add_tables(context_id, test_tables.clone(), epoch)
+            .commit_epoch(epoch, test_tables.clone())
             .await
             .unwrap();
         epoch += 1;
@@ -783,7 +653,7 @@ async fn test_retryable_pin_version() {
         );
         // Increase the version
         hummock_manager
-            .add_tables(context_id, test_tables.clone(), epoch)
+            .commit_epoch(epoch, test_tables.clone())
             .await
             .unwrap();
         epoch += 1;
@@ -819,12 +689,11 @@ async fn test_pin_snapshot_response_lost() {
             hummock_manager.get_new_table_id().await.unwrap(),
         ],
     );
+    // [ ] -> [ e0 ]
     hummock_manager
-        .add_tables(context_id, test_tables.clone(), epoch)
+        .commit_epoch(epoch, test_tables.clone())
         .await
         .unwrap();
-    // [ ] -> [ e0 ]
-    hummock_manager.commit_epoch(epoch).await.unwrap();
     epoch += 1;
 
     // Pin a snapshot with smallest last_pin
@@ -847,12 +716,11 @@ async fn test_pin_snapshot_response_lost() {
             hummock_manager.get_new_table_id().await.unwrap(),
         ],
     );
+    // [ e0:pinned ] -> [ e0:pinned, e1 ]
     hummock_manager
-        .add_tables(context_id, test_tables.clone(), epoch)
+        .commit_epoch(epoch, test_tables.clone())
         .await
         .unwrap();
-    // [ e0:pinned ] -> [ e0:pinned, e1 ]
-    hummock_manager.commit_epoch(epoch).await.unwrap();
     epoch += 1;
 
     // Assume the response of the previous rpc is lost.
@@ -884,12 +752,11 @@ async fn test_pin_snapshot_response_lost() {
             hummock_manager.get_new_table_id().await.unwrap(),
         ],
     );
+    // [ e0, e1:pinned ] -> [ e0, e1:pinned, e2 ]
     hummock_manager
-        .add_tables(context_id, test_tables.clone(), epoch)
+        .commit_epoch(epoch, test_tables.clone())
         .await
         .unwrap();
-    // [ e0, e1:pinned ] -> [ e0, e1:pinned, e2 ]
-    hummock_manager.commit_epoch(epoch).await.unwrap();
     epoch += 1;
 
     // Use correct snapshot id.
@@ -912,12 +779,11 @@ async fn test_pin_snapshot_response_lost() {
             hummock_manager.get_new_table_id().await.unwrap(),
         ],
     );
+    // [ e0, e1:pinned, e2:pinned ] -> [ e0, e1:pinned, e2:pinned, e3 ]
     hummock_manager
-        .add_tables(context_id, test_tables.clone(), epoch)
+        .commit_epoch(epoch, test_tables.clone())
         .await
         .unwrap();
-    // [ e0, e1:pinned, e2:pinned ] -> [ e0, e1:pinned, e2:pinned, e3 ]
-    hummock_manager.commit_epoch(epoch).await.unwrap();
     epoch += 1;
 
     // Use u64::MAX as epoch to pin greatest snapshot
@@ -936,17 +802,14 @@ async fn test_pin_snapshot_response_lost() {
 
 #[tokio::test]
 async fn test_print_compact_task() {
-    let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
-
+    let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     // Add some sstables and commit.
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
-        .add_tables(context_id, original_tables.clone(), epoch)
+        .commit_epoch(epoch, original_tables.clone())
         .await
         .unwrap();
-    hummock_manager.commit_epoch(epoch).await.unwrap();
 
     // Get a compaction task.
     let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
@@ -965,12 +828,11 @@ async fn test_print_compact_task() {
 
 #[tokio::test]
 async fn test_invalid_sst_id() {
-    let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
+    let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     let epoch = 1;
     let ssts = generate_test_tables(epoch, vec![HummockSSTableId::MAX]);
     let error = hummock_manager
-        .add_tables(context_id, ssts.clone(), epoch)
+        .commit_epoch(epoch, ssts.clone())
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InternalError(_)));
@@ -978,24 +840,15 @@ async fn test_invalid_sst_id() {
 
 #[tokio::test]
 async fn test_mark_orphan_ssts() {
-    let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
+    let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     let epoch = 1;
 
-    let ssts = generate_test_tables(
-        epoch,
-        vec![hummock_manager.get_new_table_id().await.unwrap()],
-    );
     // No SST is marked.
     let marked = hummock_manager
         .mark_orphan_ssts(Duration::from_secs(3600))
         .await
         .unwrap();
     assert!(marked.is_empty());
-    hummock_manager
-        .add_tables(context_id, ssts.clone(), epoch)
-        .await
-        .unwrap();
 
     let ssts = generate_test_tables(
         epoch,
@@ -1011,9 +864,9 @@ async fn test_mark_orphan_ssts() {
         marked.first().as_ref().unwrap().id,
         ssts.first().as_ref().unwrap().id
     );
-    // Cannot add_tables for marked SST ids.
+    // Cannot commit_epoch for marked SST ids.
     let error = hummock_manager
-        .add_tables(context_id, ssts.clone(), epoch)
+        .commit_epoch(epoch, ssts.clone())
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InternalError(_)));

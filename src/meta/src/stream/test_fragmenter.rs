@@ -35,7 +35,7 @@ use risingwave_pb::stream_plan::{
 
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
-use crate::stream::fragmenter::StreamFragmenter;
+use crate::stream::stream_graph::ActorGraphBuilder;
 use crate::stream::{CreateMaterializedViewContext, FragmentManager};
 
 fn make_table_ref_id(id: i32) -> TableRefId {
@@ -102,19 +102,6 @@ fn make_column_order(idx: i32) -> ColumnOrder {
 /// ```sql
 /// create table t (v1 int, v2 int);
 /// create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2;
-/// ```
-///
-/// plan:
-///
-/// ```ignore
-///     RwStreamMaterializedView(name=[t_distributed])
-///           RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])
-///             RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[SUM($1)])
-///               RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-///                 RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])
-///                   RwStreamFilter(condition=[>($0, $1)])
-///                     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED,keys=[0]}], collation=[[]])
-///                       RwStreamTableSource(table=[[test_schema,t]], columns=[`v1,v2,_row_id`])
 /// ```
 fn make_stream_node() -> StreamNode {
     let table_ref_id = make_table_ref_id(1);
@@ -266,19 +253,24 @@ fn make_stream_node() -> StreamNode {
     }
 }
 
+// TODO: enable this test with madsim
+// NOTE: frontend is not yet available with madsim
+#[cfg(not(madsim))]
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
+    use risingwave_frontend::stream_fragmenter::StreamFragmenter;
+
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
-    let graph = StreamFragmenter::generate_graph(
+    let graph = StreamFragmenter::build_graph(stream_node);
+    let graph = ActorGraphBuilder::generate_graph(
         env.id_gen_manager_ref(),
         fragment_manager,
         parallel_degree,
-        false,
-        &stream_node,
+        &graph,
         &mut ctx,
     )
     .await?;

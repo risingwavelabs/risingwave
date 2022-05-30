@@ -67,7 +67,7 @@ message DropSourceResponse {
 
 message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
-  stream_plan.StreamNode stream_node = 2;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
 }
 
 message CreateMaterializedViewResponse {
@@ -88,7 +88,7 @@ message DropMaterializedViewResponse {
 message CreateMaterializedSourceRequest {
   catalog.Source source = 1;
   catalog.Table materialized_view = 2;
-  stream_plan.StreamNode stream_node = 3;
+  stream_plan.StreamFragmentGraph fragment_graph = 3;
 }
 
 message CreateMaterializedSourceResponse {

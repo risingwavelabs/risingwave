@@ -39,7 +39,8 @@ use crate::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
 use crate::filesystem::s3::s3_dir::{
     AwsCustomConfig, S3SourceBasicConfig, S3SourceConfig, SqsReceiveMsgConfig,
 };
-use crate::{ConnectorState, ConnectorStateV2, S3Properties, SplitMetaData};
+use crate::filesystem::s3::S3Properties;
+use crate::{Column, ConnectorState, SplitMetaData};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const READ_CHUNK_SIZE: usize = 1024;
@@ -119,7 +120,7 @@ impl SplitMetaData for S3FileSplit {
         format!("{}/{}", self.bucket, self.s3_file.object.path)
     }
 
-    fn to_json_bytes(&self) -> Bytes {
+    fn encode_to_bytes(&self) -> Bytes {
         Bytes::from(serde_json::to_string(self).unwrap())
     }
 
@@ -147,50 +148,6 @@ impl Drop for S3FileReader {
 }
 
 impl S3FileReader {
-    /// 1. The config include all information about the connection to S3, for example:
-    /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's
-    /// `access_key` and secret. For now, only static credential is supported.
-    /// 2. The identifier of the State is the Path of S3 - <S3://bucket_name/object_key>
-    pub async fn new(props: S3Properties, state: ConnectorStateV2) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let s3_basic_config = S3SourceBasicConfig::from(props);
-        let credential = if s3_basic_config.secret.is_empty() || s3_basic_config.access.is_empty() {
-            AwsCredentialV2::None
-        } else {
-            AwsCredentialV2::Static {
-                access_key: s3_basic_config.clone().access,
-                secret_access: s3_basic_config.clone().secret,
-                session_token: None,
-            }
-        };
-        let aws_config = AwsConfigV2 {
-            region: None,
-            arn: None,
-            credential,
-            endpoint: None,
-        };
-        // TODO: should be use external_id parameter.
-        let shared_config = aws_config.load_config(None).await;
-        let s3_source_config = S3SourceConfig {
-            basic_config: s3_basic_config.clone(),
-            shared_config,
-            custom_config: Some(AwsCustomConfig::default()),
-            sqs_config: SqsReceiveMsgConfig::default(),
-        };
-        let mut s3_file_reader = S3FileReader::build_from_config(s3_source_config);
-        if let ConnectorStateV2::State(s3_state) = state {
-            if let Err(err) = s3_file_reader.add_s3_split(s3_state) {
-                Err(err)
-            } else {
-                Ok(s3_file_reader)
-            }
-        } else {
-            Ok(s3_file_reader)
-        }
-    }
-
     fn build_from_config(s3_source_config: S3SourceConfig) -> Self {
         let (tx, rx) = mpsc::channel(MAX_CHANNEL_BUFFER_SIZE);
         let (split_s, mut split_r) = mpsc::unbounded_channel();
@@ -228,20 +185,6 @@ impl S3FileReader {
             }
         });
         s3_file_reader
-    }
-
-    fn add_s3_split(&mut self, state: ConnectorState) -> anyhow::Result<()> {
-        let identifier_bytes = state.identifier.to_vec();
-        let raw_path = std::str::from_utf8(&identifier_bytes).unwrap();
-        let s3_file_split_rs = S3FileSplit::from_path(raw_path.to_string());
-        if let Ok(s3_file_split) = s3_file_split_rs {
-            self.s3_file_sender.send(s3_file_split).unwrap();
-            Ok(())
-        } else {
-            let err = s3_file_split_rs.err().unwrap();
-            error!("S3FileReader add_s3_split error. cause by {:?}", err);
-            Err(err)
-        }
     }
 
     async fn stream_read(
@@ -356,6 +299,49 @@ impl S3FileReader {
 
 #[async_trait]
 impl SplitReader for S3FileReader {
+    type Properties = S3Properties;
+
+    /// 1. The config include all information about the connection to S3, for example:
+    /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's
+    /// `access_key` and secret. For now, only static credential is supported.
+    /// 2. The identifier of the State is the Path of S3 - <S3://bucket_name/object_key>
+    async fn new(
+        props: S3Properties,
+        _state: ConnectorState,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let s3_basic_config = S3SourceBasicConfig::from(props);
+        let credential = if s3_basic_config.secret.is_empty() || s3_basic_config.access.is_empty() {
+            AwsCredentialV2::None
+        } else {
+            AwsCredentialV2::Static {
+                access_key: s3_basic_config.clone().access,
+                secret_access: s3_basic_config.clone().secret,
+                session_token: None,
+            }
+        };
+        let aws_config = AwsConfigV2 {
+            region: None,
+            arn: None,
+            credential,
+            endpoint: None,
+        };
+        // TODO: should be use external_id parameter.
+        let shared_config = aws_config.load_config(None).await;
+        let s3_source_config = S3SourceConfig {
+            basic_config: s3_basic_config.clone(),
+            shared_config,
+            custom_config: Some(AwsCustomConfig::default()),
+            sqs_config: SqsReceiveMsgConfig::default(),
+        };
+        let s3_file_reader = S3FileReader::build_from_config(s3_source_config);
+        // TODO: new s3 reader with ConnectorState
+        Ok(s3_file_reader)
+    }
+
     async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
         let mut read_chunk = self
             .s3_receive_stream
@@ -388,11 +374,9 @@ impl SplitReader for S3FileReader {
 
 #[cfg(test)]
 mod test {
-    use bytes::Bytes;
 
-    use crate::base::SplitReader;
-    use crate::filesystem::s3::source::s3_file_reader::{S3FileReader, S3FileSplit};
-    use crate::{ConnectorState, ConnectorStateV2, S3Properties};
+    use crate::filesystem::s3::source::s3_file_reader::S3FileSplit;
+    use crate::filesystem::s3::S3Properties;
 
     const TEST_REGION_NAME: &str = "cn-north-1";
     const BUCKET_NAME: &str = "dd-storage-s3";
@@ -412,56 +396,8 @@ mod test {
         }
     }
 
-    fn new_test_connect_state(file_name: String) -> ConnectorState {
-        let path_string = format!("s3://{}/{}", BUCKET_NAME, file_name);
-        let identifier = Bytes::copy_from_slice(path_string.as_str().as_bytes());
-        ConnectorState {
-            identifier,
-            start_offset: "".to_string(),
-            end_offset: "".to_string(),
-        }
-    }
-
     fn new_test_s3_file_split(split_str: &str) -> S3FileSplit {
         let s3_file_split: S3FileSplit = serde_json::from_str(split_str).unwrap();
         s3_file_split
-    }
-
-    async fn new_s3_file_reader(file_name: String) -> S3FileReader {
-        let s3_file_reader = S3FileReader::new(
-            test_config_map(),
-            ConnectorStateV2::State(new_test_connect_state(file_name)),
-        );
-        s3_file_reader.await.unwrap()
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore]
-    async fn test_s3_file_reader() {
-        let mut s3_file_reader =
-            new_s3_file_reader("2022-02-28-09:32:34-example.json".to_string()).await;
-        let msg_rs = s3_file_reader.next().await;
-        assert!(msg_rs.is_ok());
-        println!("S3FileReader next() msg = {:?}", msg_rs.unwrap());
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore]
-    async fn test_empty_s3_file_reader() {
-        println!("S3FileReader read empty json file.");
-        let mut s3_file_reader =
-            new_s3_file_reader("EMPTY-2022-03-23-03:35:28.json".to_string()).await;
-        let task_join_handler = tokio::task::spawn(async move {
-            tokio::select! {
-                _=  tokio::time::sleep(tokio::time::Duration::from_secs(5))=> {
-                    println!("S3FileReader wait 5s for next message");
-                }
-                _= s3_file_reader.next() => {
-                    unreachable!()
-                }
-            }
-        });
-        let join_rs = task_join_handler.await;
-        assert!(join_rs.is_ok());
     }
 }

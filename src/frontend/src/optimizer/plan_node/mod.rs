@@ -57,6 +57,7 @@ pub trait PlanNode:
     + ToDistributedBatch
     + ToProst
     + ToLocalBatch
+    + PredicatePushdown
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
@@ -201,6 +202,8 @@ mod eq_join_predicate;
 pub use eq_join_predicate::*;
 mod to_prost;
 pub use to_prost::*;
+mod predicate_pushdown;
+pub use predicate_pushdown::*;
 
 mod batch_delete;
 mod batch_exchange;
@@ -217,6 +220,7 @@ mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
 mod batch_topn;
+mod batch_update;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
@@ -227,10 +231,12 @@ mod logical_hop_window;
 mod logical_insert;
 mod logical_join;
 mod logical_limit;
+mod logical_multi_join;
 mod logical_project;
 mod logical_scan;
 mod logical_source;
 mod logical_topn;
+mod logical_update;
 mod logical_values;
 mod stream_delta_join;
 mod stream_exchange;
@@ -261,6 +267,7 @@ pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_topn::BatchTopN;
+pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
 pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
@@ -271,10 +278,12 @@ pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
+pub use logical_multi_join::LogicalMultiJoin;
 pub use logical_project::LogicalProject;
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
 pub use logical_topn::LogicalTopN;
+pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_exchange::StreamExchange;
@@ -292,8 +301,8 @@ pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
 
-/// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
-/// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]
+/// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
+/// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
 ///
 /// Every tuple has two elements, where `{ convention, name }`
 /// You can use it as follows
@@ -317,12 +326,14 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
+            , { Logical, Update }
             , { Logical, Join }
             , { Logical, Values }
             , { Logical, Limit }
             , { Logical, TopN }
             , { Logical, HopWindow }
             , { Logical, GenerateSeries }
+            , { Logical, MultiJoin }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -330,6 +341,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Filter }
             , { Batch, Insert }
             , { Batch, Delete }
+            , { Batch, Update }
             , { Batch, SeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
@@ -371,12 +383,14 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
+            , { Logical, Update }
             , { Logical, Join }
             , { Logical, Values }
             , { Logical, Limit }
             , { Logical, TopN }
             , { Logical, HopWindow }
             , { Logical, GenerateSeries }
+            , { Logical, MultiJoin }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -403,6 +417,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Exchange }
             , { Batch, Insert }
             , { Batch, Delete }
+            , { Batch, Update }
             , { Batch, HopWindow }
             , { Batch, GenerateSeries }
         }

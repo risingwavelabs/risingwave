@@ -20,10 +20,13 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
+use super::{
+    ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, StreamTableScan, ToBatch,
+    ToStream,
+};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::session::OptimizerContextRef;
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -102,10 +105,9 @@ impl LogicalScan {
     }
 
     pub(super) fn column_names(&self) -> Vec<String> {
-        self.schema()
-            .fields()
+        self.required_col_idx
             .iter()
-            .map(|f| f.name.clone())
+            .map(|i| self.table_desc.columns[*i].name.clone())
             .collect()
     }
 
@@ -203,6 +205,12 @@ impl ColPrunable for LogicalScan {
             self.base.ctx.clone(),
         )
         .into()
+    }
+}
+
+impl PredicatePushdown for LogicalScan {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 

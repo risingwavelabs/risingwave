@@ -30,6 +30,7 @@ use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::session::{OptimizerContext, SessionImpl};
+use crate::stream_fragmenter::StreamFragmenter;
 
 pub(crate) fn make_prost_source(
     session: &SessionImpl,
@@ -111,13 +112,16 @@ pub async fn handle_create_source(
     let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {
-        let (plan, table) = {
+        let (graph, table) = {
             let (plan, table) = gen_materialized_source_plan(context.into(), source.clone())?;
             let plan = plan.to_stream_prost();
-            (plan, table)
+            let graph = StreamFragmenter::build_graph(plan);
+
+            (graph, table)
         };
+
         catalog_writer
-            .create_materialized_source(source, table, plan)
+            .create_materialized_source(source, table, graph)
             .await?;
     } else {
         catalog_writer.create_source(source).await?;
@@ -132,7 +136,7 @@ pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
-    use crate::catalog::gen_row_id_column_name;
+    use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
@@ -174,7 +178,7 @@ pub mod tests {
         let city_type = DataType::Struct {
             fields: vec![DataType::Varchar, DataType::Varchar].into(),
         };
-        let row_id_col_name = gen_row_id_column_name(0);
+        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "id" => DataType::Int32,

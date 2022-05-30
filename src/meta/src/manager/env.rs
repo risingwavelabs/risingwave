@@ -16,7 +16,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{StreamClients, StreamClientsRef};
+use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
+
+use super::{HashMappingManager, HashMappingManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, NotificationManager, NotificationManagerRef,
 };
@@ -40,8 +42,11 @@ where
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
-    /// stream clients memorization.
-    stream_clients: StreamClientsRef,
+    /// hash mapping manager.
+    hash_mapping_manager: HashMappingManagerRef,
+
+    /// stream client pool memorization.
+    stream_client_pool: StreamClientPoolRef,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -69,14 +74,16 @@ where
     pub async fn new(opts: MetaOpts, meta_store: Arc<S>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let stream_clients = Arc::new(StreamClients::default());
+        let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new());
+        let hash_mapping_manager = Arc::new(HashMappingManager::new());
 
         Self {
             id_gen_manager,
             meta_store,
             notification_manager,
-            stream_clients,
+            hash_mapping_manager,
+            stream_client_pool,
             opts: opts.into(),
         }
     }
@@ -105,12 +112,20 @@ where
         self.notification_manager.deref()
     }
 
-    pub fn stream_clients_ref(&self) -> StreamClientsRef {
-        self.stream_clients.clone()
+    pub fn hash_mapping_manager_ref(&self) -> HashMappingManagerRef {
+        self.hash_mapping_manager.clone()
     }
 
-    pub fn stream_clients(&self) -> &StreamClients {
-        self.stream_clients.deref()
+    pub fn hash_mapping_manager(&self) -> &HashMappingManager {
+        self.hash_mapping_manager.deref()
+    }
+
+    pub fn stream_client_pool_ref(&self) -> StreamClientPoolRef {
+        self.stream_client_pool.clone()
+    }
+
+    pub fn stream_client_pool(&self) -> &StreamClientPool {
+        self.stream_client_pool.deref()
     }
 }
 
@@ -122,13 +137,15 @@ impl MetaSrvEnv<MemStore> {
         let meta_store = Arc::new(MemStore::default());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new());
-        let stream_clients = Arc::new(StreamClients::default());
+        let stream_client_pool = Arc::new(StreamClientPool::default());
+        let hash_mapping_manager = Arc::new(HashMappingManager::new());
 
         Self {
             id_gen_manager,
             meta_store,
             notification_manager,
-            stream_clients,
+            hash_mapping_manager,
+            stream_client_pool,
             opts: MetaOpts::default().into(),
         }
     }

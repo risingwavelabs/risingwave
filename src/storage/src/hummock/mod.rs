@@ -27,6 +27,7 @@ pub use block_cache::*;
 mod sstable;
 pub use sstable::*;
 mod cache;
+pub mod compaction_executor;
 pub mod compactor;
 #[cfg(test)]
 mod compactor_tests;
@@ -39,7 +40,7 @@ pub mod local_version_manager;
 pub mod shared_buffer;
 #[cfg(test)]
 mod snapshot_tests;
-mod sstable_store;
+pub mod sstable_store;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
@@ -49,6 +50,7 @@ pub(crate) mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
+
 pub use cache::{CachableEntry, LookupResult, LruCache};
 pub use error::*;
 use value::*;
@@ -59,7 +61,10 @@ pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::iterator::ReadOptions;
 use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::monitor::StoreLocalStatistic;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -118,30 +123,21 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
-        SSTableBuilder::new(SSTableBuilderOptions {
-            capacity: options.sstable_size as usize,
-            block_capacity: options.block_size as usize,
-            restart_interval: DEFAULT_RESTART_INTERVAL,
-            bloom_false_positive: options.bloom_false_positive,
-            // TODO: Make this configurable.
-            compression_algorithm: CompressionAlgorithm::None,
-        })
-    }
-
     async fn get_from_table(
         &self,
         table: TableHolder,
         internal_key: &[u8],
         key: &[u8],
+        read_options: Arc<ReadOptions>,
+        stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Bytes>> {
         if table.value().surely_not_have_user_key(key) {
-            self.stats.bloom_filter_true_negative_counts.inc();
+            stats.bloom_filter_true_negative_count += 1;
             return Ok(None);
         }
         // Might have the key, take it as might positive.
-        self.stats.bloom_filter_might_positive_counts.inc();
-        let mut iter = SSTableIterator::new(table, self.sstable_store.clone());
+        stats.bloom_filter_might_positive_count += 1;
+        let mut iter = SSTableIterator::create(table, self.sstable_store.clone(), read_options);
         iter.seek(internal_key).await?;
         // Iterator has seeked passed the borders.
         if !iter.is_valid() {
@@ -154,6 +150,7 @@ impl HummockStorage {
             true => iter.value().into_user_value().map(Bytes::copy_from_slice),
             false => None,
         };
+        iter.collect_local_statistic(stats);
         Ok(value)
     }
 

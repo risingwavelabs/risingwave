@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     create table t1 (v1 int, v2 int, v3 int);
     create table t2 (v1 int, v2 int, v3 int);
@@ -6,8 +8,8 @@
     LogicalProject { exprs: [$1, $2, $3, $5, $6, $7] }
       LogicalFilter { predicate: ($6 > 2:Int32) }
         LogicalJoin { type: Inner, on: ($1 = $6) AND ($1 > 1:Int32) }
-          LogicalScan { table: t1, columns: [_row_id#0, v1, v2, v3] }
-          LogicalScan { table: t2, columns: [_row_id#0, v1, v2, v3] }
+          LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
+          LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: ($0 = $4) }
       LogicalFilter { predicate: ($0 > 1:Int32) }
@@ -21,7 +23,7 @@
     LogicalProject { exprs: [$0, $1] }
       LogicalFilter { predicate: ($1 > 1:Int32) }
         LogicalProject { exprs: [$1, $2] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
     LogicalFilter { predicate: ($1 > 1:Int32) }
       LogicalScan { table: t, columns: [v1, v2] }
@@ -32,7 +34,7 @@
     LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: ($0 > 1:Int32) }
         LogicalProject { exprs: [$2, $1] }
-          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0] }
       LogicalFilter { predicate: ($1 > 1:Int32) }
@@ -45,7 +47,7 @@
       LogicalFilter { predicate: ($0 > 1:Int32) }
         LogicalProject { exprs: [$2, $1] }
           LogicalFilter { predicate: ($1 > 2:Int32) }
-            LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+            LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0] }
       LogicalFilter { predicate: ($1 > 1:Int32) AND ($0 > 2:Int32) }
@@ -59,9 +61,17 @@
         LogicalProject { exprs: [$0, $1] }
           LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
             LogicalProject { exprs: [$1, $2] }
-              LogicalScan { table: t, columns: [_row_id#0, v1, v2, v3, v4] }
+              LogicalScan { table: t, columns: [_row_id, v1, v2, v3, v4] }
   optimized_logical_plan: |
     LogicalFilter { predicate: ($1 > 1:Int32) AND ($0 > $1) }
       LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
         LogicalFilter { predicate: ($0 > 1:Int32) AND (1:Int32 > 0:Int32) }
           LogicalScan { table: t, columns: [v1, v2] }
+- sql: |
+    /* Always false should not be pushed below SimpleAgg */
+    create table t(v1 int, v2 int, v3 int, v4 int);
+    select min(v1) from t having false;
+  optimized_logical_plan: |
+    LogicalFilter { predicate: false:Boolean }
+      LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+        LogicalScan { table: t, columns: [v1] }

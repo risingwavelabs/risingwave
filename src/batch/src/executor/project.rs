@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -19,45 +20,19 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use super::{BoxedExecutor, BoxedExecutorBuilder};
-use crate::executor::{Executor, ExecutorBuilder};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
+use crate::task::BatchTaskContext;
 
-pub(super) struct ProjectExecutor {
+pub struct ProjectExecutor {
     expr: Vec<BoxedExpression>,
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
 }
 
-#[async_trait::async_trait]
 impl Executor for ProjectExecutor {
-    async fn open(&mut self) -> Result<()> {
-        self.child.open().await?;
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        let child_output = self.child.next().await?;
-        match child_output {
-            Some(child_chunk) => {
-                // let child_chunk = child_chunk.compact()?;
-                let arrays: Vec<Column> = self
-                    .expr
-                    .iter_mut()
-                    .map(|expr| expr.eval(&child_chunk).map(Column::new))
-                    .collect::<Result<Vec<_>>>()?;
-                let ret = DataChunk::builder().columns(arrays).build();
-                Ok(Some(ret))
-            }
-            None => Ok(None),
-        }
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        self.child.close().await?;
-        Ok(())
-    }
-
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -65,10 +40,39 @@ impl Executor for ProjectExecutor {
     fn identity(&self) -> &str {
         &self.identity
     }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
 }
 
+impl ProjectExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(mut self: Box<Self>) {
+        #[for_await]
+        for data_chunk in self.child.execute() {
+            let data_chunk = data_chunk?;
+            // let data_chunk = data_chunk.compact()?;
+            let arrays: Vec<Column> = self
+                .expr
+                .iter_mut()
+                .map(|expr| expr.eval(&data_chunk).map(Column::new))
+                .collect::<Result<Vec<_>>>()?;
+            let ret = if arrays.is_empty() {
+                DataChunk::new_dummy(data_chunk.cardinality())
+            } else {
+                DataChunk::builder().columns(arrays).build()
+            };
+            yield ret
+        }
+    }
+}
+
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for ProjectExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let project_node = try_match_expand!(
@@ -81,7 +85,7 @@ impl BoxedExecutorBuilder for ProjectExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child_node = source.clone_for_plan(proto_child).build()?;
+        let child_node = source.clone_for_plan(proto_child).build().await?;
 
         let project_exprs = project_node
             .get_select_list()
@@ -94,37 +98,41 @@ impl BoxedExecutorBuilder for ProjectExecutor {
             .map(|expr| Field::unnamed(expr.return_type()))
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(
-            Self {
-                expr: project_exprs,
-                child: child_node,
-                schema: Schema { fields },
-                identity: source.plan_node().get_identity().clone(),
-            }
-            .fuse(),
-        ))
+        Ok(Box::new(Self {
+            expr: project_exprs,
+            child: child_node,
+            schema: Schema { fields },
+            identity: source.plan_node().get_identity().clone(),
+        }))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use futures::stream::StreamExt;
     use risingwave_common::array::{Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::column_nonnull;
+    use risingwave_common::test_prelude::*;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
 
     use super::*;
-    use crate::executor::executor2_wrapper::Executor2Wrapper;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor2::{Executor2, ValuesExecutor2};
+    use crate::executor::{Executor, ValuesExecutor};
     use crate::*;
 
     #[tokio::test]
     async fn test_project_executor() -> Result<()> {
-        let col1 = column_nonnull! {I32Array, [1, 2, 33333, 4, 5]};
-        let col2 = column_nonnull! {I32Array, [7, 8, 66666, 4, 3]};
-        let chunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        let chunk = DataChunk::from_pretty(
+            "
+            i     i
+            1     7
+            2     8
+            33333 66666
+            4     4
+            5     3
+        ",
+        );
 
         let expr1 = InputRefExpression::new(DataType::Int32, 0);
         let expr_vec = vec![Box::new(expr1) as BoxedExpression];
@@ -138,19 +146,18 @@ mod tests {
             .map(|expr| Field::unnamed(expr.return_type()))
             .collect::<Vec<Field>>();
 
-        let mut proj_executor = ProjectExecutor {
+        let proj_executor = Box::new(ProjectExecutor {
             expr: expr_vec,
             child: Box::new(mock_executor),
             schema: Schema { fields },
             identity: "ProjectExecutor".to_string(),
-        };
-        proj_executor.open().await.unwrap();
+        });
 
         let fields = &proj_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
 
-        let result_chunk = proj_executor.next().await?.unwrap();
-        proj_executor.close().await.unwrap();
+        let mut stream = proj_executor.execute();
+        let result_chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(result_chunk.dimension(), 1);
         assert_eq!(
             result_chunk
@@ -161,8 +168,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(1), Some(2), Some(33333), Some(4), Some(5)]
         );
-
-        proj_executor.close().await.unwrap();
         Ok(())
     }
 
@@ -170,22 +175,21 @@ mod tests {
     async fn test_project_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
 
-        let values_executor2: Box<dyn Executor2> = Box::new(ValuesExecutor2::new(
+        let values_executor2: Box<dyn Executor> = Box::new(ValuesExecutor::new(
             vec![vec![]], // One single row with no column.
             Schema::default(),
             "ValuesExecutor".to_string(),
             1024,
         ));
 
-        let mut proj_executor = ProjectExecutor {
+        let proj_executor = Box::new(ProjectExecutor {
             expr: vec![Box::new(literal)],
-            child: Box::new(Executor2Wrapper::from(values_executor2)),
+            child: values_executor2,
             schema: schema_unnamed!(DataType::Int32),
-            identity: "ProjectExecutor".to_string(),
-        };
-
-        proj_executor.open().await.unwrap();
-        let chunk = proj_executor.next().await.unwrap().unwrap();
+            identity: "ProjectExecutor2".to_string(),
+        });
+        let mut stream = proj_executor.execute();
+        let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(
             *chunk.column_at(0).array(),
             array_nonnull!(I32Array, [1]).into()

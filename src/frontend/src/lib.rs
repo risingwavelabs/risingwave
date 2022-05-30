@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -32,6 +33,7 @@
 #![feature(trait_alias)]
 #![feature(drain_filter)]
 #![feature(if_let_guard)]
+#![feature(assert_matches)]
 #[macro_use]
 pub mod catalog;
 pub mod binder;
@@ -40,14 +42,18 @@ pub mod handler;
 pub mod observer;
 pub mod optimizer;
 pub mod planner;
+#[allow(unused)]
 mod scheduler;
 pub mod session;
+pub mod stream_fragmenter;
 pub mod utils;
 extern crate log;
 mod meta_client;
 pub mod test_utils;
 extern crate core;
 extern crate risingwave_common;
+
+mod config;
 
 use std::ffi::OsString;
 use std::iter;

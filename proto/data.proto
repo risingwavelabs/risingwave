@@ -45,7 +45,6 @@ message DataType {
     FLOAT = 3;
     DOUBLE = 4;
     BOOLEAN = 5;
-    CHAR = 6;
     VARCHAR = 7;
     DECIMAL = 8;
     TIME = 9;
@@ -54,7 +53,6 @@ message DataType {
     DATE = 12;
     // Timestamp type with timezone
     TIMESTAMPZ = 13;
-    SYMBOL = 14;
     STRUCT = 15;
     LIST = 16;
   }
@@ -162,6 +160,16 @@ message AddMutation {
   repeated DispatcherMutation mutations = 1;
 }
 
+message SourceChangeSplitMutation {
+  repeated SourceChangeSplit mutations = 1;
+}
+
+message SourceChangeSplit {
+  uint32 actor_id = 1;
+  string split_type = 2;
+  repeated bytes source_splits = 3;
+}
+
 message Epoch {
   uint64 curr = 1;
   uint64 prev = 2;
@@ -174,6 +182,7 @@ message Barrier {
     StopMutation stop = 3;
     UpdateMutation update = 4;
     AddMutation add = 5;
+    SourceChangeSplitMutation splits = 7;
   }
   bytes span = 6;
 }

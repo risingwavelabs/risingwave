@@ -43,14 +43,18 @@ jobs:
           # If new CI checks are added, the one with `--locked` must be run first.
           cargo clippy --all-targets --all-features --locked -- -D warnings
 
-      - name: Run rust doc check
+      - name: Build documentation
         run: |
           cargo doc --document-private-items --no-deps
 
       - name: Run rust failpoints test
         run: |
           cargo nextest run failpoints  --features failpoints --no-fail-fast
-      
+
+      - name: Run rust doc check
+        run: |
+          cargo test --doc
+
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info -- --no-fail-fast

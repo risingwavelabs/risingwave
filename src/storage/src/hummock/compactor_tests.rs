@@ -23,10 +23,10 @@ mod tests {
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_rpc_client::HummockMetaClient;
 
-    use crate::hummock::compactor::{Compactor, CompactorContext};
-    use crate::hummock::{HummockStorage, SstableStore};
-    use crate::monitor::StateStoreMetrics;
-    use crate::object::{InMemObjectStore, ObjectStoreImpl};
+    use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::HummockStorage;
+    use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use crate::storage_value::StorageValue;
     use crate::StateStore;
 
@@ -35,24 +35,14 @@ mod tests {
     ) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();
         let options = Arc::new(StorageConfig {
-            sstable_size: 32,
-            block_size: 1 << 10,
+            sstable_size_mb: 1,
+            block_size_kb: 1,
             bloom_false_positive: 0.1,
             data_directory: remote_dir.clone(),
-            async_checkpoint_enabled: true,
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let obj_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-        let block_cache_capacity = 65536;
-        let meta_cache_capacity = 65536;
-        let sstable_store = Arc::new(SstableStore::new(
-            obj_client.clone(),
-            remote_dir,
-            Arc::new(StateStoreMetrics::unused()),
-            block_cache_capacity,
-            meta_cache_capacity,
-        ));
+        let sstable_store = mock_sstable_store();
         let storage = HummockStorage::with_default_stats(
             options.clone(),
             sstable_store,
@@ -85,11 +75,13 @@ mod tests {
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
+            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
+            compaction_executor: None,
         };
 
         // 1. add sstables
         let key = Bytes::from(&b"same_key"[..]);
-        let val = Bytes::from(&b"value"[..]);
+        let val = Bytes::from(b"0"[..].repeat(4 << 20)); // 4MB value
         let kv_count = 128;
         let mut epoch: u64 = 1;
         for _ in 0..kv_count {
@@ -102,7 +94,13 @@ mod tests {
                 .await
                 .unwrap();
             storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client.commit_epoch(epoch).await.unwrap();
+            hummock_meta_client
+                .commit_epoch(
+                    epoch,
+                    storage.local_version_manager.get_uncommitted_ssts(epoch),
+                )
+                .await
+                .unwrap();
         }
 
         // 2. get compact task
@@ -137,10 +135,10 @@ mod tests {
             .id;
         let table = storage
             .sstable_store()
-            .sstable(output_table_id)
+            .sstable(output_table_id, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        let target_table_size = storage.options().sstable_size;
+        let target_table_size = storage.options().sstable_size_mb * (1 << 20);
         assert!(
             table.value().meta.estimated_size > target_table_size,
             "table.meta.estimated_size {} <= target_table_size {}",

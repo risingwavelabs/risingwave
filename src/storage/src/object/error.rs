@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::backtrace::Backtrace;
+use std::io;
 use std::marker::{Send, Sync};
 
 use risingwave_common::error::BoxedError;
@@ -22,6 +23,13 @@ use thiserror::Error;
 enum ObjectErrorInner {
     #[error(transparent)]
     S3(BoxedError),
+
+    #[error("disk error: {msg}")]
+    Disk {
+        msg: String,
+        #[source]
+        inner: io::Error,
+    },
 
     #[error("Internal error: {0}")]
     Internal(String),
@@ -55,6 +63,10 @@ impl std::fmt::Debug for ObjectError {
 impl ObjectError {
     pub fn internal(msg: impl ToString) -> Self {
         ObjectErrorInner::Internal(msg.to_string()).into()
+    }
+
+    pub fn disk(msg: String, err: io::Error) -> Self {
+        ObjectErrorInner::Disk { msg, inner: err }.into()
     }
 }
 

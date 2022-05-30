@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-async-stream = "0.3"
 async-trait = "0.1"
 aws-config = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-endpoint = { version = "0.11", default-features = false }
@@ -24,12 +23,14 @@ enum-as-inner = "0.4"
 fail = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 libc = "0.2"
 log = "0.4"
 lz4 = "1.23.1"
+madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.8", features = ["future"] }
 num-integer = "0.1"
@@ -50,9 +51,10 @@ risingwave_rpc_client = { path = "../rpc_client" }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 spin = "0.9"
+tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
-tokio = { version = "1", features = [
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "fs",
     "rt",
     "rt-multi-thread",
@@ -63,7 +65,7 @@ tokio = { version = "1", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = "0.1"
-tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 twox-hash = "1"
 value-encoding = { path = "../utils/value-encoding" }
@@ -76,6 +78,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
+tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 
 [features]
@@ -95,4 +98,8 @@ harness = false
 
 [[bench]]
 name = "bench_merge_iter"
+harness = false
+
+[[bench]]
+name = "bench_fs_operation"
 harness = false

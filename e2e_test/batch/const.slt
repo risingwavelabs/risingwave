@@ -1,0 +1,36 @@
+query I
+select 42 where true;
+----
+42
+
+query I
+select 42 where false;
+----
+
+query I
+select 42 where 2 > 1;
+----
+42
+
+query I
+select 42 where 2 < 1;
+----
+
+query I
+select 42 having true;
+----
+42
+
+query I
+select 42 having false;
+----
+
+query I
+select 42 having 2 > 1;
+----
+42
+
+query I
+select 42 having 2 < 1;
+----
+

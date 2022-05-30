@@ -1,3 +1,5 @@
+# This file is formatted and updated by running the task `./risedev do-apply-planner-test`.
+
 - sql: |
     select (select 1);
   logical_plan: |
@@ -12,18 +14,18 @@
   logical_plan: |
     LogicalProject { exprs: [$2, 1:Int32] }
       LogicalJoin { type: LeftOuter, on: true }
-        LogicalScan { table: t, columns: [_row_id#0, x] }
+        LogicalScan { table: t, columns: [_row_id, x] }
         LogicalProject { exprs: [$1] }
-          LogicalScan { table: t, columns: [_row_id#0, x] }
+          LogicalScan { table: t, columns: [_row_id, x] }
 - sql: |
     create table t(x int);
     select (select x from t) + 1 from t;
   logical_plan: |
     LogicalProject { exprs: [($2 + 1:Int32)] }
       LogicalJoin { type: LeftOuter, on: true }
-        LogicalScan { table: t, columns: [_row_id#0, x] }
+        LogicalScan { table: t, columns: [_row_id, x] }
         LogicalProject { exprs: [$1] }
-          LogicalScan { table: t, columns: [_row_id#0, x] }
+          LogicalScan { table: t, columns: [_row_id, x] }
 - sql: |
     create table t(x int);
     select (select x from t), (select 1);
@@ -33,7 +35,7 @@
         LogicalJoin { type: LeftOuter, on: true }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
           LogicalProject { exprs: [$1] }
-            LogicalScan { table: t, columns: [_row_id#0, x] }
+            LogicalScan { table: t, columns: [_row_id, x] }
         LogicalProject { exprs: [1:Int32] }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
@@ -42,12 +44,12 @@
   logical_plan: |
     LogicalProject { exprs: [($1 + $2)] }
       LogicalJoin { type: LeftOuter, on: true }
-        LogicalScan { table: t, columns: [_row_id#0, x] }
+        LogicalScan { table: t, columns: [_row_id, x] }
         LogicalProject { exprs: [($1 + $2)] }
           LogicalJoin { type: LeftOuter, on: true }
-            LogicalScan { table: t, columns: [_row_id#0, x] }
+            LogicalScan { table: t, columns: [_row_id, x] }
             LogicalProject { exprs: [$1] }
-              LogicalScan { table: t, columns: [_row_id#0, x] }
+              LogicalScan { table: t, columns: [_row_id, x] }
 - sql: |
     select (select 1, 2);
   binder_error: 'Bind error: Subquery must return only one column'
@@ -59,7 +61,7 @@
       LogicalJoin { type: LeftSemi, on: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [$1] }
-          LogicalScan { table: t, columns: [_row_id#0, x] }
+          LogicalScan { table: t, columns: [_row_id, x] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32] }
       LogicalJoin { type: LeftSemi, on: true }
@@ -73,7 +75,7 @@
       LogicalJoin { type: LeftAnti, on: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [$1] }
-          LogicalScan { table: t, columns: [_row_id#0, x] }
+          LogicalScan { table: t, columns: [_row_id, x] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32] }
       LogicalJoin { type: LeftAnti, on: true }
@@ -86,18 +88,18 @@
   logical_plan: |
     LogicalProject { exprs: [$1] }
       LogicalJoin { type: LeftSemi, on: true }
-        LogicalScan { table: t1, columns: [_row_id#0, x] }
+        LogicalScan { table: t1, columns: [_row_id, x] }
         LogicalProject { exprs: [$1] }
-          LogicalScan { table: t2, columns: [_row_id#0, x] }
+          LogicalScan { table: t2, columns: [_row_id, x] }
 - sql: |
     create table t(x int);
     select x from t where exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [$1] }
       LogicalJoin { type: LeftSemi, on: true }
-        LogicalScan { table: t, columns: [_row_id#0, x] }
+        LogicalScan { table: t, columns: [_row_id, x] }
         LogicalProject { exprs: [$1] }
-          LogicalScan { table: t, columns: [_row_id#0, x] }
+          LogicalScan { table: t, columns: [_row_id, x] }
 - sql: |
     create table t1(x int);
     create table t2(x int);
@@ -106,9 +108,9 @@
     LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: ($1 > $2) }
         LogicalJoin { type: LeftOuter, on: true }
-          LogicalScan { table: t1, columns: [_row_id#0, x] }
+          LogicalScan { table: t1, columns: [_row_id, x] }
           LogicalProject { exprs: [$1] }
-            LogicalScan { table: t2, columns: [_row_id#0, x] }
+            LogicalScan { table: t2, columns: [_row_id, x] }
 - sql: |
     select 1 where 1>0 and exists (values (1))
   logical_plan: |
@@ -139,9 +141,9 @@
   logical_plan: |
     LogicalProject { exprs: [$1] }
       LogicalJoin { type: LeftSemi, on: ($2 = $3) }
-        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalScan { table: t1, columns: [_row_id, x, y] }
         LogicalProject { exprs: [$2] }
-          LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+          LogicalScan { table: t2, columns: [_row_id, x, y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -149,6 +151,6 @@
   logical_plan: |
     LogicalProject { exprs: [$1] }
       LogicalJoin { type: LeftAnti, on: ($2 = $3) }
-        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalScan { table: t1, columns: [_row_id, x, y] }
         LogicalProject { exprs: [$2] }
-          LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+          LogicalScan { table: t2, columns: [_row_id, x, y] }

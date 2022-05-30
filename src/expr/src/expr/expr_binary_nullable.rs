@@ -14,45 +14,45 @@
 
 //! For expression that only accept two nullable arguments as input.
 
-use risingwave_common::array::{
-    BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array,
-};
-use risingwave_common::error::Result;
+use risingwave_common::array::{Array, BoolArray, Utf8Array};
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::BoxedExpression;
 use crate::expr::template::BinaryNullableExpression;
+use crate::for_all_cmp_variants;
+use crate::vector_op::cmp::{general_is_distinct_from, str_is_distinct_from};
 use crate::vector_op::conjunction::{and, or};
 
-// TODO: consider implement it using generic function.
-macro_rules! gen_stream_null_by_row_count_expr {
-    ($l:expr, $r:expr, $ret:expr, $OA:ty) => {
-        Box::new(BinaryNullableExpression::<I64Array, $OA, $OA, _>::new(
-            $l,
-            $r,
-            $ret,
-            stream_null_by_row_count,
-        ))
+macro_rules! gen_nullable_cmp_impl {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),*) => {
+        match ($l.return_type(), $r.return_type()) {
+            $(
+                ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+                    Box::new(
+                        BinaryNullableExpression::<
+                            $i1! { type_array },
+                            $i2! { type_array },
+                            BoolArray,
+                            _
+                        >::new(
+                            $l,
+                            $r,
+                            $ret,
+                            $func::<
+                                <$i1! { type_array } as Array>::OwnedItem,
+                                <$i2! { type_array } as Array>::OwnedItem,
+                                <$cast! { type_array } as Array>::OwnedItem
+                            >,
+                        )
+                    )
+                }
+            ),*
+            _ => {
+                unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type())
+            }
+        }
     };
-}
-
-/// `stream_null_by_row_count` is mainly used for a special case of the conditional aggregation. For
-/// example:
-///
-/// ```sql
-/// SELECT stream_null_by_row_count(row_count, x) FROM
-/// (SELECT count(*) AS row_count, avg(x) AS x FROM t1);
-/// ```
-///
-/// is equivalent to:
-///
-/// ```sql
-/// SELECT avg(case when row_count > 0 then x else NULL)
-/// FROM t1;
-/// ```
-fn stream_null_by_row_count<T1>(l: Option<i64>, r: Option<T1>) -> Result<Option<T1>> {
-    Ok(l.filter(|l| *l > 0).and(r))
 }
 
 pub fn new_nullable_binary_expr(
@@ -62,37 +62,13 @@ pub fn new_nullable_binary_expr(
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
-        Type::StreamNullByRowCount => match l.return_type() {
-            DataType::Int64 => match r.return_type() {
-                DataType::Boolean => gen_stream_null_by_row_count_expr!(l, r, ret, BoolArray),
-                DataType::Int16 => gen_stream_null_by_row_count_expr!(l, r, ret, I16Array),
-                DataType::Int32 => gen_stream_null_by_row_count_expr!(l, r, ret, I32Array),
-                DataType::Int64 => gen_stream_null_by_row_count_expr!(l, r, ret, I64Array),
-                DataType::Float32 => gen_stream_null_by_row_count_expr!(l, r, ret, F32Array),
-                DataType::Float64 => gen_stream_null_by_row_count_expr!(l, r, ret, F64Array),
-                DataType::Decimal => {
-                    gen_stream_null_by_row_count_expr!(l, r, ret, DecimalArray)
-                }
-                DataType::Date => gen_stream_null_by_row_count_expr!(l, r, ret, DecimalArray),
-                _ => {
-                    unimplemented!(
-                        "The output type isn't supported by stream_null_by_row_count function."
-                    )
-                }
-            },
-            tp => {
-                unimplemented!(
-                    "The first argument of StreamNullByRowCount must be Int64 but not {:?}",
-                    tp
-                )
-            }
-        },
         Type::And => Box::new(
             BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, and),
         ),
         Type::Or => Box::new(
             BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, or),
         ),
+        Type::IsDistinctFrom => new_distinct_from_expr(l, r, ret),
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",
@@ -102,22 +78,159 @@ pub fn new_nullable_binary_expr(
     }
 }
 
+pub fn new_distinct_from_expr(
+    l: BoxedExpression,
+    r: BoxedExpression,
+    ret: DataType,
+) -> BoxedExpression {
+    use crate::expr::data_types::*;
+
+    match (l.return_type(), r.return_type()) {
+        (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
+            Utf8Array,
+            Utf8Array,
+            BoolArray,
+            _,
+        >::new(
+            l, r, ret, str_is_distinct_from
+        )),
+        _ => {
+            for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_distinct_from}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::stream_null_by_row_count;
+    use risingwave_common::array::Row;
+    use risingwave_common::types::Scalar;
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::expr::expr_node::Type;
+
+    use crate::expr::build_from_prost;
+    use crate::expr::test_utils::make_expression;
 
     #[test]
-    fn test_stream_if_not_null() {
-        let cases = [
-            (Some(1), Some(2), Some(2)),
-            (Some(0), Some(2), None),
-            (Some(3), None, None),
-            (None, Some(3), None),
+    fn test_and() {
+        let lhs = vec![
+            Some(true),
+            Some(true),
+            Some(true),
+            Some(false),
+            Some(false),
+            Some(false),
+            None,
+            None,
+            None,
         ];
-        for (arg1, arg2, expected) in cases {
-            let output =
-                stream_null_by_row_count(arg1, arg2).expect("No error in stream_null_by_row_count");
-            assert_eq!(output, expected);
+        let rhs = vec![
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            Some(false),
+            None,
+        ];
+        let target = vec![
+            Some(true),
+            Some(false),
+            None,
+            Some(false),
+            Some(false),
+            Some(false),
+            None,
+            Some(false),
+            None,
+        ];
+
+        let expr = make_expression(Type::And, &[TypeName::Boolean, TypeName::Boolean], &[0, 1]);
+        let vec_executor = build_from_prost(&expr).unwrap();
+
+        for i in 0..lhs.len() {
+            let row = Row::new(vec![
+                lhs[i].map(|x| x.to_scalar_value()),
+                rhs[i].map(|x| x.to_scalar_value()),
+            ]);
+            let res = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].map(|x| x.to_scalar_value());
+            assert_eq!(res, expected);
+        }
+    }
+
+    #[test]
+    fn test_or() {
+        let lhs = vec![
+            Some(true),
+            Some(true),
+            Some(true),
+            Some(false),
+            Some(false),
+            Some(false),
+            None,
+            None,
+            None,
+        ];
+        let rhs = vec![
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            Some(false),
+            None,
+        ];
+        let target = vec![
+            Some(true),
+            Some(true),
+            Some(true),
+            Some(true),
+            Some(false),
+            None,
+            Some(true),
+            None,
+            None,
+        ];
+
+        let expr = make_expression(Type::Or, &[TypeName::Boolean, TypeName::Boolean], &[0, 1]);
+        let vec_executor = build_from_prost(&expr).unwrap();
+
+        for i in 0..lhs.len() {
+            let row = Row::new(vec![
+                lhs[i].map(|x| x.to_scalar_value()),
+                rhs[i].map(|x| x.to_scalar_value()),
+            ]);
+            let res = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].map(|x| x.to_scalar_value());
+            assert_eq!(res, expected);
+        }
+    }
+
+    #[test]
+    fn test_is_distinct_from() {
+        let lhs = vec![None, None, Some(1), Some(2), Some(3)];
+        let rhs = vec![None, Some(1), None, Some(2), Some(4)];
+        let target = vec![Some(false), Some(true), Some(true), Some(false), Some(true)];
+
+        let expr = make_expression(
+            Type::IsDistinctFrom,
+            &[TypeName::Int32, TypeName::Int32],
+            &[0, 1],
+        );
+        let vec_executor = build_from_prost(&expr).unwrap();
+
+        for i in 0..lhs.len() {
+            let row = Row::new(vec![
+                lhs[i].map(|x| x.to_scalar_value()),
+                rhs[i].map(|x| x.to_scalar_value()),
+            ]);
+            let res = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].map(|x| x.to_scalar_value());
+            assert_eq!(res, expected);
         }
     }
 }

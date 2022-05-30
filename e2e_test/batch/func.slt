@@ -1,0 +1,121 @@
+query I
+select nullif(2,2);
+----
+NULL
+
+query I
+select nullif(1,2);
+----
+1
+
+query I
+select coalesce(1,2);
+----
+1
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int);
+
+statement ok
+insert into t1 values (1,null,null),(null,2,null),(null,null,3);
+
+query I
+select nullif(t1.v1,1) from t1;
+----
+NULL
+NULL
+NULL
+
+query I
+select coalesce(v1,v2,v3) from t1;
+----
+1
+2
+3
+
+statement ok
+drop table t1;
+
+statement ok
+create table t (v1 int);
+
+statement ok
+create table b (b1 int, b2 int);
+
+
+statement ok
+insert into t values (2);
+
+statement ok
+insert into b values (2, 1);
+
+query T
+SELECT 1 in (3, 0.5*2, min(v1)) from t;
+----
+t
+
+query I
+SELECT b2 from b where 1 in (3, 1.0, (select min(v1) from t));
+----
+1
+
+query I
+SELECT b2 from b where exists (select 2 from t where v1 in (3, 1.0, b1));
+----
+1
+
+statement ok
+drop table t;
+
+statement ok
+drop table b;
+
+query T
+select concat_ws(',', 'a', 'b');
+----
+a,b
+
+query T
+select concat_ws(NULL, 'a', 'b');
+----
+NULL
+
+query T
+select concat_ws(',', NULL, 'b');
+----
+b
+
+query T
+select concat_ws(NULL, NULL, 'b');
+----
+NULL
+
+query T
+select concat_ws(',', 1, 1.01, 'A', true, NULL);
+----
+1,1.01,A,true
+
+statement ok
+create table t (v1 varchar, v2 smallint, v3 int, v4 decimal, v5 real, v6 double, v7 bool, v8 varchar);
+
+statement ok
+insert into t values (',', 1, 2, 3.01, 4, 5.01, true, NULL);
+
+query T
+select concat_ws(v1, v2, v3, v4, v5, v6, v7, v8) from t;
+----
+1,2,3.01,4,5.01,true
+
+
+statement ok
+drop table t;
+
+query T
+select split_part('abc~@~def~@~ghi', '~@~', 2);
+----
+def
+
+query T
+select split_part('abc,def,ghi,jkl', ',', -2);
+----
+ghi

@@ -17,14 +17,13 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result as RwResult, RwError};
+use risingwave_common::error::{internal_error, Result as RwResult};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 #[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectorState, SplitImpl, SplitMetaData};
+use crate::{SplitImpl, SplitMetaData};
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -48,55 +47,6 @@ impl<S: StateStore> Debug for SourceStateHandler<S> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct StateStoredKey {
-    state_identifier: String,
-    epoch: u64,
-}
-
-impl Default for StateStoredKey {
-    fn default() -> Self {
-        Self {
-            state_identifier: "".to_string(),
-            epoch: u64::MIN,
-        }
-    }
-}
-
-impl StateStoredKey {
-    fn new(state_identifier: String, epoch: u64) -> Self {
-        Self {
-            state_identifier,
-            epoch,
-        }
-    }
-
-    // default key format [state_identifier | epoch]
-    fn build_stored_key(&self) -> String {
-        [
-            self.state_identifier.clone(),
-            "|".to_string(),
-            self.epoch.clone().to_string(),
-        ]
-        .concat()
-    }
-
-    fn build_from_bytes(&self, key_bytes: Bytes) -> Option<Self> {
-        if key_bytes.is_empty() {
-            None
-        } else {
-            let key_string = String::from_utf8(key_bytes.to_vec()).unwrap();
-            let key_string_len = key_string.len();
-            let delimiter_idx = key_string.find('|').unwrap();
-
-            let identifier = &(*key_string.as_str())[0..delimiter_idx];
-            let epoch_string = &(*key_string.as_str())[delimiter_idx + 1..key_string_len];
-            let epoch = epoch_string.parse::<u64>().unwrap();
-            Some(StateStoredKey::new(String::from(identifier), epoch))
-        }
-    }
-}
-
 impl<S: StateStore> SourceStateHandler<S> {
     pub fn new(keyspace: Keyspace<S>) -> Self {
         Self { keyspace }
@@ -117,11 +67,9 @@ impl<S: StateStore> SourceStateHandler<S> {
             let mut write_batch = self.keyspace.state_store().start_write_batch();
             let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
-                // state inner key format (state_identifier | epoch)
-                let inner_key = StateStoredKey::new(state.id(), epoch).build_stored_key();
-                let value = state.to_json_bytes();
+                let value = state.encode_to_bytes();
                 // TODO(Yuanxin): Implement value meta
-                local_batch.put(inner_key, StorageValue::new_default_put(value));
+                local_batch.put(state.id(), StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
             let ingest_rs = write_batch.ingest(epoch).await;
@@ -138,73 +86,40 @@ impl<S: StateStore> SourceStateHandler<S> {
         }
     }
 
-    /// Initializes the state of the specified ``state_identifier`` and returns an empty vec
-    /// if it does not exist (e.g., the first accessible source).
+    /// Retrieves the state of the specified ``state_identifier``
+    /// Returns None if it does not exist (e.g., the first accessible source).
     ///
-    /// The function returns a collection of tuple (epoch, state).
-    pub async fn restore_states(&self, state_identifier: String) -> Result<Vec<(u64, Bytes)>> {
-        // TODO: do we need snapshot read here?
-        let epoch = u64::MAX;
-        let scan_rs = self.keyspace.scan(Option::None, epoch).await;
-        let mut restore_values = Vec::new();
-        match scan_rs {
-            Ok(scan_list) => {
-                for pair in scan_list {
-                    let stored_key = StateStoredKey::default().build_from_bytes(pair.0).unwrap();
-                    if stored_key
-                        .clone()
-                        .state_identifier
-                        .eq(&state_identifier.clone())
-                    {
-                        restore_values.push((stored_key.epoch, pair.1))
-                    }
-                }
-                Ok(restore_values)
-            }
-            Err(e) => Err(anyhow!(e)),
-        }
+    /// The function returns the serialized state.
+    pub async fn restore_states(
+        &self,
+        state_identifier: String,
+        epoch: u64,
+    ) -> Result<Option<Bytes>> {
+        self.keyspace
+            .get(state_identifier, epoch)
+            .await
+            .map_err(|e| anyhow!(e))
     }
 
     pub async fn try_recover_from_state_store(
         &self,
-        stream_source_splits: &SplitImpl,
+        stream_source_split: &SplitImpl,
         epoch: u64,
-    ) -> RwResult<ConnectorState> {
-        let mut state = self
-            .restore_states(stream_source_splits.id())
-            .await
-            .map_err(|e| RwError::from(InternalError(e.to_string())))?
-            .iter()
-            .filter(|(e, _)| e == &epoch)
-            .map(|(_, s)| {
-                ConnectorState::restore_from_bytes(s)
-                    .map_err(|e| RwError::from(InternalError(e.to_string())))
-            })
-            .collect::<RwResult<Vec<ConnectorState>>>()?;
-
-        assert!(state.len() <= 1);
-
-        if state.len() == 1 {
-            Ok(state.pop().unwrap())
-        } else if state.is_empty() {
-            Err(RwError::from(InternalError(format!(
-                "cannot found state for {:?}, epoch: {:?}",
-                stream_source_splits, epoch
-            ))))
-        } else {
-            Err(RwError::from(InternalError(format!(
-                "expected load one state from epoch {:?}, got {:?}: {:?}",
-                epoch,
-                state.len(),
-                state
-            ))))
+    ) -> RwResult<Option<SplitImpl>> {
+        let connector_type = stream_source_split.get_type();
+        match self.restore_states(stream_source_split.id(), epoch).await {
+            Ok(Some(s)) => Ok(Some(
+                SplitImpl::restore_from_bytes(connector_type, &s)
+                    .map_err(|e| internal_error(e.to_string()))?,
+            )),
+            Ok(None) => Ok(None),
+            Err(e) => Err(internal_error(e.to_string())),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use itertools::Itertools;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -230,53 +145,13 @@ mod tests {
             self.partition.clone()
         }
 
-        fn to_json_bytes(&self) -> Bytes {
+        fn encode_to_bytes(&self) -> Bytes {
             Bytes::from(serde_json::to_string(self).unwrap())
         }
 
         fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
             serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
         }
-    }
-
-    #[test]
-    fn test_new_state_stored_key() {
-        let state_inner_key = StateStoredKey::new(TEST_STATE_IDENTIFIER.to_string(), TEST_EPOCH);
-        assert_eq!(
-            TEST_STATE_IDENTIFIER.to_string(),
-            state_inner_key.state_identifier
-        );
-        assert_eq!(TEST_EPOCH, state_inner_key.epoch);
-    }
-
-    #[test]
-    fn test_build_stored_key() {
-        assert_eq!(
-            [
-                TEST_STATE_IDENTIFIER.to_string(),
-                "|".to_string(),
-                TEST_EPOCH.to_string()
-            ]
-            .concat(),
-            StateStoredKey::new(TEST_STATE_IDENTIFIER.to_string(), TEST_EPOCH).build_stored_key()
-        );
-    }
-
-    #[test]
-    fn test_stored_key_from_bytes() {
-        let ss_key = StateStoredKey::new(TEST_STATE_IDENTIFIER.to_string(), TEST_EPOCH);
-        let key_bytes = Bytes::from(
-            [
-                TEST_STATE_IDENTIFIER.to_string(),
-                "|".to_string(),
-                TEST_EPOCH.to_string(),
-            ]
-            .concat(),
-        );
-        let ss_key_from_bytes = ss_key.build_from_bytes(key_bytes);
-        if let Some(ss_val) = ss_key_from_bytes {
-            assert_eq!(ss_key, ss_val)
-        };
     }
 
     #[test]
@@ -287,7 +162,7 @@ mod tests {
         assert_eq!(offset, state_instance.offset);
         assert_eq!(partition, state_instance.partition);
         println!("TestSourceState = {:?}", state_instance);
-        let encode_value = state_instance.to_json_bytes();
+        let encode_value = state_instance.encode_to_bytes();
         let decode_value = TestSourceState::restore_from_bytes(&encode_value)?;
         println!("decode from Bytes instance = {:?}", decode_value);
         assert_eq!(offset, decode_value.offset);
@@ -310,8 +185,8 @@ mod tests {
 
     async fn take_snapshot_and_get_states(
         state_handler: SourceStateHandler<MemoryStateStore>,
+        current_epoch: u64,
     ) -> (Vec<TestSourceState>, Result<()>) {
-        let current_epoch = 1000;
         let states = test_state_store_vec();
         println!("Vec<TestSourceStat>={:?}", states.clone());
         let rs = state_handler
@@ -324,7 +199,7 @@ mod tests {
     async fn test_take_snapshot() {
         let current_epoch = 1000;
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
-        let _rs = take_snapshot_and_get_states(state_store_handler.clone()).await;
+        let _rs = take_snapshot_and_get_states(state_store_handler.clone(), current_epoch).await;
         let stored_states = state_store_handler
             .keyspace
             .scan(None, current_epoch)
@@ -337,34 +212,37 @@ mod tests {
     async fn test_empty_state_restore() {
         let partition = "p01".to_string();
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
-
-        let list_states = state_store_handler.restore_states(partition).await.unwrap();
+        let list_states = state_store_handler
+            .restore_states(partition, u64::MAX)
+            .await
+            .unwrap();
         println!("current list_states={:?}", list_states);
-        assert_eq!(0, list_states.len())
+        assert!(list_states.is_none())
     }
 
     #[tokio::test]
     async fn test_state_restore() {
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
-        let saved_states = take_snapshot_and_get_states(state_store_handler.clone())
+        let current_epoch = 1000;
+        let saved_states = take_snapshot_and_get_states(state_store_handler.clone(), current_epoch)
             .await
             .0;
 
         for state in saved_states {
             let identifier = state.id();
             let state_pair = state_store_handler
-                .restore_states(identifier)
+                .restore_states(identifier, current_epoch)
                 .await
                 .unwrap();
             println!("source_state_handler restore state_pair={:?}", state_pair);
             state_pair.into_iter().for_each(|s| {
                 assert_eq!(
                     state.offset,
-                    TestSourceState::restore_from_bytes(&s.1).unwrap().offset
+                    TestSourceState::restore_from_bytes(&s).unwrap().offset
                 );
                 assert_eq!(
                     state.partition,
-                    TestSourceState::restore_from_bytes(&s.1).unwrap().partition
+                    TestSourceState::restore_from_bytes(&s).unwrap().partition
                 );
             });
         }

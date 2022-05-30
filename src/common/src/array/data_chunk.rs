@@ -348,97 +348,6 @@ impl DataChunk {
         Ok(new_chunks)
     }
 
-    /// `rechunk_head` splits out a data chunk with `head_chunk_size` from the head of a vector of
-    /// chunks. When the total cardinality of all the chunks is smaller than `head_chunk_size`,
-    /// the remainder chunk will be returned. Otherwise, the head chunk and the remainder chunks is
-    /// returned in a vector.
-    ///
-    /// Currently, `rechunk_head` would ignore visibility map. May or may not support it later
-    /// depending on the demand
-    pub fn rechunk_head(chunks: Vec<DataChunk>, head_chunk_size: usize) -> Result<Vec<DataChunk>> {
-        assert!(head_chunk_size > 0);
-        // Corner case: one of the `chunks` may have 0 length
-        // remove the chunks with zero physical length here,
-        // or skip them in the loop below
-        let chunks = chunks
-            .into_iter()
-            .filter(|chunk| chunk.capacity() != 0)
-            .collect::<Vec<_>>();
-        if chunks.is_empty() {
-            return Ok(Vec::new());
-        }
-        assert!(!chunks[0].columns.is_empty());
-
-        let total_capacity = chunks
-            .iter()
-            .map(|chunk| chunk.capacity())
-            .reduce(|x, y| x + y)
-            .unwrap();
-
-        // the idx of `chunks`
-        let mut chunk_idx = 0;
-        // how many rows does this new chunk need?
-        let mut new_chunk_require = std::cmp::min(total_capacity, head_chunk_size);
-        let mut array_builders: Vec<ArrayBuilderImpl> = chunks[0]
-            .columns
-            .iter()
-            .map(|col| col.array_ref().create_builder(new_chunk_require))
-            .try_collect()?;
-        let mut end_row_idx = 0;
-        let mut capacity = 0;
-        while chunk_idx < chunks.len() {
-            capacity = chunks[chunk_idx].capacity();
-            let actual_acquire = std::cmp::min(new_chunk_require, capacity);
-            end_row_idx = actual_acquire - 1;
-            array_builders
-                .iter_mut()
-                .zip_eq(chunks[chunk_idx].columns())
-                .try_for_each(|(builder, column)| {
-                    let mut array_builder = column.array_ref().create_builder(end_row_idx + 1)?;
-                    for row_idx in 0..=end_row_idx {
-                        array_builder.append_datum_ref(column.array_ref().value_at(row_idx))?;
-                    }
-                    builder.append_array(&array_builder.finish()?)
-                })?;
-            chunk_idx += 1;
-
-            new_chunk_require -= actual_acquire;
-            // a new chunk receives enough rows, finalize it
-            if new_chunk_require == 0 {
-                break;
-            }
-        }
-
-        let new_columns: Vec<Column> = array_builders
-            .drain(..)
-            .map(|builder| {
-                let array = builder.finish()?;
-                Ok::<_, RwError>(Column::new(Arc::new(array)))
-            })
-            .try_collect()?;
-
-        // Build return chunks, containing the head chunk and the remainder chunks.
-        let data_chunk = DataChunk::builder().columns(new_columns).build();
-        let mut data_chunks = vec![data_chunk];
-        if end_row_idx + 1 < capacity {
-            let remainder_columns: Vec<Column> = chunks[chunk_idx - 1]
-                .columns
-                .iter()
-                .map(|col| {
-                    let mut builder = col.array_ref().create_builder(capacity - end_row_idx - 1)?;
-                    for row_idx in (end_row_idx + 1)..capacity {
-                        builder.append_datum_ref(col.array_ref().value_at(row_idx))?;
-                    }
-                    let array = builder.finish()?;
-                    Ok::<_, RwError>(Column::new(Arc::new(array)))
-                })
-                .try_collect()?;
-            data_chunks.push(DataChunk::builder().columns(remainder_columns).build());
-        }
-        data_chunks.extend(chunks[chunk_idx..].to_vec());
-        Ok(data_chunks)
-    }
-
     pub fn get_hash_values<H: BuildHasher>(
         &self,
         column_idxes: &[usize],
@@ -617,6 +526,13 @@ impl DataChunkTestExt for DataChunk {
                             .map_err(|_| panic!("invalid int64: {s:?}"))
                             .unwrap(),
                     )),
+                    s if matches!(builder, ArrayBuilderImpl::Float32(_)) => {
+                        Some(ScalarImpl::Float32(
+                            s.parse()
+                                .map_err(|_| panic!("invalid float32: {s:?}"))
+                                .unwrap(),
+                        ))
+                    }
                     s if matches!(builder, ArrayBuilderImpl::Float64(_)) => {
                         Some(ScalarImpl::Float64(
                             s.parse()
@@ -692,82 +608,6 @@ mod tests {
             }
 
             let new_chunks = DataChunk::rechunk(&chunks, new_chunk_size).unwrap();
-            assert_eq!(new_chunks.len(), chunk_sizes.len());
-            // check cardinality
-            for (idx, chunk_size) in chunk_sizes.iter().enumerate() {
-                assert_eq!(*chunk_size, new_chunks[idx].capacity());
-            }
-
-            let mut chunk_idx = 0;
-            let mut cur_idx = 0;
-            for val in 0..total_size {
-                if cur_idx >= chunk_sizes[chunk_idx] {
-                    cur_idx = 0;
-                    chunk_idx += 1;
-                }
-                assert_eq!(
-                    new_chunks[chunk_idx]
-                        .column_at(0)
-                        .array()
-                        .as_int32()
-                        .value_at(cur_idx)
-                        .unwrap(),
-                    val as i32
-                );
-                cur_idx += 1;
-            }
-        };
-
-        test_case(0, 0, 1);
-        test_case(0, 10, 1);
-        test_case(10, 0, 1);
-        test_case(1, 1, 6);
-        test_case(1, 10, 11);
-        test_case(2, 3, 6);
-        test_case(5, 5, 6);
-        test_case(10, 10, 7);
-    }
-
-    #[test]
-    fn test_rechunk_head() {
-        let test_case = |num_chunks: usize, chunk_size: usize, head_chunk_size: usize| {
-            let mut chunks = vec![];
-            for chunk_idx in 0..num_chunks {
-                let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
-                for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
-                    builder.append(Some(i as i32)).unwrap();
-                }
-                let chunk = DataChunk::builder()
-                    .columns(vec![Column::new(Arc::new(
-                        builder.finish().unwrap().into(),
-                    ))])
-                    .build();
-                chunks.push(chunk);
-            }
-
-            let total_size = num_chunks * chunk_size;
-            let (head_remainder_size, remainder_chunk_size, mut chunk_sizes) =
-                if chunk_size > 0 && total_size > 0 {
-                    if head_chunk_size >= total_size {
-                        (0, 0, vec![total_size])
-                    } else {
-                        let head_remainder_size =
-                            (chunk_size - head_chunk_size % chunk_size) % chunk_size;
-                        (
-                            head_remainder_size,
-                            (total_size - head_remainder_size - head_chunk_size) / chunk_size,
-                            vec![head_chunk_size],
-                        )
-                    }
-                } else {
-                    (0, 0, vec![])
-                };
-            if head_remainder_size > 0 {
-                chunk_sizes.push(head_remainder_size);
-            }
-            chunk_sizes.extend(vec![chunk_size; remainder_chunk_size]);
-
-            let new_chunks = DataChunk::rechunk_head(chunks, head_chunk_size).unwrap();
             assert_eq!(new_chunks.len(), chunk_sizes.len());
             // check cardinality
             for (idx, chunk_size) in chunk_sizes.iter().enumerate() {

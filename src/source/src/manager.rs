@@ -16,10 +16,11 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
@@ -27,16 +28,16 @@ use risingwave_connector::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
-use crate::connector_source::ConnectorSource;
 use crate::row_id::{RowId, RowIdGenerator};
 use crate::table_v2::TableSourceV2;
-use crate::{SourceFormat, SourceImpl, SourceParserImpl};
+use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
 /// The local source manager on the compute node.
+#[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
-    fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
+    async fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
     fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
@@ -84,6 +85,15 @@ impl SourceDesc {
     pub fn next_row_id(&self) -> RowId {
         self.row_id_generator.as_ref().lock().next()
     }
+
+    pub fn next_row_id_batch(&self, length: usize) -> Vec<RowId> {
+        let mut guard = self.row_id_generator.as_ref().lock();
+        let mut result = Vec::with_capacity(length);
+        for _ in 0..length {
+            result.push(guard.next());
+        }
+        result
+    }
 }
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
@@ -95,8 +105,9 @@ pub struct MemSourceManager {
     worker_id: u32,
 }
 
+#[async_trait]
 impl SourceManager for MemSourceManager {
-    fn create_source(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
+    async fn create_source(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
         let format = match info.get_row_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
@@ -109,9 +120,14 @@ impl SourceManager for MemSourceManager {
                 "protobuf file location not provided".to_string(),
             )));
         }
-
-        let parser =
-            SourceParserImpl::create(&format, &info.properties, info.row_schema_location.as_str())?;
+        let source_parser_rs =
+            SourceParserImpl::create(&format, &info.properties, info.row_schema_location.as_str())
+                .await;
+        let parser = if let Ok(source_parser) = source_parser_rs {
+            source_parser
+        } else {
+            return Err(source_parser_rs.err().unwrap());
+        };
 
         let columns = info
             .columns
@@ -135,8 +151,11 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = info.row_id_index as usize;
 
+        let config = ConnectorProperties::extract(info.properties)
+            .map_err(|e| RwError::from(ConnectorError(e.to_string())))?;
+
         let source = SourceImpl::Connector(ConnectorSource {
-            config: ConnectorProperties::new(info.properties)?,
+            config,
             columns: columns.clone(),
             parser,
         });
@@ -231,7 +250,6 @@ impl MemSourceManager {
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
@@ -268,7 +286,7 @@ mod tests {
         let source_id = TableId::default();
 
         let mem_source_manager = MemSourceManager::default();
-        let source = mem_source_manager.create_source(&source_id, info);
+        let source = mem_source_manager.create_source(&source_id, info).await;
 
         assert!(source.is_ok());
 

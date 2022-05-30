@@ -19,7 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use clap::StructOpt;
 use risedev::{
-    CompactorService, ComputeNodeService, ConfigExpander, FrontendServiceV2, MetaNodeService,
+    CompactorService, ComputeNodeService, ConfigExpander, FrontendService, MetaNodeService,
     ServiceConfig,
 };
 use tokio::fs::File;
@@ -35,7 +35,7 @@ async fn load_risedev_config() -> Result<(Vec<String>, HashMap<String, ServiceCo
             .await?;
         content
     };
-    let risedev_config = ConfigExpander::expand(&risedev_config)?;
+    let risedev_config = ConfigExpander::expand(&risedev_config, "playground")?;
     let (steps, services) = ConfigExpander::select(&risedev_config, "playground")?;
 
     Ok((steps, services))
@@ -78,7 +78,7 @@ pub async fn playground() -> Result<()> {
                 }
                 ServiceConfig::FrontendV2(c) => {
                     let mut command = Command::new("frontend-node");
-                    FrontendServiceV2::apply_command_args(&mut command, c)?;
+                    FrontendService::apply_command_args(&mut command, c)?;
                     rw_services.push(RisingWaveService::Frontend(
                         command.get_args().map(ToOwned::to_owned).collect(),
                     ));
@@ -113,6 +113,8 @@ pub async fn playground() -> Result<()> {
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
                 tracing::info!("opts: {:#?}", opts);
                 let _meta_handle = tokio::spawn(async move { risingwave_meta::start(opts).await });
+                // wait for the service to be ready
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
             RisingWaveService::Compute(mut opts) => {
                 opts.insert(0, "compute-node".into());

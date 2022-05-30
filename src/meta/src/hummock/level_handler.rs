@@ -17,8 +17,9 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::level_handler::SstTask;
-use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
+use risingwave_pb::hummock::SstableInfo;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SSTableInfo {

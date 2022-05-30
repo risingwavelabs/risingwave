@@ -18,7 +18,6 @@ use std::ops::{Add, Sub};
 
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::BytesMut;
-use chrono::Duration;
 use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use serde::{Deserialize, Serialize};
@@ -67,10 +66,33 @@ impl IntervalUnit {
         self.ms
     }
 
-    pub fn get_total_ms(&self) -> i64 {
-        self.ms
-            + (self.days as i64) * 24 * 3600 * 1000
-            + (self.months as i64) * 30 * 24 * 3600 * 1000
+    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> Result<Self> {
+        // TODO: remove IntervalType later.
+        match ty {
+            // the unit is months
+            Year | YearToMonth | Month => {
+                let bytes = bytes.try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
+                })?;
+                let mouths = i32::from_be_bytes(bytes);
+                Ok(IntervalUnit::from_month(mouths))
+            }
+            // the unit is ms
+            Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
+            | Minute | MinuteToSecond | Second => {
+                let bytes = bytes.try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
+                })?;
+                let ms = i64::from_be_bytes(bytes);
+                Ok(IntervalUnit::from_millis(ms))
+            }
+            Invalid => {
+                // Invalid means the interval is from the new frontend.
+                // TODO: make this default path later.
+                let mut cursor = Cursor::new(bytes);
+                read_interval_unit(&mut cursor)
+            }
+        }
     }
 
     #[must_use]
@@ -203,13 +225,6 @@ impl From<&'_ IntervalUnitProto> for IntervalUnit {
             days: p.days,
             ms: p.ms,
         }
-    }
-}
-
-#[allow(clippy::from_over_into)]
-impl Into<Duration> for IntervalUnit {
-    fn into(self) -> Duration {
-        Duration::milliseconds(self.get_total_ms())
     }
 }
 

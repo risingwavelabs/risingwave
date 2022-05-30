@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::RwError;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -31,9 +31,10 @@ use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
+use crate::keyspace::StripPrefixIterator;
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::{StorageValue, ValueMeta};
-use crate::{Keyspace, StateStore};
+use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
 /// format: [keyspace | pk | `column_id` (4B)] -> value.
@@ -58,6 +59,10 @@ pub struct CellBasedTable<S: StateStore> {
 
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
+
+    /// Indices of distribution keys in pk for computing value meta. None if value meta is not
+    /// required.
+    dist_key_indices: Option<Vec<usize>>,
 }
 
 impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
@@ -78,6 +83,7 @@ impl<S: StateStore> CellBasedTable<S> {
         column_descs: Vec<ColumnDesc>,
         ordered_row_serializer: Option<OrderedRowSerializer>,
         stats: Arc<StateStoreMetrics>,
+        dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         let schema = Schema::new(
             column_descs
@@ -96,6 +102,7 @@ impl<S: StateStore> CellBasedTable<S> {
             cell_based_row_serializer: CellBasedRowSerializer::new(),
             column_ids,
             stats,
+            dist_key_indices,
         }
     }
 
@@ -109,6 +116,7 @@ impl<S: StateStore> CellBasedTable<S> {
             column_descs,
             Some(OrderedRowSerializer::new(order_types)),
             Arc::new(StateStoreMetrics::unused()),
+            None,
         )
     }
 
@@ -118,7 +126,7 @@ impl<S: StateStore> CellBasedTable<S> {
         column_descs: Vec<ColumnDesc>,
         stats: Arc<StateStoreMetrics>,
     ) -> Self {
-        Self::new(keyspace, column_descs, None, stats)
+        Self::new(keyspace, column_descs, None, stats, None)
     }
 
     // cell-based interface
@@ -201,8 +209,13 @@ impl<S: StateStore> CellBasedTable<S> {
             let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
 
             let value_meta = if WITH_VALUE_META {
-                // TODO: use distribution key instead of pk to hash vnode
-                let vnode = pk.hash_row(&hash_builder).to_vnode();
+                // If value meta is computed here, then the cell based table is guaranteed to have
+                // distribution keys. Also, it is guaranteed that distribution key indices will
+                // not exceed the length of pk. So we simply do unwrap here.
+                let vnode = pk
+                    .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
+                    .unwrap()
+                    .to_vnode();
                 ValueMeta::with_vnode(vnode)
             } else {
                 ValueMeta::default()
@@ -288,6 +301,15 @@ impl<S: StateStore> CellBasedTable<S> {
         .await
     }
 
+    // streaming_iter is uesed for streaming executors, which is regarded as a short-term iterator
+    // and will not wait for epoch.
+    pub async fn streaming_iter(
+        &self,
+        epoch: u64,
+    ) -> StorageResult<CellBasedTableStreamingIter<S>> {
+        CellBasedTableStreamingIter::new(&self.keyspace, self.column_descs.clone(), epoch).await
+    }
+
     pub fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -300,15 +322,8 @@ fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
 // (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
 pub struct CellBasedTableRowIter<S: StateStore> {
-    keyspace: Keyspace<S>,
-    /// A buffer to store prefetched kv pairs from state store
-    buf: Vec<(Bytes, Bytes)>,
-    /// The idx into `buf` for the next item
-    next_idx: usize,
-    /// A bool to indicate whether there are more data to fetch from state store
-    done: bool,
-    /// An epoch representing the read snapshot
-    epoch: u64,
+    /// An iterator that returns raw bytes from storage.
+    iter: StripPrefixIterator<S::Iter>,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
     /// Statistics
@@ -316,9 +331,7 @@ pub struct CellBasedTableRowIter<S: StateStore> {
 }
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
-    const SCAN_LIMIT: usize = 1024;
-
-    async fn new(
+    pub async fn new(
         keyspace: Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
@@ -328,48 +341,21 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
+        let iter = keyspace.iter(epoch).await?;
+
         let iter = Self {
-            keyspace,
-            buf: vec![],
-            next_idx: 0,
-            done: false,
-            epoch,
+            iter,
             cell_based_row_deserializer,
             _stats,
         };
         Ok(iter)
     }
 
-    async fn consume_more(&mut self) -> StorageResult<()> {
-        assert_eq!(self.next_idx, self.buf.len());
-
-        if self.buf.is_empty() {
-            self.buf = self
-                .keyspace
-                .scan(Some(Self::SCAN_LIMIT), self.epoch)
-                .await?;
-        } else {
-            let last_key = self.buf.last().unwrap().0.clone();
-            let buf = self
-                .keyspace
-                .scan_with_start_key(last_key.to_vec(), Some(Self::SCAN_LIMIT), self.epoch)
-                .await?;
-            assert!(!buf.is_empty());
-            assert_eq!(buf.first().as_ref().unwrap().0, last_key);
-            self.buf = buf[1..].to_vec();
-        }
-
-        self.next_idx = 0;
-
-        Ok(())
-    }
-
     pub async fn collect_data_chunk(
         &mut self,
-        cell_based_table: &CellBasedTable<S>,
+        schema: &Schema,
         chunk_size: Option<usize>,
     ) -> StorageResult<Option<DataChunk>> {
-        let schema = &cell_based_table.schema;
         let mut builders = schema
             .create_array_builders(chunk_size.unwrap_or(0))
             .map_err(err)?;
@@ -411,47 +397,80 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
 #[async_trait::async_trait]
 impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
     async fn next(&mut self) -> StorageResult<Option<Row>> {
-        if self.done {
-            return Ok(None);
-        }
-
         loop {
-            let (key, value) = match self.buf.get(self.next_idx) {
-                Some(kv) => kv,
+            match self.iter.next().await? {
                 None => {
-                    // Need to consume more from state store
-                    self.consume_more().await?;
-                    if let Some(item) = self.buf.first() {
-                        item
-                    } else {
-                        let pk_and_row = self.cell_based_row_deserializer.take();
-                        self.done = true;
-                        return Ok(pk_and_row.map(|(_pk, row)| row));
+                    let pk_and_row = self.cell_based_row_deserializer.take();
+                    return Ok(pk_and_row.map(|(_pk, row)| row));
+                }
+                Some((key, value)) => {
+                    tracing::trace!(
+                        target: "events::storage::CellBasedTable::scan",
+                        "CellBasedTable scanned key = {:?}, value = {:?}",
+                        key,
+                        value
+                    );
+                    let pk_and_row = self
+                        .cell_based_row_deserializer
+                        .deserialize(&key, &value)
+                        .map_err(err)?;
+                    match pk_and_row {
+                        Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+                        None => {}
                     }
                 }
-            };
-            tracing::trace!(
-                target: "events::storage::CellBasedTable::scan",
-                "CellBasedTable scanned key = {:?}, value = {:?}",
-                bytes::Bytes::copy_from_slice(key),
-                value
-            );
-
-            // there is no need to deserialize pk in cell-based table
-            if key.len() < 4 {
-                return Err(StorageError::CellBasedTable(
-                    ErrorCode::InternalError("corrupted key".to_owned()).into(),
-                ));
             }
+        }
+    }
+}
 
-            let pk_and_row = self
-                .cell_based_row_deserializer
-                .deserialize(key, value)
-                .map_err(err)?;
-            self.next_idx += 1;
-            match pk_and_row {
-                Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
-                None => {}
+/// [`CellBasedTableStreamingIter`] is used for streaming executor, and will not wait for epoch.
+pub struct CellBasedTableStreamingIter<S: StateStore> {
+    /// An iterator that returns raw bytes from storage.
+    iter: StripPrefixIterator<S::Iter>,
+    /// Cell-based row deserializer
+    cell_based_row_deserializer: CellBasedRowDeserializer,
+}
+
+impl<S: StateStore> CellBasedTableStreamingIter<S> {
+    pub async fn new(
+        keyspace: &Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        epoch: u64,
+    ) -> StorageResult<Self> {
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
+        let iter = keyspace.iter(epoch).await?;
+        let iter = Self {
+            iter,
+            cell_based_row_deserializer,
+        };
+        Ok(iter)
+    }
+
+    /// return a row with its pk.
+    pub async fn next(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
+        loop {
+            match self.iter.next().await? {
+                None => {
+                    let pk_and_row = self.cell_based_row_deserializer.take();
+                    return Ok(pk_and_row);
+                }
+                Some((key, value)) => {
+                    tracing::trace!(
+                        target: "events::storage::CellBasedTable::scan",
+                        "CellBasedTable scanned key = {:?}, value = {:?}",
+                        key,
+                        value
+                    );
+                    let pk_and_row = self
+                        .cell_based_row_deserializer
+                        .deserialize(&key, &value)
+                        .map_err(err)?;
+                    match pk_and_row {
+                        Some(pk_row) => return Ok(Some(pk_row)),
+                        None => {}
+                    }
+                }
             }
         }
     }

@@ -18,10 +18,11 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo, VNodeBitmap};
+use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
+use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
+use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
@@ -43,11 +44,10 @@ where
     ];
     let test_tables = generate_test_tables(epoch, table_ids);
     hummock_manager
-        .add_tables(context_id, test_tables.clone(), epoch)
+        .commit_epoch(epoch, test_tables.clone())
         .await
         .unwrap();
-    hummock_manager.commit_epoch(epoch).await.unwrap();
-    // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables]}
+    // Current state: {v0: [], v1: [test_tables]}
 
     // Simulate a compaction and increase version by 1.
     let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
@@ -65,8 +65,7 @@ where
         .report_compact_task(&compact_task)
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3: [test_tables_2,
-    // test_tables to_delete]}
+    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, test_tables to_delete]}
 
     // Increase version by 1.
     epoch += 1;
@@ -75,11 +74,11 @@ where
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
     hummock_manager
-        .add_tables(context_id, test_tables_3.clone(), epoch)
+        .commit_epoch(epoch, test_tables_3.clone())
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3: [test_tables_2,
-    // to_delete:test_tables], v4: [test_tables_2, test_tables_3 uncommitted]}
+    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables], v3:
+    // [test_tables_2, test_tables_3]}
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
@@ -97,12 +96,10 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
             vnode_bitmaps: vec![
                 VNodeBitmap {
                     table_id: (i + 1) as u32,
-                    maplen: 0,
                     bitmap: vec![],
                 },
                 VNodeBitmap {
                     table_id: (i + 2) as u32,
-                    maplen: 0,
                     bitmap: vec![],
                 },
             ],
@@ -153,11 +150,19 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
+    let config = CompactionConfig {
+        level0_tigger_file_numer: 2,
+        level0_tier_compact_file_number: 1,
+        min_compaction_bytes: 1,
+        max_bytes_for_level_base: 1,
+        ..Default::default()
+    };
     let hummock_manager = Arc::new(
-        HummockManager::new(
+        HummockManager::new_with_config(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
+            config,
         )
         .await
         .unwrap(),

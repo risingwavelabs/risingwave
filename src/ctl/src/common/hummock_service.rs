@@ -19,7 +19,9 @@ use anyhow::{anyhow, Result};
 use risingwave_common::config::StorageConfig;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::HummockStorage;
-use risingwave_storage::monitor::{HummockMetrics, MonitoredStateStore, StateStoreMetrics};
+use risingwave_storage::monitor::{
+    HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
+};
 use risingwave_storage::StateStoreImpl;
 
 use super::MetaServiceOpts;
@@ -38,7 +40,8 @@ impl HummockServiceOpts {
     pub fn from_env() -> Result<Self> {
         let meta_opts = MetaServiceOpts::from_env()?;
         let hummock_url = env::var("RW_HUMMOCK_URL").unwrap_or_else(|_| {
-            const DEFAULT_ADDR: &str = "hummock+minio://hummock:12345678@127.0.0.1:9301/hummock001";
+            const DEFAULT_ADDR: &str =
+                "hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001";
             tracing::warn!(
                 "`RW_HUMMOCK_URL` not found, using default hummock URL {}",
                 DEFAULT_ADDR
@@ -67,6 +70,7 @@ impl HummockServiceOpts {
                 Arc::new(HummockMetrics::unused()),
             )),
             Arc::new(StateStoreMetrics::unused()),
+            Arc::new(ObjectStoreMetrics::unused()),
         )
         .await?;
 

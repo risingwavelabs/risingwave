@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
@@ -10,12 +11,6 @@ option optimize_for = SPEED;
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
-  repeated uint64 original_indices = 1;
-  repeated uint32 data = 2;
-}
-
-// Hash mapping for compute node. Stores mapping from virtual node to parallel unit id.
-message ParallelUnitMapping {
   repeated uint64 original_indices = 1;
   repeated uint32 data = 2;
 }
@@ -62,20 +57,20 @@ message MaterializeNode {
   // Column IDs of input schema
   repeated int32 column_ids = 4;
   // Hash keys of the materialize node, which is a subset of pk.
-  repeated int32 distribution_keys = 5;
+  repeated uint32 distribution_keys = 5;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
 // Local and global aggregator distinguish with each other in PlanNode definition.
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
-  repeated int32 distribution_keys = 2;
+  repeated uint32 distribution_keys = 2;
   repeated uint32 table_ids = 3;
   bool append_only = 4;
 }
 
 message HashAggNode {
-  repeated int32 distribution_keys = 1;
+  repeated uint32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated uint32 table_ids = 3;
   bool append_only = 4;
@@ -86,7 +81,7 @@ message TopNNode {
   // 0 means no limit as limit of 0 means this node should be optimized away
   uint64 limit = 2;
   uint64 offset = 3;
-  repeated int32 distribution_keys = 4;
+  repeated uint32 distribution_keys = 4;
 }
 
 message HashJoinNode {
@@ -94,7 +89,7 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
-  repeated int32 distribution_keys = 5;
+  repeated uint32 distribution_keys = 5;
   // Whether to use delta join for this hash join node. When enabled, arrangement will be created
   // on-the-fly within the plan.
   // TODO: remove this in the future when we have a separate DeltaHashJoin node.
@@ -164,8 +159,8 @@ message ChainNode {
 message BatchPlanNode {
   plan_common.TableRefId table_ref_id = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
-  repeated int32 distribution_keys = 3;
-  ParallelUnitMapping hash_mapping = 4;
+  repeated uint32 distribution_keys = 3;
+  common.ParallelUnitMapping hash_mapping = 4;
   uint32 parallel_unit_id = 5;
 }
 
@@ -184,6 +179,8 @@ message ArrangeNode {
   uint32 table_id = 2;
   // Info about the arrangement
   ArrangementInfo table_info = 3;
+  // Hash keys of the materialize node, which is a subset of pk.
+  repeated uint32 distribution_keys = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
@@ -299,4 +296,47 @@ message StreamActor {
   repeated uint32 upstream_actor_id = 6;
   // Placement rule for actor, need to stay on the same node as upstream.
   bool same_worker_node_as_upstream = 7;
+  // Vnodes that the executors in this actor own. If this actor is the only actor in its fragment, `vnode_bitmap`
+  // will be empty.
+  bytes vnode_bitmap = 8;
+}
+
+enum FragmentType {
+  SOURCE = 0;
+  SINK = 1;
+  OTHERS = 2;
+}
+
+message StreamFragmentGraph {
+  message StreamFragment {
+    // 0-based on frontend, and will be rewritten to global id on meta.
+    uint32 fragment_id = 1;
+    // root stream node in this fragment.
+    StreamNode node = 2;
+    FragmentType fragment_type = 3;
+    // mark whether this fragment should only have one actor.
+    bool is_singleton = 4;
+    // Number of table ids (stateful states) for this fragment.
+    uint32 table_ids_cnt = 5;
+  }
+
+  message StreamFragmentEdge {
+    // Dispatch strategy for the fragment.
+    DispatchStrategy dispatch_strategy = 1;
+    // Whether the two linked nodes should be placed on the same worker node
+    bool same_worker_node = 2;
+    // A unique identifer of this edge. Generally it should be exchange node's operator id. When
+    // rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
+    // virtual links generated.
+    uint64 link_id = 3;
+    uint32 upstream_id = 4;
+    uint32 downstream_id = 5;
+  }
+  // all the fragments in the graph.
+  map<uint32, StreamFragment> fragments = 1;
+  // edges between fragments.
+  repeated StreamFragmentEdge edges = 2;
+
+  repeated uint32 dependent_table_ids = 3;
+  uint32 table_ids_cnt = 4;
 }

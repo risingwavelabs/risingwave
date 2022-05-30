@@ -9,6 +9,9 @@
 .idea/
 *.iml
 
+# GitPod
+.gitpod.yml
+
 # CLion
 cmake-build-debug/
 /cmake-build-wsl_profile/
@@ -27,6 +30,7 @@ src/**/target_tarpaulin
 target/
 src/proto/
 src/prost/src/*.rs
+src/prost/src/sim/*.rs
 !src/prost/src/lib.rs
 !src/prost/src/imp.rs
 **/file_descriptor_set.bin
@@ -46,3 +50,4 @@ log/
 # generated files
 risedev-components.user.env
 riselab-components.user.env
+risedev-compose.yml

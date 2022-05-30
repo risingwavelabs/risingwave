@@ -17,7 +17,7 @@ use num_traits::Float;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 
 /// Format scalars according to postgres convention.
@@ -58,6 +58,26 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .collect_vec()
 }
 
+/// Convert column descs to rows which conclude name and type
+pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
+    columns
+        .iter()
+        .flat_map(|col| {
+            col.flatten()
+                .into_iter()
+                .map(|c| {
+                    let type_name = if let DataType::Struct { fields: _f } = c.data_type {
+                        c.type_name.clone()
+                    } else {
+                        format!("{:?}", &c.data_type)
+                    };
+                    Row::new(vec![Some(c.name), Some(type_name)])
+                })
+                .collect_vec()
+        })
+        .collect_vec()
+}
+
 /// Convert from [`Field`] to [`PgFieldDescriptor`].
 pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
     PgFieldDescriptor::new(f.name.clone(), data_type_to_type_oid(f.data_type()))
@@ -86,7 +106,6 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::*;
-    use risingwave_common::{column, column_nonnull};
 
     use super::*;
 
@@ -103,14 +122,12 @@ mod tests {
 
     #[test]
     fn test_to_pg_rows() {
-        let chunk = DataChunk::new(
-            vec![
-                column_nonnull!(I32Array, [1, 2, 3, 4]),
-                column!(I64Array, [Some(6), None, Some(7), None]),
-                column!(F32Array, [Some(6.01), None, Some(7.01), None]),
-                column!(Utf8Array, [Some("aaa"), None, Some("vvv"), None]),
-            ],
-            None,
+        let chunk = DataChunk::from_pretty(
+            "i I f    T
+             1 6 6.01 aaa
+             2 . .    .
+             3 7 7.01 vvv
+             4 . .    .  ",
         );
         let rows = to_pg_rows(chunk);
         let expected = vec![

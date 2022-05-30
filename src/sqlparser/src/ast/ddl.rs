@@ -246,6 +246,22 @@ pub struct ColumnDef {
     pub options: Vec<ColumnOptionDef>,
 }
 
+impl ColumnDef {
+    pub fn new(
+        name: Ident,
+        data_type: DataType,
+        collation: Option<ObjectName>,
+        options: Vec<ColumnOptionDef>,
+    ) -> Self {
+        ColumnDef {
+            name,
+            data_type,
+            collation,
+            options,
+        }
+    }
+}
+
 impl fmt::Display for ColumnDef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {}", self.name, self.data_type)?;

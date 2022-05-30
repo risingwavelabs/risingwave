@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::derive_partial_eq_without_eq)]
+#![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -28,25 +30,25 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
+use madsim::collections::HashMap;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
 pub use table_v2::*;
 
-use crate::connector_source::{ConnectorSource, ConnectorStreamReader};
+use crate::connector_source::{ConnectorSource, ConnectorSourceReader};
 
 pub mod parser;
 
-pub mod connector_source;
 mod manager;
 
 mod common;
+pub mod connector_source;
 mod row_id;
 mod table_v2;
 
@@ -71,7 +73,7 @@ pub enum SourceImpl {
 #[allow(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
     TableV2(TableV2StreamReader),
-    Connector(ConnectorStreamReader),
+    Connector(ConnectorSourceReader),
 }
 
 #[async_trait]

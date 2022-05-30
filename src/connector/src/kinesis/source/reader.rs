@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{thread, time};
+use core::result::Result::Ok;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -20,263 +21,330 @@ use aws_sdk_kinesis::error::GetRecordsError;
 use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
-use aws_sdk_kinesis::Client as kinesis_client;
-use aws_smithy_types::DateTime;
-use http::Uri;
+use aws_sdk_kinesis::Client as KinesisClient;
+use futures::future::join_all;
+use futures_async_stream::{for_await, try_stream};
+use futures_concurrency::prelude::*;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 use crate::base::{SourceMessage, SplitReader};
-use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
-use crate::kinesis::source::state::KinesisSplitReaderState;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
-use crate::{ConnectorStateV2, KinesisProperties};
+use crate::kinesis::{build_client, KinesisProperties};
+use crate::{Column, ConnectorState, SplitImpl};
 
+pub struct KinesisMultiSplitReader {
+    /// splits are not allowed to be empty, otherwise connector source should create
+    /// DummySplitReader which is always idling.
+    splits: Vec<KinesisSplit>,
+    properties: KinesisProperties,
+    message_cache: Arc<Mutex<Vec<SourceMessage>>>,
+    consumer_handler: Option<JoinHandle<()>>,
+}
+
+impl Drop for KinesisMultiSplitReader {
+    fn drop(&mut self) {
+        if let Some(handler) = self.consumer_handler.as_mut() {
+            handler.abort();
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct KinesisSplitReader {
-    client: kinesis_client,
+    client: KinesisClient,
     stream_name: String,
     shard_id: String,
-    latest_sequence_num: String,
+    latest_offset: Option<String>,
     shard_iter: Option<String>,
-    assigned_split: Option<KinesisSplit>,
-}
-
-#[async_trait]
-impl SplitReader for KinesisSplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        if self.assigned_split.is_none() {
-            return Err(anyhow::Error::msg(
-                "you should call `assign_split` before calling `next`".to_string(),
-            ));
-        }
-        loop {
-            let iter = match &self.shard_iter {
-                Some(_iter) => _iter,
-                None => {
-                    return Err(anyhow::Error::msg(format!(
-                        "invalid shard iter, shard_id {}",
-                        self.shard_id
-                    )));
-                }
-            };
-            let get_record_output = match self.get_records(iter.clone()).await {
-                Ok(record_resp) => record_resp,
-                Err(SdkError::DispatchFailure(e)) => {
-                    return Err(anyhow!(e));
-                }
-                Err(SdkError::ServiceError { err, .. }) if err.is_expired_iterator_exception() => {
-                    match self.renew_shard_iter().await {
-                        Ok(_) => {}
-                        Err(e) => {
-                            return Err(e);
-                        }
-                    }
-                    return self.next().await;
-                }
-                Err(SdkError::ServiceError { err, .. })
-                    if err.is_provisioned_throughput_exceeded_exception() =>
-                {
-                    return Err(anyhow::Error::msg(err));
-                }
-                Err(e) => {
-                    return Err(anyhow!("{}", e));
-                }
-            };
-            println!("get_record_output {:#?}", get_record_output);
-            self.shard_iter = get_record_output.next_shard_iterator.clone();
-
-            let records = get_record_output.records.unwrap_or_default();
-            if records.is_empty() {
-                // if records is empty, retry after 200ms to avoid
-                // ProvisionedThroughputExceededException
-                thread::sleep(time::Duration::from_millis(200));
-                continue;
-            }
-
-            let mut record_collection: Vec<SourceMessage> = Vec::new();
-            for record in records {
-                if !is_stopping(
-                    record.sequence_number.as_ref().unwrap(),
-                    self.assigned_split.as_ref().unwrap(),
-                ) {
-                    return Ok(Some(record_collection));
-                }
-                self.latest_sequence_num = record.sequence_number().unwrap().to_string();
-                record_collection.push(SourceMessage::from(KinesisMessage::new(
-                    self.shard_id.clone(),
-                    record,
-                )));
-            }
-            return Ok(Some(record_collection));
-        }
-    }
+    start_position: KinesisOffset,
+    end_position: KinesisOffset,
 }
 
 impl KinesisSplitReader {
-    /// For Kinesis, state identifier is `split_id`, `stream_name` is never changed
-    pub async fn new(config: KinesisProperties, state: ConnectorStateV2) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let config = AwsConfigInfo::build(config)?;
-        let aws_config = config.load().await?;
-        let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
-        if let Some(endpoint) = &config.endpoint {
-            let uri = endpoint.clone().parse::<Uri>().unwrap();
-            builder =
-                builder.endpoint_resolver(aws_smithy_http::endpoint::Endpoint::immutable(uri));
-        }
-        let client = kinesis_client::from_conf(builder.build());
-
-        let mut split_reader = KinesisSplitReader {
+    pub async fn new(properties: KinesisProperties, split: KinesisSplit) -> Result<Self> {
+        let stream_name = properties.stream_name.clone();
+        let client = build_client(properties).await?;
+        Ok(Self {
             client,
-            stream_name: config.stream_name.clone(),
-            shard_id: String::from(""),
-            latest_sequence_num: "".to_string(),
+            stream_name,
+            shard_id: split.shard_id,
             shard_iter: None,
-            assigned_split: None,
+            latest_offset: None,
+            start_position: split.start_position,
+            end_position: split.end_position,
+        })
+    }
+
+    pub async fn next(&mut self) -> Result<Vec<SourceMessage>> {
+        if self.shard_iter.is_none() {
+            self.new_shard_iter().await?;
+        }
+        assert!(self.shard_iter.is_some());
+        loop {
+            match self.get_records().await {
+                Ok(resp) => {
+                    self.shard_iter = resp.next_shard_iterator().map(String::from);
+                    let chunk = resp
+                        .records()
+                        .unwrap()
+                        .iter()
+                        .map(|r| {
+                            SourceMessage::from(KinesisMessage::new(
+                                self.shard_id.clone(),
+                                r.clone(),
+                            ))
+                        })
+                        .collect::<Vec<SourceMessage>>();
+                    if chunk.is_empty() {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                        continue;
+                    }
+                    self.latest_offset = Some(chunk.last().unwrap().offset.clone());
+                    return Ok(chunk);
+                }
+                Err(e) => match e {
+                    SdkError::ServiceError { err, .. } if err.is_expired_iterator_exception() => {
+                        self.new_shard_iter().await?;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                        continue;
+                    }
+                    e => return Err(anyhow!(e)),
+                },
+            };
+        }
+    }
+
+    async fn new_shard_iter(&mut self) -> Result<()> {
+        let (starting_seq_num, iter_type) = if self.latest_offset.is_some() {
+            (
+                self.latest_offset.take(),
+                ShardIteratorType::AfterSequenceNumber,
+            )
+        } else {
+            match &self.start_position {
+                KinesisOffset::Earliest => (None, ShardIteratorType::TrimHorizon),
+                KinesisOffset::SequenceNumber(seq) => {
+                    (Some(seq.clone()), ShardIteratorType::AfterSequenceNumber)
+                }
+                _ => unreachable!(),
+            }
         };
 
-        if let ConnectorStateV2::State(state) = state {
-            let split_id = String::from_utf8(state.identifier.to_vec())?;
+        let resp = self
+            .client
+            .get_shard_iterator()
+            .stream_name(self.stream_name.clone())
+            .shard_id(self.shard_id.clone())
+            .shard_iterator_type(iter_type)
+            .set_starting_sequence_number(starting_seq_num)
+            .send()
+            .await?;
 
-            let mut start_offset = KinesisOffset::Earliest;
-            if !state.start_offset.is_empty() {
-                start_offset = KinesisOffset::SequenceNumber(state.start_offset);
-            }
-            let mut end_offset = KinesisOffset::None;
-            if !state.end_offset.is_empty() {
-                end_offset = KinesisOffset::SequenceNumber(state.end_offset);
-            }
-            let split = KinesisSplit {
-                shard_id: split_id.clone(),
-                start_position: start_offset.clone(),
-                end_position: end_offset.clone(),
-            };
+        self.shard_iter = resp.shard_iterator().map(String::from);
 
-            let shard_iter: Option<String> = match &start_offset {
-                KinesisOffset::Earliest => {
-                    Self::get_kinesis_iterator(
-                        &split_reader.client,
-                        &split_reader.stream_name,
-                        &split_id,
-                        ShardIteratorType::TrimHorizon,
-                        None,
-                        None,
-                    )
-                    .await?
-                }
-                KinesisOffset::SequenceNumber(seq_number) => {
-                    Self::get_kinesis_iterator(
-                        &split_reader.client,
-                        &split_reader.stream_name,
-                        &split_id,
-                        ShardIteratorType::AfterSequenceNumber,
-                        None,
-                        Some(seq_number.clone()),
-                    )
-                    .await?
-                }
-                other => {
-                    return Err(anyhow::Error::msg(format!("invalid KinesisOffset, expect either KinesisOffset::Earliest or KinesisOffset::SequenceNumber, got {:?}", other)));
-                }
-            };
-
-            split_reader.assigned_split = Some(split);
-            split_reader.shard_iter = shard_iter;
-        }
-
-        Ok(split_reader)
+        Ok(())
     }
-}
 
-impl KinesisSplitReader {
     async fn get_records(
-        &self,
-        shard_iter: String,
+        &mut self,
     ) -> core::result::Result<GetRecordsOutput, SdkError<GetRecordsError>> {
         let resp = self
             .client
             .get_records()
-            .shard_iterator(shard_iter.clone())
+            .set_shard_iterator(self.shard_iter.take())
             .send()
             .await;
         resp
     }
+}
 
-    async fn renew_shard_iter(&mut self) -> Result<()> {
-        let get_shard_iter_resp = self
-            .client
-            .get_shard_iterator()
-            .stream_name(&self.stream_name)
-            .shard_id(self.shard_id.clone())
-            .shard_iterator_type(aws_sdk_kinesis::model::ShardIteratorType::AfterSequenceNumber)
-            .starting_sequence_number(self.latest_sequence_num.clone())
-            .send()
-            .await;
-        self.shard_iter = match get_shard_iter_resp {
-            Ok(resp) => resp.shard_iterator().map(String::from),
+#[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+async fn split_reader_into_stream(mut reader: KinesisSplitReader) {
+    loop {
+        match reader.next().await {
+            Ok(chunk) => yield chunk,
             Err(e) => {
-                return Err(anyhow!("{}", e));
+                log::error!("hang up kinesis reader due to polling error: {}", e);
+                drop(reader);
+                break;
             }
-        };
-        Ok(())
-    }
-
-    async fn get_kinesis_iterator(
-        client: &kinesis_client,
-        stream_name: &String,
-        shard_id: &String,
-        shard_iterator_type: aws_sdk_kinesis::model::ShardIteratorType,
-        timestamp: Option<i64>,
-        seq_num: Option<String>,
-    ) -> Result<Option<String>> {
-        let mut get_shard_iter_req = client
-            .get_shard_iterator()
-            .stream_name(stream_name)
-            .shard_id(shard_id)
-            .shard_iterator_type(shard_iterator_type);
-
-        if let Some(ts) = timestamp {
-            get_shard_iter_req = get_shard_iter_req.set_timestamp(Some(DateTime::from_secs(ts)));
         }
-        if let Some(seq) = seq_num {
-            get_shard_iter_req = get_shard_iter_req.set_starting_sequence_number(Some(seq));
-        }
-
-        let get_shard_iter_resp = get_shard_iter_req.send().await;
-        match get_shard_iter_resp {
-            Ok(resp) => return Ok(resp.shard_iterator().map(String::from)),
-            Err(e) => {
-                return Err(anyhow!("{}", e));
-            }
-        };
-    }
-
-    fn get_state(&self) -> KinesisSplitReaderState {
-        KinesisSplitReaderState::new(
-            self.stream_name.clone(),
-            self.shard_id.clone(),
-            self.latest_sequence_num.clone(),
-        )
-    }
-
-    async fn restore_from_state(&mut self, state: KinesisSplitReaderState) -> Result<()> {
-        self.stream_name = state.stream_name;
-        self.shard_id = state.shard_id;
-        self.latest_sequence_num = state.sequence_number;
-
-        self.renew_shard_iter().await
     }
 }
 
-fn is_stopping(cur_seq_num: &str, split: &KinesisSplit) -> bool {
-    match &split.end_position {
-        KinesisOffset::SequenceNumber(stopping_seq_num) => {
-            if cur_seq_num < stopping_seq_num.as_str() {
-                return true;
-            }
-            false
+#[async_trait]
+impl SplitReader for KinesisMultiSplitReader {
+    type Properties = KinesisProperties;
+
+    async fn new(
+        properties: KinesisProperties,
+        state: ConnectorState,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let splits = state.unwrap();
+        Ok(Self {
+            splits: splits
+                .iter()
+                .map(|split| match split {
+                    SplitImpl::Kinesis(ks) => Ok(ks.to_owned()),
+                    _ => Err(anyhow!(format!("expect KinesisSplit, got {:?}", split))),
+                })
+                .collect::<Result<Vec<KinesisSplit>>>()?,
+            properties,
+            message_cache: Arc::new(Mutex::new(Vec::new())),
+            consumer_handler: None,
+        })
+    }
+
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+        if self.consumer_handler.is_none() {
+            let split_readers = join_all(
+                self.splits
+                    .iter()
+                    .map(|split| async {
+                        KinesisSplitReader::new(self.properties.clone(), split.to_owned())
+                            .await
+                            .unwrap()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .await;
+            let cache = Arc::clone(&self.message_cache);
+
+            self.consumer_handler = Some(tokio::spawn(async move {
+                let join_stream = split_readers
+                    .iter()
+                    .map(|split| split_reader_into_stream(split.to_owned()))
+                    .collect::<Vec<_>>()
+                    .merge()
+                    .into_stream();
+                #[for_await]
+                for msg in join_stream {
+                    match msg {
+                        Ok(chunk) => {
+                            cache.lock().await.extend(chunk);
+                        }
+                        Err(e) => {
+                            log::error!("split encountered error: {:?}, shutting down stream", e);
+                            break;
+                        }
+                    }
+                }
+            }));
+            log::info!("launch kinesis reader with splits: {:?}", self.splits);
         }
-        _ => true,
+        loop {
+            let mut cache_lock = self.message_cache.lock().await;
+            if cache_lock.is_empty() {
+                drop(cache_lock);
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                continue;
+            }
+            let chunk = cache_lock.clone();
+            cache_lock.clear();
+            drop(cache_lock);
+            return Ok(Some(chunk));
+        }
+    }
+}
+
+impl KinesisMultiSplitReader {}
+#[cfg(test)]
+mod tests {
+
+    use std::iter::Iterator;
+
+    use futures_async_stream::for_await;
+    use futures_concurrency::prelude::*;
+
+    use super::*;
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_single_thread_kinesis_reader() -> Result<()> {
+        let properties = KinesisProperties {
+            assume_role_arn: None,
+            credentials_access_key: None,
+            credentials_secret_access_key: None,
+            stream_name: "kinesis_debug".to_string(),
+            stream_region: "cn-northwest-1".to_string(),
+            endpoint: None,
+            session_token: None,
+            assume_role_externeal_id: None,
+        };
+
+        let mut trim_horizen_reader = KinesisSplitReader::new(
+            properties.clone(),
+            KinesisSplit {
+                shard_id: "shardId-000000000001".to_string(),
+                start_position: KinesisOffset::Earliest,
+                end_position: KinesisOffset::None,
+            },
+        )
+        .await?;
+        let stream_reader = trim_horizen_reader.clone();
+        println!("{:?}", trim_horizen_reader.next().await?);
+
+        let mut offset_reader = KinesisSplitReader::new(
+            properties.clone(),
+            KinesisSplit {
+                shard_id: "shardId-000000000001".to_string(),
+                start_position: KinesisOffset::SequenceNumber(
+                    "49629139817504901062972448413535783695568426186596941842".to_string(),
+                ),
+                end_position: KinesisOffset::None,
+            },
+        )
+        .await?;
+        println!("{:?}", offset_reader.next().await?);
+
+        let stream1 = split_reader_into_stream(stream_reader.clone());
+        let stream2 = split_reader_into_stream(stream_reader);
+        let stream = vec![stream1, stream2].merge().into_stream();
+        #[for_await]
+        for msg in stream {
+            println!("read stream: {:?}", msg);
+            break;
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_multi_splits() -> Result<()> {
+        let properties = KinesisProperties {
+            assume_role_arn: None,
+            credentials_access_key: None,
+            credentials_secret_access_key: None,
+            stream_name: "kinesis_debug".to_string(),
+            stream_region: "cn-northwest-1".to_string(),
+            endpoint: None,
+            session_token: None,
+            assume_role_externeal_id: None,
+        };
+
+        let splits = vec!["shardId-000000000000", "shardId-000000000001"]
+            .iter()
+            .map(|split| {
+                SplitImpl::Kinesis(KinesisSplit {
+                    shard_id: split.to_string(),
+                    start_position: KinesisOffset::Earliest,
+                    end_position: KinesisOffset::None,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut reader = KinesisMultiSplitReader::new(properties, Some(splits), None).await?;
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        println!("1: {:?}", reader.next().await);
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        println!("2: {:?}", reader.next().await);
+        Ok(())
     }
 }

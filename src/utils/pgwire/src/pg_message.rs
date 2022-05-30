@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
 use byteorder::{BigEndian, ByteOrder};
 /// Part of code learned from https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs.
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::error::PsqlError;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_response::StatementType;
+use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
@@ -29,10 +30,13 @@ pub enum FeMessage {
     Ssl,
     Startup(FeStartupMessage),
     Query(FeQueryMessage),
+    Parse(FeParseMessage),
+    Describe(FeDescribeMessage),
+    Bind(FeBindMessage),
+    Execute(FeExecuteMessage),
+    Sync,
     CancelQuery,
     Terminate,
-    /// For error in read function of `FeStartupMessage` and `FeMessage`.
-    ReadError(PsqlError),
 }
 
 pub struct FeStartupMessage {}
@@ -42,12 +46,95 @@ pub struct FeQueryMessage {
     pub sql_bytes: Bytes,
 }
 
+#[derive(Debug)]
+pub struct FeBindMessage {}
+
+#[derive(Debug)]
+pub struct FeExecuteMessage {
+    pub max_rows: i32,
+}
+
+#[derive(Debug)]
+pub struct FeParseMessage {
+    pub query_string: Bytes,
+}
+
+#[derive(Debug)]
+pub struct FeDescribeMessage {
+    // 'S' to describe a prepared statement; or 'P' to describe a portal.
+    pub kind: u8,
+}
+
+impl FeDescribeMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let kind = buf.get_u8();
+        let _pstmt_name = read_null_terminated(&mut buf)?;
+
+        if kind != b'S' {
+            unimplemented!("only prepared statement Describe is implemented");
+        }
+
+        Ok(FeMessage::Describe(FeDescribeMessage { kind }))
+    }
+}
+
+impl FeBindMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let portal_name = read_null_terminated(&mut buf)?;
+        let _pstmt_name = read_null_terminated(&mut buf)?;
+
+        if !portal_name.is_empty() {
+            unimplemented!("named portals not implemented");
+        }
+
+        Ok(FeMessage::Bind(FeBindMessage {}))
+    }
+}
+
+impl FeExecuteMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let portal_name = read_null_terminated(&mut buf)?;
+        let max_rows = buf.get_i32();
+
+        if !portal_name.is_empty() {
+            unimplemented!("named portals not implemented");
+        }
+
+        if max_rows != 0 {
+            unimplemented!("row limit in Execute message not supported");
+        }
+
+        Ok(FeMessage::Execute(FeExecuteMessage { max_rows }))
+    }
+}
+
+impl FeParseMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let _pstmt_name = read_null_terminated(&mut buf)?;
+        let query_string = read_null_terminated(&mut buf)?;
+        let nparams = buf.get_i16();
+
+        if nparams != 0 {
+            unimplemented!("query params not implemented");
+        }
+
+        Ok(FeMessage::Parse(FeParseMessage { query_string }))
+    }
+}
+
 impl FeQueryMessage {
-    pub fn get_sql(&self) -> &str {
-        // Why there is a \0..
-        match std::str::from_utf8(&self.sql_bytes[..]) {
-            Ok(v) => v.trim_end_matches('\0'),
-            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+    pub fn get_sql(&self) -> Result<&str> {
+        match CStr::from_bytes_with_nul(&self.sql_bytes) {
+            Ok(cstr) => cstr.to_str().map_err(|err| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Invalid UTF-8 sequence: {}", err),
+                )
+            }),
+            Err(err) => Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Input end error: {}", err),
+            )),
         }
     }
 }
@@ -67,11 +154,16 @@ impl FeMessage {
 
         match val {
             b'Q' => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
+            b'P' => FeParseMessage::parse(sql_bytes),
+            b'D' => FeDescribeMessage::parse(sql_bytes),
+            b'B' => FeBindMessage::parse(sql_bytes),
+            b'E' => FeExecuteMessage::parse(sql_bytes),
+            b'S' => Ok(FeMessage::Sync),
             b'X' => Ok(FeMessage::Terminate),
-            _ => Ok(FeMessage::ReadError(PsqlError::ReadError(format!(
-                "Unsupported tag of regular message: {}",
-                val
-            )))),
+            _ => Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("Unsupported tag of regular message: {}", val),
+            )),
         }
     }
 }
@@ -92,12 +184,34 @@ impl FeStartupMessage {
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
             80877102 => Ok(FeMessage::CancelQuery),
-            _ => Ok(FeMessage::ReadError(PsqlError::ReadError(format!(
-                "Unsupported protocol number in start up msg {:?}",
-                protocol_num
-            )))),
+            _ => Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "Unsupported protocol number in start up msg {:?}",
+                    protocol_num
+                ),
+            )),
         }
     }
+}
+
+/// Continue read until reached a \0. Used in reading string from Bytes.
+fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
+    let mut result = BytesMut::new();
+
+    loop {
+        if !buf.has_remaining() {
+            panic!("no null-terminator in string");
+        }
+
+        let byte = buf.get_u8();
+
+        if byte == 0 {
+            break;
+        }
+        result.put_u8(byte);
+    }
+    Ok(result.freeze())
 }
 
 /// Message sent from server to psql client. Implement `write` (how to serialize it into psql
@@ -109,17 +223,22 @@ pub enum BeMessage<'a> {
     // Single byte - used in response to SSLRequest/GSSENCRequest.
     EncryptionResponse,
     EmptyQueryResponse,
+    ParseComplete,
+    BindComplete,
+    ParameterDescription,
+    NoData,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
-    ErrorResponse(Box<dyn std::error::Error + Send + Sync>),
+    ErrorResponse(BoxedError),
 }
 
 #[derive(Debug)]
 pub enum BeParameterStatusMessage<'a> {
-    Encoding(&'a str),
+    ClientEncoding(&'a str),
     StandardConformingString(&'a str),
+    ServerVersion(&'a str),
 }
 
 #[derive(Debug)]
@@ -166,10 +285,11 @@ impl<'a> BeMessage<'a> {
             BeMessage::ParameterStatus(param) => {
                 use BeParameterStatusMessage::*;
                 let [name, value] = match param {
-                    Encoding(val) => [b"client_encoding", val.as_bytes()],
+                    ClientEncoding(val) => [b"client_encoding", val.as_bytes()],
                     StandardConformingString(val) => {
                         [b"standard_conforming_strings", val.as_bytes()]
                     }
+                    ServerVersion(val) => [b"server_version", val.as_bytes()],
                 };
 
                 // Parameter names and values are passed as null-terminated strings
@@ -276,6 +396,31 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'I');
             }
 
+            BeMessage::ParseComplete => {
+                buf.put_u8(b'1');
+                write_body(buf, |_| Ok(()))?;
+            }
+
+            BeMessage::BindComplete => {
+                buf.put_u8(b'2');
+                write_body(buf, |_| Ok(()))?;
+            }
+
+            BeMessage::ParameterDescription => {
+                buf.put_u8(b't');
+                write_body(buf, |buf| {
+                    // we don't support params, so always 0
+                    buf.put_i16(0);
+                    Ok(())
+                })
+                .unwrap();
+            }
+
+            BeMessage::NoData => {
+                buf.put_u8(b'n');
+                write_body(buf, |_| Ok(())).unwrap();
+            }
+
             BeMessage::EncryptionResponse => {
                 buf.put_u8(b'N');
             }
@@ -366,4 +511,23 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
     buf.put_slice(s);
     buf.put_u8(0);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use crate::pg_message::FeQueryMessage;
+
+    #[tokio::test]
+    async fn test_get_sql() {
+        let fe = FeQueryMessage {
+            sql_bytes: Bytes::from(vec![255, 255, 255, 255, 255, 255, 0]),
+        };
+        assert!(fe.get_sql().is_err(), "{}", true);
+        let fe = FeQueryMessage {
+            sql_bytes: Bytes::from(vec![1, 2, 3, 4, 5, 6, 7, 8]),
+        };
+        assert!(fe.get_sql().is_err(), "{}", true);
+    }
 }

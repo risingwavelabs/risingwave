@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::ops::BitAnd;
 use std::option::Option;
 
 use risingwave_common::array::DataChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -74,8 +76,13 @@ fn generate_new_data_chunks(
     });
     let mut res = Vec::with_capacity(output_count);
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
-        let vis_map = (vis_map_vec).try_into()?;
-        let new_data_chunk = chunk.with_visibility(vis_map).compact()?;
+        let vis_map: Bitmap = vis_map_vec.try_into()?;
+        let vis_map = if let Some(visibility) = chunk.get_visibility_ref() {
+            vis_map.bitand(visibility)?
+        } else {
+            vis_map
+        };
+        let new_data_chunk = chunk.with_visibility(vis_map);
         trace!(
             "send to sink:{}, cardinality:{}",
             sink_id,

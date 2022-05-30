@@ -189,6 +189,27 @@ impl ExprImpl {
         visitor.visit_expr(self);
         visitor.has
     }
+
+    /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
+    /// Equivalent to `!has_input_ref && !has_agg_call && !has_subquery &&
+    /// !has_correlated_input_ref` but checks them in one pass.
+    pub fn is_const(&self) -> bool {
+        struct Has {
+            has: bool,
+        }
+        impl ExprVisitor for Has {
+            fn visit_expr(&mut self, expr: &ExprImpl) {
+                match expr {
+                    ExprImpl::Literal(_inner) => {}
+                    ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+                    _ => self.has = true,
+                }
+            }
+        }
+        let mut visitor = Has { has: false };
+        visitor.visit_expr(self);
+        !visitor.has
+    }
 }
 
 impl Expr for ExprImpl {

@@ -266,7 +266,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<PrimitiveArray<T>> {
+    fn finish(self) -> Result<PrimitiveArray<T>> {
         Ok(PrimitiveArray {
             bitmap: self.bitmap.finish(),
             data: self.data,

@@ -107,6 +107,38 @@ impl OverlapInfo for RangeOverlapInfo {
 }
 
 #[derive(Default)]
+pub struct HashOverlapInfo {
+    target_range: Option<KeyRange>,
+}
+
+impl OverlapInfo for HashOverlapInfo {
+    fn check_overlap(&self, a: &SstableInfo) -> bool {
+        // TODO: We may need to handle vnode overlap as well in `check_overlap` and `update`
+        match self.target_range.as_ref() {
+            Some(range) => check_table_overlap(range, a),
+            None => false,
+        }
+    }
+
+    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo> {
+        others
+            .iter()
+            .filter(|table| self.check_overlap(*table))
+            .cloned()
+            .collect_vec()
+    }
+
+    fn update(&mut self, table: &SstableInfo) {
+        let other = KeyRange::from(table.key_range.as_ref().unwrap());
+        if let Some(range) = self.target_range.as_mut() {
+            range.full_key_extend(&other);
+            return;
+        }
+        self.target_range = Some(other);
+    }
+}
+
+#[derive(Default)]
 pub struct RangeOverlapStrategy {}
 
 impl OverlapStrategy for RangeOverlapStrategy {
@@ -123,4 +155,18 @@ impl OverlapStrategy for RangeOverlapStrategy {
 fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
     let other = KeyRange::from(table.key_range.as_ref().unwrap());
     key_range.full_key_overlap(&other)
+}
+
+#[derive(Default)]
+pub struct HashStrategy {}
+
+impl OverlapStrategy for HashStrategy {
+    fn check_overlap(&self, a: &SstableInfo, b: &SstableInfo) -> bool {
+        let key_range = KeyRange::from(a.key_range.as_ref().unwrap());
+        check_table_overlap(&key_range, b)
+    }
+
+    fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {
+        Box::new(HashOverlapInfo::default())
+    }
 }

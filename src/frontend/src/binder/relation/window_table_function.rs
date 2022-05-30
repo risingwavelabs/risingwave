@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
+use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName, TableAlias};
 
 use super::{Binder, Relation, Result};
 use crate::expr::{ExprImpl, InputRef};
@@ -43,7 +43,7 @@ impl FromStr for WindowTableFunctionKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundWindowTableFunction {
     pub(crate) input: Relation,
     pub(crate) kind: WindowTableFunctionKind,
@@ -54,6 +54,7 @@ pub struct BoundWindowTableFunction {
 impl Binder {
     pub(super) fn bind_window_table_function(
         &mut self,
+        alias: Option<TableAlias>,
         kind: WindowTableFunctionKind,
         args: Vec<FunctionArg>,
     ) -> Result<BoundWindowTableFunction> {
@@ -77,7 +78,6 @@ impl Binder {
         }?;
         let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
 
-        // TODO: support alias.
         let base = self.bind_table_or_source(&schema_name, &table_name, None)?;
 
         let Some(time_col_arg) = args.next() else {
@@ -93,51 +93,31 @@ impl Binder {
             .into());
         };
 
+        let base_columns = std::mem::take(&mut self.context.columns);
+
         self.pop_context();
 
-        let table_catalog =
-            self.catalog
-                .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
-
-        let columns = table_catalog.columns().to_vec();
-        if columns.iter().any(|col| {
-            col.name().eq_ignore_ascii_case("window_start")
-                || col.name().eq_ignore_ascii_case("window_end")
-        }) {
-            return Err(ErrorCode::BindError(
-                "column names `window_start` and `window_end` are not allowed in window table function's input."
-                .into())
-            .into());
-        }
-
-        let columns = columns
-            .iter()
-            .map(|c| (c.is_hidden, (&c.column_desc).into()))
+        let columns = base_columns
+            .into_iter()
+            .map(|c| {
+                if c.field.name == "window_start" || c.field.name == "window_end" {
+                    Err(ErrorCode::BindError(
+                        "column names `window_start` and `window_end` are not allowed in window table function's input."
+                        .into())
+                    .into())
+                } else {
+                    Ok((c.is_hidden, c.field))
+                }
+            })
             .chain(
                 [
-                    (
-                        false,
-                        Field {
-                            data_type: DataType::Timestamp,
-                            name: "window_start".to_string(),
-                            sub_fields: vec![],
-                            type_name: "".to_string(),
-                        },
-                    ),
-                    (
-                        false,
-                        Field {
-                            data_type: DataType::Timestamp,
-                            name: "window_end".to_string(),
-                            sub_fields: vec![],
-                            type_name: "".to_string(),
-                        },
-                    ),
+                    Ok((false, Field::with_name(DataType::Timestamp, "window_start"))),
+                    Ok((false, Field::with_name(DataType::Timestamp, "window_end"))),
                 ]
                 .into_iter(),
-            );
-        // TODO: support alias.
-        self.bind_context(columns, table_name.clone(), None)?;
+            ).collect::<Result<Vec<_>>>()?;
+
+        self.bind_context(columns, table_name.clone(), alias)?;
 
         let exprs: Vec<_> = args
             .map(|arg| self.bind_function_arg(arg))

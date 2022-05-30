@@ -8,6 +8,7 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 - How does this PR work? Need a brief introduction for the changed logic (optional)
 - Describe clearly one logical change and avoid lazy messages (optional)
 - Describe any limitations of the current code (optional)
+- Add the 'user-facing changes' label if your PR contains changes that are visible to users (optional) 
 
 ## Checklist
 

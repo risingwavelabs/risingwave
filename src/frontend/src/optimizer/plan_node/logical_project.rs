@@ -21,13 +21,13 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
 use super::{
-    BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
-    ToStream,
+    gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, Order};
-use crate::utils::ColIndexMapping;
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -87,11 +87,11 @@ impl LogicalProject {
     ///
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
-    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
+    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
         if mapping.target_size() == 0 {
             // The mapping is empty, so the parent actually doesn't need the output of the input.
             // This can happen when the parent node only selects constant expressions.
-            return input;
+            return LogicalProject::new(input, vec![]);
         };
         let mut input_refs = vec![None; mapping.target_size()];
         for (src, tar) in mapping.mapping_pairs() {
@@ -105,7 +105,7 @@ impl LogicalProject {
             .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).into())
             .collect();
 
-        LogicalProject::new(input, exprs).into()
+        LogicalProject::new(input, exprs)
     }
 
     fn derive_schema(exprs: &[ExprImpl], input_schema: &Schema) -> Schema {
@@ -235,6 +235,18 @@ impl ColPrunable for LogicalProject {
     }
 }
 
+impl PredicatePushdown for LogicalProject {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // convert the predicate to one that references the child of the project
+        let mut subst = Substitute {
+            mapping: self.exprs.clone(),
+        };
+        let predicate = predicate.rewrite_expr(&mut subst);
+
+        gen_filter_and_pushdown(self, Condition::true_cond(), predicate)
+    }
+}
+
 impl ToBatch for LogicalProject {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
@@ -244,14 +256,20 @@ impl ToBatch for LogicalProject {
 }
 
 impl ToStream for LogicalProject {
-    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> Result<PlanRef> {
-        let input_required = match required_dist {
-            Distribution::HashShard(_) => self
+    fn to_stream_with_dist_required(&self, required_dist: &RequiredDist) -> Result<PlanRef> {
+        let input_required = if required_dist.satisfies(&RequiredDist::AnyShard) {
+            RequiredDist::Any
+        } else {
+            let input_required = self
                 .o2i_col_mapping()
-                .rewrite_required_distribution(required_dist)
-                .unwrap_or(Distribution::AnyShard),
-            Distribution::AnyShard => Distribution::AnyShard,
-            _ => Distribution::Any,
+                .rewrite_required_distribution(required_dist);
+            match input_required {
+                RequiredDist::PhysicalDist(dist) => match dist {
+                    Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
+                    _ => RequiredDist::PhysicalDist(dist),
+                },
+                _ => input_required,
+            }
         };
         let new_input = self.input().to_stream_with_dist_required(&input_required)?;
         let new_logical = self.clone_with_input(new_input);
@@ -260,7 +278,7 @@ impl ToStream for LogicalProject {
     }
 
     fn to_stream(&self) -> Result<PlanRef> {
-        self.to_stream_with_dist_required(Distribution::any())
+        self.to_stream_with_dist_required(&RequiredDist::Any)
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {

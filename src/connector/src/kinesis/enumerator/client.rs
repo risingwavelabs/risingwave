@@ -19,15 +19,28 @@ use aws_sdk_kinesis::Client as kinesis_client;
 
 use crate::base::SplitEnumerator;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::kinesis::*;
 
 pub struct KinesisSplitEnumerator {
     stream_name: String,
     client: kinesis_client,
 }
 
+impl KinesisSplitEnumerator {}
+
 #[async_trait]
 impl SplitEnumerator for KinesisSplitEnumerator {
+    type Properties = KinesisProperties;
     type Split = KinesisSplit;
+
+    async fn new(properties: KinesisProperties) -> Result<Self> {
+        let client = build_client(properties.clone()).await?;
+        let stream_name = properties.stream_name.clone();
+        Ok(Self {
+            stream_name,
+            client,
+        })
+    }
 
     async fn list_splits(&mut self) -> Result<Vec<KinesisSplit>> {
         let mut next_token: Option<String> = None;
@@ -76,9 +89,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_kinesis_split_enumerator() -> Result<()> {
-        let stream_name = "kinesis_test_stream".to_string();
+        let stream_name = "kinesis_debug".to_string();
         let config = aws_config::from_env()
-            .region(Region::new("cn-north-1"))
+            .region(Region::new("cn-northwest-1"))
             .load()
             .await;
         let client = aws_sdk_kinesis::Client::new(&config);
@@ -87,7 +100,7 @@ mod tests {
             client,
         };
         let list_splits_resp = enumerator.list_splits().await?;
-        // println!("{:#?}", list_splits_resp);
+        println!("{:#?}", list_splits_resp);
         assert_eq!(list_splits_resp.len(), 4);
         Ok(())
     }

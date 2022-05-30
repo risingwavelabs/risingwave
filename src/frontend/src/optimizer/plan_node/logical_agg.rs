@@ -24,13 +24,13 @@ use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHashAgg,
-    StreamSimpleAgg, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::Distribution;
-use crate::utils::ColIndexMapping;
+use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
+use crate::optimizer::property::RequiredDist;
+use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Aggregation Call
 #[derive(Clone)]
@@ -64,6 +64,23 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             distinct: self.distinct,
+        }
+    }
+
+    pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
+        let total_agg_kind = match &self.agg_kind {
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::Avg
+            | AggKind::StringAgg
+            | AggKind::SingleValue => self.agg_kind.clone(),
+
+            AggKind::Count | AggKind::RowCount | AggKind::Sum => AggKind::Sum,
+        };
+        PlanAggCall {
+            agg_kind: total_agg_kind,
+            inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
+            ..self.clone()
         }
     }
 
@@ -466,7 +483,7 @@ impl ColPrunable for LogicalAgg {
         };
 
         let input_required_cols = {
-            let mut tmp: FixedBitSet = upstream_required_cols.clone();
+            let mut tmp: FixedBitSet = upstream_required_cols;
             tmp.union_with(&group_key_required_cols);
             tmp.union_with(&agg_call_required_cols);
             tmp.ones().collect_vec()
@@ -499,24 +516,25 @@ impl ColPrunable for LogicalAgg {
                 self.input.prune_col(&input_required_cols),
             )
         };
-
-        if group_key_required_cols.is_subset(&upstream_required_cols) {
+        let new_output_cols = {
+            let mapping = self.i2o_col_mapping();
+            let mut tmp = input_required_cols
+                .iter()
+                .filter_map(|&idx| mapping.try_map(idx))
+                .collect_vec();
+            tmp.extend(
+                required_cols
+                    .iter()
+                    .filter(|&&index| index >= self.group_keys.len()),
+            );
+            tmp
+        };
+        if new_output_cols == required_cols {
+            // current schema perfectly fit the required columns
             agg.into()
         } else {
-            // Some group key columns are not needed
-            let new_output_cols = {
-                let mapping = self.i2o_col_mapping();
-                let mut tmp = input_required_cols
-                    .iter()
-                    .filter_map(|&idx| mapping.try_map(idx))
-                    .collect_vec();
-                tmp.extend(
-                    required_cols
-                        .iter()
-                        .filter(|&&index| index >= self.group_keys.len()),
-                );
-                tmp
-            };
+            // some columns are not needed, or the order need to be adjusted.
+            // so we did a projection to remove/reorder the columns.
             let mapping =
                 &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
             let output_required_cols = required_cols
@@ -528,7 +546,47 @@ impl ColPrunable for LogicalAgg {
                 agg.into(),
                 ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
             )
+            .into()
         }
+    }
+}
+
+impl PredicatePushdown for LogicalAgg {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        let num_group_keys = self.group_keys.len();
+        let num_agg_calls = self.agg_calls.len();
+        assert!(num_group_keys + num_agg_calls == self.schema().len());
+
+        // SimpleAgg should be skipped because the predicate either references agg_calls
+        // or is const.
+        // If the filter references agg_calls, we can not push it.
+        // When it is constantly true, pushing is useless and may actually cause more evaulation
+        // cost of the predicate.
+        // When it is constantly false, pushing is wrong - the old plan returns 0 rows but new one
+        // returns 1 row.
+        if num_group_keys == 0 {
+            return gen_filter_and_pushdown(self, predicate, Condition::true_cond());
+        }
+
+        // If the filter references agg_calls, we can not push it.
+        let mut agg_call_columns = FixedBitSet::with_capacity(num_group_keys + num_agg_calls);
+        agg_call_columns.insert_range(num_group_keys..num_group_keys + num_agg_calls);
+        let (agg_call_pred, pushed_predicate) = predicate.split_disjoint(&agg_call_columns);
+
+        // convert the predicate to one that references the child of the agg
+        let mut subst = Substitute {
+            mapping: self
+                .group_keys()
+                .iter()
+                .enumerate()
+                .map(|(i, group_key)| {
+                    InputRef::new(*group_key, self.schema().fields()[i].data_type()).into()
+                })
+                .collect(),
+        };
+        let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
+
+        gen_filter_and_pushdown(self, agg_call_pred, pushed_predicate)
     }
 }
 
@@ -550,14 +608,14 @@ impl ToStream for LogicalAgg {
             Ok(StreamSimpleAgg::new(
                 self.clone_with_input(
                     self.input()
-                        .to_stream_with_dist_required(&Distribution::Single)?,
+                        .to_stream_with_dist_required(&RequiredDist::single())?,
                 ),
             )
             .into())
         } else {
             Ok(StreamHashAgg::new(
                 self.clone_with_input(self.input().to_stream_with_dist_required(
-                    &Distribution::HashShard(self.group_keys().to_vec()),
+                    &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
                 )?),
             )
             .into())
@@ -721,6 +779,24 @@ mod tests {
             assert_eq!(group_keys, vec![0]);
         }
     }
+    /// Generate a agg call node with given [`DataType`] and fields.
+    /// For example, `generate_agg_call(Int32, [v1, v2, v3])` will result in:
+    /// ```text
+    /// Agg(min(input_ref(2))) group by (input_ref(1))
+    ///   TableScan(v1, v2, v3)
+    /// ```
+    async fn generate_agg_call(ty: DataType, fields: Vec<Field>) -> LogicalAgg {
+        let ctx = OptimizerContext::mock().await;
+
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let agg_call = PlanAggCall {
+            agg_kind: AggKind::Min,
+            return_type: ty.clone(),
+            inputs: vec![InputRef::new(2, ty.clone())],
+            distinct: false,
+        };
+        LogicalAgg::new(vec![agg_call], vec![1], values.into())
+    }
 
     #[tokio::test]
     /// Pruning
@@ -732,29 +808,15 @@ mod tests {
     /// ```text
     /// Agg(min(input_ref(1))) group by (input_ref(0))
     ///  TableScan(v2, v3)
+    /// ```
     async fn test_prune_all() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let values = LogicalValues::new(
-            vec![],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
-        let agg_call = PlanAggCall {
-            agg_kind: AggKind::Min,
-            return_type: ty.clone(),
-            inputs: vec![InputRef::new(2, ty.clone())],
-            distinct: false,
-        };
-        let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
-
+        let agg = generate_agg_call(ty.clone(), fields.clone()).await;
         // Perform the prune
         let required_cols = vec![0, 1];
         let plan = agg.prune_col(&required_cols);
@@ -780,11 +842,55 @@ mod tests {
     /// Agg(min(input_ref(2))) group by (input_ref(1))
     ///   TableScan(v1, v2, v3)
     /// ```
+    /// with required columns [1,0] (all columns, with reversed order) will result in
+    /// ```text
+    /// Project [input_ref(1), input_ref(0)]
+    ///   Agg(min(input_ref(1))) group by (input_ref(0))
+    ///     TableScan(v2, v3)
+    /// ```
+    async fn test_prune_all_with_order_required() {
+        let ty = DataType::Int32;
+        let fields: Vec<Field> = vec![
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
+        ];
+        let agg = generate_agg_call(ty.clone(), fields.clone()).await;
+        // Perform the prune
+        let required_cols = vec![1, 0];
+        let plan = agg.prune_col(&required_cols);
+        // Check the result
+        let proj = plan.as_logical_project().unwrap();
+        assert_eq!(proj.exprs().len(), 2);
+        assert_eq!(proj.exprs()[0].as_input_ref().unwrap().index(), 1);
+        assert_eq!(proj.exprs()[1].as_input_ref().unwrap().index(), 0);
+        let proj_input = proj.input();
+        let agg_new = proj_input.as_logical_agg().unwrap();
+        assert_eq!(agg_new.group_keys(), vec![0]);
+
+        assert_eq!(agg_new.agg_calls.len(), 1);
+        let agg_call_new = agg_new.agg_calls[0].clone();
+        assert_eq!(agg_call_new.agg_kind, AggKind::Min);
+        assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
+        assert_eq!(agg_call_new.return_type, ty);
+
+        let values = agg_new.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields(), &fields[1..]);
+    }
+
+    #[tokio::test]
+    /// Pruning
+    /// ```text
+    /// Agg(min(input_ref(2))) group by (input_ref(1))
+    ///   TableScan(v1, v2, v3)
+    /// ```
     /// with required columns [1] (group key removed) will result in
     /// ```text
     /// Project(input_ref(1))
     ///   Agg(min(input_ref(1))) group by (input_ref(0))
     ///     TableScan(v2, v3)
+    /// ```
     async fn test_prune_group_key() {
         let ctx = OptimizerContext::mock().await;
         let ty = DataType::Int32;
@@ -845,6 +951,7 @@ mod tests {
     /// Project(input_ref(0), input_ref(2))
     ///   Agg(max(input_ref(0))) group by (input_ref(0), input_ref(1))
     ///     TableScan(v2, v3)
+    /// ```
     async fn test_prune_agg() {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;

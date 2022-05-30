@@ -22,15 +22,16 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
+use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use super::create_source::make_prost_source;
-use crate::binder::expr::bind_data_type;
+use crate::binder::expr::{bind_data_type, bind_struct_field};
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::stream_fragmenter::StreamFragmenter;
 
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
@@ -43,11 +44,19 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
             check_valid_column_name(&column.name.value)?;
+            let field_descs = if let AstDataType::Struct(fields) = &column.data_type {
+                fields
+                    .iter()
+                    .map(bind_struct_field)
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                vec![]
+            };
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
                 name: column.name.value,
-                field_descs: vec![],
+                field_descs,
                 type_name: "".to_string(),
             });
         }
@@ -100,7 +109,7 @@ pub(crate) fn gen_materialized_source_plan(
 
         PlanRoot::new(
             source_node,
-            Distribution::HashShard(vec![0]),
+            RequiredDist::Any,
             Order::any().clone(),
             required_cols,
             out_names,
@@ -121,23 +130,24 @@ pub async fn handle_create_table(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let (plan, source, table) = {
+    let (graph, source, table) = {
         let (plan, source, table) =
             gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
         let plan = plan.to_stream_prost();
+        let graph = StreamFragmenter::build_graph(plan);
 
-        (plan, source, table)
+        (graph, source, table)
     };
 
     log::trace!(
-        "name={}, plan=\n{}",
+        "name={}, graph=\n{}",
         table_name,
-        serde_json::to_string_pretty(&plan).unwrap()
+        serde_json::to_string_pretty(&graph).unwrap()
     );
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .create_materialized_source(source, table, plan)
+        .create_materialized_source(source, table, graph)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
@@ -147,15 +157,16 @@ pub async fn handle_create_table(
 mod tests {
     use std::collections::HashMap;
 
+    use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
-    use crate::catalog::gen_row_id_column_name;
+    use crate::catalog::row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
+        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>);";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
@@ -178,20 +189,25 @@ mod tests {
             .clone();
         assert_eq!(table.name(), "t");
 
+        // Get all column descs.
         let columns = table
-            .columns()
+            .columns
             .iter()
-            .map(|col| (col.name(), col.data_type().clone()))
+            .flat_map(|c| c.column_desc.flatten())
+            .collect_vec();
+        let columns = columns
+            .iter()
+            .map(|col| (col.name.as_str(), col.data_type.clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let row_id_col_name = gen_row_id_column_name(0);
+        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "v1" => DataType::Int16,
-            "v2" => DataType::Int32,
-            "v3" => DataType::Int64,
-            "v4" => DataType::Float64,
-            "v5" => DataType::Float64,
+            "v2" => DataType::Struct {fields:vec![DataType::Int64,DataType::Float64,DataType::Float64].into()},
+            "v2.v3" => DataType::Int64,
+            "v2.v4" => DataType::Float64,
+            "v2.v5" => DataType::Float64,
         };
 
         assert_eq!(columns, expected_columns);
