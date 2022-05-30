@@ -278,7 +278,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     }
 
     // string expressions
-    for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper] {
+    for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {
         map.insert(FuncSign::new(e, vec![T::Varchar]), T::Varchar);
     }
     for e in [E::Trim, E::Ltrim, E::Rtrim] {

@@ -55,7 +55,8 @@ message ExprNode {
     COALESCE = 217;
     CONCAT_WS = 218;
     ABS = 219;
-    MD5 = 220;
+
+    MD5 = 224;
 
     // Boolean comparison
     IS_TRUE = 301;

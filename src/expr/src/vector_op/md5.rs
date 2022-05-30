@@ -17,7 +17,7 @@ use risingwave_common::error::Result;
 use md5 as lib_md5;
 
 #[inline(always)]
-pub fn convert_md5(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
+pub fn md5(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
     writer.write_ref(&format!("{:x}", lib_md5::compute(s)))
 }
 
@@ -38,7 +38,7 @@ mod tests {
         for (s, expected) in cases {
             let builder = Utf8ArrayBuilder::new(1)?;
             let writer = builder.writer();
-            let guard = convert_md5(s, writer)?;
+            let guard = md5(s, writer)?;
             let array = guard.into_inner().finish()?;
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);

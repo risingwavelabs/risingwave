@@ -34,7 +34,7 @@ use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
-use crate::vector_op::md5::convert_md5;
+use crate::vector_op::md5::md5;
 
 /// This macro helps to create cast expression.
 /// It receives all the combinations of `gen_cast` and generates corresponding match cases
@@ -264,7 +264,7 @@ pub fn new_unary_expr(
         (ProstType::Md5, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
             child_expr,
             return_type,
-            convert_md5,
+            md5,
         )),
         (ProstType::Ascii, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
             child_expr,

@@ -58,6 +58,7 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
+                "md5" => ExprType::Md5,
                 "nullif" => {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case
