@@ -181,13 +181,17 @@ impl CompactStatus {
         let select_level_id = ret.select_level.level_idx;
         let target_level_id = ret.target_level.level_idx;
 
-        let compact_task = CompactTask {
-            input_ssts: vec![ret.select_level, ret.target_level],
-            splits: ret
-                .split_ranges
+        let splits = if ret.split_ranges.is_empty() {
+            vec![KeyRange::inf().into()]
+        } else {
+            ret.split_ranges
                 .iter()
                 .map(|v| v.clone().into())
-                .collect_vec(),
+                .collect_vec()
+        };
+        let compact_task = CompactTask {
+            input_ssts: vec![ret.select_level, ret.target_level],
+            splits,
             watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
             task_id: self.next_compact_task_id,

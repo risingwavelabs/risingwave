@@ -299,6 +299,7 @@ impl Compactor {
 
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
+        assert_ne!(parallelism, 0, "splits cannot be empty");
         let mut compact_success = true;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
