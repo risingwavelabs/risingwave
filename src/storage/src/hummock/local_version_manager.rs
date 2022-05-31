@@ -37,7 +37,7 @@ use super::SstableStoreRef;
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTask;
-use crate::hummock::shared_buffer::UploadTaskType::{LocalFlush, SyncEpoch};
+use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, INVALID_VERSION_ID,
@@ -274,7 +274,7 @@ impl LocalVersionManager {
         let mut task = None;
         for (epoch, shared_buffer) in self.local_version.read().iter_shared_buffer() {
             if let Some((order_index, task_data)) =
-                shared_buffer.write().new_upload_task(LocalFlush)
+                shared_buffer.write().new_upload_task(FlushWriteBatch)
             {
                 // TODO: may apply different `is_local` according to whether local spill is enabled.
                 task = Some(UploadTask::new(order_index, *epoch, task_data, true));

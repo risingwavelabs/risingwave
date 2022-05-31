@@ -156,7 +156,7 @@ pub struct SharedBuffer {
 }
 
 pub enum UploadTaskType {
-    LocalFlush,
+    FlushWriteBatch,
     SyncEpoch,
 }
 
@@ -256,11 +256,12 @@ impl SharedBuffer {
         task_type: UploadTaskType,
     ) -> Option<(OrderIndex, UploadTaskPayload)> {
         let keyed_payload = match task_type {
-            UploadTaskType::LocalFlush => {
-                // For local flush, currently we only flush the write batches. We first pick the
-                // write batch with the smallest order index, and then start from this order index,
-                // we iterate over all order indexes in ascending order. We add the write batches to
-                // the task payload and stop when we meet a sst.
+            UploadTaskType::FlushWriteBatch => {
+                // For flush write batch, currently we only flush the write batches. We first pick
+                // the write batch with the smallest order index, and then start
+                // from this order index, we iterate over all order indexes in
+                // ascending order. We add the write batches to the task payload and
+                // stop when we meet a sst.
 
                 // Keep track of whether the data of an order index is non uploaded local batches
                 let mut order_index_is_non_upload_batch = BTreeMap::new();
@@ -433,7 +434,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
-    use crate::hummock::shared_buffer::UploadTaskType::{LocalFlush, SyncEpoch};
+    use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
     use crate::hummock::test_utils::gen_dummy_sst_info;
     use crate::hummock::HummockValue;
 
@@ -556,7 +557,7 @@ mod tests {
 
         let (order_index1, payload1) = shared_buffer
             .borrow_mut()
-            .new_upload_task(LocalFlush)
+            .new_upload_task(FlushWriteBatch)
             .unwrap();
         assert_eq!(order_index1, 0);
         assert_eq!(2, payload1.len());
@@ -570,7 +571,7 @@ mod tests {
 
         let (order_index2, payload2) = shared_buffer
             .borrow_mut()
-            .new_upload_task(LocalFlush)
+            .new_upload_task(FlushWriteBatch)
             .unwrap();
         assert_eq!(order_index2, 2);
         assert_eq!(2, payload2.len());
@@ -582,7 +583,7 @@ mod tests {
         shared_buffer.borrow_mut().fail_upload_task(order_index1);
         let (order_index1, payload1) = shared_buffer
             .borrow_mut()
-            .new_upload_task(LocalFlush)
+            .new_upload_task(FlushWriteBatch)
             .unwrap();
         assert_eq!(order_index1, 0);
         assert_eq!(2, payload1.len());
