@@ -130,6 +130,8 @@ impl<S: StateStore> StateTable<S> {
 
 pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>> + 'a;
 
+type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
+
 struct StateTableRowIter<S: StateStore> {
     _phantom: PhantomData<S>,
 }
@@ -203,7 +205,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                                     yield Cow::Borrowed(new_row);
                                 }
                             }
-                            let _cell_based_row = cell_based_table_iter.next().await.unwrap()?.1;
+                            cell_based_table_iter.next().await.unwrap()?;
                         }
                         Ordering::Greater => {
                             // mem_table_item will be return
@@ -218,8 +220,8 @@ impl<S: StateStore> StateTableRowIter<S> {
                 }
                 (Some(_), Some(_)) => {
                     // Throw the error.
-                    let _ = cell_based_table_iter.next().await.unwrap()?;
-                    let _ = mem_table_iter.next().unwrap()?;
+                    cell_based_table_iter.next().await.unwrap()?;
+                    mem_table_iter.next().unwrap()?;
 
                     unreachable!()
                 }
@@ -227,7 +229,6 @@ impl<S: StateStore> StateTableRowIter<S> {
         }
     }
 }
-type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
 
 fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::StateTable(rw.into())
