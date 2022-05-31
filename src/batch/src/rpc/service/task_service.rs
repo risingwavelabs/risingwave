@@ -12,16 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Into;
 use std::sync::Arc;
 
+use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
-    AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, CreateTaskResponse, GetTaskInfoRequest,
-    GetTaskInfoResponse, RemoveTaskRequest, RemoveTaskResponse,
+    AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, CreateTaskResponse, ExecuteRequest,
+    ExecuteResponse, GetTaskInfoRequest, GetTaskInfoResponse, RemoveTaskRequest,
+    RemoveTaskResponse,
 };
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::task::{BatchEnvironment, BatchManager, ComputeNodeContext};
+use crate::rpc::service::exchange::GrpcExchangeWriter;
+use crate::task::{BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext};
+
+const LOCAL_EXECUTE_BUFFER_SIZE: usize = 64;
 
 #[derive(Clone)]
 pub struct BatchServiceImpl {
@@ -37,6 +44,8 @@ impl BatchServiceImpl {
 
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
+    type ExecuteStream = ReceiverStream<std::result::Result<ExecuteResponse, Status>>;
+
     #[cfg_attr(coverage, no_coverage)]
     async fn create_task(
         &self,
@@ -104,5 +113,45 @@ impl TaskService for BatchServiceImpl {
                 Err(e.into())
             }
         }
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn execute(
+        &self,
+        req: Request<ExecuteRequest>,
+    ) -> Result<Response<Self::ExecuteStream>, Status> {
+        let req = req.into_inner();
+        let task_id = req.get_task_id().expect("no task id found");
+        let plan = req.get_plan().expect("no plan found").clone();
+        let epoch = req.epoch;
+        let context = ComputeNodeContext::new(self.env.clone());
+        let task = BatchTaskExecution::new(task_id, plan, context, epoch)?;
+        let task = Arc::new(task);
+        if let Err(e) = task.clone().async_execute().await {
+            error!(
+                "failed to build executors and trigger execution of Task {:?}: {}",
+                task_id, e
+            );
+            return Err(e.into());
+        }
+
+        let pb_task_output_id = TaskOutputId {
+            task_id: Some(task_id.clone()),
+            // Since this is local execution path, the exchange would follow single distribution,
+            // therefore we would only have one data output.
+            output_id: 0,
+        };
+
+        let mut output = task.get_task_output(&pb_task_output_id).map_err(|e| {
+            error!(
+                "failed to get task output of Task {:?} in local execution mode",
+                task_id
+            );
+            e
+        })?;
+        let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
+        let mut writer = GrpcExchangeWriter::new(tx.clone());
+        output.take_data(&mut writer).await?;
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
