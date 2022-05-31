@@ -50,7 +50,7 @@ where
         let result = self.cluster_manager.heartbeat(req.node_id).await;
         match result {
             Ok(_) => Ok(Response::new(HeartbeatResponse { status: None })),
-            Err(e) => Err(e.to_grpc_status()),
+            Err(e) => Err(e.into()),
         }
     }
 }

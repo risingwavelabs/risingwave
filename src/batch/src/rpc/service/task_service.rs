@@ -57,7 +57,7 @@ impl TaskService for BatchServiceImpl {
             Ok(_) => Ok(Response::new(CreateTaskResponse { status: None })),
             Err(e) => {
                 error!("failed to fire task {}", e);
-                Err(e.to_grpc_status())
+                Err(e.into())
             }
         }
     }
@@ -83,7 +83,7 @@ impl TaskService for BatchServiceImpl {
             Ok(_) => Ok(Response::new(AbortTaskResponse { status: None })),
             Err(e) => {
                 error!("failed to abort task {}", e);
-                Err(e.to_grpc_status())
+                Err(e.into())
             }
         }
     }
@@ -101,7 +101,7 @@ impl TaskService for BatchServiceImpl {
             Ok(_) => Ok(Response::new(RemoveTaskResponse { status: None })),
             Err(e) => {
                 error!("failed to remove task {}", e);
-                Err(e.to_grpc_status())
+                Err(e.into())
             }
         }
     }
