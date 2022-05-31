@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
@@ -152,10 +153,9 @@ impl Compactor {
             is_target_ultimate_and_leveling: false,
             metrics: None,
             task_status: false,
-            // TODO: get compaction group info from meta
-            prefix_pairs: vec![],
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
+            compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
         };
 
         let parallelism = compact_task.splits.len();

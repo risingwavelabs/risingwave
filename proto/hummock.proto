@@ -124,7 +124,7 @@ message CompactTask {
   repeated KeyRange splits = 2;
   // low watermark in 'ts-aware compaction'
   uint64 watermark = 3;
-  // compacion output, which will be added to [`target_level`] of LSM after compaction
+  // compaction output, which will be added to [`target_level`] of LSM after compaction
   repeated SstableInfo sorted_output_ssts = 4;
   // task id assigned by hummock storage service
   uint64 task_id = 5;
@@ -133,18 +133,11 @@ message CompactTask {
   bool is_target_ultimate_and_leveling = 7;
   CompactMetrics metrics = 8;
   bool task_status = 9;
-  repeated CompactionGroup.PrefixPair prefix_pairs = 10;
   // Hash mapping from virtual node to parallel unit. Since one compactor might deal with SSTs
   // with data for more than one relational state tables, here a vector is required.
   repeated common.ParallelUnitMapping vnode_mappings = 11;
-}
-
-message CompactionGroup {
-  message PrefixPair {
-    // key value with `prefix` belongs to compaction group `group_id`
-    uint64 group_id = 1;
-    bytes prefix = 2;
-  }
+  // compaction group the task belongs to
+  uint64 compaction_group_id = 12;
 }
 
 message LevelHandler {
@@ -157,7 +150,14 @@ message LevelHandler {
 }
 
 message CompactStatus {
-  repeated LevelHandler level_handlers = 1;
+  uint64 compaction_group_id = 1;
+  repeated LevelHandler level_handlers = 2;
+  CompactionConfig compaction_config = 3;
+}
+
+message CompactionGroup {
+  uint64 id = 1;
+  repeated bytes member_prefixes = 2;
 }
 
 message CompactTaskAssignment {
@@ -244,3 +244,18 @@ service HummockManagerService {
 }
 
 service CompactorService {}
+
+message CompactionConfig {
+  enum CompactionMode {
+      RangeMode = 0;
+      ConsistentHashMode = 1;
+  }
+  uint64 max_bytes_for_level_base = 1;
+  uint64 max_level = 2;
+  uint64 max_bytes_for_level_multiplier = 3;
+  uint64 max_compaction_bytes = 4;
+  uint64 min_compaction_bytes = 5;
+  uint64 level0_tigger_file_numer = 6;
+  uint64 level0_tier_compact_file_number = 7;
+  CompactionMode compaction_mode = 8;
+}

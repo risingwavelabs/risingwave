@@ -12,41 +12,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
-pub struct CompactionGroupId(u64);
+use std::borrow::Borrow;
 
-impl From<u64> for CompactionGroupId {
-    fn from(u: u64) -> Self {
+use crate::CompactionGroupId;
+
+#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
+pub struct Prefix([u8; 4]);
+
+impl From<[u8; 4]> for Prefix {
+    fn from(u: [u8; 4]) -> Self {
         Self(u)
     }
 }
-
-impl From<CompactionGroupId> for u64 {
-    fn from(c: CompactionGroupId) -> Self {
-        c.0
-    }
-}
-
-#[derive(Copy, Clone, Eq, Hash, PartialEq)]
-pub struct Prefix(u32);
 
 impl From<u32> for Prefix {
     fn from(u: u32) -> Self {
-        Self(u)
+        let u: [u8; 4] = u.to_be_bytes();
+        u.into()
     }
 }
 
-impl From<Prefix> for u32 {
+impl From<Prefix> for Vec<u8> {
     fn from(p: Prefix) -> Self {
-        p.0
+        p.borrow().into()
     }
 }
 
-#[allow(dead_code)]
-struct CompactionGroup {
-    group_id: CompactionGroupId,
-    prefixes: Vec<Prefix>,
-    /// If `is_scheduled`, no need to notify scheduler again. Scheduler will reschedule it if
-    /// necessary, e.g. more compaction task available.
-    is_scheduled: bool,
+impl From<&Prefix> for Vec<u8> {
+    fn from(p: &Prefix) -> Self {
+        p.0.to_vec()
+    }
+}
+
+/// Indicates the compaction group a compaction task belongs to
+pub enum StaticCompactionGroupId {
+    /// All shared buffer local compaction task goes to here.
+    SharedBuffer = 1,
+    /// All unregistered state goes to here.
+    StateDefault = 2,
+    // TODO: all registered MV goes to here.
+    MaterializedView = 3,
+}
+
+impl From<StaticCompactionGroupId> for CompactionGroupId {
+    fn from(cg: StaticCompactionGroupId) -> Self {
+        cg as CompactionGroupId
+    }
 }

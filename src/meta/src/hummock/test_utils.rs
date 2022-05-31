@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
 use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
@@ -50,7 +51,11 @@ where
     // Current state: {v0: [], v1: [test_tables]}
 
     // Simulate a compaction and increase version by 1.
-    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
     hummock_manager
         .assign_compaction_task(&compact_task, context_id, async { true })
         .await
