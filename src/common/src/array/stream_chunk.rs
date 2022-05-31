@@ -79,7 +79,7 @@ pub struct StreamChunk {
 }
 
 impl Default for StreamChunk {
-    /// Create a 0-row-0-col StreamChunk. Only used in some existing tests.
+    /// Create a 0-row-0-col `StreamChunk`. Only used in some existing tests.
     /// This is NOT the same as an **empty** chunk, which has 0 rows but with
     /// columns aligned with executor schema.
     fn default() -> Self {
