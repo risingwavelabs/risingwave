@@ -29,6 +29,7 @@ use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
 use crate::store::StateStore;
+use crate::StateStoreIter;
 
 #[tokio::test]
 async fn test_basic() {
@@ -476,6 +477,7 @@ async fn test_write_anytime() {
     let epoch1 = initial_epoch + 1;
 
     let assert_old_value = |epoch| {
+        // check point get
         assert_eq!(
             "111".as_bytes(),
             block_on(hummock_storage.get("aa".as_bytes(), epoch))
@@ -494,6 +496,22 @@ async fn test_write_anytime() {
                 .unwrap()
                 .unwrap()
         );
+        // check iter
+        let mut iter =
+            block_on(hummock_storage.iter("aa".as_bytes()..="cc".as_bytes(), epoch)).unwrap();
+        assert_eq!(
+            (Bytes::from("aa"), Bytes::from("111")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert_eq!(
+            (Bytes::from("bb"), Bytes::from("222")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert_eq!(
+            (Bytes::from("cc"), Bytes::from("333")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert!(block_on(iter.next()).unwrap().is_none());
     };
 
     let batch1 = vec![
@@ -509,6 +527,7 @@ async fn test_write_anytime() {
     assert_old_value(epoch1);
 
     let assert_new_value = |epoch| {
+        // check point get
         assert_eq!(
             "111_new".as_bytes(),
             block_on(hummock_storage.get("aa".as_bytes(), epoch))
@@ -524,6 +543,17 @@ async fn test_write_anytime() {
                 .unwrap()
                 .unwrap()
         );
+        let mut iter =
+            block_on(hummock_storage.iter("aa".as_bytes()..="cc".as_bytes(), epoch)).unwrap();
+        assert_eq!(
+            (Bytes::from("aa"), Bytes::from("111_new")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert_eq!(
+            (Bytes::from("cc"), Bytes::from("333")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert!(block_on(iter.next()).unwrap().is_none());
     };
 
     // Update aa, delete bb, cc unchanged
