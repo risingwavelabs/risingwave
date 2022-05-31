@@ -93,10 +93,23 @@ pub enum Vis {
     Compact(usize), // equivalent to all ones of this size
 }
 
+impl From<Bitmap> for Vis {
+    fn from(b: Bitmap) -> Self {
+        Vis::Bitmap(b)
+    }
+}
+
+impl From<usize> for Vis {
+    fn from(c: usize) -> Self {
+        Vis::Compact(c)
+    }
+}
+
 impl DataChunk {
     /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
     /// or a simple cardinality number.
-    pub fn new(columns: Vec<Column>, vis: Vis) -> Self {
+    pub fn new<V: Into<Vis>>(columns: Vec<Column>, vis: V) -> Self {
+        let vis = vis.into();
         let capacity = match &vis {
             Vis::Bitmap(b) => b.num_bits(),
             Vis::Compact(c) => *c,
@@ -138,7 +151,7 @@ impl DataChunk {
             .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
-        Ok(DataChunk::new(new_columns, Vis::Compact(rows.len())))
+        Ok(DataChunk::new(new_columns, rows.len()))
     }
 
     /// Return the next visible row index on or after `row_idx`.
@@ -189,7 +202,7 @@ impl DataChunk {
 
     #[must_use]
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
-        DataChunk::new(self.columns.clone(), Vis::Bitmap(visibility))
+        DataChunk::new(self.columns.clone(), visibility)
     }
 
     pub fn visibility(&self) -> Option<&Bitmap> {
@@ -270,7 +283,7 @@ impl DataChunk {
                 columns.push(Column::from_protobuf(any_col, cardinality)?);
             }
 
-            let chunk = DataChunk::new(columns, Vis::Compact(proto.cardinality as usize));
+            let chunk = DataChunk::new(columns, proto.cardinality as usize);
             Ok(chunk)
         }
     }
@@ -466,7 +479,7 @@ impl TryFrom<Vec<Column>> for DataChunk {
         );
 
         let len = columns[0].array_ref().len();
-        Ok(DataChunk::new(columns, Vis::Compact(len)))
+        Ok(DataChunk::new(columns, len))
     }
 }
 
@@ -691,7 +704,7 @@ mod tests {
                 column_nonnull!(I64Array, [1, 2, 3, 4]),
                 column!(I64Array, [Some(6), None, Some(7), None]),
             ],
-            Vis::Compact(4),
+            4,
         );
         assert_eq!(
             chunk.to_pretty_string(),

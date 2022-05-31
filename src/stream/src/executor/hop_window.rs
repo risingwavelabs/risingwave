@@ -182,8 +182,8 @@ impl HopWindowExecutor {
             let hop_start = hop_start
                 .eval(&data_chunk)
                 .map_err(StreamExecutorError::eval_error)?;
-            let vis = Vis::Compact(hop_start.len());
-            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], vis);
+            let len = hop_start.len();
+            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
             let (origin_cols, vis) = data_chunk.into_parts();
             // SAFETY: Already compacted.
             assert!(matches!(vis, Vis::Compact(_)));

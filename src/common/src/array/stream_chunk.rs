@@ -85,7 +85,7 @@ impl Default for StreamChunk {
     fn default() -> Self {
         Self {
             ops: Default::default(),
-            data: DataChunk::new(vec![], Vis::Compact(0)),
+            data: DataChunk::new(vec![], 0),
         }
     }
 }
