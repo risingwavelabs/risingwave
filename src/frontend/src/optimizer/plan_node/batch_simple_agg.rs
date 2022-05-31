@@ -36,7 +36,6 @@ impl BatchSimpleAgg {
         let input_dist = input.distribution();
         match input_dist {
             Distribution::Single | Distribution::SomeShard | Distribution::HashShard(_) => {}
-            _ => unreachable!(),
         };
         let base = PlanBase::new_batch(
             ctx,
