@@ -13,7 +13,7 @@ risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_logging = { path = "../utils/logging" }
 risingwave_meta = { path = "../meta" }
-tikv-jemallocator = "0.4"
+tikv-jemallocator = "0.5"
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

@@ -16,6 +16,8 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
+use std::collections::HashMap;
+
 pub use enumerator::*;
 use serde::Deserialize;
 pub use source::*;
@@ -24,21 +26,31 @@ pub use split::*;
 pub const DATAGEN_CONNECTOR: &str = "datagen";
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatagenProperties {
-    #[serde(
-        rename = "datagen.max.chunk.size",
-        default = "default_datagen_max_chunk_size"
-    )]
-    pub max_chunk_size: String,
+    /// split_num means data source partition
+    #[serde(rename = "datagen.split.num")]
+    pub split_num: Option<String>,
+
+    /// default_rows_per_second =10
+    /// when the split_num = 3 and default_rows_per_second =10
+    /// there will be three readers that generate respectly 4,3,3 message per second
     #[serde(
         rename = "datagen.rows.per.second",
         default = "default_rows_per_second"
     )]
     pub rows_per_second: String,
+
+    /// Some connector options of the datagen source's fields
+    /// for example: create datagen source with column v1 int, v2 float
+    /// 'fields.v1.kind'='sequence',
+    /// 'fields.v1.start'='1',
+    /// 'fields.v1.end'='1000',
+    /// 'fields.v1.kind'='random',
+    /// datagen will create v1 by self-incrementing from 1 to 1000
+    /// datagen will create v2 by randomly generating from default_min to default_max
+    #[serde(flatten)]
+    fields: HashMap<String, String>,
 }
 
 fn default_rows_per_second() -> String {
-    "1".to_string()
-}
-fn default_datagen_max_chunk_size() -> String {
-    "5".to_string()
+    "10".to_string()
 }

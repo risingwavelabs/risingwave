@@ -25,9 +25,9 @@ use super::{
     PredicatePushdown, StreamHashJoin, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprType};
-use crate::optimizer::plan_node::batch_nested_loop_join::BatchNestedLoopJoin;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
+    BatchFilter, BatchHashJoin, BatchNestedLoopJoin, BatchProject, EqJoinPredicate, LogicalFilter,
+    StreamFilter, StreamProject,
 };
 use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
@@ -36,7 +36,8 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// Each output row has fields from the left and right inputs. The set of output rows is a subset
 /// of the cartesian product of the two inputs; precisely which subset depends on the join
-/// condition.
+/// condition. In addition, the output columns are a subset of the columns of the left and
+/// right columns, dependent on the output indices provided. A repeat output index is illegal.
 #[derive(Debug, Clone)]
 pub struct LogicalJoin {
     pub base: PlanBase,
@@ -44,28 +45,63 @@ pub struct LogicalJoin {
     right: PlanRef,
     on: Condition,
     join_type: JoinType,
+    output_indices: Vec<usize>,
 }
 
 impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "LogicalJoin {{ type: {:?}, on: {} }}",
-            &self.join_type, &self.on
+            "LogicalJoin {{ type: {:?}, on: {}, output_indices: {} }}",
+            &self.join_type,
+            &self.on,
+            if self
+                .output_indices
+                .iter()
+                .copied()
+                .eq(0..self.internal_column_num())
+            {
+                "all".to_string()
+            } else {
+                format!("{:?}", self.output_indices)
+            }
         )
     }
 }
 
+fn has_duplicate_index(indices: &[usize]) -> bool {
+    for i in 1..indices.len() {
+        if indices[i..].contains(&indices[i - 1]) {
+            return true;
+        }
+    }
+    false
+}
+
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
+        let out_column_num =
+            Self::out_column_num(left.schema().len(), right.schema().len(), join_type);
+        Self::new_with_output_indices(left, right, join_type, on, (0..out_column_num).collect())
+    }
+
+    pub(crate) fn new_with_output_indices(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        on: Condition,
+        output_indices: Vec<usize>,
+    ) -> Self {
+        assert!(!has_duplicate_index(&output_indices));
         let ctx = left.ctx();
-        let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
+        let schema = Self::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
         let pk_indices = Self::derive_pk(
             left.schema().len(),
             right.schema().len(),
             left.pk_indices(),
             right.pk_indices(),
             join_type,
+            &output_indices,
         );
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalJoin {
@@ -74,6 +110,7 @@ impl LogicalJoin {
             right,
             on,
             join_type,
+            output_indices,
         }
     }
 
@@ -96,8 +133,15 @@ impl LogicalJoin {
         }
     }
 
-    /// get the Mapping of columnIndex from output column index to left column index
-    fn o2l_col_mapping_inner(
+    pub fn internal_column_num(&self) -> usize {
+        Self::out_column_num(
+            self.left.schema().len(),
+            self.right.schema().len(),
+            self.join_type,
+        )
+    }
+
+    fn i2l_col_mapping_inner(
         left_len: usize,
         right_len: usize,
         join_type: JoinType,
@@ -112,8 +156,7 @@ impl LogicalJoin {
         }
     }
 
-    /// get the Mapping of columnIndex from output column index to right column index
-    fn o2r_col_mapping_inner(
+    fn i2r_col_mapping_inner(
         left_len: usize,
         right_len: usize,
         join_type: JoinType,
@@ -127,72 +170,87 @@ impl LogicalJoin {
         }
     }
 
-    /// get the Mapping of columnIndex from left column index to output column index
-    fn l2o_col_mapping_inner(
+    fn l2i_col_mapping_inner(
         left_len: usize,
         right_len: usize,
         join_type: JoinType,
     ) -> ColIndexMapping {
-        Self::o2l_col_mapping_inner(left_len, right_len, join_type).inverse()
+        Self::i2l_col_mapping_inner(left_len, right_len, join_type).inverse()
     }
 
-    /// get the Mapping of columnIndex from right column index to output column index
-    fn r2o_col_mapping_inner(
+    fn r2i_col_mapping_inner(
         left_len: usize,
         right_len: usize,
         join_type: JoinType,
     ) -> ColIndexMapping {
-        Self::o2r_col_mapping_inner(left_len, right_len, join_type).inverse()
+        Self::i2r_col_mapping_inner(left_len, right_len, join_type).inverse()
     }
 
-    pub fn o2l_col_mapping(&self) -> ColIndexMapping {
-        Self::o2l_col_mapping_inner(
+    /// get the Mapping of columnIndex from internal column index to left column index
+    pub fn i2l_col_mapping(&self) -> ColIndexMapping {
+        Self::i2l_col_mapping_inner(
             self.left().schema().len(),
             self.right().schema().len(),
             self.join_type(),
         )
     }
 
-    pub fn o2r_col_mapping(&self) -> ColIndexMapping {
-        Self::o2r_col_mapping_inner(
+    /// get the Mapping of columnIndex from internal column index to right column index
+    pub fn i2r_col_mapping(&self) -> ColIndexMapping {
+        Self::i2r_col_mapping_inner(
             self.left().schema().len(),
             self.right().schema().len(),
             self.join_type(),
         )
     }
 
-    pub fn l2o_col_mapping(&self) -> ColIndexMapping {
-        Self::l2o_col_mapping_inner(
+    /// get the Mapping of columnIndex from left column index to internal column index
+    pub fn l2i_col_mapping(&self) -> ColIndexMapping {
+        Self::l2i_col_mapping_inner(
             self.left().schema().len(),
             self.right().schema().len(),
             self.join_type(),
         )
     }
 
-    pub fn r2o_col_mapping(&self) -> ColIndexMapping {
-        Self::r2o_col_mapping_inner(
+    /// get the Mapping of columnIndex from right column index to internal column index
+    pub fn r2i_col_mapping(&self) -> ColIndexMapping {
+        Self::r2i_col_mapping_inner(
             self.left().schema().len(),
             self.right().schema().len(),
             self.join_type(),
         )
+    }
+
+    /// get the Mapping of columnIndex from internal column index to output column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::with_remaining_columns(&self.output_indices, self.internal_column_num())
+    }
+
+    /// get the Mapping of columnIndex from output column index to internal column index
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        self.i2o_col_mapping().inverse()
     }
 
     pub(super) fn derive_schema(
         left_schema: &Schema,
         right_schema: &Schema,
         join_type: JoinType,
+        output_indices: &[usize],
     ) -> Schema {
         let left_len = left_schema.len();
         let right_len = right_schema.len();
-        let out_column_num = Self::out_column_num(left_len, right_len, join_type);
-        let o2l = Self::o2l_col_mapping_inner(left_len, right_len, join_type);
-        let o2r = Self::o2r_col_mapping_inner(left_len, right_len, join_type);
-        let fields = (0..out_column_num)
-            .into_iter()
-            .map(|i| match (o2l.try_map(i), o2r.try_map(i)) {
+        let i2l = Self::i2l_col_mapping_inner(left_len, right_len, join_type);
+        let i2r = Self::i2r_col_mapping_inner(left_len, right_len, join_type);
+        let fields = output_indices
+            .iter()
+            .map(|&i| match (i2l.try_map(i), i2r.try_map(i)) {
                 (Some(l_i), None) => left_schema.fields()[l_i].clone(),
                 (None, Some(r_i)) => right_schema.fields()[r_i].clone(),
-                _ => panic!(),
+                _ => panic!(
+                    "left len {}, right len {}, i {}, lmap {:?}, rmap {:?}",
+                    left_len, right_len, i, i2l, i2r
+                ),
             })
             .collect();
         Schema { fields }
@@ -204,15 +262,20 @@ impl LogicalJoin {
         left_pk: &[usize],
         right_pk: &[usize],
         join_type: JoinType,
+        output_indices: &[usize],
     ) -> Vec<usize> {
-        let l2o = Self::l2o_col_mapping_inner(left_len, right_len, join_type);
-        let r2o = Self::r2o_col_mapping_inner(left_len, right_len, join_type);
+        let l2i = Self::l2i_col_mapping_inner(left_len, right_len, join_type);
+        let r2i = Self::r2i_col_mapping_inner(left_len, right_len, join_type);
+        let out_col_num = Self::out_column_num(left_len, right_len, join_type);
+        let i2o = ColIndexMapping::with_remaining_columns(output_indices, out_col_num);
         left_pk
             .iter()
-            .map(|index| l2o.try_map(*index))
-            .chain(right_pk.iter().map(|index| r2o.try_map(*index)))
+            .map(|index| l2i.try_map(*index))
+            .chain(right_pk.iter().map(|index| r2i.try_map(*index)))
             .flatten()
-            .collect()
+            .map(|index| i2o.try_map(index))
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default()
     }
 
     /// Get a reference to the logical join's on.
@@ -226,8 +289,25 @@ impl LogicalJoin {
     }
 
     /// Clone with new `on` condition
+    pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
+        Self::new_with_output_indices(
+            self.left.clone(),
+            self.right.clone(),
+            self.join_type,
+            self.on.clone(),
+            output_indices,
+        )
+    }
+
+    /// Clone with new `on` condition
     pub fn clone_with_cond(&self, cond: Condition) -> Self {
-        Self::new(self.left.clone(), self.right.clone(), self.join_type, cond)
+        Self::new_with_output_indices(
+            self.left.clone(),
+            self.right.clone(),
+            self.join_type,
+            cond,
+            self.output_indices.clone(),
+        )
     }
 
     pub fn is_left_join(&self) -> bool {
@@ -376,7 +456,13 @@ impl PlanTreeNodeBinary for LogicalJoin {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(left, right, self.join_type, self.on.clone())
+        Self::new_with_output_indices(
+            left,
+            right,
+            self.join_type,
+            self.on.clone(),
+            self.output_indices.clone(),
+        )
     }
 
     #[must_use]
@@ -387,27 +473,51 @@ impl PlanTreeNodeBinary for LogicalJoin {
         right: PlanRef,
         right_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let new_on = {
-            let (mut left_map, _) = left_col_change.clone().into_parts();
+        let (new_on, new_output_indices) = {
+            let (mut map, _) = left_col_change.clone().into_parts();
             let (mut right_map, _) = right_col_change.clone().into_parts();
             for i in right_map.iter_mut().flatten() {
                 *i += left.schema().len();
             }
-            left_map.append(&mut right_map);
-            self.on()
-                .clone()
-                .rewrite_expr(&mut ColIndexMapping::new(left_map))
+            map.append(&mut right_map);
+            let mut mapping = ColIndexMapping::new(map);
+
+            let new_output_indices = self
+                .output_indices
+                .iter()
+                .map(|&i| mapping.map(i))
+                .collect::<Vec<_>>();
+            let new_on = self.on().clone().rewrite_expr(&mut mapping);
+            (new_on, new_output_indices)
         };
-        let join = Self::new(left, right, self.join_type, new_on);
 
-        let old_o2l = self.o2l_col_mapping().composite(&left_col_change);
-        let old_o2r = self.o2r_col_mapping().composite(&right_col_change);
-        let new_l2o = join.l2o_col_mapping();
-        let new_r2o = join.r2o_col_mapping();
+        let join = Self::new_with_output_indices(
+            left,
+            right,
+            self.join_type,
+            new_on,
+            new_output_indices.clone(),
+        );
 
-        let out_col_change = old_o2l
-            .composite(&new_l2o)
-            .union(&old_o2r.composite(&new_r2o));
+        let new_i2o = ColIndexMapping::with_remaining_columns(
+            &new_output_indices,
+            join.internal_column_num(),
+        );
+
+        let old_o2i = self.o2i_col_mapping();
+
+        let old_i2l = old_o2i
+            .composite(&self.i2l_col_mapping())
+            .composite(&left_col_change);
+        let old_i2r = old_o2i
+            .composite(&self.i2r_col_mapping())
+            .composite(&right_col_change);
+        let new_l2i = join.l2i_col_mapping().composite(&new_i2o);
+        let new_r2i = join.r2i_col_mapping().composite(&new_i2o);
+
+        let out_col_change = old_i2l
+            .composite(&new_l2i)
+            .union(&old_i2r.composite(&new_r2i));
         (join, out_col_change)
     }
 }
@@ -429,14 +539,11 @@ impl ColPrunable for LogicalJoin {
             }
         });
 
+        // add those columns which are required in the join condition to
+        // to those that are required in the output
         let mut visitor = CollectInputRef::new(resized_required_cols);
         self.on.visit_expr(&mut visitor);
         let left_right_required_cols = FixedBitSet::from(visitor).ones().collect_vec();
-
-        let mut on = self.on.clone();
-        let mut mapping =
-            ColIndexMapping::with_remaining_columns(&left_right_required_cols, total_len);
-        on = on.rewrite_expr(&mut mapping);
 
         let mut left_required_cols = Vec::new();
         let mut right_required_cols = Vec::new();
@@ -448,34 +555,36 @@ impl ColPrunable for LogicalJoin {
             }
         });
 
-        let join = LogicalJoin::new(
+        let mut on = self.on.clone();
+        let mut mapping =
+            ColIndexMapping::with_remaining_columns(&left_right_required_cols, total_len);
+        on = on.rewrite_expr(&mut mapping);
+
+        let new_output_indices = {
+            let required_inputs_in_output = if self.is_left_join() {
+                &left_required_cols
+            } else if self.is_right_join() {
+                &right_required_cols
+            } else {
+                &left_right_required_cols
+            };
+
+            let mapping =
+                ColIndexMapping::with_remaining_columns(required_inputs_in_output, total_len);
+            required_cols
+                .iter()
+                .map(|&i| mapping.map(self.output_indices[i]))
+                .collect_vec()
+        };
+
+        LogicalJoin::new_with_output_indices(
             self.left.prune_col(&left_required_cols),
             self.right.prune_col(&right_required_cols),
             self.join_type,
             on,
-        );
-
-        let required_inputs_in_output = if self.is_left_join() {
-            left_required_cols
-        } else if self.is_right_join() {
-            right_required_cols
-        } else {
-            left_right_required_cols
-        };
-        if required_cols == required_inputs_in_output {
-            join.into()
-        } else {
-            let mapping = ColIndexMapping::with_remaining_columns(
-                &required_inputs_in_output,
-                self.schema().len(),
-            );
-            let remaining_columns = required_cols.iter().map(|&i| mapping.map(i)).collect_vec();
-            LogicalProject::with_mapping(
-                join.into(),
-                ColIndexMapping::with_remaining_columns(&remaining_columns, self.schema().len()),
-            )
-            .into()
-        }
+            new_output_indices,
+        )
+        .into()
     }
 }
 
@@ -507,6 +616,11 @@ impl PredicatePushdown for LogicalJoin {
         let left_col_num = self.left.schema().len();
         let right_col_num = self.right.schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type);
+
+        // rewrite output col referencing indices as internal cols
+        let mut mapping = self.o2i_col_mapping();
+
+        predicate = predicate.rewrite_expr(&mut mapping);
 
         let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
             &mut predicate,
@@ -552,8 +666,12 @@ impl ToBatch for LogicalJoin {
         let left = self.left().to_batch()?;
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
+        let new_output_indices = logical_join.output_indices.clone();
+        let new_internal_column_num = logical_join.internal_column_num();
+        let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
+        let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
 
-        if predicate.has_eq() {
+        let plan = if predicate.has_eq() {
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
@@ -566,13 +684,26 @@ impl ToBatch for LogicalJoin {
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                Ok(BatchFilter::new(logical_filter).into())
+                BatchFilter::new(logical_filter).into()
             } else {
-                Ok(BatchHashJoin::new(logical_join, predicate).into())
+                BatchHashJoin::new(logical_join, predicate).into()
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            Ok(BatchNestedLoopJoin::new(logical_join).into())
+            BatchNestedLoopJoin::new(logical_join).into()
+        };
+
+        if self.output_indices != default_indices {
+            let logical_project = LogicalProject::with_mapping(
+                plan,
+                ColIndexMapping::with_remaining_columns(
+                    &new_output_indices,
+                    new_internal_column_num,
+                ),
+            );
+            Ok(BatchProject::new(logical_project).into())
+        } else {
+            Ok(plan)
         }
     }
 }
@@ -601,8 +732,14 @@ impl ToStream for LogicalJoin {
 
         let left = self.left().to_stream_with_dist_required(&left_dist)?;
         let logical_join = self.clone_with_left_right(left, right);
+        let new_output_indices = logical_join.output_indices.clone();
+        let new_internal_column_num = logical_join.internal_column_num();
+        let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
 
-        if predicate.has_eq() {
+        // Temporarily remove output indices.
+        let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
+
+        let plan = if predicate.has_eq() {
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
@@ -615,24 +752,75 @@ impl ToStream for LogicalJoin {
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                Ok(StreamFilter::new(logical_filter).into())
+                StreamFilter::new(logical_filter).into()
             } else {
-                Ok(StreamHashJoin::new(logical_join, predicate).into())
+                StreamHashJoin::new(logical_join, predicate).into()
             }
         } else {
-            Err(RwError::from(ErrorCode::NotImplemented(
+            return Err(RwError::from(ErrorCode::NotImplemented(
                 "stream nested-loop join".to_string(),
                 None.into(),
-            )))
+            )));
+        };
+
+        if self.output_indices != default_indices {
+            let logical_project = LogicalProject::with_mapping(
+                plan,
+                ColIndexMapping::with_remaining_columns(
+                    &new_output_indices,
+                    new_internal_column_num,
+                ),
+            );
+            Ok(StreamProject::new(logical_project).into())
+        } else {
+            Ok(plan)
         }
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         let (left, left_col_change) = self.left.logical_rewrite_for_stream()?;
+        let left_len = left.schema().len();
         let (right, right_col_change) = self.right.logical_rewrite_for_stream()?;
-        let (join, out_col_change) =
-            self.rewrite_with_left_right(left, left_col_change, right, right_col_change);
-        Ok((join.into(), out_col_change))
+        let (join, out_col_change) = self.rewrite_with_left_right(
+            left.clone(),
+            left_col_change,
+            right.clone(),
+            right_col_change,
+        );
+
+        let mapping = ColIndexMapping::with_remaining_columns(
+            &join.output_indices,
+            join.internal_column_num(),
+        );
+
+        let l2i = join.l2i_col_mapping().composite(&mapping);
+        let r2i = join.r2i_col_mapping().composite(&mapping);
+
+        // Add missing pk indices to the logical join
+        let left_to_add = left
+            .pk_indices()
+            .iter()
+            .cloned()
+            .filter(|i| l2i.try_map(*i) == None);
+
+        let right_to_add = right
+            .pk_indices()
+            .iter()
+            .cloned()
+            .filter(|i| r2i.try_map(*i) == None)
+            .map(|i| i + left_len);
+
+        let mut new_output_indices = join.output_indices.clone();
+        if !self.is_right_join() {
+            new_output_indices.extend(left_to_add);
+        }
+        if !self.is_left_join() {
+            new_output_indices.extend(right_to_add);
+        }
+
+        let join_with_pk = join.clone_with_output_indices(new_output_indices);
+        // the added columns is at the end, so it will not change the exists column index
+        Ok((join_with_pk.into(), out_col_change))
     }
 }
 
@@ -705,15 +893,10 @@ mod tests {
         let plan = join.prune_col(&required_cols);
 
         // Check the result
-        let project = plan.as_logical_project().unwrap();
-        assert_eq!(project.exprs().len(), 2);
-        assert_eq_input_ref!(&project.exprs()[0], 1);
-        assert_eq_input_ref!(&project.exprs()[1], 2);
-
-        let join = project.input();
-        let join = join.as_logical_join().unwrap();
-        assert_eq!(join.schema().fields().len(), 3);
-        assert_eq!(join.schema().fields(), &fields[1..4]);
+        let join = plan.as_logical_join().unwrap();
+        assert_eq!(join.schema().fields().len(), 2);
+        assert_eq!(join.schema().fields()[0], fields[2]);
+        assert_eq!(join.schema().fields()[1], fields[3]);
 
         let expr: ExprImpl = join.on.clone().into();
         let call = expr.as_function_call().unwrap();
@@ -779,8 +962,7 @@ mod tests {
             let required_cols = vec![0];
             // key 0 is never used in the join (always key 1)
             let plan = join.prune_col(&required_cols);
-            // Check that the join has been wrapped in a projection
-            let as_plan = plan.as_logical_project().unwrap();
+            let as_plan = plan.as_logical_join().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 1);
             assert_eq!(as_plan.schema().fields()[0], fields[offset]);
@@ -789,7 +971,6 @@ mod tests {
             let required_cols = vec![0, 1, 2];
             // should not panic here
             let plan = join.prune_col(&required_cols);
-            // Check that the join has not been wrapped in a projection
             let as_plan = plan.as_logical_join().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 3);
@@ -1102,15 +1283,10 @@ mod tests {
         let plan = join.prune_col(&required_cols);
 
         // Check the result
-        let project = plan.as_logical_project().unwrap();
-        assert_eq!(project.exprs().len(), 2);
-        assert_eq_input_ref!(&project.exprs()[0], 2);
-        assert_eq_input_ref!(&project.exprs()[1], 1);
-
-        let join = project.input();
-        let join = join.as_logical_join().unwrap();
-        assert_eq!(join.schema().fields().len(), 3);
-        assert_eq!(join.schema().fields(), &fields[1..4]);
+        let join = plan.as_logical_join().unwrap();
+        assert_eq!(join.schema().fields().len(), 2);
+        assert_eq!(join.schema().fields()[0], fields[3]);
+        assert_eq!(join.schema().fields()[1], fields[2]);
 
         let expr: ExprImpl = join.on.clone().into();
         let call = expr.as_function_call().unwrap();
