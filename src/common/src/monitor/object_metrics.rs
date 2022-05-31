@@ -31,7 +31,7 @@ macro_rules! for_all_metrics {
     };
 }
 
-macro_rules! define_state_store_metrics {
+macro_rules! define_object_store_metrics {
     ($( $name:ident: $type:ty ),* ,) => {
         /// [`ObjectStoreMetrics`] stores the performance and IO metrics of `ObjectStore` such as
         /// `S3` and `MinIO`.
@@ -49,7 +49,7 @@ macro_rules! define_state_store_metrics {
 
 }
 
-for_all_metrics! { define_state_store_metrics }
+for_all_metrics! { define_object_store_metrics }
 
 impl ObjectStoreMetrics {
     pub fn new(registry: Registry) -> Self {

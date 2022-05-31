@@ -16,8 +16,9 @@ use std::backtrace::Backtrace;
 use std::io;
 use std::marker::{Send, Sync};
 
-use risingwave_common::error::BoxedError;
 use thiserror::Error;
+
+use crate::error::BoxedError;
 
 #[derive(Error, Debug)]
 enum ObjectErrorInner {

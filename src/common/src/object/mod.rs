@@ -26,7 +26,7 @@ mod disk;
 pub mod error;
 pub use error::*;
 
-use crate::monitor::ObjectStoreMetrics;
+use crate::monitor::object_metrics::ObjectStoreMetrics;
 use crate::object::disk::LocalDiskObjectStore;
 
 pub const LOCAL_OBJECT_STORE_PATH_PREFIX: &str = "@local:";

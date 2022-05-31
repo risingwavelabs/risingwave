@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use futures::executor::block_on;
 use itertools::Itertools;
+use risingwave_common::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSSTableId;
 
@@ -31,7 +32,6 @@ use crate::hummock::{
     SstableStoreRef,
 };
 use crate::monitor::ObjectStoreMetrics;
-use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]

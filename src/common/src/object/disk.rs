@@ -24,7 +24,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use tokio::io::AsyncWriteExt;
 
-use crate::hummock::{CachableEntry, HummockError, LruCache};
+use crate::cache::{CachableEntry, LruCache};
 use crate::object::{
     strip_path_local, BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
 };
@@ -131,24 +131,21 @@ impl LocalDiskObjectStore {
         };
         let entry = self
             .opened_read_file_cache
-            .lookup_with_request_dedup(hash, path.clone(), || async {
+            .lookup_with_request_dedup::<_, ObjectError, _>(hash, path.clone(), || async {
                 let file = utils::open_file(&path, true, false, false)
-                    .await
-                    .map_err(HummockError::object_io_error)?
+                    .await?
                     .into_std()
                     .await;
                 Ok((file, 1))
             })
             .await
             .map_err(|e| {
-                ObjectError::disk(
-                    "".to_string(),
-                    std::io::Error::new(
-                        ErrorKind::Other,
-                        format!("Failed to open file {:?}. Err{:?}", path.to_str(), e),
-                    ),
-                )
-            })?;
+                ObjectError::internal(format!(
+                    "open file cache request dedup get canceled {:?}. Err{:?}",
+                    path.to_str(),
+                    e
+                ))
+            })??;
         Ok(Arc::new(entry))
     }
 }

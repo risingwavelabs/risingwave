@@ -8,12 +8,19 @@ anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 auto_enums = "0.7"
+aws-config = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-endpoint = { version = "0.12", default-features = false }
+aws-sdk-s3 = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.42"
+aws-smithy-types = "0.42"
+aws-types = { version = "0.12", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 comfy-table = "6"
 crc32fast = "1"
 either = "1"
+fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
@@ -31,6 +38,8 @@ risingwave_pb = { path = "../prost" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
+spin = "0.9"
+tempfile = "3"
 thiserror = "1"
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"
