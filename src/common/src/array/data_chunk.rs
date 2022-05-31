@@ -85,6 +85,8 @@ pub struct DataChunk {
     vis2: Vis,
 }
 
+/// `Vis` is a visibility bitmap of rows. When all rows are visible, it is considered compact and
+/// is represented by a single cardinality number rather than that many of ones.
 #[derive(Clone, PartialEq)]
 pub enum Vis {
     Bitmap(Bitmap),
@@ -92,7 +94,17 @@ pub enum Vis {
 }
 
 impl DataChunk {
+    /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
+    /// or a simple cardinality number.
     pub fn new(columns: Vec<Column>, vis: Vis) -> Self {
+        let capacity = match &vis {
+            Vis::Bitmap(b) => b.num_bits(),
+            Vis::Compact(c) => *c,
+        };
+        for column in &columns {
+            assert_eq!(capacity, column.array_ref().len());
+        }
+
         DataChunk { columns, vis2: vis }
     }
 
