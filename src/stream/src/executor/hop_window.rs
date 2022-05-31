@@ -34,6 +34,7 @@ pub struct HopWindowExecutor {
     pub time_col_idx: usize,
     pub window_slide: IntervalUnit,
     pub window_size: IntervalUnit,
+    pub output_indices: Vec<usize>,
 }
 
 impl HopWindowExecutor {
@@ -43,6 +44,7 @@ impl HopWindowExecutor {
         time_col_idx: usize,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
+        output_indices: Vec<usize>,
     ) -> Self {
         HopWindowExecutor {
             input,
@@ -50,6 +52,7 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
+            output_indices,
         }
     }
 }
@@ -80,6 +83,7 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
+            output_indices,
             ..
         } = *self;
         let units = window_size
@@ -94,7 +98,7 @@ impl HopWindowExecutor {
             .get();
 
         let schema = self.info.schema;
-        let time_col_data_type = schema.fields()[time_col_idx].data_type();
+        let time_col_data_type = input.schema().fields()[time_col_idx].data_type();
         let time_col_ref = InputRefExpression::new(time_col_data_type, self.time_col_idx).boxed();
 
         let window_slide_expr =
@@ -167,7 +171,8 @@ impl HopWindowExecutor {
             );
             window_end_exprs.push(window_end_expr);
         }
-
+        let window_start_col_index = input.schema().len();
+        let window_end_col_index = input.schema().len() + 1;
         #[for_await]
         for msg in input.execute() {
             let msg = msg?;
@@ -187,17 +192,38 @@ impl HopWindowExecutor {
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
             for i in 0..units {
-                let window_start_col = window_start_exprs[i]
-                    .eval(&hop_start_chunk)
-                    .map_err(StreamExecutorError::eval_error)?;
-                let window_end_col = window_end_exprs[i]
-                    .eval(&hop_start_chunk)
-                    .map_err(StreamExecutorError::eval_error)?;
-                let mut new_cols = origin_cols.clone();
-                new_cols.extend_from_slice(&[
-                    Column::new(window_start_col),
-                    Column::new(window_end_col),
-                ]);
+                let window_start_col = if output_indices.contains(&window_start_col_index) {
+                    Some(
+                        window_start_exprs[i]
+                            .eval(&hop_start_chunk)
+                            .map_err(StreamExecutorError::eval_error)?,
+                    )
+                } else {
+                    None
+                };
+                let window_end_col = if output_indices.contains(&window_end_col_index) {
+                    Some(
+                        window_end_exprs[i]
+                            .eval(&hop_start_chunk)
+                            .map_err(StreamExecutorError::eval_error)?,
+                    )
+                } else {
+                    None
+                };
+                let new_cols = output_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        if idx < window_start_col_index {
+                            Some(origin_cols[idx].clone())
+                        } else if idx == window_start_col_index {
+                            Some(Column::new(window_start_col.clone().unwrap()))
+                        } else if idx == window_end_col_index {
+                            Some(Column::new(window_end_col.clone().unwrap()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
                 let new_chunk = StreamChunk::new(ops.clone(), new_cols, None);
                 yield Message::Chunk(new_chunk);
             }
@@ -241,7 +267,7 @@ mod tests {
 
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
-
+        let default_indices: Vec<_> = (0..5).collect();
         let executor = super::HopWindowExecutor::new(
             input,
             ExecutorInfo {
@@ -253,6 +279,7 @@ mod tests {
             2,
             window_slide,
             window_size,
+            default_indices,
         )
         .boxed();
 

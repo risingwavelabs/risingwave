@@ -15,6 +15,7 @@
 use std::num::NonZeroUsize;
 
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
@@ -38,6 +39,7 @@ pub struct HopWindowExecutor {
     time_col_idx: usize,
     window_slide: IntervalUnit,
     window_size: IntervalUnit,
+    output_indices: Vec<usize>,
 }
 
 #[async_trait::async_trait]
@@ -53,9 +55,15 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
         let time_col = hop_window_node.get_time_col()?.column_idx as usize;
         let window_slide = hop_window_node.get_window_slide()?.into();
         let window_size = hop_window_node.get_window_size()?.into();
+        let output_indices = hop_window_node
+            .get_output_indices()
+            .iter()
+            .copied()
+            .map(|x| x as usize)
+            .collect_vec();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build().await?;
-            let schema = child
+            let original_schema: Schema = child
                 .schema()
                 .clone()
                 .into_fields()
@@ -65,13 +73,18 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
                     Field::with_name(DataType::Timestamp, "window_end"),
                 ])
                 .collect();
+            let output_indices_schema: Schema = output_indices
+                .iter()
+                .map(|&idx| original_schema[idx].clone())
+                .collect();
             return Ok(Box::new(HopWindowExecutor::new(
                 child,
-                schema,
+                output_indices_schema,
                 time_col,
                 window_slide,
                 window_size,
                 source.plan_node().get_identity().clone(),
+                output_indices,
             )));
         }
         Err(ErrorCode::InternalError("HopWindow must have one child".to_string()).into())
@@ -86,6 +99,7 @@ impl HopWindowExecutor {
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
         identity: String,
+        output_indices: Vec<usize>,
     ) -> Self {
         Self {
             child,
@@ -94,6 +108,7 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
+            output_indices,
         }
     }
 }
@@ -120,6 +135,7 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
+            output_indices,
             ..
         } = *self;
         let units = window_size
@@ -133,8 +149,7 @@ impl HopWindowExecutor {
             })?
             .get();
 
-        let schema = self.schema;
-        let time_col_data_type = schema.fields()[time_col_idx].data_type();
+        let time_col_data_type = child.schema().fields()[time_col_idx].data_type();
         let time_col_ref = InputRefExpression::new(time_col_data_type, self.time_col_idx).boxed();
 
         let window_slide_expr =
@@ -208,7 +223,8 @@ impl HopWindowExecutor {
             );
             window_end_exprs.push(window_end_expr);
         }
-
+        let window_start_col_index = child.schema().len();
+        let window_end_col_index = child.schema().len() + 1;
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
@@ -218,13 +234,30 @@ impl HopWindowExecutor {
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
             for i in 0..units {
-                let window_start_col = window_start_exprs[i].eval(&hop_start_chunk)?;
-                let window_end_col = window_end_exprs[i].eval(&hop_start_chunk)?;
-                let mut new_cols = origin_cols.clone();
-                new_cols.extend_from_slice(&[
-                    Column::new(window_start_col),
-                    Column::new(window_end_col),
-                ]);
+                let window_start_col = if output_indices.contains(&window_start_col_index) {
+                    Some(window_start_exprs[i].eval(&hop_start_chunk)?)
+                } else {
+                    None
+                };
+                let window_end_col = if output_indices.contains(&window_end_col_index) {
+                    Some(window_end_exprs[i].eval(&hop_start_chunk)?)
+                } else {
+                    None
+                };
+                let new_cols = output_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        if idx < window_start_col_index {
+                            Some(origin_cols[idx].clone())
+                        } else if idx == window_start_col_index {
+                            Some(Column::new(window_start_col.clone().unwrap()))
+                        } else if idx == window_end_col_index {
+                            Some(Column::new(window_end_col.clone().unwrap()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect_vec();
                 let new_chunk = DataChunk::new(new_cols, None);
                 yield new_chunk;
             }
@@ -267,6 +300,7 @@ mod tests {
 
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
+        let default_indices = (0..schema.len() + 2).collect_vec();
         let executor = Box::new(HopWindowExecutor::new(
             Box::new(mock_executor),
             schema,
@@ -274,6 +308,7 @@ mod tests {
             window_slide,
             window_size,
             "test".to_string(),
+            default_indices,
         ));
 
         let mut stream = executor.execute();
@@ -309,6 +344,78 @@ mod tests {
                 6 2 ^10:42:00 ^10:30:00 ^11:00:00
                 7 1 ^10:51:00 ^10:45:00 ^11:15:00
                 8 3 ^11:02:00 ^11:00:00 ^11:30:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+    }
+    #[tokio::test]
+    async fn test_output_indices() {
+        let field1 = Field::unnamed(DataType::Int64);
+        let field2 = Field::unnamed(DataType::Int64);
+        let field3 = Field::with_name(DataType::Timestamp, "created_at");
+        let schema = Schema::new(vec![field1, field2, field3]);
+
+        let chunk = DataChunk::from_pretty(
+            &"I I TS
+            1 1 ^10:00:00
+            2 3 ^10:05:00
+            3 2 ^10:14:00
+            4 1 ^10:22:00
+            5 3 ^10:33:00
+            6 2 ^10:42:00
+            7 1 ^10:51:00
+            8 3 ^11:02:00"
+                .replace('^', "2022-2-2T"),
+        );
+
+        let mut mock_executor = MockExecutor::new(schema.clone());
+        mock_executor.add(chunk);
+
+        let window_slide = IntervalUnit::from_minutes(15);
+        let window_size = IntervalUnit::from_minutes(30);
+        let executor = Box::new(HopWindowExecutor::new(
+            Box::new(mock_executor),
+            schema,
+            2,
+            window_slide,
+            window_size,
+            "test".to_string(),
+            vec![1, 3, 4, 2],
+        ));
+
+        let mut stream = executor.execute();
+        // TODO: add more test infra to reduce the duplicated codes below.
+
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk,
+            DataChunk::from_pretty(
+                &" I TS        TS        TS        
+                   1 ^09:45:00 ^10:15:00 ^10:00:00 
+                   3 ^09:45:00 ^10:15:00 ^10:05:00 
+                   2 ^09:45:00 ^10:15:00 ^10:14:00 
+                   1 ^10:00:00 ^10:30:00 ^10:22:00 
+                   3 ^10:15:00 ^10:45:00 ^10:33:00 
+                   2 ^10:15:00 ^10:45:00 ^10:42:00 
+                   1 ^10:30:00 ^11:00:00 ^10:51:00 
+                   3 ^10:45:00 ^11:15:00 ^11:02:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk,
+            DataChunk::from_pretty(
+                &"I TS        TS        TS       
+                  1 ^10:00:00 ^10:30:00 ^10:00:00
+                  3 ^10:00:00 ^10:30:00 ^10:05:00
+                  2 ^10:00:00 ^10:30:00 ^10:14:00
+                  1 ^10:15:00 ^10:45:00 ^10:22:00
+                  3 ^10:30:00 ^11:00:00 ^10:33:00
+                  2 ^10:30:00 ^11:00:00 ^10:42:00
+                  1 ^10:45:00 ^11:15:00 ^10:51:00
+                  3 ^11:00:00 ^11:30:00 ^11:02:00"
                     .replace('^', "2022-2-2T"),
             )
         );

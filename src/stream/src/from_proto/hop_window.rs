@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node;
 
@@ -36,8 +36,16 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         } = params;
 
         let input = input.into_iter().next().unwrap();
-        // TODO: reuse the schema deriviation with frontend.
-        let schema = input
+        // TODO: reuse the schema derivation with frontend.
+        let Some(stream_node::NodeBody::HopWindow(node)) = &node.node_body else {
+            unreachable!();
+        };
+        let output_indices = node
+            .get_output_indices()
+            .iter()
+            .map(|&x| x as usize)
+            .collect_vec();
+        let original_schema: Schema = input
             .schema()
             .clone()
             .into_fields()
@@ -47,17 +55,27 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
                 Field::with_name(DataType::Timestamp, "window_end"),
             ])
             .collect();
+        let actual_schema: Schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
         let info = ExecutorInfo {
-            schema,
+            schema: actual_schema,
             identity: format!("HopWindowExecutor {:X}", executor_id),
             pk_indices,
-        };
-        let Some(stream_node::NodeBody::HopWindow(node)) = &node.node_body else {
-            unreachable!();
         };
         let time_col = node.get_time_col()?.column_idx as usize;
         let window_slide = node.get_window_slide()?.into();
         let window_size = node.get_window_size()?.into();
-        Ok(HopWindowExecutor::new(input, info, time_col, window_slide, window_size).boxed())
+
+        Ok(HopWindowExecutor::new(
+            input,
+            info,
+            time_col,
+            window_slide,
+            window_size,
+            output_indices,
+        )
+        .boxed())
     }
 }
