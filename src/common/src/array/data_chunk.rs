@@ -71,9 +71,11 @@ pub struct DataChunk {
 #[derive(Clone, PartialEq)]
 enum Vis {
     Bitmap(Bitmap),
-    Compact(usize),
+    Compact(usize), // equivalent to all ones of this size
 }
 
+// Indirectly required by StreamChunk::default(), which is only used in tests.
+// Maybe we should impl Default for StreamChunk directly with #[cfg(test)]
 impl Default for Vis {
     fn default() -> Self {
         Vis::Compact(0)
@@ -97,7 +99,7 @@ impl DataChunk {
             Vis::Compact(card)
         } else {
             // no data (dummy)
-            Vis::Compact(0)
+            Vis::default()
         };
 
         DataChunk { columns, vis2 }
