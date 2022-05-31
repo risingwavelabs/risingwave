@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk, Vis};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_expr::expr::BoxedExpression;
@@ -87,7 +87,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
             .eval(&data_chunk)
             .map_err(StreamExecutorError::eval_error)?;
 
-        let (columns, visibility) = data_chunk.into_parts();
+        let (columns, vis) = data_chunk.into_parts();
 
         let n = ops.len();
 
@@ -96,9 +96,9 @@ impl SimpleExecutor for SimpleFilterExecutor {
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         let mut last_res = false;
 
-        assert!(match visibility {
-            None => true,
-            Some(ref m) => m.len() == n,
+        assert!(match vis {
+            Vis::Compact(c) => c == n,
+            Vis::Bitmap(ref m) => m.len() == n,
         });
         assert!(matches!(&*pred_output, ArrayImpl::Bool(_)));
 
