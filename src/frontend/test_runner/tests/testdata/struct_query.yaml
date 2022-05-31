@@ -149,7 +149,7 @@
     select * from (select (country).city as c from t) as vv join t on (c).zipcode=(t.country).zipcode;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $2, $3, $4] }
-      LogicalJoin { type: Inner, on: (Field($0, 1:Int32) = Field($2, 2:Int32)), output_indices: [0, 1, 2, 3, 4, 5] }
+      LogicalJoin { type: Inner, on: (Field($0, 1:Int32) = Field($2, 2:Int32)) }
         LogicalProject { exprs: [Field($1, 1:Int32)] }
           LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
         LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }

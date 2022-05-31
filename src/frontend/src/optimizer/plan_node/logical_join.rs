@@ -56,8 +56,9 @@ impl fmt::Display for LogicalJoin {
             &self.join_type, &self.on,
         )?;
         if self.output_indices != (0..self.schema().len()).collect::<Vec<usize>>() {
-            write!(f, ", output_indices: {:?} }}", &self.output_indices[..])?
+            write!(f, ", output_indices: {:?}", &self.output_indices[..])?
         }
+        write!(f, " }}")?;
         Ok(())
     }
 }

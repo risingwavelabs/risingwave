@@ -27,7 +27,7 @@
     select t1.v1, t2.v1 from t1 join t2 on t1.v2 = t2.v2;
   logical_plan: |
     LogicalProject { exprs: [$1, $5] }
-      LogicalJoin { type: Inner, on: ($2 = $6), output_indices: [0, 1, 2, 3, 4, 5, 6, 7] }
+      LogicalJoin { type: Inner, on: ($2 = $6) }
         LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
         LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
@@ -107,7 +107,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $5] }
       LogicalFilter { predicate: ($3 < 1:Int32) }
-        LogicalJoin { type: Inner, on: ($2 = $6), output_indices: [0, 1, 2, 3, 4, 5, 6, 7] }
+        LogicalJoin { type: Inner, on: ($2 = $6) }
           LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
           LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |

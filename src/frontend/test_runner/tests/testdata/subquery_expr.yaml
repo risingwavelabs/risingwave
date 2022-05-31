@@ -4,7 +4,7 @@
     select (select 1);
   logical_plan: |
     LogicalProject { exprs: [$0] }
-      LogicalJoin { type: LeftOuter, on: true, output_indices: [0] }
+      LogicalJoin { type: LeftOuter, on: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [1:Int32] }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -13,7 +13,7 @@
     select (select x from t), 1 from t;
   logical_plan: |
     LogicalProject { exprs: [$2, 1:Int32] }
-      LogicalJoin { type: LeftOuter, on: true, output_indices: [0, 1, 2] }
+      LogicalJoin { type: LeftOuter, on: true }
         LogicalScan { table: t, columns: [_row_id, x] }
         LogicalProject { exprs: [$1] }
           LogicalScan { table: t, columns: [_row_id, x] }
@@ -22,7 +22,7 @@
     select (select x from t) + 1 from t;
   logical_plan: |
     LogicalProject { exprs: [($2 + 1:Int32)] }
-      LogicalJoin { type: LeftOuter, on: true, output_indices: [0, 1, 2] }
+      LogicalJoin { type: LeftOuter, on: true }
         LogicalScan { table: t, columns: [_row_id, x] }
         LogicalProject { exprs: [$1] }
           LogicalScan { table: t, columns: [_row_id, x] }
@@ -31,8 +31,8 @@
     select (select x from t), (select 1);
   logical_plan: |
     LogicalProject { exprs: [$0, $1] }
-      LogicalJoin { type: LeftOuter, on: true, output_indices: [0, 1] }
-        LogicalJoin { type: LeftOuter, on: true, output_indices: [0] }
+      LogicalJoin { type: LeftOuter, on: true }
+        LogicalJoin { type: LeftOuter, on: true }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
           LogicalProject { exprs: [$1] }
             LogicalScan { table: t, columns: [_row_id, x] }
@@ -43,10 +43,10 @@
     select x + (select x + (select x as v1 from t) as v2 from t) as v3 from t;
   logical_plan: |
     LogicalProject { exprs: [($1 + $2)] }
-      LogicalJoin { type: LeftOuter, on: true, output_indices: [0, 1, 2] }
+      LogicalJoin { type: LeftOuter, on: true }
         LogicalScan { table: t, columns: [_row_id, x] }
         LogicalProject { exprs: [($1 + $2)] }
-          LogicalJoin { type: LeftOuter, on: true, output_indices: [0, 1, 2] }
+          LogicalJoin { type: LeftOuter, on: true }
             LogicalScan { table: t, columns: [_row_id, x] }
             LogicalProject { exprs: [$1] }
               LogicalScan { table: t, columns: [_row_id, x] }
@@ -58,13 +58,13 @@
     select 1 where exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalJoin { type: LeftSemi, on: true, output_indices: [] }
+      LogicalJoin { type: LeftSemi, on: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [$1] }
           LogicalScan { table: t, columns: [_row_id, x] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalJoin { type: LeftSemi, on: true, output_indices: [] }
+      LogicalJoin { type: LeftSemi, on: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalScan { table: t, columns: [] }
 - sql: |
@@ -72,13 +72,13 @@
     select 1 where not exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalJoin { type: LeftAnti, on: true, output_indices: [] }
+      LogicalJoin { type: LeftAnti, on: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [$1] }
           LogicalScan { table: t, columns: [_row_id, x] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32] }
-      LogicalJoin { type: LeftAnti, on: true, output_indices: [] }
+      LogicalJoin { type: LeftAnti, on: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalScan { table: t, columns: [] }
 - sql: |
@@ -87,7 +87,7 @@
     select x from t1 where exists (select x from t2);
   logical_plan: |
     LogicalProject { exprs: [$1] }
-      LogicalJoin { type: LeftSemi, on: true, output_indices: [0, 1] }
+      LogicalJoin { type: LeftSemi, on: true }
         LogicalScan { table: t1, columns: [_row_id, x] }
         LogicalProject { exprs: [$1] }
           LogicalScan { table: t2, columns: [_row_id, x] }
@@ -96,7 +96,7 @@
     select x from t where exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [$1] }
-      LogicalJoin { type: LeftSemi, on: true, output_indices: [0, 1] }
+      LogicalJoin { type: LeftSemi, on: true }
         LogicalScan { table: t, columns: [_row_id, x] }
         LogicalProject { exprs: [$1] }
           LogicalScan { table: t, columns: [_row_id, x] }
@@ -107,7 +107,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: ($1 > $2) }
-        LogicalJoin { type: LeftOuter, on: true, output_indices: [0, 1, 2] }
+        LogicalJoin { type: LeftOuter, on: true }
           LogicalScan { table: t1, columns: [_row_id, x] }
           LogicalProject { exprs: [$1] }
             LogicalScan { table: t2, columns: [_row_id, x] }
@@ -116,7 +116,7 @@
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
       LogicalFilter { predicate: (1:Int32 > 0:Int32) }
-        LogicalJoin { type: LeftSemi, on: true, output_indices: [] }
+        LogicalJoin { type: LeftSemi, on: true }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
           LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
 - sql: |
@@ -124,8 +124,8 @@
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
       LogicalFilter { predicate: ((1:Int32 > 0:Int32) OR $0) }
-        LogicalJoin { type: LeftOuter, on: true, output_indices: [0] }
-          LogicalJoin { type: LeftAnti, on: true, output_indices: [] }
+        LogicalJoin { type: LeftOuter, on: true }
+          LogicalJoin { type: LeftAnti, on: true }
             LogicalValues { rows: [[]], schema: Schema { fields: [] } }
             LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
           LogicalProject { exprs: [($0 >= 1:Int32)] }
@@ -140,7 +140,7 @@
     select x from t1 where y in (select y from t2);
   logical_plan: |
     LogicalProject { exprs: [$1] }
-      LogicalJoin { type: LeftSemi, on: ($2 = $3), output_indices: [0, 1, 2] }
+      LogicalJoin { type: LeftSemi, on: ($2 = $3) }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
         LogicalProject { exprs: [$2] }
           LogicalScan { table: t2, columns: [_row_id, x, y] }
@@ -150,7 +150,7 @@
     select x from t1 where y not in (select y from t2);
   logical_plan: |
     LogicalProject { exprs: [$1] }
-      LogicalJoin { type: LeftAnti, on: ($2 = $3), output_indices: [0, 1, 2] }
+      LogicalJoin { type: LeftAnti, on: ($2 = $3) }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
         LogicalProject { exprs: [$2] }
           LogicalScan { table: t2, columns: [_row_id, x, y] }
