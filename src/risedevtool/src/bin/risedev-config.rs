@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(let_else)]
+#![allow(clippy::needless_question_mark)]
 
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, BufWriter, Write};
