@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::pin_mut;
 use futures::stream::StreamExt;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
@@ -466,7 +467,8 @@ async fn test_state_table_iter() {
         .unwrap();
 
     {
-        let mut iter = Box::pin(state.iter(epoch).await.unwrap());
+        let iter = state.iter(epoch).await.unwrap();
+        pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
         assert!(res.is_some());
@@ -576,7 +578,8 @@ async fn test_state_table_iter() {
         )
         .unwrap();
 
-    let mut iter = Box::pin(state.iter(epoch).await.unwrap());
+    let iter = state.iter(epoch).await.unwrap();
+    pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
 
@@ -771,8 +774,10 @@ async fn test_multi_state_table_iter() {
         .unwrap();
 
     {
-        let mut iter_1 = Box::pin(state_1.iter(epoch).await.unwrap());
-        let mut iter_2 = Box::pin(state_2.iter(epoch).await.unwrap());
+        let iter_1 = state_1.iter(epoch).await.unwrap();
+        pin_mut!(iter_1);
+        let iter_2 = state_2.iter(epoch).await.unwrap();
+        pin_mut!(iter_2);
 
         let res_1_1 = iter_1.next().await.unwrap().unwrap();
         assert!(res_1_1.is_some());
