@@ -16,64 +16,52 @@ use std::collections::HashMap;
 use anyhow::Result;
 use bytes::Bytes;
 use serde_json::{Map, Value};
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, Duration, Instant};
 
 use super::field_generator::FieldGeneratorImpl;
-use super::FieldGenerator;
-use crate::{Column, SourceMessage};
-pub type BoxedFieldGenerator = Box<dyn FieldGenerator>;
+use super::DEFUALT_DATAGEN_INTERVAL;
+use crate::SourceMessage;
 
 pub struct DatagenEventGenerator {
     pub fields_map: HashMap<String, FieldGeneratorImpl>,
-    pub last_offset: u64,
-    pub batch_chunk_size: u64,
+    pub events_so_far: u64,
     pub rows_per_second: u64,
+    pub split_id: String,
+    pub partition_size: u64,
 }
 
 impl DatagenEventGenerator {
     pub fn new(
-        columns: Vec<Column>,
-        last_offset: u64,
-        batch_chunk_size: u64,
+        fields_map: HashMap<String, FieldGeneratorImpl>,
         rows_per_second: u64,
+        events_so_far: u64,
+        split_id: String,
+        split_num: u64,
+        split_index: u64,
     ) -> Result<Self> {
-        // FIXME better way to throw out err in the map
-        let fields_map: HashMap<String, FieldGeneratorImpl> = columns[1..]
-            .iter()
-            .map(|column| {
-                (
-                    column.name.clone(),
-                    FieldGeneratorImpl::new(
-                        column.data_type.clone(),
-                        super::FieldKind::Random,
-                        None,
-                        None,
-                    ),
-                )
-            })
-            .map(|(s, field)| (s, Result::unwrap(field)))
-            .collect();
-        assert_eq!(
-            fields_map.len() + 1,
-            columns.len(),
-            "parsing datagen table fail!"
-        );
-
+        let partition_size = if rows_per_second % split_num > split_index {
+            rows_per_second / split_num + 1
+        } else {
+            rows_per_second / split_num
+        };
         Ok(Self {
             fields_map,
-            last_offset,
-            batch_chunk_size,
+            events_so_far,
             rows_per_second,
+            split_id,
+            partition_size,
         })
     }
 
     pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        sleep(Duration::from_secs(
-            self.batch_chunk_size / self.rows_per_second,
-        ))
-        .await;
+        let now = Instant::now();
         let mut res = vec![];
-        for i in 0..self.batch_chunk_size {
+        let mut generated_count: u64 = 0;
+        // if generating data time beyond 1s then just return the result
+        for i in 0..self.partition_size {
+            if now.elapsed().as_millis() >= DEFUALT_DATAGEN_INTERVAL {
+                break;
+            }
             let map: Map<String, Value> = self
                 .fields_map
                 .iter_mut()
@@ -83,13 +71,92 @@ impl DatagenEventGenerator {
             let value = Value::Object(map);
             let msg = SourceMessage {
                 payload: Some(Bytes::from(value.to_string())),
-                offset: (self.last_offset + i).to_string(),
-                split_id: 0.to_string(),
+                offset: (self.events_so_far + i).to_string(),
+                split_id: self.split_id.clone(),
             };
-
+            generated_count += 1;
             res.push(msg);
         }
-        self.last_offset += self.batch_chunk_size;
+
+        self.events_so_far += generated_count;
+
+        // if left time < 1s then wait
+        if now.elapsed().as_millis() < DEFUALT_DATAGEN_INTERVAL {
+            sleep(Duration::from_millis(
+                (DEFUALT_DATAGEN_INTERVAL - now.elapsed().as_millis()) as u64,
+            ))
+            .await;
+        }
+
         Ok(Some(res))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn check_sequence_partition_result(
+        split_num: u64,
+        split_index: u64,
+        rows_per_second: u64,
+        expected_length: usize,
+    ) {
+        let split_id = format!("{}-{}", split_num, split_index);
+        let mut fields_map = HashMap::new();
+        fields_map.insert(
+            "v1".to_string(),
+            FieldGeneratorImpl::with_sequence(
+                risingwave_common::types::DataType::Int32,
+                Some("1".to_string()),
+                Some("10".to_string()),
+                split_index,
+                split_num,
+            )
+            .unwrap(),
+        );
+
+        fields_map.insert(
+            "v2".to_string(),
+            FieldGeneratorImpl::with_sequence(
+                risingwave_common::types::DataType::Float32,
+                Some("1".to_string()),
+                Some("10".to_string()),
+                split_index,
+                split_num,
+            )
+            .unwrap(),
+        );
+
+        let mut generator = DatagenEventGenerator::new(
+            fields_map,
+            rows_per_second,
+            0,
+            split_id,
+            split_num,
+            split_index,
+        )
+        .unwrap();
+
+        let chunk = generator.next().await.unwrap().unwrap();
+        assert_eq!(expected_length, chunk.len());
+    }
+
+    #[tokio::test]
+    async fn test_one_partition_sequence() {
+        check_sequence_partition_result(1, 0, 10, 10).await;
+    }
+
+    #[tokio::test]
+    async fn test_two_partition_sequence() {
+        check_sequence_partition_result(2, 0, 10, 5).await;
+        check_sequence_partition_result(2, 1, 10, 5).await;
+    }
+
+    #[tokio::test]
+    async fn test_three_partition_sequence() {
+        check_sequence_partition_result(3, 0, 10, 4).await;
+        check_sequence_partition_result(3, 1, 10, 3).await;
+        check_sequence_partition_result(3, 2, 10, 3).await;
     }
 }

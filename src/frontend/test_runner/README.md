@@ -4,9 +4,6 @@ This module contains a testing tool for binder, planner and optimizer.
 Given a sequence of SQL queries as the input, the test runner will check
 the logical operator tree if any, and the physical operator tree if any.
 
-Just the same as a normal Rust unit test, you can independently run the test runner
-via function `run_all_test_files()` in `plan_test_runner.rs`.
-
 The test data in YAML format is organized under `tests/testdata` folder.
 
 ```yaml
