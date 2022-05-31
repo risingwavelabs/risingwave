@@ -319,4 +319,83 @@ mod tests {
             )
         );
     }
+
+    #[tokio::test]
+    async fn test_output_indices() {
+        let field1 = Field::unnamed(DataType::Int64);
+        let field2 = Field::unnamed(DataType::Int64);
+        let field3 = Field::with_name(DataType::Timestamp, "created_at");
+        let schema = Schema::new(vec![field1, field2, field3]);
+        let pk_indices = vec![0];
+
+        let chunk = StreamChunk::from_pretty(
+            &"I I TS
+            + 1 1 ^10:00:00
+            + 2 3 ^10:05:00
+            - 3 2 ^10:14:00
+            + 4 1 ^10:22:00
+            - 5 3 ^10:33:00
+            + 6 2 ^10:42:00
+            - 7 1 ^10:51:00
+            + 8 3 ^11:02:00"
+                .replace('^', "2022-2-2T"),
+        );
+
+        let input =
+            MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
+
+        let window_slide = IntervalUnit::from_minutes(15);
+        let window_size = IntervalUnit::from_minutes(30);
+        let executor = super::HopWindowExecutor::new(
+            input,
+            ExecutorInfo {
+                // TODO: the schema is incorrect, but it seems useless here.
+                schema: schema.clone(),
+                pk_indices,
+                identity: "test".to_string(),
+            },
+            2,
+            window_slide,
+            window_size,
+            vec![4, 1, 0, 2],
+        )
+        .boxed();
+
+        let mut stream = executor.execute();
+        // TODO: add more test infra to reduce the duplicated codes below.
+
+        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                &"TS        I I TS       
+                + ^10:15:00 1 1 ^10:00:00
+                + ^10:15:00 3 2 ^10:05:00
+                - ^10:15:00 2 3 ^10:14:00
+                + ^10:30:00 1 4 ^10:22:00
+                - ^10:45:00 3 5 ^10:33:00
+                + ^10:45:00 2 6 ^10:42:00
+                - ^11:00:00 1 7 ^10:51:00
+                + ^11:15:00 3 8 ^11:02:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+
+        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                &"TS        I I TS 
+                + ^10:30:00 1 1 ^10:00:00 
+                + ^10:30:00 3 2 ^10:05:00 
+                - ^10:30:00 2 3 ^10:14:00 
+                + ^10:45:00 1 4 ^10:22:00 
+                - ^11:00:00 3 5 ^10:33:00 
+                + ^11:00:00 2 6 ^10:42:00 
+                - ^11:15:00 1 7 ^10:51:00 
+                + ^11:30:00 3 8 ^11:02:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+    }
 }

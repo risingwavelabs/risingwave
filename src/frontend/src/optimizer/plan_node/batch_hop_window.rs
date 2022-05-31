@@ -102,8 +102,7 @@ impl ToBatchProst for BatchHopWindow {
                 .logical
                 .output_indices
                 .iter()
-                .copied()
-                .map(|x| x as u32)
+                .map(|&x| x as u32)
                 .collect(),
         })
     }
