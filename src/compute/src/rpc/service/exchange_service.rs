@@ -62,7 +62,7 @@ impl ExchangeService for ExchangeServiceImpl {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
         if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
             error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
-            return Err(e.to_grpc_status());
+            return Err(e.into());
         }
 
         Ok(Response::new(ReceiverStream::new(rx)))
@@ -77,10 +77,7 @@ impl ExchangeService for ExchangeServiceImpl {
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
         let req = request.into_inner();
         let up_down_ids = (req.up_fragment_id, req.down_fragment_id);
-        let receiver = self
-            .stream_mgr
-            .take_receiver(up_down_ids)
-            .map_err(|e| e.to_grpc_status())?;
+        let receiver = self.stream_mgr.take_receiver(up_down_ids)?;
         match self.get_stream_impl(peer_addr, receiver, up_down_ids).await {
             Ok(resp) => Ok(resp),
             Err(e) => {
@@ -88,7 +85,7 @@ impl ExchangeService for ExchangeServiceImpl {
                     "Failed to server stream exchange RPC from {}: {}",
                     peer_addr, e
                 );
-                Err(e.to_grpc_status())
+                Err(e.into())
             }
         }
     }
@@ -129,7 +126,7 @@ impl ExchangeServiceImpl {
                             Ok(stream_msg) => Ok(GetStreamResponse {
                                 message: Some(stream_msg),
                             }),
-                            Err(e) => Err(e.to_grpc_status()),
+                            Err(e) => Err(e.into()),
                         };
 
                         let bytes = match res.as_ref() {
@@ -150,7 +147,7 @@ impl ExchangeServiceImpl {
                                     .inc_by(bytes as u64);
                                 Ok(())
                             }
-                            Err(e) => tx.send(Err(e.to_grpc_status())).await,
+                            Err(e) => tx.send(Err(e.into())).await,
                         };
                     }
                 }

@@ -1,4 +1,4 @@
-// Copyright 2022 Singularity Data
+// Copyright 2022 Singulari&ty Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashSet;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -49,6 +51,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
         distribution_keys: Vec<usize>,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
+        let arrange_columns_set: HashSet<usize> =
+            keys.iter().map(|k| k.column_idx).collect::<HashSet<_>>();
+        let dist_key_set = distribution_keys.iter().copied().collect::<HashSet<_>>();
+        assert!(dist_key_set.is_subset(&arrange_columns_set));
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
         let column_descs = column_ids

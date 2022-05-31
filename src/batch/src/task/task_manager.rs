@@ -88,7 +88,7 @@ impl BatchManager {
                     );
                     Ok(())
                 }
-                Err(e) => tx.send(Err(e.to_grpc_status())).await,
+                Err(e) => tx.send(Err(e.into())).await,
             }
         });
         Ok(())
@@ -188,6 +188,7 @@ mod tests {
 
     #[test]
     fn test_task_not_found() {
+        use tonic::Status;
         let manager = BatchManager::new();
         let task_id = TaskId {
             task_id: 0,
@@ -196,11 +197,7 @@ mod tests {
         };
 
         assert_eq!(
-            manager
-                .check_if_task_running(&task_id)
-                .unwrap_err()
-                .to_grpc_status()
-                .code(),
+            Status::from(manager.check_if_task_running(&task_id).unwrap_err()).code(),
             Code::Internal
         );
 
@@ -213,7 +210,7 @@ mod tests {
             output_id: 0,
         };
         match manager.take_output(&output_id) {
-            Err(e) => assert_eq!(e.to_grpc_status().code(), Code::Internal),
+            Err(e) => assert_eq!(Status::from(e).code(), Code::Internal),
             Ok(_) => unreachable!(),
         };
     }
