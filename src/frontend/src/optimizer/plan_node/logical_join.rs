@@ -52,11 +52,13 @@ impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "LogicalJoin {{ type: {:?}, on: {}, output_indices: {:?} }}",
-            &self.join_type,
-            &self.on,
-            &self.output_indices[..]
-        )
+            "LogicalJoin {{ type: {:?}, on: {}",
+            &self.join_type, &self.on,
+        )?;
+        if self.output_indices != (0..self.schema().len()).collect::<Vec<usize>>() {
+            write!(f, ", output_indices: {:?} }}", &self.output_indices[..])?
+        }
+        Ok(())
     }
 }
 
