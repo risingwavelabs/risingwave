@@ -201,24 +201,23 @@
                             BatchScan { table: region, columns: [_row_id, r_regionkey, r_name, r_comment] }
                     BatchExchange { order: [], dist: HashShard([1]) }
                       BatchProject { exprs: [$1, $0] }
-                        BatchProject { exprs: [$0, $1] }
-                          BatchHashJoin { type: Inner, predicate: $2 = $3 }
-                            BatchExchange { order: [], dist: HashShard([2]) }
-                              BatchProject { exprs: [$0, $1, $4] }
-                                BatchHashJoin { type: Inner, predicate: $2 = $3 }
-                                  BatchExchange { order: [], dist: HashShard([2]) }
-                                    BatchProject { exprs: [$0, $2, $4] }
-                                      BatchHashJoin { type: Inner, predicate: $1 = $3 }
-                                        BatchExchange { order: [], dist: HashShard([1]) }
-                                          BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
-                                        BatchExchange { order: [], dist: HashShard([0]) }
-                                          BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
-                                  BatchExchange { order: [], dist: HashShard([0]) }
-                                    BatchScan { table: nation, columns: [n_nationkey, n_regionkey] }
-                            BatchExchange { order: [], dist: HashShard([0]) }
-                              BatchProject { exprs: [$0] }
-                                BatchFilter { predicate: ($1 = 'AFRICA':Varchar) }
-                                  BatchScan { table: region, columns: [r_regionkey, r_name] }
+                        BatchHashJoin { type: Inner, predicate: $2 = $3 }
+                          BatchExchange { order: [], dist: HashShard([2]) }
+                            BatchProject { exprs: [$0, $1, $4] }
+                              BatchHashJoin { type: Inner, predicate: $2 = $3 }
+                                BatchExchange { order: [], dist: HashShard([2]) }
+                                  BatchProject { exprs: [$0, $2, $4] }
+                                    BatchHashJoin { type: Inner, predicate: $1 = $3 }
+                                      BatchExchange { order: [], dist: HashShard([1]) }
+                                        BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
+                                      BatchExchange { order: [], dist: HashShard([0]) }
+                                        BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                                BatchExchange { order: [], dist: HashShard([0]) }
+                                  BatchScan { table: nation, columns: [n_nationkey, n_regionkey] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchProject { exprs: [$0] }
+                              BatchFilter { predicate: ($1 = 'AFRICA':Varchar) }
+                                BatchScan { table: region, columns: [r_regionkey, r_name] }
   stream_plan: |
     StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id(hidden), ps_partkey(hidden), ps_suppkey(hidden), ps_availqty(hidden), ps_supplycost(hidden), ps_comment(hidden), _row_id#1(hidden), p_name(hidden), p_brand(hidden), p_type(hidden), p_size(hidden), p_container(hidden), p_retailprice(hidden), p_comment(hidden), _row_id#2(hidden), s_suppkey(hidden), s_nationkey(hidden), _row_id#3(hidden), n_nationkey(hidden), n_regionkey(hidden), n_comment(hidden), _row_id#4(hidden), r_regionkey(hidden), r_name(hidden), r_comment(hidden)], pk_columns: [_row_id, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id#1, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id#2, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id#3, n_nationkey, n_name, n_regionkey, n_comment, _row_id#4, r_regionkey, r_name, r_comment], order_descs: [s_acctbal, n_name, s_name, p_partkey, _row_id, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id#1, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id#2, s_suppkey, s_address, s_nationkey, s_phone, s_comment, _row_id#3, n_nationkey, n_regionkey, n_comment, _row_id#4, r_regionkey, r_name, r_comment] }
       StreamTopN { order: [$0 DESC, $2 ASC, $1 ASC, $3 ASC], limit: 100, offset: 0 }
@@ -250,25 +249,24 @@
                             StreamFilter { predicate: ($2 = 'AFRICA':Varchar) }
                               StreamTableScan { table: region, columns: [_row_id, r_regionkey, r_name, r_comment], pk_indices: [0] }
                       StreamExchange { dist: HashShard([1]) }
-                        StreamProject { exprs: [$1, $0, $2, $3, $4, $5] }
-                          StreamProject { exprs: [$0, $1, $3, $4, $5, $7] }
-                            StreamHashJoin { type: Inner, predicate: $2 = $6 }
-                              StreamExchange { dist: HashShard([2]) }
-                                StreamProject { exprs: [$0, $1, $6, $3, $4, $7] }
-                                  StreamHashJoin { type: Inner, predicate: $2 = $5 }
-                                    StreamExchange { dist: HashShard([2]) }
-                                      StreamProject { exprs: [$0, $2, $5, $3, $6] }
-                                        StreamHashJoin { type: Inner, predicate: $1 = $4 }
-                                          StreamExchange { dist: HashShard([1]) }
-                                            StreamTableScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost, _row_id], pk_indices: [3] }
-                                          StreamExchange { dist: HashShard([0]) }
-                                            StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
-                                    StreamExchange { dist: HashShard([0]) }
-                                      StreamTableScan { table: nation, columns: [n_nationkey, n_regionkey, _row_id], pk_indices: [2] }
-                              StreamExchange { dist: HashShard([0]) }
-                                StreamProject { exprs: [$0, $2] }
-                                  StreamFilter { predicate: ($1 = 'AFRICA':Varchar) }
-                                    StreamTableScan { table: region, columns: [r_regionkey, r_name, _row_id], pk_indices: [2] }
+                        StreamProject { exprs: [$1, $0, $3, $4, $5, $7] }
+                          StreamHashJoin { type: Inner, predicate: $2 = $6 }
+                            StreamExchange { dist: HashShard([2]) }
+                              StreamProject { exprs: [$0, $1, $6, $3, $4, $7] }
+                                StreamHashJoin { type: Inner, predicate: $2 = $5 }
+                                  StreamExchange { dist: HashShard([2]) }
+                                    StreamProject { exprs: [$0, $2, $5, $3, $6] }
+                                      StreamHashJoin { type: Inner, predicate: $1 = $4 }
+                                        StreamExchange { dist: HashShard([1]) }
+                                          StreamTableScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost, _row_id], pk_indices: [3] }
+                                        StreamExchange { dist: HashShard([0]) }
+                                          StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
+                                  StreamExchange { dist: HashShard([0]) }
+                                    StreamTableScan { table: nation, columns: [n_nationkey, n_regionkey, _row_id], pk_indices: [2] }
+                            StreamExchange { dist: HashShard([0]) }
+                              StreamProject { exprs: [$0, $2] }
+                                StreamFilter { predicate: ($1 = 'AFRICA':Varchar) }
+                                  StreamTableScan { table: region, columns: [r_regionkey, r_name, _row_id], pk_indices: [2] }
 - id: tpch_q3
   before:
     - create_tables
@@ -302,23 +300,22 @@
         BatchProject { exprs: [$0, $3, $1, $2] }
           BatchHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
             BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
-              BatchProject { exprs: [$2, $0, $1, ($3 * (1:Int32 - $4))] }
-                BatchProject { exprs: [$1, $2, $3, $4, $5] }
-                  BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchProject { exprs: [$1, $3, $4] }
-                        BatchHashJoin { type: Inner, predicate: $0 = $2 }
-                          BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchProject { exprs: [$0] }
-                              BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) }
-                                BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
-                          BatchExchange { order: [], dist: HashShard([1]) }
-                            BatchFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
-                              BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchProject { exprs: [$0, $1, $2] }
-                        BatchFilter { predicate: ($3 > '1995-03-29':Varchar::Date) }
-                          BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate] }
+              BatchProject { exprs: [$3, $1, $2, ($4 * (1:Int32 - $5))] }
+                BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchProject { exprs: [$1, $3, $4] }
+                      BatchHashJoin { type: Inner, predicate: $0 = $2 }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchProject { exprs: [$0] }
+                            BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) }
+                              BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
+                        BatchExchange { order: [], dist: HashShard([1]) }
+                          BatchFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
+                            BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchProject { exprs: [$0, $1, $2] }
+                      BatchFilter { predicate: ($3 > '1995-03-29':Varchar::Date) }
+                        BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate] }
   stream_plan: |
     StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], pk_columns: [l_orderkey, o_orderdate, o_shippriority], order_descs: [revenue, o_orderdate, l_orderkey, o_shippriority] }
       StreamTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
@@ -326,23 +323,22 @@
           StreamProject { exprs: [$0, $4, $1, $2] }
             StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, sum($3)] }
               StreamExchange { dist: HashShard([0, 1, 2]) }
-                StreamProject { exprs: [$2, $0, $1, ($3 * (1:Int32 - $4)), $5, $6, $7] }
-                  StreamProject { exprs: [$1, $2, $5, $6, $7, $3, $4, $8] }
-                    StreamHashJoin { type: Inner, predicate: $0 = $5 }
-                      StreamExchange { dist: HashShard([0]) }
-                        StreamProject { exprs: [$2, $4, $5, $1, $6] }
-                          StreamHashJoin { type: Inner, predicate: $0 = $3 }
-                            StreamExchange { dist: HashShard([0]) }
-                              StreamProject { exprs: [$0, $2] }
-                                StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) }
-                                  StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id], pk_indices: [2] }
-                            StreamExchange { dist: HashShard([1]) }
-                              StreamFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
-                                StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority, _row_id], pk_indices: [4] }
-                      StreamExchange { dist: HashShard([0]) }
-                        StreamProject { exprs: [$0, $1, $2, $4] }
-                          StreamFilter { predicate: ($3 > '1995-03-29':Varchar::Date) }
-                            StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id], pk_indices: [4] }
+                StreamProject { exprs: [$5, $1, $2, ($6 * (1:Int32 - $7)), $3, $4, $8] }
+                  StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                    StreamExchange { dist: HashShard([0]) }
+                      StreamProject { exprs: [$2, $4, $5, $1, $6] }
+                        StreamHashJoin { type: Inner, predicate: $0 = $3 }
+                          StreamExchange { dist: HashShard([0]) }
+                            StreamProject { exprs: [$0, $2] }
+                              StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) }
+                                StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id], pk_indices: [2] }
+                          StreamExchange { dist: HashShard([1]) }
+                            StreamFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
+                              StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority, _row_id], pk_indices: [4] }
+                    StreamExchange { dist: HashShard([0]) }
+                      StreamProject { exprs: [$0, $1, $2, $4] }
+                        StreamFilter { predicate: ($3 > '1995-03-29':Varchar::Date) }
+                          StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id], pk_indices: [4] }
 - id: tpch_q4
   before:
     - create_tables
@@ -431,71 +427,69 @@
         BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchProject { exprs: [$2, ($0 * (1:Int32 - $1))] }
-              BatchProject { exprs: [$0, $1, $2] }
-                BatchHashJoin { type: Inner, predicate: $3 = $4 }
-                  BatchExchange { order: [], dist: HashShard([3]) }
-                    BatchProject { exprs: [$1, $2, $4, $5] }
-                      BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchProject { exprs: [$2, $5, $6] }
-                            BatchHashJoin { type: Inner, predicate: $1 = $4 AND $0 = $3 }
-                              BatchExchange { order: [], dist: HashShard([0, 1]) }
-                                BatchProject { exprs: [$1, $2, $3] }
-                                  BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                                    BatchExchange { order: [], dist: HashShard([0]) }
-                                      BatchProject { exprs: [$1, $2] }
-                                        BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                                          BatchExchange { order: [], dist: HashShard([0]) }
-                                            BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
-                                          BatchExchange { order: [], dist: HashShard([1]) }
-                                            BatchProject { exprs: [$0, $1] }
-                                              BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-                                                BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
-                                    BatchExchange { order: [], dist: HashShard([1]) }
-                                      BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
-                              BatchExchange { order: [], dist: HashShard([0, 1]) }
-                                BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount] }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchScan { table: nation, columns: [n_nationkey, n_name, n_regionkey] }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchProject { exprs: [$0] }
-                      BatchFilter { predicate: ($1 = 'MIDDLE EAST':Varchar) }
-                        BatchScan { table: region, columns: [r_regionkey, r_name] }
+              BatchHashJoin { type: Inner, predicate: $3 = $4 }
+                BatchExchange { order: [], dist: HashShard([3]) }
+                  BatchProject { exprs: [$1, $2, $4, $5] }
+                    BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchProject { exprs: [$2, $5, $6] }
+                          BatchHashJoin { type: Inner, predicate: $1 = $4 AND $0 = $3 }
+                            BatchExchange { order: [], dist: HashShard([0, 1]) }
+                              BatchProject { exprs: [$1, $2, $3] }
+                                BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                                  BatchExchange { order: [], dist: HashShard([0]) }
+                                    BatchProject { exprs: [$1, $2] }
+                                      BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                                        BatchExchange { order: [], dist: HashShard([0]) }
+                                          BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
+                                        BatchExchange { order: [], dist: HashShard([1]) }
+                                          BatchProject { exprs: [$0, $1] }
+                                            BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                                              BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
+                                  BatchExchange { order: [], dist: HashShard([1]) }
+                                    BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                            BatchExchange { order: [], dist: HashShard([0, 1]) }
+                              BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchScan { table: nation, columns: [n_nationkey, n_name, n_regionkey] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchProject { exprs: [$0] }
+                    BatchFilter { predicate: ($1 = 'MIDDLE EAST':Varchar) }
+                      BatchScan { table: region, columns: [r_regionkey, r_name] }
   stream_plan: |
     StreamMaterialize { columns: [n_name, agg#0(hidden), revenue], pk_columns: [n_name], order_descs: [revenue, n_name] }
       StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
         StreamExchange { dist: HashShard([0]) }
-          StreamProject { exprs: [$2, ($0 * (1:Int32 - $1)), $3, $4, $5, $6, $7, $8] }
-            StreamProject { exprs: [$0, $1, $2, $4, $5, $6, $7, $8, $10] }
-              StreamHashJoin { type: Inner, predicate: $3 = $9 }
-                StreamExchange { dist: HashShard([3]) }
-                  StreamProject { exprs: [$1, $2, $8, $9, $3, $4, $5, $6, $10] }
-                    StreamHashJoin { type: Inner, predicate: $0 = $7 }
-                      StreamExchange { dist: HashShard([0]) }
-                        StreamProject { exprs: [$2, $8, $9, $3, $4, $5, $10] }
-                          StreamHashJoin { type: Inner, predicate: $1 = $7 AND $0 = $6 }
-                            StreamExchange { dist: HashShard([0, 1]) }
-                              StreamProject { exprs: [$1, $4, $5, $2, $3, $6] }
-                                StreamHashJoin { type: Inner, predicate: $0 = $5 }
-                                  StreamExchange { dist: HashShard([0]) }
-                                    StreamProject { exprs: [$1, $3, $2, $5] }
-                                      StreamHashJoin { type: Inner, predicate: $0 = $4 }
-                                        StreamExchange { dist: HashShard([0]) }
-                                          StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id], pk_indices: [2] }
-                                        StreamExchange { dist: HashShard([1]) }
-                                          StreamProject { exprs: [$0, $1, $3] }
-                                            StreamFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-                                              StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, _row_id], pk_indices: [3] }
-                                  StreamExchange { dist: HashShard([1]) }
-                                    StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
-                            StreamExchange { dist: HashShard([0, 1]) }
-                              StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, _row_id], pk_indices: [4] }
-                      StreamExchange { dist: HashShard([0]) }
-                        StreamTableScan { table: nation, columns: [n_nationkey, n_name, n_regionkey, _row_id], pk_indices: [3] }
-                StreamExchange { dist: HashShard([0]) }
-                  StreamProject { exprs: [$0, $2] }
-                    StreamFilter { predicate: ($1 = 'MIDDLE EAST':Varchar) }
-                      StreamTableScan { table: region, columns: [r_regionkey, r_name, _row_id], pk_indices: [2] }
+          StreamProject { exprs: [$2, ($0 * (1:Int32 - $1)), $4, $5, $6, $7, $8, $10] }
+            StreamHashJoin { type: Inner, predicate: $3 = $9 }
+              StreamExchange { dist: HashShard([3]) }
+                StreamProject { exprs: [$1, $2, $8, $9, $3, $4, $5, $6, $10] }
+                  StreamHashJoin { type: Inner, predicate: $0 = $7 }
+                    StreamExchange { dist: HashShard([0]) }
+                      StreamProject { exprs: [$2, $8, $9, $3, $4, $5, $10] }
+                        StreamHashJoin { type: Inner, predicate: $1 = $7 AND $0 = $6 }
+                          StreamExchange { dist: HashShard([0, 1]) }
+                            StreamProject { exprs: [$1, $4, $5, $2, $3, $6] }
+                              StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                                StreamExchange { dist: HashShard([0]) }
+                                  StreamProject { exprs: [$1, $3, $2, $5] }
+                                    StreamHashJoin { type: Inner, predicate: $0 = $4 }
+                                      StreamExchange { dist: HashShard([0]) }
+                                        StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id], pk_indices: [2] }
+                                      StreamExchange { dist: HashShard([1]) }
+                                        StreamProject { exprs: [$0, $1, $3] }
+                                          StreamFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                                            StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, _row_id], pk_indices: [3] }
+                                StreamExchange { dist: HashShard([1]) }
+                                  StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
+                          StreamExchange { dist: HashShard([0, 1]) }
+                            StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, _row_id], pk_indices: [4] }
+                    StreamExchange { dist: HashShard([0]) }
+                      StreamTableScan { table: nation, columns: [n_nationkey, n_name, n_regionkey, _row_id], pk_indices: [3] }
+              StreamExchange { dist: HashShard([0]) }
+                StreamProject { exprs: [$0, $2] }
+                  StreamFilter { predicate: ($1 = 'MIDDLE EAST':Varchar) }
+                    StreamTableScan { table: region, columns: [r_regionkey, r_name, _row_id], pk_indices: [2] }
 - id: tpch_q6
   before:
     - create_tables
@@ -571,68 +565,66 @@
       BatchSort { order: [$0 ASC, $1 ASC, $2 ASC] }
         BatchHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
           BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
-            BatchProject { exprs: [$3, $4, Extract('YEAR':Varchar, $2), ($0 * (1:Int32 - $1))] }
-              BatchProject { exprs: [$0, $1, $2, $3, $6] }
-                BatchFilter { predicate: ((($3 = 'ROMANIA':Varchar) AND ($6 = 'IRAN':Varchar)) OR (($3 = 'IRAN':Varchar) AND ($6 = 'ROMANIA':Varchar))) }
-                  BatchHashJoin { type: Inner, predicate: $4 = $5 }
-                    BatchExchange { order: [], dist: HashShard([4]) }
-                      BatchProject { exprs: [$0, $1, $2, $3, $6] }
-                        BatchHashJoin { type: Inner, predicate: $4 = $5 }
-                          BatchExchange { order: [], dist: HashShard([4]) }
-                            BatchProject { exprs: [$1, $2, $3, $4, $6] }
-                              BatchHashJoin { type: Inner, predicate: $0 = $5 }
-                                BatchExchange { order: [], dist: HashShard([0]) }
-                                  BatchProject { exprs: [$1, $2, $3, $4, $6] }
-                                    BatchHashJoin { type: Inner, predicate: $0 = $5 }
-                                      BatchExchange { order: [], dist: HashShard([0]) }
-                                        BatchProject { exprs: [$1, $2, $4, $5, $6] }
-                                          BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                                            BatchExchange { order: [], dist: HashShard([0]) }
-                                              BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
-                                            BatchExchange { order: [], dist: HashShard([1]) }
-                                              BatchFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
-                                                BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate] }
-                                      BatchExchange { order: [], dist: HashShard([0]) }
-                                        BatchScan { table: nation, columns: [n_nationkey, n_name] }
-                                BatchExchange { order: [], dist: HashShard([0]) }
-                                  BatchScan { table: orders, columns: [o_orderkey, o_custkey] }
-                          BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchScan { table: nation, columns: [n_nationkey, n_name] }
+            BatchProject { exprs: [$3, $6, Extract('YEAR':Varchar, $2), ($0 * (1:Int32 - $1))] }
+              BatchFilter { predicate: ((($3 = 'ROMANIA':Varchar) AND ($6 = 'IRAN':Varchar)) OR (($3 = 'IRAN':Varchar) AND ($6 = 'ROMANIA':Varchar))) }
+                BatchHashJoin { type: Inner, predicate: $4 = $5 }
+                  BatchExchange { order: [], dist: HashShard([4]) }
+                    BatchProject { exprs: [$0, $1, $2, $3, $6] }
+                      BatchHashJoin { type: Inner, predicate: $4 = $5 }
+                        BatchExchange { order: [], dist: HashShard([4]) }
+                          BatchProject { exprs: [$1, $2, $3, $4, $6] }
+                            BatchHashJoin { type: Inner, predicate: $0 = $5 }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchProject { exprs: [$1, $2, $3, $4, $6] }
+                                  BatchHashJoin { type: Inner, predicate: $0 = $5 }
+                                    BatchExchange { order: [], dist: HashShard([0]) }
+                                      BatchProject { exprs: [$1, $2, $4, $5, $6] }
+                                        BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                                          BatchExchange { order: [], dist: HashShard([0]) }
+                                            BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                                          BatchExchange { order: [], dist: HashShard([1]) }
+                                            BatchFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
+                                              BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate] }
+                                    BatchExchange { order: [], dist: HashShard([0]) }
+                                      BatchScan { table: nation, columns: [n_nationkey, n_name] }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchScan { table: orders, columns: [o_orderkey, o_custkey] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchScan { table: nation, columns: [n_nationkey, n_name] }
   stream_plan: |
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, agg#0(hidden), revenue], pk_columns: [supp_nation, cust_nation, l_year] }
       StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, sum($3)] }
         StreamExchange { dist: HashShard([0, 1, 2]) }
-          StreamProject { exprs: [$3, $4, Extract('YEAR':Varchar, $2), ($0 * (1:Int32 - $1)), $5, $6, $7, $8, $9, $10] }
-            StreamProject { exprs: [$0, $1, $2, $3, $11, $5, $6, $7, $8, $9, $12] }
-              StreamFilter { predicate: ((($3 = 'ROMANIA':Varchar) AND ($11 = 'IRAN':Varchar)) OR (($3 = 'IRAN':Varchar) AND ($11 = 'ROMANIA':Varchar))) }
-                StreamHashJoin { type: Inner, predicate: $4 = $10 }
-                  StreamExchange { dist: HashShard([4]) }
-                    StreamProject { exprs: [$0, $1, $2, $3, $10, $5, $6, $7, $8, $11] }
-                      StreamHashJoin { type: Inner, predicate: $4 = $9 }
-                        StreamExchange { dist: HashShard([4]) }
-                          StreamProject { exprs: [$1, $2, $3, $4, $9, $5, $6, $7, $10] }
-                            StreamHashJoin { type: Inner, predicate: $0 = $8 }
-                              StreamExchange { dist: HashShard([0]) }
-                                StreamProject { exprs: [$1, $2, $3, $4, $8, $5, $6, $9] }
-                                  StreamHashJoin { type: Inner, predicate: $0 = $7 }
-                                    StreamExchange { dist: HashShard([0]) }
-                                      StreamProject { exprs: [$1, $3, $5, $6, $7, $2, $8] }
-                                        StreamHashJoin { type: Inner, predicate: $0 = $4 }
-                                          StreamExchange { dist: HashShard([0]) }
-                                            StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
-                                          StreamExchange { dist: HashShard([1]) }
-                                            StreamFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
-                                              StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id], pk_indices: [5] }
-                                    StreamExchange { dist: HashShard([0]) }
-                                      StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
-                              StreamExchange { dist: HashShard([0]) }
-                                StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, _row_id], pk_indices: [2] }
-                        StreamExchange { dist: HashShard([0]) }
-                          StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id], pk_indices: [2] }
-                  StreamExchange { dist: HashShard([0]) }
-                    StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
+          StreamProject { exprs: [$3, $11, Extract('YEAR':Varchar, $2), ($0 * (1:Int32 - $1)), $5, $6, $7, $8, $9, $12] }
+            StreamFilter { predicate: ((($3 = 'ROMANIA':Varchar) AND ($11 = 'IRAN':Varchar)) OR (($3 = 'IRAN':Varchar) AND ($11 = 'ROMANIA':Varchar))) }
+              StreamHashJoin { type: Inner, predicate: $4 = $10 }
+                StreamExchange { dist: HashShard([4]) }
+                  StreamProject { exprs: [$0, $1, $2, $3, $10, $5, $6, $7, $8, $11] }
+                    StreamHashJoin { type: Inner, predicate: $4 = $9 }
+                      StreamExchange { dist: HashShard([4]) }
+                        StreamProject { exprs: [$1, $2, $3, $4, $9, $5, $6, $7, $10] }
+                          StreamHashJoin { type: Inner, predicate: $0 = $8 }
+                            StreamExchange { dist: HashShard([0]) }
+                              StreamProject { exprs: [$1, $2, $3, $4, $8, $5, $6, $9] }
+                                StreamHashJoin { type: Inner, predicate: $0 = $7 }
+                                  StreamExchange { dist: HashShard([0]) }
+                                    StreamProject { exprs: [$1, $3, $5, $6, $7, $2, $8] }
+                                      StreamHashJoin { type: Inner, predicate: $0 = $4 }
+                                        StreamExchange { dist: HashShard([0]) }
+                                          StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
+                                        StreamExchange { dist: HashShard([1]) }
+                                          StreamFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
+                                            StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id], pk_indices: [5] }
+                                  StreamExchange { dist: HashShard([0]) }
+                                    StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
+                            StreamExchange { dist: HashShard([0]) }
+                              StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, _row_id], pk_indices: [2] }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id], pk_indices: [2] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
 - id: tpch_q8
   before:
     - create_tables
@@ -683,94 +675,92 @@
           BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($2)] }
             BatchExchange { order: [], dist: HashShard([0]) }
               BatchProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))] }
-                BatchProject { exprs: [$0, $1, $2, $3] }
-                  BatchHashJoin { type: Inner, predicate: $4 = $5 }
-                    BatchExchange { order: [], dist: HashShard([4]) }
-                      BatchProject { exprs: [$0, $1, $2, $3, $6] }
-                        BatchHashJoin { type: Inner, predicate: $4 = $5 }
-                          BatchExchange { order: [], dist: HashShard([4]) }
-                            BatchProject { exprs: [$0, $1, $3, $4, $6] }
-                              BatchHashJoin { type: Inner, predicate: $2 = $5 }
-                                BatchExchange { order: [], dist: HashShard([2]) }
-                                  BatchProject { exprs: [$0, $1, $3, $4, $6] }
-                                    BatchHashJoin { type: Inner, predicate: $2 = $5 }
-                                      BatchExchange { order: [], dist: HashShard([2]) }
-                                        BatchProject { exprs: [$1, $2, $3, $5, $6] }
-                                          BatchHashJoin { type: Inner, predicate: $0 = $4 }
-                                            BatchExchange { order: [], dist: HashShard([0]) }
-                                              BatchProject { exprs: [$0, $2, $3, $5] }
-                                                BatchHashJoin { type: Inner, predicate: $1 = $4 }
-                                                  BatchExchange { order: [], dist: HashShard([1]) }
-                                                    BatchProject { exprs: [$0, $2, $3, $4] }
-                                                      BatchHashJoin { type: Inner, predicate: $1 = $5 }
-                                                        BatchExchange { order: [], dist: HashShard([1]) }
-                                                          BatchScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_extendedprice, l_discount] }
-                                                        BatchExchange { order: [], dist: HashShard([0]) }
-                                                          BatchProject { exprs: [$0] }
-                                                            BatchFilter { predicate: ($1 = 'PROMO ANODIZED STEEL':Varchar) }
-                                                              BatchScan { table: part, columns: [p_partkey, p_type] }
-                                                  BatchExchange { order: [], dist: HashShard([0]) }
-                                                    BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
-                                            BatchExchange { order: [], dist: HashShard([0]) }
-                                              BatchFilter { predicate: ($2 >= '1995-01-01':Varchar::Date) AND ($2 <= '1996-12-31':Varchar::Date) }
-                                                BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
-                                      BatchExchange { order: [], dist: HashShard([0]) }
-                                        BatchScan { table: nation, columns: [n_nationkey, n_name] }
-                                BatchExchange { order: [], dist: HashShard([0]) }
-                                  BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
-                          BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchScan { table: nation, columns: [n_nationkey, n_regionkey] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchProject { exprs: [$0] }
-                        BatchFilter { predicate: ($1 = 'ASIA':Varchar) }
-                          BatchScan { table: region, columns: [r_regionkey, r_name] }
+                BatchHashJoin { type: Inner, predicate: $4 = $5 }
+                  BatchExchange { order: [], dist: HashShard([4]) }
+                    BatchProject { exprs: [$0, $1, $2, $3, $6] }
+                      BatchHashJoin { type: Inner, predicate: $4 = $5 }
+                        BatchExchange { order: [], dist: HashShard([4]) }
+                          BatchProject { exprs: [$0, $1, $3, $4, $6] }
+                            BatchHashJoin { type: Inner, predicate: $2 = $5 }
+                              BatchExchange { order: [], dist: HashShard([2]) }
+                                BatchProject { exprs: [$0, $1, $3, $4, $6] }
+                                  BatchHashJoin { type: Inner, predicate: $2 = $5 }
+                                    BatchExchange { order: [], dist: HashShard([2]) }
+                                      BatchProject { exprs: [$1, $2, $3, $5, $6] }
+                                        BatchHashJoin { type: Inner, predicate: $0 = $4 }
+                                          BatchExchange { order: [], dist: HashShard([0]) }
+                                            BatchProject { exprs: [$0, $2, $3, $5] }
+                                              BatchHashJoin { type: Inner, predicate: $1 = $4 }
+                                                BatchExchange { order: [], dist: HashShard([1]) }
+                                                  BatchProject { exprs: [$0, $2, $3, $4] }
+                                                    BatchHashJoin { type: Inner, predicate: $1 = $5 }
+                                                      BatchExchange { order: [], dist: HashShard([1]) }
+                                                        BatchScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_extendedprice, l_discount] }
+                                                      BatchExchange { order: [], dist: HashShard([0]) }
+                                                        BatchProject { exprs: [$0] }
+                                                          BatchFilter { predicate: ($1 = 'PROMO ANODIZED STEEL':Varchar) }
+                                                            BatchScan { table: part, columns: [p_partkey, p_type] }
+                                                BatchExchange { order: [], dist: HashShard([0]) }
+                                                  BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                                          BatchExchange { order: [], dist: HashShard([0]) }
+                                            BatchFilter { predicate: ($2 >= '1995-01-01':Varchar::Date) AND ($2 <= '1996-12-31':Varchar::Date) }
+                                              BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
+                                    BatchExchange { order: [], dist: HashShard([0]) }
+                                      BatchScan { table: nation, columns: [n_nationkey, n_name] }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: nation, columns: [n_nationkey, n_regionkey] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchProject { exprs: [$0] }
+                      BatchFilter { predicate: ($1 = 'ASIA':Varchar) }
+                        BatchScan { table: region, columns: [r_regionkey, r_name] }
   stream_plan: |
     StreamMaterialize { columns: [o_year, mkt_share], pk_columns: [o_year] }
       StreamProject { exprs: [$0, RoundDigit(($2 / $3), 6:Int32)] }
         StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), sum($2)] }
           StreamExchange { dist: HashShard([0]) }
-            StreamProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1)), $4, $5, $6, $7, $8, $9, $10, $11] }
-              StreamProject { exprs: [$0, $1, $2, $3, $5, $6, $7, $8, $9, $10, $11, $13] }
-                StreamHashJoin { type: Inner, predicate: $4 = $12 }
-                  StreamExchange { dist: HashShard([4]) }
-                    StreamProject { exprs: [$0, $1, $2, $3, $12, $5, $6, $7, $8, $9, $10, $13] }
-                      StreamHashJoin { type: Inner, predicate: $4 = $11 }
-                        StreamExchange { dist: HashShard([4]) }
-                          StreamProject { exprs: [$0, $1, $3, $4, $11, $5, $6, $7, $8, $9, $12] }
-                            StreamHashJoin { type: Inner, predicate: $2 = $10 }
-                              StreamExchange { dist: HashShard([2]) }
-                                StreamProject { exprs: [$0, $1, $3, $4, $10, $5, $6, $7, $8, $11] }
-                                  StreamHashJoin { type: Inner, predicate: $2 = $9 }
-                                    StreamExchange { dist: HashShard([2]) }
-                                      StreamProject { exprs: [$1, $2, $3, $8, $9, $4, $5, $6, $10] }
-                                        StreamHashJoin { type: Inner, predicate: $0 = $7 }
-                                          StreamExchange { dist: HashShard([0]) }
-                                            StreamProject { exprs: [$0, $2, $3, $7, $4, $5, $8] }
-                                              StreamHashJoin { type: Inner, predicate: $1 = $6 }
-                                                StreamExchange { dist: HashShard([1]) }
-                                                  StreamProject { exprs: [$0, $2, $3, $4, $5, $7] }
-                                                    StreamHashJoin { type: Inner, predicate: $1 = $6 }
-                                                      StreamExchange { dist: HashShard([1]) }
-                                                        StreamTableScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_extendedprice, l_discount, _row_id], pk_indices: [5] }
-                                                      StreamExchange { dist: HashShard([0]) }
-                                                        StreamProject { exprs: [$0, $2] }
-                                                          StreamFilter { predicate: ($1 = 'PROMO ANODIZED STEEL':Varchar) }
-                                                            StreamTableScan { table: part, columns: [p_partkey, p_type, _row_id], pk_indices: [2] }
-                                                StreamExchange { dist: HashShard([0]) }
-                                                  StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
-                                          StreamExchange { dist: HashShard([0]) }
-                                            StreamFilter { predicate: ($2 >= '1995-01-01':Varchar::Date) AND ($2 <= '1996-12-31':Varchar::Date) }
-                                              StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, _row_id], pk_indices: [3] }
-                                    StreamExchange { dist: HashShard([0]) }
-                                      StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
-                              StreamExchange { dist: HashShard([0]) }
-                                StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id], pk_indices: [2] }
-                        StreamExchange { dist: HashShard([0]) }
-                          StreamTableScan { table: nation, columns: [n_nationkey, n_regionkey, _row_id], pk_indices: [2] }
-                  StreamExchange { dist: HashShard([0]) }
-                    StreamProject { exprs: [$0, $2] }
-                      StreamFilter { predicate: ($1 = 'ASIA':Varchar) }
-                        StreamTableScan { table: region, columns: [r_regionkey, r_name, _row_id], pk_indices: [2] }
+            StreamProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1)), $5, $6, $7, $8, $9, $10, $11, $13] }
+              StreamHashJoin { type: Inner, predicate: $4 = $12 }
+                StreamExchange { dist: HashShard([4]) }
+                  StreamProject { exprs: [$0, $1, $2, $3, $12, $5, $6, $7, $8, $9, $10, $13] }
+                    StreamHashJoin { type: Inner, predicate: $4 = $11 }
+                      StreamExchange { dist: HashShard([4]) }
+                        StreamProject { exprs: [$0, $1, $3, $4, $11, $5, $6, $7, $8, $9, $12] }
+                          StreamHashJoin { type: Inner, predicate: $2 = $10 }
+                            StreamExchange { dist: HashShard([2]) }
+                              StreamProject { exprs: [$0, $1, $3, $4, $10, $5, $6, $7, $8, $11] }
+                                StreamHashJoin { type: Inner, predicate: $2 = $9 }
+                                  StreamExchange { dist: HashShard([2]) }
+                                    StreamProject { exprs: [$1, $2, $3, $8, $9, $4, $5, $6, $10] }
+                                      StreamHashJoin { type: Inner, predicate: $0 = $7 }
+                                        StreamExchange { dist: HashShard([0]) }
+                                          StreamProject { exprs: [$0, $2, $3, $7, $4, $5, $8] }
+                                            StreamHashJoin { type: Inner, predicate: $1 = $6 }
+                                              StreamExchange { dist: HashShard([1]) }
+                                                StreamProject { exprs: [$0, $2, $3, $4, $5, $7] }
+                                                  StreamHashJoin { type: Inner, predicate: $1 = $6 }
+                                                    StreamExchange { dist: HashShard([1]) }
+                                                      StreamTableScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_extendedprice, l_discount, _row_id], pk_indices: [5] }
+                                                    StreamExchange { dist: HashShard([0]) }
+                                                      StreamProject { exprs: [$0, $2] }
+                                                        StreamFilter { predicate: ($1 = 'PROMO ANODIZED STEEL':Varchar) }
+                                                          StreamTableScan { table: part, columns: [p_partkey, p_type, _row_id], pk_indices: [2] }
+                                              StreamExchange { dist: HashShard([0]) }
+                                                StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
+                                        StreamExchange { dist: HashShard([0]) }
+                                          StreamFilter { predicate: ($2 >= '1995-01-01':Varchar::Date) AND ($2 <= '1996-12-31':Varchar::Date) }
+                                            StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, _row_id], pk_indices: [3] }
+                                  StreamExchange { dist: HashShard([0]) }
+                                    StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
+                            StreamExchange { dist: HashShard([0]) }
+                              StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id], pk_indices: [2] }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamTableScan { table: nation, columns: [n_nationkey, n_regionkey, _row_id], pk_indices: [2] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamProject { exprs: [$0, $2] }
+                    StreamFilter { predicate: ($1 = 'ASIA':Varchar) }
+                      StreamTableScan { table: region, columns: [r_regionkey, r_name, _row_id], pk_indices: [2] }
 - id: tpch_q9
   before:
     - create_tables
@@ -815,69 +805,67 @@
         BatchProject { exprs: [$0, $1, RoundDigit($2, 2:Int32)] }
           BatchHashAgg { group_keys: [$0, $1], aggs: [sum($2)] }
             BatchExchange { order: [], dist: HashShard([0, 1]) }
-              BatchProject { exprs: [$5, Extract('YEAR':Varchar, $4), (($1 * (1:Int32 - $2)) - ($3 * $0))] }
-                BatchProject { exprs: [$0, $1, $2, $4, $5, $7] }
-                  BatchHashJoin { type: Inner, predicate: $3 = $6 }
-                    BatchExchange { order: [], dist: HashShard([3]) }
-                      BatchProject { exprs: [$1, $2, $3, $4, $5, $7] }
-                        BatchHashJoin { type: Inner, predicate: $0 = $6 }
-                          BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchProject { exprs: [$0, $3, $4, $5, $6, $9] }
-                              BatchHashJoin { type: Inner, predicate: $2 = $8 AND $1 = $7 }
-                                BatchExchange { order: [], dist: HashShard([1, 2]) }
-                                  BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $7] }
-                                    BatchHashJoin { type: Inner, predicate: $2 = $6 }
-                                      BatchExchange { order: [], dist: HashShard([2]) }
-                                        BatchProject { exprs: [$0, $1, $2, $3, $4, $5] }
-                                          BatchHashJoin { type: Inner, predicate: $1 = $6 }
-                                            BatchExchange { order: [], dist: HashShard([1]) }
-                                              BatchScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount] }
-                                            BatchExchange { order: [], dist: HashShard([0]) }
-                                              BatchProject { exprs: [$0] }
-                                                BatchFilter { predicate: Like($1, '%yellow%':Varchar) }
-                                                  BatchScan { table: part, columns: [p_partkey, p_name] }
-                                      BatchExchange { order: [], dist: HashShard([0]) }
-                                        BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
-                                BatchExchange { order: [], dist: HashShard([0, 1]) }
-                                  BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
-                          BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchScan { table: orders, columns: [o_orderkey, o_orderdate] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchScan { table: nation, columns: [n_nationkey, n_name] }
+              BatchProject { exprs: [$7, Extract('YEAR':Varchar, $5), (($1 * (1:Int32 - $2)) - ($4 * $0))] }
+                BatchHashJoin { type: Inner, predicate: $3 = $6 }
+                  BatchExchange { order: [], dist: HashShard([3]) }
+                    BatchProject { exprs: [$1, $2, $3, $4, $5, $7] }
+                      BatchHashJoin { type: Inner, predicate: $0 = $6 }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchProject { exprs: [$0, $3, $4, $5, $6, $9] }
+                            BatchHashJoin { type: Inner, predicate: $2 = $8 AND $1 = $7 }
+                              BatchExchange { order: [], dist: HashShard([1, 2]) }
+                                BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $7] }
+                                  BatchHashJoin { type: Inner, predicate: $2 = $6 }
+                                    BatchExchange { order: [], dist: HashShard([2]) }
+                                      BatchProject { exprs: [$0, $1, $2, $3, $4, $5] }
+                                        BatchHashJoin { type: Inner, predicate: $1 = $6 }
+                                          BatchExchange { order: [], dist: HashShard([1]) }
+                                            BatchScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount] }
+                                          BatchExchange { order: [], dist: HashShard([0]) }
+                                            BatchProject { exprs: [$0] }
+                                              BatchFilter { predicate: Like($1, '%yellow%':Varchar) }
+                                                BatchScan { table: part, columns: [p_partkey, p_name] }
+                                    BatchExchange { order: [], dist: HashShard([0]) }
+                                      BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                              BatchExchange { order: [], dist: HashShard([0, 1]) }
+                                BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: orders, columns: [o_orderkey, o_orderdate] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchScan { table: nation, columns: [n_nationkey, n_name] }
   stream_plan: |
     StreamMaterialize { columns: [nation, o_year, sum_profit], pk_columns: [nation, o_year] }
       StreamProject { exprs: [$0, $1, RoundDigit($3, 2:Int32)] }
         StreamHashAgg { group_keys: [$0, $1], aggs: [count, sum($2)] }
           StreamExchange { dist: HashShard([0, 1]) }
-            StreamProject { exprs: [$5, Extract('YEAR':Varchar, $4), (($1 * (1:Int32 - $2)) - ($3 * $0)), $6, $7, $8, $9, $10, $11] }
-              StreamProject { exprs: [$0, $1, $2, $4, $5, $12, $6, $7, $8, $9, $10, $13] }
-                StreamHashJoin { type: Inner, predicate: $3 = $11 }
-                  StreamExchange { dist: HashShard([3]) }
-                    StreamProject { exprs: [$1, $2, $3, $4, $5, $11, $6, $7, $8, $9, $12] }
-                      StreamHashJoin { type: Inner, predicate: $0 = $10 }
-                        StreamExchange { dist: HashShard([0]) }
-                          StreamProject { exprs: [$0, $3, $4, $5, $6, $12, $7, $8, $9, $13] }
-                            StreamHashJoin { type: Inner, predicate: $2 = $11 AND $1 = $10 }
-                              StreamExchange { dist: HashShard([1, 2]) }
-                                StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $9, $6, $7, $10] }
-                                  StreamHashJoin { type: Inner, predicate: $2 = $8 }
-                                    StreamExchange { dist: HashShard([2]) }
-                                      StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $8] }
-                                        StreamHashJoin { type: Inner, predicate: $1 = $7 }
-                                          StreamExchange { dist: HashShard([1]) }
-                                            StreamTableScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id], pk_indices: [6] }
-                                          StreamExchange { dist: HashShard([0]) }
-                                            StreamProject { exprs: [$0, $2] }
-                                              StreamFilter { predicate: Like($1, '%yellow%':Varchar) }
-                                                StreamTableScan { table: part, columns: [p_partkey, p_name, _row_id], pk_indices: [2] }
-                                    StreamExchange { dist: HashShard([0]) }
-                                      StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
-                              StreamExchange { dist: HashShard([0, 1]) }
-                                StreamTableScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost, _row_id], pk_indices: [3] }
-                        StreamExchange { dist: HashShard([0]) }
-                          StreamTableScan { table: orders, columns: [o_orderkey, o_orderdate, _row_id], pk_indices: [2] }
-                  StreamExchange { dist: HashShard([0]) }
-                    StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
+            StreamProject { exprs: [$12, Extract('YEAR':Varchar, $5), (($1 * (1:Int32 - $2)) - ($4 * $0)), $6, $7, $8, $9, $10, $13] }
+              StreamHashJoin { type: Inner, predicate: $3 = $11 }
+                StreamExchange { dist: HashShard([3]) }
+                  StreamProject { exprs: [$1, $2, $3, $4, $5, $11, $6, $7, $8, $9, $12] }
+                    StreamHashJoin { type: Inner, predicate: $0 = $10 }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamProject { exprs: [$0, $3, $4, $5, $6, $12, $7, $8, $9, $13] }
+                          StreamHashJoin { type: Inner, predicate: $2 = $11 AND $1 = $10 }
+                            StreamExchange { dist: HashShard([1, 2]) }
+                              StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $9, $6, $7, $10] }
+                                StreamHashJoin { type: Inner, predicate: $2 = $8 }
+                                  StreamExchange { dist: HashShard([2]) }
+                                    StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $8] }
+                                      StreamHashJoin { type: Inner, predicate: $1 = $7 }
+                                        StreamExchange { dist: HashShard([1]) }
+                                          StreamTableScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id], pk_indices: [6] }
+                                        StreamExchange { dist: HashShard([0]) }
+                                          StreamProject { exprs: [$0, $2] }
+                                            StreamFilter { predicate: Like($1, '%yellow%':Varchar) }
+                                              StreamTableScan { table: part, columns: [p_partkey, p_name, _row_id], pk_indices: [2] }
+                                  StreamExchange { dist: HashShard([0]) }
+                                    StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
+                            StreamExchange { dist: HashShard([0, 1]) }
+                              StreamTableScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost, _row_id], pk_indices: [3] }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamTableScan { table: orders, columns: [o_orderkey, o_orderdate, _row_id], pk_indices: [2] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
 - id: tpch_q10
   before:
     - create_tables
@@ -920,27 +908,26 @@
         BatchProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6] }
           BatchHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6], aggs: [sum($7)] }
             BatchExchange { order: [], dist: HashShard([0, 1, 2, 3, 4, 5, 6]) }
-              BatchProject { exprs: [$0, $1, $4, $3, $6, $2, $5, ($7 * (1.00:Decimal - $8))] }
-                BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $7, $9, $10] }
-                  BatchHashJoin { type: Inner, predicate: $6 = $8 }
-                    BatchExchange { order: [], dist: HashShard([6]) }
-                      BatchProject { exprs: [$0, $1, $2, $4, $5, $6, $7, $9] }
-                        BatchHashJoin { type: Inner, predicate: $3 = $8 }
-                          BatchExchange { order: [], dist: HashShard([3]) }
-                            BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7] }
-                              BatchHashJoin { type: Inner, predicate: $0 = $8 }
-                                BatchExchange { order: [], dist: HashShard([0]) }
-                                  BatchScan { table: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_comment] }
-                                BatchExchange { order: [], dist: HashShard([1]) }
-                                  BatchProject { exprs: [$0, $1] }
-                                    BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                                      BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
-                          BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchScan { table: nation, columns: [n_nationkey, n_name] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchProject { exprs: [$0, $1, $2] }
-                        BatchFilter { predicate: ($3 = 'R':Varchar) }
-                          BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_returnflag] }
+              BatchProject { exprs: [$0, $1, $4, $3, $7, $2, $5, ($9 * (1.00:Decimal - $10))] }
+                BatchHashJoin { type: Inner, predicate: $6 = $8 }
+                  BatchExchange { order: [], dist: HashShard([6]) }
+                    BatchProject { exprs: [$0, $1, $2, $4, $5, $6, $7, $9] }
+                      BatchHashJoin { type: Inner, predicate: $3 = $8 }
+                        BatchExchange { order: [], dist: HashShard([3]) }
+                          BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7] }
+                            BatchHashJoin { type: Inner, predicate: $0 = $8 }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchScan { table: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_comment] }
+                              BatchExchange { order: [], dist: HashShard([1]) }
+                                BatchProject { exprs: [$0, $1] }
+                                  BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                                    BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: nation, columns: [n_nationkey, n_name] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchProject { exprs: [$0, $1, $2] }
+                      BatchFilter { predicate: ($3 = 'R':Varchar) }
+                        BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_returnflag] }
   stream_plan: |
     StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], pk_columns: [c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], order_descs: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment] }
       StreamTopN { order: [$2 DESC], limit: 20, offset: 0 }
@@ -948,27 +935,26 @@
           StreamProject { exprs: [$0, $1, $8, $2, $4, $5, $3, $6] }
             StreamHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6], aggs: [count, sum($7)] }
               StreamExchange { dist: HashShard([0, 1, 2, 3, 4, 5, 6]) }
-                StreamProject { exprs: [$0, $1, $4, $3, $6, $2, $5, ($7 * (1.00:Decimal - $8)), $9, $10, $11, $12] }
-                  StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $7, $12, $13, $8, $9, $10, $14] }
-                    StreamHashJoin { type: Inner, predicate: $6 = $11 }
-                      StreamExchange { dist: HashShard([6]) }
-                        StreamProject { exprs: [$0, $1, $2, $4, $5, $6, $7, $11, $8, $9, $12] }
-                          StreamHashJoin { type: Inner, predicate: $3 = $10 }
-                            StreamExchange { dist: HashShard([3]) }
-                              StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $8, $7, $10] }
-                                StreamHashJoin { type: Inner, predicate: $0 = $9 }
-                                  StreamExchange { dist: HashShard([0]) }
-                                    StreamTableScan { table: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_comment, _row_id], pk_indices: [7] }
-                                  StreamExchange { dist: HashShard([1]) }
-                                    StreamProject { exprs: [$0, $1, $3] }
-                                      StreamFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                                        StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, _row_id], pk_indices: [3] }
-                            StreamExchange { dist: HashShard([0]) }
-                              StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
-                      StreamExchange { dist: HashShard([0]) }
-                        StreamProject { exprs: [$0, $1, $2, $4] }
-                          StreamFilter { predicate: ($3 = 'R':Varchar) }
-                            StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_returnflag, _row_id], pk_indices: [4] }
+                StreamProject { exprs: [$0, $1, $4, $3, $7, $2, $5, ($12 * (1.00:Decimal - $13)), $8, $9, $10, $14] }
+                  StreamHashJoin { type: Inner, predicate: $6 = $11 }
+                    StreamExchange { dist: HashShard([6]) }
+                      StreamProject { exprs: [$0, $1, $2, $4, $5, $6, $7, $11, $8, $9, $12] }
+                        StreamHashJoin { type: Inner, predicate: $3 = $10 }
+                          StreamExchange { dist: HashShard([3]) }
+                            StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $8, $7, $10] }
+                              StreamHashJoin { type: Inner, predicate: $0 = $9 }
+                                StreamExchange { dist: HashShard([0]) }
+                                  StreamTableScan { table: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_comment, _row_id], pk_indices: [7] }
+                                StreamExchange { dist: HashShard([1]) }
+                                  StreamProject { exprs: [$0, $1, $3] }
+                                    StreamFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                                      StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, _row_id], pk_indices: [3] }
+                          StreamExchange { dist: HashShard([0]) }
+                            StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id], pk_indices: [2] }
+                    StreamExchange { dist: HashShard([0]) }
+                      StreamProject { exprs: [$0, $1, $2, $4] }
+                        StreamFilter { predicate: ($3 = 'R':Varchar) }
+                          StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_returnflag, _row_id], pk_indices: [4] }
 - id: tpch_q11
   before:
     - create_tables
@@ -1051,37 +1037,35 @@
             BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($1)] }
               BatchExchange { order: [], dist: HashShard([0]) }
                 BatchProject { exprs: [$0, ($2 * $1)] }
-                  BatchProject { exprs: [$0, $1, $2] }
-                    BatchHashJoin { type: Inner, predicate: $3 = $4 }
-                      BatchExchange { order: [], dist: HashShard([3]) }
-                        BatchProject { exprs: [$0, $2, $3, $5] }
-                          BatchHashJoin { type: Inner, predicate: $1 = $4 }
-                            BatchExchange { order: [], dist: HashShard([1]) }
-                              BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost] }
+                  BatchHashJoin { type: Inner, predicate: $3 = $4 }
+                    BatchExchange { order: [], dist: HashShard([3]) }
+                      BatchProject { exprs: [$0, $2, $3, $5] }
+                        BatchHashJoin { type: Inner, predicate: $1 = $4 }
+                          BatchExchange { order: [], dist: HashShard([1]) }
+                            BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                    BatchExchange { order: [], dist: HashShard([0]) }
+                      BatchProject { exprs: [$0] }
+                        BatchFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
+                          BatchScan { table: nation, columns: [n_nationkey, n_name] }
+          BatchProject { exprs: [($0 * 0.0001000000:Decimal)] }
+            BatchSimpleAgg { aggs: [sum($0)] }
+              BatchExchange { order: [], dist: Single }
+                BatchSimpleAgg { aggs: [sum($0)] }
+                  BatchProject { exprs: [($1 * $0)] }
+                    BatchHashJoin { type: Inner, predicate: $2 = $3 }
+                      BatchExchange { order: [], dist: HashShard([2]) }
+                        BatchProject { exprs: [$1, $2, $4] }
+                          BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                            BatchExchange { order: [], dist: HashShard([0]) }
+                              BatchScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost] }
                             BatchExchange { order: [], dist: HashShard([0]) }
                               BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
                       BatchExchange { order: [], dist: HashShard([0]) }
                         BatchProject { exprs: [$0] }
                           BatchFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
                             BatchScan { table: nation, columns: [n_nationkey, n_name] }
-          BatchProject { exprs: [($0 * 0.0001000000:Decimal)] }
-            BatchSimpleAgg { aggs: [sum($0)] }
-              BatchExchange { order: [], dist: Single }
-                BatchSimpleAgg { aggs: [sum($0)] }
-                  BatchProject { exprs: [($1 * $0)] }
-                    BatchProject { exprs: [$0, $1] }
-                      BatchHashJoin { type: Inner, predicate: $2 = $3 }
-                        BatchExchange { order: [], dist: HashShard([2]) }
-                          BatchProject { exprs: [$1, $2, $4] }
-                            BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                              BatchExchange { order: [], dist: HashShard([0]) }
-                                BatchScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost] }
-                              BatchExchange { order: [], dist: HashShard([0]) }
-                                BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchProject { exprs: [$0] }
-                            BatchFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
-                              BatchScan { table: nation, columns: [n_nationkey, n_name] }
 - id: tpch_q12
   before:
     - create_tables
@@ -1119,28 +1103,26 @@
       BatchSort { order: [$0 ASC] }
         BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($2)] }
           BatchExchange { order: [], dist: HashShard([0]) }
-            BatchProject { exprs: [$1, Case((($0 = '1-URGENT':Varchar) OR ($0 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($0 <> '1-URGENT':Varchar) AND ($0 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)] }
-              BatchProject { exprs: [$1, $3] }
-                BatchHashJoin { type: Inner, predicate: $0 = $2 }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchScan { table: orders, columns: [o_orderkey, o_orderpriority] }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchProject { exprs: [$0, $4] }
-                      BatchFilter { predicate: In($4, 'FOB':Varchar, 'SHIP':Varchar) AND ($2 < $3) AND ($1 < $2) AND ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-                        BatchScan { table: lineitem, columns: [l_orderkey, l_shipdate, l_commitdate, l_receiptdate, l_shipmode] }
+            BatchProject { exprs: [$3, Case((($1 = '1-URGENT':Varchar) OR ($1 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($1 <> '1-URGENT':Varchar) AND ($1 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)] }
+              BatchHashJoin { type: Inner, predicate: $0 = $2 }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchScan { table: orders, columns: [o_orderkey, o_orderpriority] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchProject { exprs: [$0, $4] }
+                    BatchFilter { predicate: In($4, 'FOB':Varchar, 'SHIP':Varchar) AND ($2 < $3) AND ($1 < $2) AND ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                      BatchScan { table: lineitem, columns: [l_orderkey, l_shipdate, l_commitdate, l_receiptdate, l_shipmode] }
   stream_plan: |
     StreamMaterialize { columns: [l_shipmode, agg#0(hidden), high_line_count, low_line_count], pk_columns: [l_shipmode] }
       StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), sum($2)] }
         StreamExchange { dist: HashShard([0]) }
-          StreamProject { exprs: [$1, Case((($0 = '1-URGENT':Varchar) OR ($0 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($0 <> '1-URGENT':Varchar) AND ($0 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32), $2, $3] }
-            StreamProject { exprs: [$1, $4, $2, $5] }
-              StreamHashJoin { type: Inner, predicate: $0 = $3 }
-                StreamExchange { dist: HashShard([0]) }
-                  StreamTableScan { table: orders, columns: [o_orderkey, o_orderpriority, _row_id], pk_indices: [2] }
-                StreamExchange { dist: HashShard([0]) }
-                  StreamProject { exprs: [$0, $4, $5] }
-                    StreamFilter { predicate: In($4, 'FOB':Varchar, 'SHIP':Varchar) AND ($2 < $3) AND ($1 < $2) AND ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-                      StreamTableScan { table: lineitem, columns: [l_orderkey, l_shipdate, l_commitdate, l_receiptdate, l_shipmode, _row_id], pk_indices: [5] }
+          StreamProject { exprs: [$4, Case((($1 = '1-URGENT':Varchar) OR ($1 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($1 <> '1-URGENT':Varchar) AND ($1 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32), $2, $5] }
+            StreamHashJoin { type: Inner, predicate: $0 = $3 }
+              StreamExchange { dist: HashShard([0]) }
+                StreamTableScan { table: orders, columns: [o_orderkey, o_orderpriority, _row_id], pk_indices: [2] }
+              StreamExchange { dist: HashShard([0]) }
+                StreamProject { exprs: [$0, $4, $5] }
+                  StreamFilter { predicate: In($4, 'FOB':Varchar, 'SHIP':Varchar) AND ($2 < $3) AND ($1 < $2) AND ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                    StreamTableScan { table: lineitem, columns: [l_orderkey, l_shipdate, l_commitdate, l_receiptdate, l_shipmode, _row_id], pk_indices: [5] }
 - id: tpch_q13
   before:
     - create_tables
@@ -1216,29 +1198,27 @@
       BatchSimpleAgg { aggs: [sum($0), sum($1)] }
         BatchExchange { order: [], dist: Single }
           BatchSimpleAgg { aggs: [sum($0), sum($1)] }
-            BatchProject { exprs: [Case(Like($2, 'PROMO%':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))] }
-              BatchProject { exprs: [$1, $2, $4] }
-                BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchProject { exprs: [$0, $1, $2] }
-                      BatchFilter { predicate: ($3 >= '1995-09-01':Varchar::Date) AND ($3 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
-                        BatchScan { table: lineitem, columns: [l_partkey, l_extendedprice, l_discount, l_shipdate] }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchScan { table: part, columns: [p_partkey, p_type] }
+            BatchProject { exprs: [Case(Like($4, 'PROMO%':Varchar), ($1 * (1:Int32 - $2)), 0:Int32::Decimal), ($1 * (1:Int32 - $2))] }
+              BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchProject { exprs: [$0, $1, $2] }
+                    BatchFilter { predicate: ($3 >= '1995-09-01':Varchar::Date) AND ($3 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
+                      BatchScan { table: lineitem, columns: [l_partkey, l_extendedprice, l_discount, l_shipdate] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchScan { table: part, columns: [p_partkey, p_type] }
   stream_plan: |
     StreamMaterialize { columns: [promo_revenue, agg#0(hidden), agg#1(hidden), agg#2(hidden)], pk_columns: [agg#0, agg#1, agg#2] }
       StreamProject { exprs: [((100.00:Decimal * $1) / $2), $0, $1, $2] }
         StreamSimpleAgg { aggs: [count, sum($0), sum($1)] }
           StreamExchange { dist: Single }
-            StreamProject { exprs: [Case(Like($2, 'PROMO%':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1)), $3, $4] }
-              StreamProject { exprs: [$1, $2, $5, $3, $6] }
-                StreamHashJoin { type: Inner, predicate: $0 = $4 }
-                  StreamExchange { dist: HashShard([0]) }
-                    StreamProject { exprs: [$0, $1, $2, $4] }
-                      StreamFilter { predicate: ($3 >= '1995-09-01':Varchar::Date) AND ($3 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
-                        StreamTableScan { table: lineitem, columns: [l_partkey, l_extendedprice, l_discount, l_shipdate, _row_id], pk_indices: [4] }
-                  StreamExchange { dist: HashShard([0]) }
-                    StreamTableScan { table: part, columns: [p_partkey, p_type, _row_id], pk_indices: [2] }
+            StreamProject { exprs: [Case(Like($5, 'PROMO%':Varchar), ($1 * (1:Int32 - $2)), 0:Int32::Decimal), ($1 * (1:Int32 - $2)), $3, $6] }
+              StreamHashJoin { type: Inner, predicate: $0 = $4 }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamProject { exprs: [$0, $1, $2, $4] }
+                    StreamFilter { predicate: ($3 >= '1995-09-01':Varchar::Date) AND ($3 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
+                      StreamTableScan { table: lineitem, columns: [l_partkey, l_extendedprice, l_discount, l_shipdate, _row_id], pk_indices: [4] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamTableScan { table: part, columns: [p_partkey, p_type, _row_id], pk_indices: [2] }
 - id: tpch_q15
   before:
     - create_tables
@@ -1592,32 +1572,30 @@
     BatchSimpleAgg { aggs: [sum($0)] }
       BatchExchange { order: [], dist: Single }
         BatchSimpleAgg { aggs: [sum($0)] }
-          BatchProject { exprs: [($0 * (1:Int32 - $1))] }
-            BatchProject { exprs: [$2, $3] }
-              BatchFilter { predicate: ((((((($5 = 'Brand#52':Varchar) AND In($7, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($6 <= 5:Int32)) OR ((((($5 = 'Brand#24':Varchar) AND In($7, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($6 <= 10:Int32))) OR ((((($5 = 'Brand#32':Varchar) AND In($7, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($6 <= 15:Int32))) }
-                BatchHashJoin { type: Inner, predicate: $0 = $4 }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchProject { exprs: [$0, $1, $2, $3] }
-                      BatchFilter { predicate: In($5, 'AIR':Varchar, 'AIR REG':Varchar) AND ($4 = 'DELIVER IN PERSON':Varchar) }
-                        BatchScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice, l_discount, l_shipinstruct, l_shipmode] }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchFilter { predicate: ($2 >= 1:Int32) }
-                      BatchScan { table: part, columns: [p_partkey, p_brand, p_size, p_container] }
+          BatchProject { exprs: [($2 * (1:Int32 - $3))] }
+            BatchFilter { predicate: ((((((($5 = 'Brand#52':Varchar) AND In($7, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($6 <= 5:Int32)) OR ((((($5 = 'Brand#24':Varchar) AND In($7, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($6 <= 10:Int32))) OR ((((($5 = 'Brand#32':Varchar) AND In($7, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($6 <= 15:Int32))) }
+              BatchHashJoin { type: Inner, predicate: $0 = $4 }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchProject { exprs: [$0, $1, $2, $3] }
+                    BatchFilter { predicate: In($5, 'AIR':Varchar, 'AIR REG':Varchar) AND ($4 = 'DELIVER IN PERSON':Varchar) }
+                      BatchScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice, l_discount, l_shipinstruct, l_shipmode] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchFilter { predicate: ($2 >= 1:Int32) }
+                    BatchScan { table: part, columns: [p_partkey, p_brand, p_size, p_container] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), revenue], pk_columns: [agg#0, revenue] }
       StreamSimpleAgg { aggs: [count, sum($0)] }
         StreamExchange { dist: Single }
-          StreamProject { exprs: [($0 * (1:Int32 - $1)), $2, $3] }
-            StreamProject { exprs: [$2, $3, $4, $9] }
-              StreamFilter { predicate: ((((((($6 = 'Brand#52':Varchar) AND In($8, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($7 <= 5:Int32)) OR ((((($6 = 'Brand#24':Varchar) AND In($8, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($7 <= 10:Int32))) OR ((((($6 = 'Brand#32':Varchar) AND In($8, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($7 <= 15:Int32))) }
-                StreamHashJoin { type: Inner, predicate: $0 = $5 }
-                  StreamExchange { dist: HashShard([0]) }
-                    StreamProject { exprs: [$0, $1, $2, $3, $6] }
-                      StreamFilter { predicate: In($5, 'AIR':Varchar, 'AIR REG':Varchar) AND ($4 = 'DELIVER IN PERSON':Varchar) }
-                        StreamTableScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice, l_discount, l_shipinstruct, l_shipmode, _row_id], pk_indices: [6] }
-                  StreamExchange { dist: HashShard([0]) }
-                    StreamFilter { predicate: ($2 >= 1:Int32) }
-                      StreamTableScan { table: part, columns: [p_partkey, p_brand, p_size, p_container, _row_id], pk_indices: [4] }
+          StreamProject { exprs: [($2 * (1:Int32 - $3)), $4, $9] }
+            StreamFilter { predicate: ((((((($6 = 'Brand#52':Varchar) AND In($8, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($7 <= 5:Int32)) OR ((((($6 = 'Brand#24':Varchar) AND In($8, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($7 <= 10:Int32))) OR ((((($6 = 'Brand#32':Varchar) AND In($8, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($7 <= 15:Int32))) }
+              StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamProject { exprs: [$0, $1, $2, $3, $6] }
+                    StreamFilter { predicate: In($5, 'AIR':Varchar, 'AIR REG':Varchar) AND ($4 = 'DELIVER IN PERSON':Varchar) }
+                      StreamTableScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice, l_discount, l_shipinstruct, l_shipmode, _row_id], pk_indices: [6] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamFilter { predicate: ($2 >= 1:Int32) }
+                    StreamTableScan { table: part, columns: [p_partkey, p_brand, p_size, p_container, _row_id], pk_indices: [4] }
 - id: tpch_q20
   before:
     - create_tables
@@ -1889,20 +1867,19 @@
         BatchHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1] }
-              BatchProject { exprs: [$0, $1] }
-                BatchNestedLoopJoin { type: Inner, predicate: ($1 > $2) }
-                  BatchExchange { order: [], dist: Single }
-                    BatchProject { exprs: [$1, $2] }
-                      BatchHashJoin { type: LeftAnti, predicate: $0 = $3 }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchFilter { predicate: In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
-                            BatchScan { table: customer, columns: [c_custkey, c_phone, c_acctbal] }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchScan { table: orders, columns: [o_custkey] }
-                  BatchProject { exprs: [($0 / $1)] }
-                    BatchSimpleAgg { aggs: [sum($0), sum($1)] }
-                      BatchExchange { order: [], dist: Single }
-                        BatchSimpleAgg { aggs: [sum($0), count($0)] }
-                          BatchProject { exprs: [$1] }
-                            BatchFilter { predicate: ($1 > 0.00:Decimal) AND In(Substr($0, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
-                              BatchScan { table: customer, columns: [c_phone, c_acctbal] }
+              BatchNestedLoopJoin { type: Inner, predicate: ($1 > $2) }
+                BatchExchange { order: [], dist: Single }
+                  BatchProject { exprs: [$1, $2] }
+                    BatchHashJoin { type: LeftAnti, predicate: $0 = $3 }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchFilter { predicate: In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                          BatchScan { table: customer, columns: [c_custkey, c_phone, c_acctbal] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchScan { table: orders, columns: [o_custkey] }
+                BatchProject { exprs: [($0 / $1)] }
+                  BatchSimpleAgg { aggs: [sum($0), sum($1)] }
+                    BatchExchange { order: [], dist: Single }
+                      BatchSimpleAgg { aggs: [sum($0), count($0)] }
+                        BatchProject { exprs: [$1] }
+                          BatchFilter { predicate: ($1 > 0.00:Decimal) AND In(Substr($0, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                            BatchScan { table: customer, columns: [c_phone, c_acctbal] }
