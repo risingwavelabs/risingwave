@@ -3893,6 +3893,7 @@ dependencies = [
  "madsim",
  "madsim-tokio",
  "madsim-tonic",
+ "md5",
  "memcomparable",
  "num-traits",
  "paste",
