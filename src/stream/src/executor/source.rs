@@ -493,6 +493,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
 
         let executor = SourceExecutor::new(
+            0x3f3f3f,
             table_id,
             source_desc,
             keyspace,
@@ -615,6 +616,7 @@ mod tests {
         let (barrier_sender, barrier_receiver) = unbounded_channel();
         let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
         let executor = SourceExecutor::new(
+            0x3f3f3f,
             table_id,
             source_desc,
             keyspace,
