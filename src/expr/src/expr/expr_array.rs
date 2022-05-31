@@ -49,7 +49,7 @@ impl Expression for ArrayExpression {
                 Ok(Column::new(array))
             })
             .collect::<Result<Vec<Column>>>()?;
-        let chunk = DataChunk::new(columns, input.visibility().cloned());
+        let chunk = DataChunk::nex(columns, input.vis().clone());
 
         let mut builder = ListArrayBuilder::with_meta(
             input.capacity(),

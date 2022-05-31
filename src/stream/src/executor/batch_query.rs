@@ -14,7 +14,7 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{DataChunk, Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk, Vis};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
@@ -106,7 +106,7 @@ where
         }
         let new_visibility = new_visibility.finish();
         if new_visibility.num_high_bits() > 0 {
-            Some(DataChunk::new(columns, Some(new_visibility)))
+            Some(DataChunk::nex(columns, Vis::Bitmap(new_visibility)))
         } else {
             None
         }

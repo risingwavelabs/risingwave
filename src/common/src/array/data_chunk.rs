@@ -57,7 +57,24 @@ impl DataChunkBuilder {
     }
 
     pub fn build(self) -> DataChunk {
-        DataChunk::new(self.columns, self.visibility)
+        let vis = if let Some(bitmap) = self.visibility {
+            // with visibility bitmap
+            for column in &self.columns {
+                assert_eq!(bitmap.len(), column.array_ref().len())
+            }
+            Vis::Bitmap(bitmap)
+        } else if !self.columns.is_empty() {
+            // without visibility bitmap
+            let card = self.columns.first().unwrap().array_ref().len();
+            for column in self.columns.iter().skip(1) {
+                assert_eq!(card, column.array_ref().len())
+            }
+            Vis::Compact(card)
+        } else {
+            // no data (dummy)
+            Vis::Compact(0)
+        };
+        DataChunk::nex(self.columns, vis)
     }
 }
 
@@ -75,28 +92,6 @@ pub enum Vis {
 }
 
 impl DataChunk {
-    pub fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
-        let vis2 = if let Some(bitmap) = visibility {
-            // with visibility bitmap
-            for column in &columns {
-                assert_eq!(bitmap.len(), column.array_ref().len())
-            }
-            Vis::Bitmap(bitmap)
-        } else if !columns.is_empty() {
-            // without visibility bitmap
-            let card = columns.first().unwrap().array_ref().len();
-            for column in columns.iter().skip(1) {
-                assert_eq!(card, column.array_ref().len())
-            }
-            Vis::Compact(card)
-        } else {
-            // no data (dummy)
-            Vis::Compact(0)
-        };
-
-        DataChunk { columns, vis2 }
-    }
-
     pub fn nex(columns: Vec<Column>, vis: Vis) -> Self {
         DataChunk { columns, vis2: vis }
     }
@@ -131,7 +126,7 @@ impl DataChunk {
             .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
-        Ok(DataChunk::new(new_columns, None))
+        Ok(DataChunk::nex(new_columns, Vis::Compact(rows.len())))
     }
 
     /// Return the next visible row index on or after `row_idx`.
@@ -176,9 +171,13 @@ impl DataChunk {
         }
     }
 
+    pub fn vis(&self) -> &Vis {
+        &self.vis2
+    }
+
     #[must_use]
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
-        DataChunk::new(self.columns.clone(), Some(visibility))
+        DataChunk::nex(self.columns.clone(), Vis::Bitmap(visibility))
     }
 
     pub fn visibility(&self) -> Option<&Bitmap> {
@@ -259,7 +258,7 @@ impl DataChunk {
                 columns.push(Column::from_protobuf(any_col, cardinality)?);
             }
 
-            let chunk = DataChunk::new(columns, None);
+            let chunk = DataChunk::nex(columns, Vis::Compact(proto.cardinality as usize));
             Ok(chunk)
         }
     }
@@ -454,7 +453,8 @@ impl TryFrom<Vec<Column>> for DataChunk {
             "Not all columns length same!"
         );
 
-        Ok(DataChunk::new(columns, None))
+        let len = columns[0].array_ref().len();
+        Ok(DataChunk::nex(columns, Vis::Compact(len)))
     }
 }
 
@@ -573,12 +573,12 @@ impl DataChunkTestExt for DataChunk {
             .into_iter()
             .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
             .collect();
-        let visibility = if visibility.iter().all(|b| *b) {
-            None
+        let vis = if visibility.iter().all(|b| *b) {
+            Vis::Compact(visibility.len())
         } else {
-            Some(Bitmap::try_from(visibility).unwrap())
+            Vis::Bitmap(Bitmap::try_from(visibility).unwrap())
         };
-        DataChunk::new(columns, visibility)
+        DataChunk::nex(columns, vis)
     }
 }
 
@@ -674,12 +674,12 @@ mod tests {
 
     #[test]
     fn test_to_pretty_string() {
-        let chunk = DataChunk::new(
+        let chunk = DataChunk::nex(
             vec![
                 column_nonnull!(I64Array, [1, 2, 3, 4]),
                 column!(I64Array, [Some(6), None, Some(7), None]),
             ],
-            None,
+            Vis::Compact(4),
         );
         assert_eq!(
             chunk.to_pretty_string(),

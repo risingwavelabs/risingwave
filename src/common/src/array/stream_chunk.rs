@@ -85,7 +85,7 @@ impl Default for StreamChunk {
     fn default() -> Self {
         Self {
             ops: Default::default(),
-            data: DataChunk::new(vec![], None),
+            data: DataChunk::nex(vec![], Vis::Compact(0)),
         }
     }
 }
@@ -96,7 +96,11 @@ impl StreamChunk {
             assert_eq!(col.array_ref().len(), ops.len());
         }
 
-        let data = DataChunk::new(columns, visibility);
+        let vis = match visibility {
+            Some(b) => Vis::Bitmap(b),
+            None => Vis::Compact(ops.len()),
+        };
+        let data = DataChunk::nex(columns, vis);
         StreamChunk { ops, data }
     }
 
