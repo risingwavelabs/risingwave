@@ -21,9 +21,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    gen_filter_and_pushdown, BatchHopWindow, ColPrunable, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch,
-    ToStream,
+    gen_filter_and_pushdown, BatchHopWindow, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::{InputRef, InputRefDisplay};
 use crate::utils::{ColIndexMapping, Condition};

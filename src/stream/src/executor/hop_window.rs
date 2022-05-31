@@ -97,7 +97,6 @@ impl HopWindowExecutor {
             })?
             .get();
 
-        let schema = self.info.schema;
         let time_col_data_type = input.schema().fields()[time_col_idx].data_type();
         let time_col_ref = InputRefExpression::new(time_col_data_type, self.time_col_idx).boxed();
 
