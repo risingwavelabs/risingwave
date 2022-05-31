@@ -297,7 +297,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     }
 
     // string expressions
-    for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper] {
+    for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {
         map.insert(FuncSign::new(e, vec![T::Varchar]), T::Varchar);
     }
     for e in [E::Trim, E::Ltrim, E::Rtrim] {
@@ -330,6 +330,11 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     );
     map.insert(
         FuncSign::new(E::SplitPart, vec![T::Varchar, T::Varchar, T::Int32]),
+        T::Varchar,
+    );
+    // TODO: Support more `to_char` types.
+    map.insert(
+        FuncSign::new(E::ToChar, vec![T::Timestamp, T::Varchar]),
         T::Varchar,
     );
 
