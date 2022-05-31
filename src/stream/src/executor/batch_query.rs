@@ -106,7 +106,7 @@ where
         }
         let new_visibility = new_visibility.finish();
         if new_visibility.num_high_bits() > 0 {
-            Some(DataChunk::new(columns, Some(new_visibility)))
+            Some(DataChunk::new(columns, new_visibility))
         } else {
             None
         }
