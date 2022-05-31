@@ -53,6 +53,10 @@ impl StreamProject {
         );
         StreamProject { base, logical }
     }
+
+    pub fn as_logical(&self) -> &LogicalProject {
+        &self.logical
+    }
 }
 
 impl PlanTreeNodeUnary for StreamProject {

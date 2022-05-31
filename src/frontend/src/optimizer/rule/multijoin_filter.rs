@@ -16,9 +16,7 @@ use super::super::plan_node::*;
 use super::Rule;
 use crate::optimizer::rule::BoxedRule;
 
-/// Merges adjacent inner joins into a single `LogicalMultiJoin`.
-/// The `LogicalMultiJoin` is short-lived and will be immediately
-/// rewritten into a join tree of binary joins.
+/// Merges a filter above a `LogicalMultiJoin` into the `LogicalMultiJoin`.
 pub struct MultiJoinFilterRule {}
 
 impl Rule for MultiJoinFilterRule {

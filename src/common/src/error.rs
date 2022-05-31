@@ -160,25 +160,26 @@ pub struct RwError {
     backtrace: Arc<Backtrace>,
 }
 
-impl RwError {
-    /// Turns a crate-wide `RwError` into grpc error.
-    pub fn to_grpc_status(&self) -> tonic::Status {
-        match *self.inner {
-            ErrorCode::OK => tonic::Status::ok(self.to_string()),
+impl From<RwError> for tonic::Status {
+    fn from(err: RwError) -> Self {
+        match *err.inner {
+            ErrorCode::OK => tonic::Status::ok(err.to_string()),
             _ => {
                 let bytes = {
-                    let status = self.to_status();
+                    let status = err.to_status();
                     let mut bytes = Vec::<u8>::with_capacity(status.encoded_len());
                     status.encode(&mut bytes).expect("Failed to encode status.");
                     bytes
                 };
                 let mut header = MetadataMap::new();
                 header.insert_bin(RW_ERROR_GRPC_HEADER, MetadataValue::from_bytes(&bytes));
-                tonic::Status::with_metadata(Code::Internal, self.to_string(), header)
+                tonic::Status::with_metadata(Code::Internal, err.to_string(), header)
             }
         }
     }
+}
 
+impl RwError {
     /// Converting to risingwave's status.
     ///
     /// We can't use grpc/tonic's library directly because we need to customized error code and
@@ -339,7 +340,7 @@ impl From<ProstFieldNotFound> for RwError {
 
 /// Convert `RwError` into `tonic::Status`. Generally used in `map_err`.
 pub fn tonic_err(err: impl Into<RwError>) -> tonic::Status {
-    err.into().to_grpc_status()
+    err.into().into()
 }
 
 pub type Result<T> = std::result::Result<T, RwError>;
@@ -582,10 +583,10 @@ mod tests {
     }
 
     #[test]
-    fn test_to_grpc_status() {
-        use tonic::Code;
+    fn test_into() {
+        use tonic::{Code, Status};
         fn check_grpc_error(ec: ErrorCode, grpc_code: Code) {
-            assert_eq!(RwError::from(ec).to_grpc_status().code(), grpc_code);
+            assert_eq!(Status::from(RwError::from(ec)).code(), grpc_code);
         }
 
         check_grpc_error(ErrorCode::TaskNotFound, Code::Internal);

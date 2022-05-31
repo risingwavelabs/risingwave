@@ -50,6 +50,10 @@ impl BatchProject {
         );
         BatchProject { base, logical }
     }
+
+    pub fn as_logical(&self) -> &LogicalProject {
+        &self.logical
+    }
 }
 
 impl fmt::Display for BatchProject {

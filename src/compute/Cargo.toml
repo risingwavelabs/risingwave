@@ -9,7 +9,7 @@ async-stream = "0.3"
 async-trait = "0.1"
 byteorder = "1"
 bytes = "1"
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "3", features = ["derive"] }
 crc32fast = "1"
 dyn-clone = "1"

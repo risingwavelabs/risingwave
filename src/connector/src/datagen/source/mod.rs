@@ -15,27 +15,9 @@
 mod field_generator;
 mod generator;
 mod reader;
-use anyhow::Result;
+
 pub use reader::*;
-use serde_json::Value;
-pub trait FieldGenerator {
-    fn with_sequence(min: Option<String>, max: Option<String>) -> Result<Self>
-    where
-        Self: Sized;
-    fn with_random(start: Option<String>, end: Option<String>) -> Result<Self>
-    where
-        Self: Sized;
-    fn generate(&mut self) -> Value;
-}
 
-// Generator of this '#' field. Can be 'sequence' or 'random'.
-pub enum FieldKind {
-    Sequence,
-    Random,
-}
-
-impl Default for FieldKind {
-    fn default() -> Self {
-        FieldKind::Random
-    }
-}
+const SEQUENCE_FIELD_KIND: &str = "sequence";
+/// default datagen generator next() interval
+const DEFUALT_DATAGEN_INTERVAL: u128 = 1000;
