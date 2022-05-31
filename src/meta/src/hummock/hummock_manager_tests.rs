@@ -170,7 +170,7 @@ async fn test_hummock_compaction_task() {
             .get_level_idx(),
         0
     );
-    assert_eq!(compact_task.get_task_id(), 1);
+    assert_eq!(compact_task.get_task_id(), 2);
     // In the test case, we assume that each SST contains data of 2 relational tables, and
     // one of them overlaps with the previous SST. So there will be one more relational tables
     // (for vnode mapping) than SSTs.
@@ -213,7 +213,7 @@ async fn test_hummock_compaction_task() {
         .assign_compaction_task(&compact_task, context_id, async { true })
         .await
         .unwrap();
-    assert_eq!(compact_task.get_task_id(), 2);
+    assert_eq!(compact_task.get_task_id(), 3);
     // Finish the task and succeed.
     compact_task.task_status = true;
 

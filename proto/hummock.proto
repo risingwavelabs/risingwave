@@ -158,7 +158,6 @@ message LevelHandler {
 
 message CompactStatus {
   repeated LevelHandler level_handlers = 1;
-  uint64 next_compact_task_id = 2;
 }
 
 message CompactTaskAssignment {
