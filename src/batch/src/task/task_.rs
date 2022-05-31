@@ -23,11 +23,12 @@ use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
 use risingwave_pb::task_service::task_info::TaskStatus;
+use risingwave_pb::task_service::GetDataResponse;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tracing_futures::Instrument;
 
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
-use crate::rpc::service::exchange::{CreateDataResponse, ExchangeWriter};
+use crate::rpc::service::exchange::ExchangeWriter;
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
 use crate::task::BatchTaskContext;
 
@@ -110,10 +111,7 @@ pub struct TaskOutput {
 
 impl TaskOutput {
     /// Writes the data in serialized format to `ExchangeWriter`.
-    pub async fn take_data<T: CreateDataResponse>(
-        &mut self,
-        writer: &mut dyn ExchangeWriter<T>,
-    ) -> Result<()> {
+    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
         loop {
             match self.receiver.recv().await {
                 // Received some data
@@ -125,7 +123,10 @@ impl TaskOutput {
                         chunk.cardinality()
                     );
                     let pb = chunk.to_protobuf();
-                    let resp = T::create_data_response(Default::default(), pb);
+                    let resp = GetDataResponse {
+                        status: Default::default(),
+                        record_batch: Some(pb),
+                    };
                     writer.write(resp).await?;
                 }
                 // Reached EOF

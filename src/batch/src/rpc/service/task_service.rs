@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
     AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, CreateTaskResponse, ExecuteRequest,
-    ExecuteResponse, GetTaskInfoRequest, GetTaskInfoResponse, RemoveTaskRequest,
+    GetDataResponse, GetTaskInfoRequest, GetTaskInfoResponse, RemoveTaskRequest,
     RemoveTaskResponse,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -44,7 +44,7 @@ impl BatchServiceImpl {
 
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
-    type ExecuteStream = ReceiverStream<std::result::Result<ExecuteResponse, Status>>;
+    type ExecuteStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
 
     #[cfg_attr(coverage, no_coverage)]
     async fn create_task(
