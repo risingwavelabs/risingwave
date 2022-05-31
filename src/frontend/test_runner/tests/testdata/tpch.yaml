@@ -990,12 +990,12 @@
   logical_plan: |
     LogicalProject { exprs: [$0, $1] }
       LogicalFilter { predicate: ($2 > $3) }
-        LogicalJoin { type: LeftOuter, on: true }
+        LogicalJoin { type: LeftOuter, on: true, output_indices: all }
           LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($1)] }
             LogicalProject { exprs: [$1, ($4 * $3)] }
               LogicalFilter { predicate: ($2 = $7) AND ($10 = $15) AND ($16 = 'ARGENTINA':Varchar) }
-                LogicalJoin { type: Inner, on: true }
-                  LogicalJoin { type: Inner, on: true }
+                LogicalJoin { type: Inner, on: true, output_indices: all }
+                  LogicalJoin { type: Inner, on: true, output_indices: all }
                     LogicalScan { table: partsupp, columns: [_row_id, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
                     LogicalScan { table: supplier, columns: [_row_id, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                   LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
@@ -1003,35 +1003,32 @@
             LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
               LogicalProject { exprs: [($4 * $3)] }
                 LogicalFilter { predicate: ($2 = $7) AND ($10 = $15) AND ($16 = 'ARGENTINA':Varchar) }
-                  LogicalJoin { type: Inner, on: true }
-                    LogicalJoin { type: Inner, on: true }
+                  LogicalJoin { type: Inner, on: true, output_indices: all }
+                    LogicalJoin { type: Inner, on: true, output_indices: all }
                       LogicalScan { table: partsupp, columns: [_row_id, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
                       LogicalScan { table: supplier, columns: [_row_id, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                     LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0, $1] }
-      LogicalJoin { type: Inner, on: ($2 > $3) }
-        LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($1)] }
-          LogicalProject { exprs: [$0, ($2 * $1)] }
-            LogicalJoin { type: Inner, on: ($3 = $4) }
-              LogicalProject { exprs: [$0, $2, $3, $5] }
-                LogicalJoin { type: Inner, on: ($1 = $4) }
-                  LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost] }
-                  LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+    LogicalJoin { type: Inner, on: ($2 > $3), output_indices: [0, 1] }
+      LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($1)] }
+        LogicalProject { exprs: [$0, ($2 * $1)] }
+          LogicalJoin { type: Inner, on: ($3 = $4), output_indices: [0, 1, 2] }
+            LogicalJoin { type: Inner, on: ($1 = $4), output_indices: [0, 2, 3, 5] }
+              LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost] }
+              LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+            LogicalProject { exprs: [$0] }
+              LogicalFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
+                LogicalScan { table: nation, columns: [n_nationkey, n_name] }
+      LogicalProject { exprs: [($0 * 0.0001000000:Decimal)] }
+        LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+          LogicalProject { exprs: [($1 * $0)] }
+            LogicalJoin { type: Inner, on: ($2 = $3), output_indices: [0, 1] }
+              LogicalJoin { type: Inner, on: ($0 = $3), output_indices: [1, 2, 4] }
+                LogicalScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost] }
+                LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
               LogicalProject { exprs: [$0] }
                 LogicalFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
                   LogicalScan { table: nation, columns: [n_nationkey, n_name] }
-        LogicalProject { exprs: [($0 * 0.0001000000:Decimal)] }
-          LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
-            LogicalProject { exprs: [($1 * $0)] }
-              LogicalJoin { type: Inner, on: ($2 = $3) }
-                LogicalProject { exprs: [$1, $2, $4] }
-                  LogicalJoin { type: Inner, on: ($0 = $3) }
-                    LogicalScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost] }
-                    LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
-                LogicalProject { exprs: [$0] }
-                  LogicalFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
-                    LogicalScan { table: nation, columns: [n_nationkey, n_name] }
   batch_plan: |
     BatchSort { order: [$1 DESC] }
       BatchProject { exprs: [$0, $1] }
@@ -1295,27 +1292,26 @@
   stream_plan: |
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, _row_id(hidden), l_suppkey(hidden), agg#0(hidden), agg#1(hidden)], pk_columns: [_row_id, l_suppkey, agg#0, agg#1], order_descs: [s_suppkey, _row_id, l_suppkey, agg#0, agg#1] }
       StreamExchange { dist: HashShard([5, 6, 7, 8]) }
-        StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8] }
-          StreamHashJoin { type: Inner, predicate: $4 = $8 }
-            StreamExchange { dist: HashShard([4]) }
-              StreamProject { exprs: [$0, $1, $2, $3, $7, $4, $5] }
-                StreamHashJoin { type: Inner, predicate: $0 = $5 }
+        StreamHashJoin { type: Inner, predicate: $4 = $8 }
+          StreamExchange { dist: HashShard([4]) }
+            StreamProject { exprs: [$0, $1, $2, $3, $7, $4, $5] }
+              StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamTableScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone, _row_id], pk_indices: [4] }
+                StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
                   StreamExchange { dist: HashShard([0]) }
-                    StreamTableScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone, _row_id], pk_indices: [4] }
+                    StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $4] }
+                      StreamFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                        StreamTableScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id], pk_indices: [4] }
+          StreamExchange { dist: HashShard([1]) }
+            StreamSimpleAgg { aggs: [count, max($0)] }
+              StreamExchange { dist: Single }
+                StreamProject { exprs: [$2, $0] }
                   StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
                     StreamExchange { dist: HashShard([0]) }
                       StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $4] }
                         StreamFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
                           StreamTableScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id], pk_indices: [4] }
-            StreamExchange { dist: HashShard([1]) }
-              StreamSimpleAgg { aggs: [count, max($0)] }
-                StreamExchange { dist: Single }
-                  StreamProject { exprs: [$2, $0] }
-                    StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
-                      StreamExchange { dist: HashShard([0]) }
-                        StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $4] }
-                          StreamFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                            StreamTableScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id], pk_indices: [4] }
 - id: tpch_q16
   before:
     - create_tables
