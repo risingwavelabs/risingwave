@@ -10,7 +10,7 @@ async-trait = "0.1"
 auto_enums = "0.7"
 byteorder = "1"
 bytes = "1"
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 comfy-table = "6"
 crc32fast = "1"
 either = "1"
