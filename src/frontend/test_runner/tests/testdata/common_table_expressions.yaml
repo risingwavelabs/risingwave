@@ -16,7 +16,7 @@
     with cte as (select v1 from t1) select * from t2 inner join cte on t2.v3 = cte.v1;
   logical_plan: |
     LogicalProject { exprs: [$1, $2, $3] }
-      LogicalJoin { type: Inner, on: ($1 = $3) }
+      LogicalJoin { type: Inner, on: ($1 = $3), output_indices: all }
         LogicalScan { table: t2, columns: [_row_id, v3, v4] }
         LogicalProject { exprs: [$1] }
           LogicalScan { table: t1, columns: [_row_id, v1, v2] }
