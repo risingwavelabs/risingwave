@@ -183,7 +183,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                     Some(Ok((cell_based_pk, cell_based_row))),
                     Some(Ok((mem_table_pk, _mem_table_row_op))),
                 ) => {
-                    match cell_based_pk.cmp(&mem_table_pk) {
+                    match cell_based_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
                             // cell_based_table_item will be return
                             let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
