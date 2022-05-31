@@ -85,18 +85,18 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: Row, value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap())
-            .map_err(err)?;
+        let pk_bytes =
+            serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()).map_err(err)?;
         self.mem_table.insert(pk_bytes, value)?;
         Ok(())
     }
 
-    pub fn delete(&mut self, pk: Row, old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap())
-            .map_err(err)?;
+        let pk_bytes =
+            serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()).map_err(err)?;
         self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }

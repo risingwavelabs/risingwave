@@ -22,7 +22,6 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::RwError;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-// use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::next_key;
@@ -204,7 +203,6 @@ impl<S: StateStore> CellBasedTable<S> {
         // stateful executors need to compute vnode.
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        // let ordered_row_serializer = self.pk_serializer.as_ref().unwrap();
         let hash_builder = CRC32FastBuilder {};
         for (pk, row_op) in buffer {
             // If value meta is computed here, then the cell based table is guaranteed to have

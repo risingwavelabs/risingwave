@@ -62,23 +62,13 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 type_name: "".to_string(),
             })
             .collect_vec();
-        let pk_dist_indices = distribution_keys
-            .into_iter()
-            .map(|dist_idx| {
-                arrange_columns
-                    .iter()
-                    .find_position(|&pk_idx| *pk_idx == dist_idx)
-                    .unwrap()
-                    .0
-            })
-            .collect_vec();
         Self {
             input,
             state_table: StateTable::new(
                 keyspace,
                 column_descs,
                 arrange_order_types,
-                Some(pk_dist_indices),
+                Some(distribution_keys),
             ),
             arrange_columns: arrange_columns.clone(),
             info: ExecutorInfo {
@@ -124,10 +114,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                         match op {
                             Insert | UpdateInsert => {
-                                self.state_table.insert(arrange_row, row)?;
+                                self.state_table.insert(&arrange_row, row)?;
                             }
                             Delete | UpdateDelete => {
-                                self.state_table.delete(arrange_row, row)?;
+                                self.state_table.delete(&arrange_row, row)?;
                             }
                         }
                     }
