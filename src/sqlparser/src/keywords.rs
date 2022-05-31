@@ -65,44 +65,6 @@ macro_rules! define_keywords {
     };
 }
 
-/// These keywords can't be used as a table alias, so that `FROM table_name alias`
-/// can be parsed unambiguously without looking ahead.
-pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
-    // Reserved as both a table and a column alias:
-    Keyword::WITH,
-    Keyword::EXPLAIN,
-    Keyword::ANALYZE,
-    Keyword::SELECT,
-    Keyword::WHERE,
-    Keyword::GROUP,
-    Keyword::SORT,
-    Keyword::HAVING,
-    Keyword::ORDER,
-    Keyword::TOP,
-    Keyword::LATERAL,
-    Keyword::VIEW,
-    Keyword::LIMIT,
-    Keyword::OFFSET,
-    Keyword::FETCH,
-    Keyword::UNION,
-    Keyword::EXCEPT,
-    Keyword::INTERSECT,
-    // Reserved only as a table alias in the `FROM`/`JOIN` clauses:
-    Keyword::ON,
-    Keyword::JOIN,
-    Keyword::INNER,
-    Keyword::CROSS,
-    Keyword::FULL,
-    Keyword::LEFT,
-    Keyword::RIGHT,
-    Keyword::NATURAL,
-    Keyword::USING,
-    Keyword::CLUSTER,
-    // for MSSQL-specific OUTER APPLY (seems reserved in most dialects)
-    Keyword::OUTER,
-    Keyword::SET,
-];
-
 // The following keywords should be sorted to be able to match using binary search
 define_keywords!(
     ABORT,
@@ -544,6 +506,44 @@ define_keywords!(
     YEAR,
     ZONE
 );
+
+/// These keywords can't be used as a table alias, so that `FROM table_name alias`
+/// can be parsed unambiguously without looking ahead.
+pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
+    // Reserved as both a table and a column alias:
+    Keyword::WITH,
+    Keyword::EXPLAIN,
+    Keyword::ANALYZE,
+    Keyword::SELECT,
+    Keyword::WHERE,
+    Keyword::GROUP,
+    Keyword::SORT,
+    Keyword::HAVING,
+    Keyword::ORDER,
+    Keyword::TOP,
+    Keyword::LATERAL,
+    Keyword::VIEW,
+    Keyword::LIMIT,
+    Keyword::OFFSET,
+    Keyword::FETCH,
+    Keyword::UNION,
+    Keyword::EXCEPT,
+    Keyword::INTERSECT,
+    // Reserved only as a table alias in the `FROM`/`JOIN` clauses:
+    Keyword::ON,
+    Keyword::JOIN,
+    Keyword::INNER,
+    Keyword::CROSS,
+    Keyword::FULL,
+    Keyword::LEFT,
+    Keyword::RIGHT,
+    Keyword::NATURAL,
+    Keyword::USING,
+    Keyword::CLUSTER,
+    // for MSSQL-specific OUTER APPLY (seems reserved in most dialects)
+    Keyword::OUTER,
+    Keyword::SET,
+];
 
 /// Can't be used as a column alias, so that `SELECT <expr> alias`
 /// can be parsed unambiguously without looking ahead.
