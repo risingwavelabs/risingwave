@@ -149,9 +149,11 @@ impl<S: StateStore> StateTableRowIter<S> {
         order_types_vec: &'a [OrderType],
         epoch: u64,
     ) {
-        let cell_based_table_iter: CellBasedTableStreamingIter<_> =
-            CellBasedTableStreamingIter::new(keyspace, table_descs, epoch).await?;
-        let cell_based_table_iter = cell_based_table_iter.into_stream().peekable();
+        let cell_based_table_iter: futures::stream::Peekable<_> =
+            CellBasedTableStreamingIter::new(keyspace, table_descs, epoch)
+                .await?
+                .into_stream()
+                .peekable();
         pin_mut!(cell_based_table_iter);
 
         let pk_serializer = OrderedRowSerializer::new(order_types_vec.to_vec());
@@ -216,6 +218,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                     }
                 }
                 (Some(_), Some(_)) => {
+                    // Throw the error.
                     let _ = cell_based_table_iter.next().await.unwrap()?;
                     let _ = mem_table_iter.next().unwrap()?;
 
