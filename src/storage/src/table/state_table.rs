@@ -17,8 +17,7 @@ use std::collections::btree_map;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use aws_smithy_http::pin_mut;
-use futures::{Stream, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
