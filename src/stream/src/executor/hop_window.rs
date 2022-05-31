@@ -18,7 +18,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::{DataChunk, StreamChunk, Vis};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
@@ -183,9 +183,9 @@ impl HopWindowExecutor {
                 .eval(&data_chunk)
                 .map_err(StreamExecutorError::eval_error)?;
             let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], None);
-            let (origin_cols, visibility) = data_chunk.into_parts();
+            let (origin_cols, vis) = data_chunk.into_partx();
             // SAFETY: Already compacted.
-            assert!(visibility.is_none());
+            assert!(matches!(vis, Vis::Compact(_)));
             for i in 0..units {
                 let window_start_col = window_start_exprs[i]
                     .eval(&hop_start_chunk)

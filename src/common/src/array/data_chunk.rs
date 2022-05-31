@@ -69,7 +69,7 @@ pub struct DataChunk {
 }
 
 #[derive(Clone, PartialEq)]
-enum Vis {
+pub enum Vis {
     Bitmap(Bitmap),
     Compact(usize), // equivalent to all ones of this size
 }
@@ -95,6 +95,10 @@ impl DataChunk {
         };
 
         DataChunk { columns, vis2 }
+    }
+
+    pub fn nex(columns: Vec<Column>, vis: Vis) -> Self {
+        DataChunk { columns, vis2: vis }
     }
 
     /// `new_dummy` creates a data chunk without columns but only a cardinality.
@@ -148,11 +152,8 @@ impl DataChunk {
         DataChunkBuilder::new()
     }
 
-    pub fn into_parts(self) -> (Vec<Column>, Option<Bitmap>) {
-        match self.vis2 {
-            Vis::Bitmap(b) => (self.columns, Some(b)),
-            Vis::Compact(_) => (self.columns, None),
-        }
+    pub fn into_partx(self) -> (Vec<Column>, Vis) {
+        (self.columns, self.vis2)
     }
 
     pub fn dimension(&self) -> usize {

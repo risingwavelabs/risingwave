@@ -92,7 +92,7 @@ impl InsertExecutor {
             }
 
             let rowid_column = once(Column::from(builder.finish().unwrap()));
-            let child_columns = data_chunk.into_parts().0.into_iter();
+            let child_columns = data_chunk.into_partx().0.into_iter();
 
             // Materialize plan is assembled manually with Rust frontend, so we put the row
             // id column to the first.

@@ -21,7 +21,7 @@ use prost::DecodeError;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk, Row};
+use crate::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::types::{DataType, NaiveDateTimeWrapper};
@@ -181,12 +181,20 @@ impl StreamChunk {
     }
 
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
-        let (columns, visibility) = data_chunk.into_parts();
+        let (columns, vis) = data_chunk.into_partx();
+        let visibility = match vis {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
+        };
         Self::new(ops, columns, visibility)
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
-        let (columns, visibility) = self.data.into_parts();
+        let (columns, vis) = self.data.into_partx();
+        let visibility = match vis {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
+        };
         (self.ops, columns, visibility)
     }
 

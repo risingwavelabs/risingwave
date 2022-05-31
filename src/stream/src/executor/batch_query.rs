@@ -94,7 +94,7 @@ where
             .get_hash_values(self.key_indices.as_ref(), CRC32FastBuilder)
             .unwrap();
         let n = data_chunk.cardinality();
-        let (columns, _visibility) = data_chunk.into_parts();
+        let (columns, _visibility) = data_chunk.into_partx();
 
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         for hv in &hash_values {
