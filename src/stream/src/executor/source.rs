@@ -26,8 +26,8 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{
-    ConnectorState, SplitImpl, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
-    PULSAR_CONNECTOR,
+    ConnectorState, SplitImpl, DATAGEN_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR,
+    NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
 };
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
@@ -240,7 +240,9 @@ impl<S: StateStore> SourceExecutor<S> {
                 { kafka, KAFKA_CONNECTOR },
                 { kinesis, KINESIS_CONNECTOR },
                 { nexmark, NEXMARK_CONNECTOR },
-                { pulsar, PULSAR_CONNECTOR }
+                { pulsar, PULSAR_CONNECTOR },
+                { datagen, DATAGEN_CONNECTOR}
+
             );
             self.state_cache.clear();
         }
