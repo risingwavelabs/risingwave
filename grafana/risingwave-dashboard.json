@@ -2502,6 +2502,202 @@
 			"type": "row"
 		},
 		{
+			"collapsed": true,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"gridPos": {
+				"h": 1,
+				"w": 24,
+				"x": 0,
+				"y": 101
+			},
+			"id": 152,
+			"panels": [
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 102
+					},
+					"hiddenSeries": false,
+					"id": 17,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.5.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "rate(stream_exchange_send_size[15s]) / 1024",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{up_actor_id}}->{{down_actor_id}}",
+							"refId": "A"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "Exchange Send throughput",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:439",
+							"format": "KB/s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:440",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 110
+					},
+					"hiddenSeries": false,
+					"id": 18,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "rate(stream_exchange_recv_size[15s]) / 1024",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{up_actor_id}}->{{down_actor_id}}",
+							"refId": "A"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "Exchange Recv throughput",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:439",
+							"format": "KB/s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:440",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
+			"title": "Streaming Exchange",
+			"type": "row"
+		},
+		{
 			"collapsed": false,
 			"datasource": {
 				"type": "prometheus",
@@ -2511,7 +2707,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 85
+				"y": 118
 			},
 			"id": 26,
 			"panels": [],
@@ -2578,7 +2774,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 86
+				"y": 119
 			},
 			"id": 30,
 			"options": {
@@ -2714,7 +2910,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 86
+				"y": 119
 			},
 			"id": 28,
 			"options": {
@@ -2948,7 +3144,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 94
+				"y": 119
 			},
 			"id": 128,
 			"options": {
@@ -2997,7 +3193,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 94
+				"y": 119
 			},
 			"hiddenSeries": false,
 			"id": 196,
@@ -3149,7 +3345,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 102
+				"y": 119
 			},
 			"id": 43,
 			"options": {
@@ -3257,7 +3453,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 102
+				"y": 119
 			},
 			"id": 40,
 			"options": {
@@ -3448,7 +3644,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 110
+				"y": 119
 			},
 			"id": 130,
 			"options": {
@@ -3588,7 +3784,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 110
+				"y": 119
 			},
 			"id": 32,
 			"options": {
@@ -3727,7 +3923,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 118
+				"y": 119
 			},
 			"id": 44,
 			"options": {
@@ -3819,7 +4015,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 118
+				"y": 119
 			},
 			"id": 45,
 			"options": {
