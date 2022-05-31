@@ -226,7 +226,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .map_err(StreamExecutorError::eval_error)?;
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone())
             .map_err(StreamExecutorError::eval_error)?;
-        let (columns, vis) = data_chunk.into_partx();
+        let (columns, vis) = data_chunk.into_parts();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,

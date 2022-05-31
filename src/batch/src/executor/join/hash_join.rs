@@ -642,7 +642,7 @@ mod tests {
 
         fn select_from_chunk(&self, data_chunk: DataChunk) -> DataChunk {
             let join_type = self.join_type;
-            let (columns, vis) = data_chunk.into_partx();
+            let (columns, vis) = data_chunk.into_parts();
 
             let keep_columns = if join_type.keep_all() {
                 vec![columns[1].clone(), columns[3].clone()]
@@ -652,7 +652,7 @@ mod tests {
                 unreachable!()
             };
 
-            DataChunk::nex(keep_columns, vis)
+            DataChunk::new(keep_columns, vis)
         }
 
         async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool) {

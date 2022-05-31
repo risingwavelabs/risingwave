@@ -94,7 +94,7 @@ where
             .get_hash_values(self.key_indices.as_ref(), CRC32FastBuilder)
             .unwrap();
         let n = data_chunk.cardinality();
-        let (columns, _visibility) = data_chunk.into_partx();
+        let (columns, _visibility) = data_chunk.into_parts();
 
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         for hv in &hash_values {
@@ -106,7 +106,7 @@ where
         }
         let new_visibility = new_visibility.finish();
         if new_visibility.num_high_bits() > 0 {
-            Some(DataChunk::nex(columns, Vis::Bitmap(new_visibility)))
+            Some(DataChunk::new(columns, Vis::Bitmap(new_visibility)))
         } else {
             None
         }

@@ -294,7 +294,7 @@ impl<K: HashKey> ProbeTable<K> {
         data_chunk: DataChunk,
         filter: &Bitmap,
     ) -> DataChunk {
-        let (columns, vis) = data_chunk.into_partx();
+        let (columns, vis) = data_chunk.into_parts();
         let mut new_column = Vec::with_capacity(self.params.full_data_types().len());
 
         for (idx, col) in columns.into_iter().enumerate() {
@@ -307,7 +307,7 @@ impl<K: HashKey> ProbeTable<K> {
                 new_column.push(Column::new(Arc::new(array)));
             }
         }
-        DataChunk::nex(new_column, vis)
+        DataChunk::new(new_column, vis)
     }
 
     fn remove_duplicate_rows_for_left_outer(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -1043,7 +1043,7 @@ impl<K: HashKey> ProbeTable<K> {
         if join_type.keep_all() {
             data_chunk
         } else {
-            let (columns, vis) = data_chunk.into_partx();
+            let (columns, vis) = data_chunk.into_parts();
             let keep_columns = if join_type.keep_left() {
                 columns[0..self.params.left_len()].to_vec()
             } else if join_type.keep_right() {
@@ -1052,7 +1052,7 @@ impl<K: HashKey> ProbeTable<K> {
             } else {
                 unreachable!()
             };
-            DataChunk::nex(keep_columns, vis)
+            DataChunk::new(keep_columns, vis)
         }
     }
 

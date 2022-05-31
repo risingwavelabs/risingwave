@@ -87,7 +87,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
             .eval(&data_chunk)
             .map_err(StreamExecutorError::eval_error)?;
 
-        let (columns, vis) = data_chunk.into_partx();
+        let (columns, vis) = data_chunk.into_parts();
 
         let n = ops.len();
 

@@ -85,7 +85,7 @@ impl Default for StreamChunk {
     fn default() -> Self {
         Self {
             ops: Default::default(),
-            data: DataChunk::nex(vec![], Vis::Compact(0)),
+            data: DataChunk::new(vec![], Vis::Compact(0)),
         }
     }
 }
@@ -100,7 +100,7 @@ impl StreamChunk {
             Some(b) => Vis::Bitmap(b),
             None => Vis::Compact(ops.len()),
         };
-        let data = DataChunk::nex(columns, vis);
+        let data = DataChunk::new(columns, vis);
         StreamChunk { ops, data }
     }
 
@@ -185,7 +185,7 @@ impl StreamChunk {
     }
 
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
-        let (columns, vis) = data_chunk.into_partx();
+        let (columns, vis) = data_chunk.into_parts();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,
@@ -194,7 +194,7 @@ impl StreamChunk {
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
-        let (columns, vis) = self.data.into_partx();
+        let (columns, vis) = self.data.into_parts();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,

@@ -74,7 +74,7 @@ impl DataChunkBuilder {
             // no data (dummy)
             Vis::Compact(0)
         };
-        DataChunk::nex(self.columns, vis)
+        DataChunk::new(self.columns, vis)
     }
 }
 
@@ -92,7 +92,7 @@ pub enum Vis {
 }
 
 impl DataChunk {
-    pub fn nex(columns: Vec<Column>, vis: Vis) -> Self {
+    pub fn new(columns: Vec<Column>, vis: Vis) -> Self {
         DataChunk { columns, vis2: vis }
     }
 
@@ -126,7 +126,7 @@ impl DataChunk {
             .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
-        Ok(DataChunk::nex(new_columns, Vis::Compact(rows.len())))
+        Ok(DataChunk::new(new_columns, Vis::Compact(rows.len())))
     }
 
     /// Return the next visible row index on or after `row_idx`.
@@ -147,7 +147,7 @@ impl DataChunk {
         DataChunkBuilder::new()
     }
 
-    pub fn into_partx(self) -> (Vec<Column>, Vis) {
+    pub fn into_parts(self) -> (Vec<Column>, Vis) {
         (self.columns, self.vis2)
     }
 
@@ -177,7 +177,7 @@ impl DataChunk {
 
     #[must_use]
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
-        DataChunk::nex(self.columns.clone(), Vis::Bitmap(visibility))
+        DataChunk::new(self.columns.clone(), Vis::Bitmap(visibility))
     }
 
     pub fn visibility(&self) -> Option<&Bitmap> {
@@ -258,7 +258,7 @@ impl DataChunk {
                 columns.push(Column::from_protobuf(any_col, cardinality)?);
             }
 
-            let chunk = DataChunk::nex(columns, Vis::Compact(proto.cardinality as usize));
+            let chunk = DataChunk::new(columns, Vis::Compact(proto.cardinality as usize));
             Ok(chunk)
         }
     }
@@ -454,7 +454,7 @@ impl TryFrom<Vec<Column>> for DataChunk {
         );
 
         let len = columns[0].array_ref().len();
-        Ok(DataChunk::nex(columns, Vis::Compact(len)))
+        Ok(DataChunk::new(columns, Vis::Compact(len)))
     }
 }
 
@@ -578,7 +578,7 @@ impl DataChunkTestExt for DataChunk {
         } else {
             Vis::Bitmap(Bitmap::try_from(visibility).unwrap())
         };
-        DataChunk::nex(columns, vis)
+        DataChunk::new(columns, vis)
     }
 }
 
@@ -674,7 +674,7 @@ mod tests {
 
     #[test]
     fn test_to_pretty_string() {
-        let chunk = DataChunk::nex(
+        let chunk = DataChunk::new(
             vec![
                 column_nonnull!(I64Array, [1, 2, 3, 4]),
                 column!(I64Array, [Some(6), None, Some(7), None]),
