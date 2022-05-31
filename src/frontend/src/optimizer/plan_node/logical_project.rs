@@ -250,8 +250,23 @@ impl PredicatePushdown for LogicalProject {
 impl ToBatch for LogicalProject {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
-        Ok(BatchProject::new(new_logical).into())
+        let new_logical = self.clone_with_input(new_input.clone());
+        if let Some(input_proj) = new_input.as_batch_project() {
+            let outer_project = new_logical;
+            let inner_project = input_proj.as_logical();
+            let mut subst = Substitute {
+                mapping: inner_project.exprs().clone(),
+            };
+            let exprs = outer_project
+                .exprs()
+                .iter()
+                .cloned()
+                .map(|expr| subst.rewrite_expr(expr))
+                .collect();
+            Ok(BatchProject::new(LogicalProject::new(inner_project.input(), exprs)).into())
+        } else {
+            Ok(BatchProject::new(new_logical).into())
+        }
     }
 }
 
@@ -265,15 +280,30 @@ impl ToStream for LogicalProject {
                 .rewrite_required_distribution(required_dist);
             match input_required {
                 RequiredDist::PhysicalDist(dist) => match dist {
-                    Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
+                    Distribution::Single => RequiredDist::Any,
                     _ => RequiredDist::PhysicalDist(dist),
                 },
                 _ => input_required,
             }
         };
         let new_input = self.input().to_stream_with_dist_required(&input_required)?;
-        let new_logical = self.clone_with_input(new_input);
-        let stream_plan = StreamProject::new(new_logical);
+        let new_logical = self.clone_with_input(new_input.clone());
+        let stream_plan = if let Some(input_proj) = new_input.as_stream_project() {
+            let outer_project = new_logical;
+            let inner_project = input_proj.as_logical();
+            let mut subst = Substitute {
+                mapping: inner_project.exprs().clone(),
+            };
+            let exprs = outer_project
+                .exprs()
+                .iter()
+                .cloned()
+                .map(|expr| subst.rewrite_expr(expr))
+                .collect();
+            StreamProject::new(LogicalProject::new(inner_project.input(), exprs))
+        } else {
+            StreamProject::new(new_logical)
+        };
         required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
     }
 

@@ -70,12 +70,24 @@ impl Op {
 pub type Ops<'a> = &'a [Op];
 
 /// `StreamChunk` is used to pass data over the streaming pathway.
-#[derive(Default, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,
 
     pub(super) data: DataChunk,
+}
+
+impl Default for StreamChunk {
+    /// Create a 0-row-0-col `StreamChunk`. Only used in some existing tests.
+    /// This is NOT the same as an **empty** chunk, which has 0 rows but with
+    /// columns aligned with executor schema.
+    fn default() -> Self {
+        Self {
+            ops: Default::default(),
+            data: DataChunk::new(vec![], None),
+        }
+    }
 }
 
 impl StreamChunk {
@@ -203,7 +215,7 @@ impl StreamChunk {
         &self.ops
     }
 
-    pub fn visibility(&self) -> &Option<Bitmap> {
+    pub fn visibility(&self) -> Option<&Bitmap> {
         self.data.visibility()
     }
 

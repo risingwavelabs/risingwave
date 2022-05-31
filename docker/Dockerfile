@@ -58,5 +58,9 @@ ENTRYPOINT [ "/risingwave/bin/compactor" ]
 FROM image-base as risingwave
 RUN mkdir -p /risingwave/bin
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
+# Copy risedev.yml into container
+COPY ./risedev.yml /risedev.yml
+# Set default playground mode to docker-playground profile
+ENV PLAYGROUND_PROFILE docker-playground
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]

@@ -24,17 +24,20 @@ All connectors need to implement the following trait and it exposes two methods 
 
 ```rust
 // src/connector/src/base.rs
-#[async_trait]
-pub trait SourceReader {
-    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
-    async fn new(config: HashMap<String, String>, state: Option<ConnectorState>) -> Result<Self>
-    where
-        Self: Sized;
+pub trait SplitReader: Sized {
+    type Properties;
+
+    async fn new(
+        properties: Self::Properties,
+        state: ConnectorState,
+        columns: Option<Vec<Column>>,
+    ) -> Result<Self>;
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
 }
 ```
 
+- `new`: create a new connector with some properties, and this method should support restoring from a specific state(with partitions and offsets).
 - `next`: return a batch of new messages and their offsets in the split.
-- `new`: create a new connector with some properties, and this method should support restoring to a specific state via ConnectorState.
 
 ### Enumerators
 
@@ -44,26 +47,29 @@ All enumerators need to implement the following trait.
 
 ```rust
 // src/connector/src/base.rs
-#[async_trait]
-pub trait SplitEnumerator {
-    type Split: SourceSplit + Send + Sync;
+pub trait SplitEnumerator: Sized {
+    type Split: SplitMetaData + Send + Sync;
+    type Properties;
+
+    async fn new(properties: Self::Properties) -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 ```
 
+- `new`: creates an enumerator with some properties.
 - `list_splits`: requests the upstream and returns all partitions.
 
 ### ConnectorSource
 
-`ConnectorSource` unites all connectors via `SourceReader` trait. Also, a parser is held here, which parses raw data to data chunks or stream chunks according to column description. One `ConnectorSource` keeps one connector and one parser.
+`ConnectorSource` unites all connectors via `SourceReader` trait. Also, a parser is held here, which parses raw data to stream chunks according to column description. A `ConnectorSource` can handle multiple splits by spawning a new thread for each split. If the source is assigned no split, it will start a dummy reader whose `next` method never returns as a placeholder.
 
 ### SourceExecutor
 
-`SourceExecutor` relies on batch processing in the current implementation, which builds connector and parser. The primary responsibility of the `SourceExecutor` is to correctly process barriers.
+`SourceExecutor` is initialized with splits assigned by the enumerator to subscribe. The channel of the data chunks and the channel of the barrier are combined at this level and the `SourceExecutor` needs to prioritize and correctly handle the barriers.
 
 ## How It Works
 
-1. When a source is defined, meta service will register its schema and broadcast to compute nodes. Compute node extracts properties from the frontend and builds corresponding components and stores them as `SourceDesc` in `source_manager` identified by table_id.
-2. `SourceExecutor` fetches its SourceDesc by table_id and builds a state handler. Then the building process is completed and no data is read from upstream.
+1. When a source is defined, meta service will register its schema and broadcast to compute nodes. Compute node extracts properties from the frontend and builds corresponding components and stores them as `SourceDesc` in `source_manager` identified by table_id. Note that at this stage, the source instance is only built but not running.
+2. No `SourceExecutor` will be built until a subsequent materialized view is created. `SourceExecutor` fetches specific source instance from `source_manager` identified by table_id and holds a copy of it, and initializes the corresponding state store at this stage.
 3. When receiving a barrier, SourceExecutor will check whether it contains an assign_split mutation. If the partition assignment in the assign_split mutation is different from the current situation, the `SourceExecutor` needs to rebuild the `ConnectorSource` and other underlying services based on the information in the mutation, then starts reading from the new split and offset.
 4. Whenever receiving a barrier, the state handler always takes a snapshot of the `ConnectorSource` then labels the snapshot with an epoch number. When an error occurs, SourceExecutor takes a specific state and applies it.

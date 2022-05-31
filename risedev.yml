@@ -83,6 +83,19 @@ risedev:
     - use: compute-node
     - use: frontend
 
+  docker-playground:
+    - use: meta-node
+      enable-dashboard-v2: false
+      unsafe-disable-recovery: true
+      listen-address: "0.0.0.0"
+      address: "127.0.0.1"
+    - use: compute-node
+      listen-address: "0.0.0.0"
+      address: "127.0.0.1"
+    - use: frontend
+      listen-address: "0.0.0.0"
+      address: "127.0.0.1"
+
   ######################################
   ### Configurations used in Compose ###
   ######################################
