@@ -21,7 +21,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::{ArgEnum, Parser, Subcommand};
 use console::style;
 use dialoguer::MultiSelect;
-use enum_iterator::IntoEnumIterator;
+use enum_iterator::{all, Sequence};
 use itertools::Itertools;
 
 #[derive(Parser)]
@@ -54,7 +54,7 @@ enum Commands {
     Default,
 }
 
-#[derive(Clone, Copy, Debug, IntoEnumIterator, PartialEq, Eq, ArgEnum)]
+#[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ArgEnum)]
 pub enum Components {
     #[clap(name = "minio")]
     MinIO,
@@ -195,7 +195,7 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
     );
     println!();
 
-    let all_components = Components::into_enum_iter().collect_vec();
+    let all_components = all::<Components>().collect_vec();
 
     const ITEMS_PER_PAGE: usize = 6;
 
@@ -299,7 +299,7 @@ fn main() -> Result<()> {
     };
 
     println!("=== Enabled Components ===");
-    for component in Components::into_enum_iter() {
+    for component in all::<Components>() {
         println!(
             "{}: {}",
             component.title(),
@@ -326,7 +326,7 @@ fn main() -> Result<()> {
     writeln!(file, "RISEDEV_CONFIGURED=true")?;
     writeln!(file)?;
 
-    for component in Components::into_enum_iter() {
+    for component in all::<Components>() {
         writeln!(file, "# {}", component.title())?;
         writeln!(
             file,

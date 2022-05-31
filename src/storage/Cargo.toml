@@ -6,12 +6,12 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-aws-config = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-endpoint = { version = "0.11", default-features = false }
-aws-sdk-s3 = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.41"
-aws-smithy-types = "0.41"
-aws-types = { version = "0.11", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-endpoint = { version = "0.12", default-features = false }
+aws-sdk-s3 = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.42"
+aws-smithy-types = "0.42"
+aws-types = { version = "0.12", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -19,7 +19,7 @@ crc32fast = "1"
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 either = "1"
-enum-as-inner = "0.4"
+enum-as-inner = "0.5"
 fail = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

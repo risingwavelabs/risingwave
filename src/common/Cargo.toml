@@ -11,7 +11,7 @@ auto_enums = "0.7"
 byteorder = "1"
 bytes = "1"
 chrono = "0.4"
-comfy-table = "5.0"
+comfy-table = "6"
 crc32fast = "1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
