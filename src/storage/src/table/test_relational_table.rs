@@ -469,38 +469,34 @@ async fn test_state_table_iter() {
         let mut iter = Box::pin(state.iter(epoch).await.unwrap());
 
         let res = iter.next().await.unwrap().unwrap();
-        assert!(res.is_some());
         assert_eq!(
-            Row(vec![
+            &Row(vec![
                 Some(1_i32.into()),
                 Some(11_i32.into()),
                 Some(111_i32.into())
             ]),
-            res.unwrap()
+            res.as_ref()
         );
 
         // will not get [2, 22, 222]
         let res = iter.next().await.unwrap().unwrap();
-
-        assert!(res.is_some());
         assert_eq!(
-            Row(vec![
+            &Row(vec![
                 Some(3333_i32.into()),
                 Some(3333_i32.into()),
                 Some(3333_i32.into())
             ]),
-            res.unwrap()
+            res.as_ref()
         );
 
         let res = iter.next().await.unwrap().unwrap();
-        assert!(res.is_some());
         assert_eq!(
-            Row(vec![
+            &Row(vec![
                 Some(6_i32.into()),
                 Some(66_i32.into()),
                 Some(666_i32.into())
             ]),
-            res.unwrap()
+            res.as_ref()
         );
     }
 
@@ -582,85 +578,85 @@ async fn test_state_table_iter() {
 
     // this pk exist in both cell_based_table(shared_storage) and mem_table(buffer)
     assert_eq!(
-        Row(vec![
+        &Row(vec![
             Some(3_i32.into()),
             Some(33_i32.into()),
             Some(333_i32.into())
         ]),
-        res.unwrap()
+        res.as_ref()
     );
 
     // this row exists in mem_table
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
-        Row(vec![
+        &Row(vec![
             Some(4_i32.into()),
             Some(44_i32.into()),
             Some(444_i32.into())
         ]),
-        res.unwrap()
+        res.as_ref()
     );
 
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in mem_table
     assert_eq!(
-        Row(vec![
+        &Row(vec![
             Some(5_i32.into()),
             Some(55_i32.into()),
             Some(555_i32.into())
         ]),
-        res.unwrap()
+        res.as_ref()
     );
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in cell_based_table
     assert_eq!(
-        Row(vec![
+        &Row(vec![
             Some(6_i32.into()),
             Some(66_i32.into()),
             Some(666_i32.into())
         ]),
-        res.unwrap()
+        res.as_ref()
     );
 
     let res = iter.next().await.unwrap().unwrap();
     // this row exists in mem_table
     assert_eq!(
-        Row(vec![
+        &Row(vec![
             Some(7_i32.into()),
             Some(77_i32.into()),
             Some(777.into())
         ]),
-        res.unwrap()
+        res.as_ref()
     );
 
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in mem_table
     assert_eq!(
-        Row(vec![
+        &Row(vec![
             Some(8_i32.into()),
             Some(88_i32.into()),
             Some(888_i32.into())
         ]),
-        res.unwrap()
+        res.as_ref()
     );
 
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in cell_based_table
     assert_eq!(
-        Row(vec![
+        &Row(vec![
             Some(9_i32.into()),
             Some(99_i32.into()),
             Some(999_i32.into())
         ]),
-        res.unwrap()
+        res.as_ref()
     );
 
     // there is no row in both cell_based_table and mem_table
-    let res = iter.next().await.unwrap().unwrap();
+    let res = iter.next().await;
     assert!(res.is_none());
 }
 
@@ -775,29 +771,27 @@ async fn test_multi_state_table_iter() {
         let mut iter_2 = Box::pin(state_2.iter(epoch).await.unwrap());
 
         let res_1_1 = iter_1.next().await.unwrap().unwrap();
-        assert!(res_1_1.is_some());
         assert_eq!(
-            Row(vec![
+            &Row(vec![
                 Some(1_i32.into()),
                 Some(11_i32.into()),
                 Some(111_i32.into()),
             ]),
-            res_1_1.unwrap()
+            res_1_1.as_ref()
         );
-        let res_1_2 = iter_1.next().await.unwrap().unwrap();
+        let res_1_2 = iter_1.next().await;
         assert!(res_1_2.is_none());
 
         let res_2_1 = iter_2.next().await.unwrap().unwrap();
-        assert!(res_2_1.is_some());
         assert_eq!(
-            Row(vec![
+            &Row(vec![
                 Some("1".to_string().into()),
                 Some("11".to_string().into()),
                 Some("111".to_string().into())
             ]),
-            res_2_1.unwrap()
+            res_2_1.as_ref()
         );
-        let res_2_2 = iter_2.next().await.unwrap().unwrap();
+        let res_2_2 = iter_2.next().await;
         assert!(res_2_2.is_none());
     }
 
