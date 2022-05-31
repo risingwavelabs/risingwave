@@ -13,47 +13,23 @@
 // limitations under the License.
 
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_pb::common::Status as PbStatus;
-use risingwave_pb::data::DataChunk;
-use risingwave_pb::task_service::{ExecuteResponse, GetDataResponse};
+use risingwave_pb::task_service::GetDataResponse;
 use tonic::Status;
 
-type ExchangeDataSender<T> = tokio::sync::mpsc::Sender<std::result::Result<T, Status>>;
-
-pub trait CreateDataResponse: Send {
-    fn create_data_response(status: PbStatus, data_chunk: DataChunk) -> Self;
-}
-
-impl CreateDataResponse for GetDataResponse {
-    fn create_data_response(status: PbStatus, data_chunk: DataChunk) -> Self {
-        Self {
-            status: Some(status),
-            record_batch: Some(data_chunk),
-        }
-    }
-}
-
-impl CreateDataResponse for ExecuteResponse {
-    fn create_data_response(status: PbStatus, data_chunk: DataChunk) -> Self {
-        Self {
-            status: Some(status),
-            record_batch: Some(data_chunk),
-        }
-    }
-}
+type ExchangeDataSender = tokio::sync::mpsc::Sender<std::result::Result<GetDataResponse, Status>>;
 
 #[async_trait::async_trait]
-pub trait ExchangeWriter<T: CreateDataResponse>: Send {
-    async fn write(&mut self, resp: T) -> Result<()>;
+pub trait ExchangeWriter: Send {
+    async fn write(&mut self, resp: GetDataResponse) -> Result<()>;
 }
 
-pub struct GrpcExchangeWriter<T: CreateDataResponse> {
-    sender: ExchangeDataSender<T>,
+pub struct GrpcExchangeWriter {
+    sender: ExchangeDataSender,
     written_chunks: usize,
 }
 
-impl<T: CreateDataResponse> GrpcExchangeWriter<T> {
-    pub fn new(sender: ExchangeDataSender<T>) -> Self {
+impl GrpcExchangeWriter {
+    pub fn new(sender: ExchangeDataSender) -> Self {
         Self {
             sender,
             written_chunks: 0,
@@ -66,8 +42,8 @@ impl<T: CreateDataResponse> GrpcExchangeWriter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: CreateDataResponse> ExchangeWriter<T> for GrpcExchangeWriter<T> {
-    async fn write(&mut self, data: T) -> Result<()> {
+impl ExchangeWriter for GrpcExchangeWriter {
+    async fn write(&mut self, data: GetDataResponse) -> Result<()> {
         self.written_chunks += 1;
         self.sender
             .send(Ok(data))
