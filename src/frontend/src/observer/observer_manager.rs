@@ -29,6 +29,8 @@ use tokio::task::JoinHandle;
 use crate::catalog::root_catalog::Catalog;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::HummockSnapshotManagerRef;
+use crate::user::root_user::UserInfoManager;
+use crate::user::UserInfoVersion;
 
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
@@ -40,18 +42,23 @@ pub(crate) struct ObserverManager {
     worker_node_manager: WorkerNodeManagerRef,
     catalog: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
+    user_info_manager: Arc<RwLock<UserInfoManager>>,
+    user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 impl ObserverManager {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         meta_client: MetaClient,
         addr: HostAddr,
         worker_node_manager: WorkerNodeManagerRef,
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
+        user_info_manager: Arc<RwLock<UserInfoManager>>,
+        user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         let rx = meta_client
@@ -65,6 +72,8 @@ impl ObserverManager {
             worker_node_manager,
             catalog,
             catalog_updated_tx,
+            user_info_manager,
+            user_info_updated_tx,
             hummock_snapshot_manager,
         }
     }
