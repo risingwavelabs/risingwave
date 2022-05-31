@@ -203,7 +203,7 @@ impl StreamChunk {
         &self.ops
     }
 
-    pub fn visibility(&self) -> &Option<Bitmap> {
+    pub fn visibility(&self) -> Option<&Bitmap> {
         self.data.visibility()
     }
 
