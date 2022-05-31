@@ -14,6 +14,6 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 - [ ] I have written necessary docs and comments
 - [ ] I have added necessary unit tests and integration tests
-- [ ] All checks passed in `./risedev check` (or its alias, `./risedev c`)
+- [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
 
 ## Refer to a related PR or issue link (optional)
