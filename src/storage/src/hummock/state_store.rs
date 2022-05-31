@@ -21,7 +21,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::common::VNodeBitmap;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,

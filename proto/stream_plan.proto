@@ -296,6 +296,9 @@ message StreamActor {
   repeated uint32 upstream_actor_id = 6;
   // Placement rule for actor, need to stay on the same node as upstream.
   bool same_worker_node_as_upstream = 7;
+  // Vnodes that the executors in this actor own. If this actor is the only actor in its fragment, `vnode_bitmap`
+  // will be empty.
+  bytes vnode_bitmap = 8;
 }
 
 enum FragmentType {

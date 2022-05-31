@@ -14,24 +14,27 @@
 
 //! For expression that only accept two arguments + 1 bytes writer as input.
 
-use risingwave_common::array::{I32Array, Utf8Array};
+use risingwave_common::array::{I32Array, NaiveDateTimeArray, Utf8Array};
 use risingwave_common::types::DataType;
 
+use super::Expression;
 use crate::expr::template::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::substr::*;
+use crate::vector_op::to_char::to_char_timestamp;
 
 pub fn new_substr_start(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
     return_type: DataType,
 ) -> BoxedExpression {
-    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _>::new(
+    BinaryBytesExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         expr_ia2,
         return_type,
         substr_start,
-    ))
+    )
+    .boxed()
 }
 
 #[allow(dead_code)]
@@ -40,12 +43,28 @@ pub fn new_substr_for(
     expr_ia2: BoxedExpression,
     return_type: DataType,
 ) -> BoxedExpression {
-    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _>::new(
+    BinaryBytesExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         expr_ia2,
         return_type,
         substr_for,
-    ))
+    )
+    .boxed()
+}
+
+// TODO: Support more `to_char` types.
+pub fn new_to_char(
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    BinaryBytesExpression::<NaiveDateTimeArray, Utf8Array, _>::new(
+        expr_ia1,
+        expr_ia2,
+        return_type,
+        to_char_timestamp,
+    )
+    .boxed()
 }
 
 #[cfg(test)]

@@ -23,7 +23,8 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::hummock::{KeyRange, SstableInfo, VNodeBitmap};
+use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_sstable_store};

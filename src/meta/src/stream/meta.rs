@@ -30,7 +30,7 @@ use crate::cluster::{ParallelUnitId, WorkerId};
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::set_table_vnode_mappings;
+use crate::stream::record_table_vnode_mappings;
 
 struct FragmentManagerCore {
     table_fragments: HashMap<TableId, TableFragments>,
@@ -442,7 +442,11 @@ where
                 // identical state table id.
                 let actor = fragment.actors.first().unwrap();
                 let stream_node = actor.get_nodes()?;
-                set_table_vnode_mappings(&hash_mapping_manager, stream_node, fragment.fragment_id)?;
+                record_table_vnode_mappings(
+                    &hash_mapping_manager,
+                    stream_node,
+                    fragment.fragment_id,
+                )?;
             }
         }
         Ok(())

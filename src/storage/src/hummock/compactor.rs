@@ -28,9 +28,8 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
-use risingwave_pb::hummock::{
-    CompactTask, SstableInfo, SubscribeCompactTasksResponse, VNodeBitmap, VacuumTask,
-};
+use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -310,6 +309,7 @@ impl Compactor {
 
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
+        assert_ne!(parallelism, 0, "splits cannot be empty");
         let mut compact_success = true;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];

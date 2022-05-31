@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-async-stream = "0.3"
 async-trait = "0.1"
 aws-config = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-endpoint = { version = "0.11", default-features = false }
@@ -24,6 +23,7 @@ enum-as-inner = "0.4"
 fail = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
