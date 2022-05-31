@@ -582,4 +582,7 @@ async fn test_write_anytime() {
     hummock_storage.sync(Some(epoch2)).await.unwrap();
     assert_new_value(epoch1);
     assert_old_value(epoch2);
+
+    assert!(!hummock_storage.get_uncommitted_ssts(epoch1).is_empty());
+    assert!(!hummock_storage.get_uncommitted_ssts(epoch2).is_empty());
 }

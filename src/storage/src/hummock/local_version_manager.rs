@@ -278,6 +278,7 @@ impl LocalVersionManager {
             {
                 // TODO: may apply different `is_local` according to whether local spill is enabled.
                 task = Some(UploadTask::new(order_index, *epoch, task_data, true));
+                break;
             }
         }
         let task = match task {

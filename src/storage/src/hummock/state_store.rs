@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::SstableInfo;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
@@ -420,6 +421,10 @@ impl StateStore for HummockStorage {
                 .await?;
             Ok(())
         }
+    }
+
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
+        self.local_version_manager.get_uncommitted_ssts(epoch)
     }
 }
 
