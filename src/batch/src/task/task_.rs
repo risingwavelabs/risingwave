@@ -124,8 +124,8 @@ impl TaskOutput {
                     );
                     let pb = chunk.to_protobuf();
                     let resp = GetDataResponse {
+                        status: Default::default(),
                         record_batch: Some(pb),
-                        ..Default::default()
                     };
                     writer.write(resp).await?;
                 }

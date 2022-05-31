@@ -483,6 +483,10 @@ impl Message {
         };
         Ok(res)
     }
+
+    pub fn get_encoded_len(msg: &impl ::prost::Message) -> usize {
+        ::prost::Message::encoded_len(msg)
+    }
 }
 
 pub type PkIndices = Vec<usize>;

@@ -9,6 +9,7 @@ anyhow = "1"
 console = "0.15"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
+libtest-mimic = "0.4"
 madsim = "=0.2.0-alpha.3"
 risingwave_frontend = { path = ".." }
 risingwave_sqlparser = { path = "../../sqlparser" }
@@ -37,3 +38,7 @@ walkdir = "2"
 [[bin]]
 name = "planner-test-apply"
 path = "src/bin/apply.rs"
+
+[[test]]
+name = "plan_test_runner"
+harness = false

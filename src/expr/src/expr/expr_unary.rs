@@ -31,6 +31,7 @@ use crate::vector_op::conjunction;
 use crate::vector_op::length::length_default;
 use crate::vector_op::lower::lower;
 use crate::vector_op::ltrim::ltrim;
+use crate::vector_op::md5::md5;
 use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
@@ -276,6 +277,11 @@ pub fn new_unary_expr(
             child_expr,
             return_type,
             lower,
+        )),
+        (ProstType::Md5, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
+            child_expr,
+            return_type,
+            md5,
         )),
         (ProstType::Ascii, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
             child_expr,

@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
@@ -447,31 +448,28 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         Ok(iter)
     }
 
-    /// return a row with its pk.
-    pub async fn next(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
-        loop {
-            match self.iter.next().await? {
-                None => {
-                    let pk_and_row = self.cell_based_row_deserializer.take();
-                    return Ok(pk_and_row);
-                }
-                Some((key, value)) => {
-                    tracing::trace!(
-                        target: "events::storage::CellBasedTable::scan",
-                        "CellBasedTable scanned key = {:?}, value = {:?}",
-                        key,
-                        value
-                    );
-                    let pk_and_row = self
-                        .cell_based_row_deserializer
-                        .deserialize(&key, &value)
-                        .map_err(err)?;
-                    match pk_and_row {
-                        Some(pk_row) => return Ok(Some(pk_row)),
-                        None => {}
-                    }
-                }
+    /// Yield a row with its primary key.
+    #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+    pub async fn into_stream(mut self) {
+        while let Some((key, value)) = self.iter.next().await? {
+            tracing::trace!(
+                target: "events::storage::CellBasedTable::scan",
+                "CellBasedTable scanned key = {:?}, value = {:?}",
+                key,
+                value
+            );
+
+            if let Some(pk_and_row) = self
+                .cell_based_row_deserializer
+                .deserialize(&key, &value)
+                .map_err(err)?
+            {
+                yield pk_and_row;
             }
+        }
+
+        if let Some(pk_and_row) = self.cell_based_row_deserializer.take() {
+            yield pk_and_row;
         }
     }
 }
