@@ -21,6 +21,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::RwError;
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 // use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -204,28 +205,23 @@ impl<S: StateStore> CellBasedTable<S> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         // let ordered_row_serializer = self.pk_serializer.as_ref().unwrap();
-        // let hash_builder = CRC32FastBuilder {};
+        let hash_builder = CRC32FastBuilder {};
         for (pk, row_op) in buffer {
-            // let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
-
-            let value_meta = if WITH_VALUE_META {
-                // If value meta is computed here, then the cell based table is guaranteed to have
-                // distribution keys. Also, it is guaranteed that distribution key indices will
-                // not exceed the length of pk. So we simply do unwrap here.
-
-                // todo(wcy): correct calculate vnode with pk_bytes
-                let vnode = 0_u16;
-                // let vnode = pk
-                //     .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
-                //     .unwrap()
-                //     .to_vnode();
-                ValueMeta::with_vnode(vnode)
-            } else {
-                ValueMeta::default()
-            };
+            // If value meta is computed here, then the cell based table is guaranteed to have
+            // distribution keys. Also, it is guaranteed that distribution key indices will
+            // not exceed the length of pk. So we simply do unwrap here.
 
             match row_op {
                 RowOp::Insert(row) => {
+                    let value_meta = if WITH_VALUE_META {
+                        let vnode = row
+                            .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
+                            .unwrap()
+                            .to_vnode();
+                        ValueMeta::with_vnode(vnode)
+                    } else {
+                        ValueMeta::default()
+                    };
                     let bytes = self
                         .cell_based_row_serializer
                         .serialize(&pk, row, &self.column_ids)
@@ -236,6 +232,15 @@ impl<S: StateStore> CellBasedTable<S> {
                 }
                 RowOp::Delete(old_row) => {
                     // TODO(wcy-fdu): only serialize key on deletion
+                    let value_meta = if WITH_VALUE_META {
+                        let vnode = old_row
+                            .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
+                            .unwrap()
+                            .to_vnode();
+                        ValueMeta::with_vnode(vnode)
+                    } else {
+                        ValueMeta::default()
+                    };
                     let bytes = self
                         .cell_based_row_serializer
                         .serialize(&pk, old_row, &self.column_ids)
@@ -245,6 +250,15 @@ impl<S: StateStore> CellBasedTable<S> {
                     }
                 }
                 RowOp::Update((old_row, new_row)) => {
+                    let value_meta = if WITH_VALUE_META {
+                        let vnode = new_row
+                            .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
+                            .unwrap()
+                            .to_vnode();
+                        ValueMeta::with_vnode(vnode)
+                    } else {
+                        ValueMeta::default()
+                    };
                     let delete_bytes = self
                         .cell_based_row_serializer
                         .serialize_without_filter(&pk, old_row, &self.column_ids)
