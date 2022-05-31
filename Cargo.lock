@@ -5566,6 +5566,7 @@ dependencies = [
  "bstr",
  "bytes",
  "cc",
+ "chrono",
  "crossbeam-deque",
  "crossbeam-utils 0.8.8",
  "crypto-common",
