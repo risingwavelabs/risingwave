@@ -62,7 +62,7 @@ impl DataChunkBuilder {
 }
 
 /// `DataChunk` is a collection of arrays with visibility mask.
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct DataChunk {
     columns: Vec<Column>,
     vis2: Vis,
@@ -72,14 +72,6 @@ pub struct DataChunk {
 enum Vis {
     Bitmap(Bitmap),
     Compact(usize), // equivalent to all ones of this size
-}
-
-// Indirectly required by StreamChunk::default(), which is only used in tests.
-// Maybe we should impl Default for StreamChunk directly with #[cfg(test)]
-impl Default for Vis {
-    fn default() -> Self {
-        Vis::Compact(0)
-    }
 }
 
 impl DataChunk {
@@ -99,7 +91,7 @@ impl DataChunk {
             Vis::Compact(card)
         } else {
             // no data (dummy)
-            Vis::default()
+            Vis::Compact(0)
         };
 
         DataChunk { columns, vis2 }
