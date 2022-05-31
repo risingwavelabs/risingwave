@@ -556,8 +556,8 @@ impl NestedLoopJoinExecutor {
         concated_columns.extend_from_slice(right.columns());
         // Only handle one side is constant row chunk: One of visibility must be None.
         let vis = match (left.visibility(), right.visibility()) {
-            (None, _) => right.visibility().clone(),
-            (_, None) => left.visibility().clone(),
+            (None, _) => right.visibility().cloned(),
+            (_, None) => left.visibility().cloned(),
             (Some(_), Some(_)) => {
                 return Err(ErrorCode::NotImplemented(
                     "The concatenate behaviour of two chunk with visibility is undefined"
@@ -619,7 +619,7 @@ mod tests {
         assert_eq!(chunk.capacity(), chunk2.capacity());
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
         assert_eq!(
-            chunk.visibility().clone().unwrap(),
+            chunk.visibility().cloned().unwrap(),
             (bool_vec).try_into().unwrap()
         );
     }
