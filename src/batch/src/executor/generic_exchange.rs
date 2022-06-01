@@ -97,7 +97,12 @@ pub struct GenericExchangeExecutorBuilder {}
 impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(
+            inputs.is_empty(),
+            "Exchange executor should not have children!"
+        );
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Exchange

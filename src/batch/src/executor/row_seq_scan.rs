@@ -76,7 +76,12 @@ impl RowSeqScanExecutorBuilder {
 impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(
+            inputs.is_empty(),
+            "Row sequential scan should not have input executor!"
+        );
         let seq_scan_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::RowSeqScan
