@@ -31,7 +31,7 @@ use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
 use crate::{Keyspace, StateStore};
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
     keyspace: Keyspace<S>,
@@ -45,6 +45,8 @@ pub struct StateTable<S: StateStore> {
 
     /// Relation layer
     cell_based_table: CellBasedTable<S>,
+
+    _pk_indices: Vec<usize>,
 }
 impl<S: StateStore> StateTable<S> {
     pub fn new(
@@ -52,6 +54,7 @@ impl<S: StateStore> StateTable<S> {
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         dist_key_indices: Option<Vec<usize>>,
+        _pk_indices: Vec<usize>,
     ) -> Self {
         let cell_based_keyspace = keyspace.clone();
         let cell_based_column_descs = column_descs.clone();
@@ -67,6 +70,7 @@ impl<S: StateStore> StateTable<S> {
                 Arc::new(StateStoreMetrics::unused()),
                 dist_key_indices,
             ),
+            _pk_indices,
         }
     }
 
