@@ -470,7 +470,7 @@ where
         }
 
         self.source_manager
-            .register_source(source_fragments, None)
+            .register_source(source_fragments, affiliated_source.clone())
             .await?;
 
         let split_assignment = self
