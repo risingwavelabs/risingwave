@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
@@ -91,15 +91,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
 
-        let (ops, columns, visibility) = chunk.into_inner();
-        let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().columns(columns);
-            if let Some(visibility) = visibility {
-                data_chunk_builder.visibility(visibility).build()
-            } else {
-                data_chunk_builder.build()
-            }
-        };
+        let (data_chunk, ops) = chunk.into_parts();
 
         let projected_columns = self
             .exprs
