@@ -105,8 +105,8 @@ mod tests {
         assert_eq!(b1.cmp(&a2), cmp::Ordering::Greater);
 
         let kr1 = KeyRange::new(a2.clone(), a1.clone());
-        let kr2 = KeyRange::new(a2.clone(), b1.clone());
-        let kr3 = KeyRange::new(a1.clone(), b1.clone());
+        let kr2 = KeyRange::new(a2, b1.clone());
+        let kr3 = KeyRange::new(a1, b1);
         assert_eq!(kr1.cmp(&kr1), cmp::Ordering::Equal);
         assert_eq!(kr2.cmp(&kr2), cmp::Ordering::Equal);
         assert_eq!(kr3.cmp(&kr3), cmp::Ordering::Equal);
@@ -130,10 +130,10 @@ mod tests {
         let b2 = key_with_epoch(Vec::from("b"), 2);
 
         let kr1 = KeyRange::new(a2.clone(), a1.clone());
-        let kr2 = KeyRange::new(a2.clone(), b1.clone());
+        let kr2 = KeyRange::new(a2, b1.clone());
         let kr3 = KeyRange::new(a1.clone(), b2.clone());
-        let kr4 = KeyRange::new(a1.clone(), b1.clone());
-        let kr5 = KeyRange::new(b2.clone(), b1.clone());
+        let kr4 = KeyRange::new(a1, b1.clone());
+        let kr5 = KeyRange::new(b2, b1);
 
         assert!(kr1.full_key_overlap(&kr2));
         assert!(kr1.full_key_overlap(&kr3));
@@ -159,10 +159,10 @@ mod tests {
         let b2 = key_with_epoch(Vec::from("b"), 2);
 
         let kr1 = KeyRange::new(a2.clone(), a1.clone());
-        let kr2 = KeyRange::new(a2.clone(), b2.clone());
-        let kr3 = KeyRange::new(a1.clone(), b1.clone());
+        let kr2 = KeyRange::new(a2.clone(), b2);
+        let kr3 = KeyRange::new(a1, b1.clone());
 
-        let mut kr = kr1.clone();
+        let mut kr = kr1;
         kr.full_key_extend(&kr2);
         assert_eq!(kr.cmp(&kr2), cmp::Ordering::Equal);
         kr.full_key_extend(&kr3);
