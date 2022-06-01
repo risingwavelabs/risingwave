@@ -200,7 +200,7 @@ impl StreamFragmenter {
             _ => {}
         };
 
-        Self::assign_table_id_to_stream_node(state, &mut stream_node);
+        Self::assign_local_table_id_to_stream_node(state, &mut stream_node);
 
         // handle join logic
         match stream_node.node_body.as_mut().unwrap() {
@@ -313,9 +313,9 @@ impl StreamFragmenter {
         fragment_graph
     }
 
-    /// This function assigns the table_id based on the type of StreamNode
-    /// Be careful it has side effects and will change the StreamNode
-    fn assign_table_id_to_stream_node(
+    /// This function assigns the `table_id` based on the type of `StreamNode`
+    /// Be careful it has side effects and will change the `StreamNode`
+    fn assign_local_table_id_to_stream_node(
         state: &mut BuildFragmentGraphState,
         stream_node: &mut StreamNode,
     ) {
