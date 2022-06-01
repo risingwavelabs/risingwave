@@ -39,6 +39,10 @@ impl UserInfoManager {
         self.users.get_mut(user_name)
     }
 
+    pub fn get_user_by_name(&self, user_name: &str) -> Option<&UserInfo> {
+        self.users.get(user_name)
+    }
+
     pub fn create_user(&mut self, user_info: UserInfo) {
         self.users
             .try_insert(user_info.name.clone(), user_info)

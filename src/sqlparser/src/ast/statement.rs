@@ -397,7 +397,7 @@ impl ParseTo for CreateUserWithOptions {
 impl fmt::Display for CreateUserWithOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.0.is_empty() {
-            write!(f, " WITH {}", display_separated(self.0.as_slice(), " "))
+            write!(f, "WITH {}", display_separated(self.0.as_slice(), " "))
         } else {
             Ok(())
         }
