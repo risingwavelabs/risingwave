@@ -72,6 +72,8 @@ impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
             CompactionMode::RangeMode => Arc::new(RangeOverlapStrategy::default()),
             CompactionMode::ConsistentHashMode => Arc::new(HashStrategy::default()),
         };
+        // Currently we only support DynamicLevelSelector. If we add more LevelSelector in the
+        // future, make sure to persist its type as well.
         let compaction_selector =
             DynamicLevelSelector::new(Arc::new(compaction_config.clone()), overlap_strategy);
         CompactStatus {
