@@ -62,7 +62,7 @@ async fn test_row_seq_scan() -> Result<()> {
 
     state
         .insert(
-            Row(vec![Some(1_i32.into())]),
+            &Row(vec![Some(1_i32.into())]),
             Row(vec![
                 Some(1_i32.into()),
                 Some(4_i32.into()),
@@ -72,7 +72,7 @@ async fn test_row_seq_scan() -> Result<()> {
         .unwrap();
     state
         .insert(
-            Row(vec![Some(2_i32.into())]),
+            &Row(vec![Some(2_i32.into())]),
             Row(vec![
                 Some(2_i32.into()),
                 Some(5_i32.into()),
