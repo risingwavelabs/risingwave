@@ -75,6 +75,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 column_descs,
                 arrange_order_types,
                 Some(distribution_keys),
+                arrange_columns.clone(),
             ),
             arrange_columns: arrange_columns.clone(),
             info: ExecutorInfo {
