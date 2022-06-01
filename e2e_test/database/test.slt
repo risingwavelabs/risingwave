@@ -1,3 +1,4 @@
 query T
 show schemas;
 ----
+schema1
