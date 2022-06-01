@@ -14,10 +14,10 @@
 use std::any::type_name;
 use std::convert::TryInto;
 use std::fmt::Debug;
-use std::ops::{BitAnd, BitOr, BitXor, Not,};
+use std::ops::{BitAnd, BitOr, BitXor, Not};
 
 use num_traits::{CheckedShl, CheckedShr};
-use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 
 use crate::vector_op::arithmetic_op::general_atm;
@@ -42,7 +42,7 @@ where
 {
     general_shift(l, r, |a, b| match a.checked_shr(b) {
         Some(c) => Ok(c),
-        None => Ok(a.bitxor(a))
+        None => Ok(a.bitxor(a)),
     })
 }
 
