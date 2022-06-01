@@ -1485,6 +1485,7 @@ pub enum ObjectType {
     Source,
     MaterializedSource,
     Database,
+    User,
 }
 
 impl fmt::Display for ObjectType {
@@ -1498,6 +1499,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Source => "SOURCE",
             ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
             ObjectType::Database => "DATABASE",
+            ObjectType::User => "USER",
         })
     }
 }
@@ -1520,9 +1522,11 @@ impl ParseTo for ObjectType {
             ObjectType::Schema
         } else if parser.parse_keyword(Keyword::DATABASE) {
             ObjectType::Database
+        } else if parser.parse_keyword(Keyword::USER) {
+            ObjectType::User
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, or SCHEMA after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SCHEMA, DATABASE or USER after DROP",
                 parser.peek_token(),
             );
         };

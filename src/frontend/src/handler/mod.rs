@@ -36,6 +36,7 @@ pub mod drop_mv;
 mod drop_schema;
 pub mod drop_source;
 pub mod drop_table;
+pub mod drop_user;
 mod explain;
 mod flush;
 #[allow(dead_code)]
@@ -91,6 +92,10 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             }
             ObjectType::Schema => {
                 drop_schema::handle_drop_schema(context, object_name, if_exists, drop_mode.into())
+                    .await
+            }
+            ObjectType::User => {
+                drop_user::handle_drop_user(context, object_name, if_exists, drop_mode.into())
                     .await
             }
             _ => Err(
