@@ -619,7 +619,7 @@ mod tests {
                 (Int32, Int32),
             ]
         ) {
-            test_simple_infer_type(expr, vec![t1, t2], tr);
+            test_simple_infer_type(expr, vec![t1, t2], t1);
         }
     }
     #[test]
