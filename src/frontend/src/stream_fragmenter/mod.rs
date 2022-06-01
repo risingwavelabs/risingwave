@@ -350,3 +350,130 @@ impl StreamFragmenter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType;
+    use risingwave_pb::expr::agg_call::{Arg, Type};
+    use risingwave_pb::expr::{AggCall, InputRefExpr};
+    use risingwave_pb::stream_plan::*;
+
+    use super::*;
+
+    fn make_sum_aggcall(idx: i32) -> AggCall {
+        AggCall {
+            r#type: Type::Sum as i32,
+            args: vec![Arg {
+                input: Some(InputRefExpr { column_idx: idx }),
+                r#type: Some(DataType {
+                    type_name: TypeName::Int64 as i32,
+                    ..Default::default()
+                }),
+            }],
+            return_type: Some(DataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            distinct: false,
+        }
+    }
+
+    #[test]
+    fn test_assign_local_table_id_to_stream_node() {
+        // let fragmenter = StreamFragmenter {};
+        let mut state = BuildFragmentGraphState::default();
+        let mut expect_table_id = 0;
+        state.gen_table_id(); // to consume one table_id
+
+        {
+            // test HashJoin Type
+            let mut stream_node = StreamNode {
+                node_body: Some(NodeBody::HashJoin(HashJoinNode {
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+
+            if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_ref().unwrap() {
+                expect_table_id += 1;
+                assert_eq!(expect_table_id, hash_join_node.left_table_id);
+                expect_table_id += 1;
+                assert_eq!(expect_table_id, hash_join_node.right_table_id);
+            }
+        }
+
+        {
+            // test SimpleAgg Type
+            let mut stream_node = StreamNode {
+                node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
+                    agg_calls: vec![
+                        make_sum_aggcall(0),
+                        make_sum_aggcall(1),
+                        make_sum_aggcall(2),
+                    ],
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+
+            if let NodeBody::GlobalSimpleAgg(global_simple_agg_node) =
+                stream_node.node_body.as_ref().unwrap()
+            {
+                assert_eq!(
+                    global_simple_agg_node.agg_calls.len(),
+                    global_simple_agg_node.table_ids.len()
+                );
+
+                for table_id in global_simple_agg_node.table_ids.iter() {
+                    expect_table_id += 1;
+                    assert_eq!(expect_table_id, *table_id);
+                }
+            }
+        }
+
+        {
+            // test HashAgg Type
+            let mut stream_node = StreamNode {
+                node_body: Some(NodeBody::HashAgg(HashAggNode {
+                    agg_calls: vec![
+                        make_sum_aggcall(0),
+                        make_sum_aggcall(1),
+                        make_sum_aggcall(2),
+                        make_sum_aggcall(3),
+                    ],
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+
+            if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_ref().unwrap() {
+                assert_eq!(hash_agg_node.agg_calls.len(), hash_agg_node.table_ids.len());
+
+                for table_id in hash_agg_node.table_ids.iter() {
+                    expect_table_id += 1;
+                    assert_eq!(expect_table_id, *table_id);
+                }
+            }
+        }
+
+        {
+            // test HashJoin Type
+            let mut stream_node = StreamNode {
+                node_body: Some(NodeBody::TopN(TopNNode {
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+
+            if let NodeBody::TopN(top_n_node) = stream_node.node_body.as_ref().unwrap() {
+                expect_table_id += 1;
+                assert_eq!(expect_table_id, top_n_node.table_id);
+            }
+        }
+    }
+}
