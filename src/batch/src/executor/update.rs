@@ -105,7 +105,7 @@ impl UpdateExecutor {
                     .map(|expr| expr.eval(&data_chunk).map(Column::new))
                     .collect::<Result<Vec<_>>>()?;
 
-                DataChunk::builder().columns(columns).build()
+                DataChunk::new(columns, len)
             };
 
             // Merge two data chunks into (U-, U+) pairs.

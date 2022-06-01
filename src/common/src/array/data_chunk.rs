@@ -267,7 +267,7 @@ impl DataChunk {
                             .map(|array| Column::new(Arc::new(array)))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                Ok(Self::builder().columns(columns).build())
+                Ok(Self::new(columns, cardinality))
             }
         }
     }
