@@ -608,12 +608,12 @@ mod tests {
             let arr = builder.finish().unwrap();
             columns.push(Column::new(Arc::new(arr.into())))
         }
-        let chunk1: DataChunk = DataChunk::builder().columns(columns.clone()).build();
+        let chunk1: DataChunk = DataChunk::new(columns.clone(), length);
         let bool_vec = vec![true, false, true, false, false];
-        let chunk2: DataChunk = DataChunk::builder()
-            .columns(columns.clone())
-            .visibility((bool_vec.clone()).try_into().unwrap())
-            .build();
+        let chunk2: DataChunk = DataChunk::new(
+            columns.clone(),
+            Vis::Bitmap((bool_vec.clone()).try_into().unwrap()),
+        );
         let chunk = NestedLoopJoinExecutor::concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
         assert_eq!(chunk.capacity(), chunk2.capacity());

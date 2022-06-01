@@ -169,7 +169,7 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
 
-        let data_chunk = DataChunk::builder().columns([col].to_vec()).build();
+        let data_chunk = DataChunk::new([col].to_vec(), row_num);
 
         DataChunk::rechunk(&[data_chunk], chunk_size)
             .unwrap()
@@ -300,7 +300,7 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
 
-        let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
+        let data_chunk = DataChunk::new([col0, col1].to_vec(), row_num);
 
         DataChunk::rechunk(&[data_chunk], chunk_size)
             .unwrap()
