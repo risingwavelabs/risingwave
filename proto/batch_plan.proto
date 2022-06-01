@@ -104,6 +104,7 @@ message HopWindowNode {
   expr.InputRefExpr time_col = 1;
   data.IntervalUnit window_slide = 2;
   data.IntervalUnit window_size = 3;
+  repeated uint32 output_indices = 4;
 }
 
 message GenerateSeriesNode {

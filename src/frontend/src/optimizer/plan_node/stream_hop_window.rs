@@ -27,8 +27,9 @@ pub struct StreamHopWindow {
 }
 
 impl StreamHopWindow {
-    pub fn new(logical: LogicalHopWindow, pk_indices: Vec<usize>) -> Self {
+    pub fn new(logical: LogicalHopWindow) -> Self {
         let ctx = logical.base.ctx.clone();
+        let pk_indices = logical.base.pk_indices.to_vec();
         let input = logical.input();
 
         let base = PlanBase::new_stream(
@@ -54,11 +55,7 @@ impl PlanTreeNodeUnary for StreamHopWindow {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            self.logical.clone_with_input(input),
-            // Here is a workaround. And it assumes that pk will not change.
-            self.pk_indices().to_vec(),
-        )
+        Self::new(self.logical.clone_with_input(input))
     }
 }
 
@@ -70,6 +67,12 @@ impl ToStreamProst for StreamHopWindow {
             time_col: Some(self.logical.time_col.to_proto()),
             window_slide: Some(self.logical.window_slide.into()),
             window_size: Some(self.logical.window_size.into()),
+            output_indices: self
+                .logical
+                .output_indices
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
         })
     }
 }
