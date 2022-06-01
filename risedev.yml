@@ -161,10 +161,12 @@ risedev:
     # - use: aws-s3
     #   bucket: ${terraform:s3-bucket}
 
-    - use: etcd
-      listen-address: "0.0.0.0"
-      address: ${dns-host:rw-meta-0}
-      id: etcd-0
+    # Not enabled by default as all previous benchmarks are not done with etcd.
+    # Also we currently only support node-level docker volume tear down.
+    # - use: etcd
+    #   listen-address: "0.0.0.0"
+    #   address: ${dns-host:rw-meta-0}
+    #   id: etcd-0
 
     - use: meta-node
       # Id must starts with `meta-node`, therefore to be picked up by other
