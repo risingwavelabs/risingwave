@@ -49,7 +49,7 @@ pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 use prost::Message;
-use risingwave_pb::expr::StructValue as ProstStructValue;
+use risingwave_pb::expr::{ListValue as ProstListValue, StructValue as ProstStructValue};
 
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
@@ -715,7 +715,7 @@ impl ScalarImpl {
             ScalarImpl::NaiveDateTime(_) => todo!(),
             ScalarImpl::NaiveTime(_) => todo!(),
             ScalarImpl::Struct(v) => v.to_protobuf_owned(),
-            ScalarImpl::List(_) => todo!(),
+            ScalarImpl::List(v) => v.to_protobuf_owned(),
         };
         body
     }
@@ -785,6 +785,22 @@ impl ScalarImpl {
                     })
                     .collect::<Result<Vec<Datum>>>()?;
                 ScalarImpl::Struct(StructValue::new(fields))
+            }
+            TypeName::List => {
+                let list_value: ProstListValue = Message::decode(b.as_slice())?;
+                let d = &data_type.field_type[0];
+                let fields: Vec<Datum> = list_value
+                    .fields
+                    .iter()
+                    .map(|b| {
+                        if b.is_empty() {
+                            Ok(None)
+                        } else {
+                            Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
+                        }
+                    })
+                    .collect::<Result<Vec<Datum>>>()?;
+                ScalarImpl::List(ListValue::new(fields))
             }
             _ => {
                 return Err(InternalError(format!(

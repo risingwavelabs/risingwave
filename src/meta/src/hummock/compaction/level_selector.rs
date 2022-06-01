@@ -19,6 +19,7 @@
 
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::Level;
 
 use crate::hummock::compaction::compaction_picker::{CompactionPicker, MinOverlappingPicker};
@@ -39,7 +40,7 @@ pub trait LevelSelector: Sync + Send {
 
     fn pick_compaction(
         &self,
-        task_id: u64,
+        task_id: HummockCompactionTaskId,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult>;
@@ -88,7 +89,7 @@ impl DynamicLevelSelector {
         &self,
         select_level: usize,
         target_level: usize,
-        task_id: u64,
+        task_id: HummockCompactionTaskId,
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
@@ -235,7 +236,7 @@ impl LevelSelector for DynamicLevelSelector {
 
     fn pick_compaction(
         &self,
-        task_id: u64,
+        task_id: HummockCompactionTaskId,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {

@@ -21,9 +21,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    gen_filter_and_pushdown, BatchHopWindow, BatchProject, ColPrunable, LogicalProject, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, StreamProject, ToBatch,
-    ToStream,
+    gen_filter_and_pushdown, BatchHopWindow, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::{InputRef, InputRefDisplay};
 use crate::utils::{ColIndexMapping, Condition};
@@ -36,7 +35,7 @@ pub struct LogicalHopWindow {
     pub(super) time_col: InputRef,
     pub(super) window_slide: IntervalUnit,
     pub(super) window_size: IntervalUnit,
-    output_indices: Vec<usize>,
+    pub(super) output_indices: Vec<usize>,
 }
 
 impl LogicalHopWindow {
@@ -327,26 +326,7 @@ impl ToBatch for LogicalHopWindow {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        let new_output_indices = new_logical.output_indices.clone();
-        let new_internal_column_num = new_logical.internal_column_num();
-
-        // remove output indices
-        let default_indices = (0..new_logical.internal_column_num()).collect_vec();
-        let new_logical = new_logical.clone_with_output_indices(default_indices.clone());
-
-        let plan = BatchHopWindow::new(new_logical).into();
-        if self.output_indices != default_indices {
-            let logical_project = LogicalProject::with_mapping(
-                plan,
-                ColIndexMapping::with_remaining_columns(
-                    &new_output_indices,
-                    new_internal_column_num,
-                ),
-            );
-            Ok(BatchProject::new(logical_project).into())
-        } else {
-            Ok(plan)
-        }
+        Ok(BatchHopWindow::new(new_logical).into())
     }
 }
 
@@ -354,34 +334,7 @@ impl ToStream for LogicalHopWindow {
     fn to_stream(&self) -> Result<PlanRef> {
         let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
-        let new_output_indices = new_logical.output_indices.clone();
-        let new_internal_column_num = new_logical.internal_column_num();
-        let new_pk = {
-            let mapping = new_logical.output2internal_col_mapping();
-            new_logical
-                .pk_indices()
-                .iter()
-                .map(|&pk| mapping.map(pk))
-                .collect_vec()
-        };
-
-        // remove output indices
-        let default_indices = (0..new_logical.internal_column_num()).collect_vec();
-        let new_logical = new_logical.clone_with_output_indices(default_indices.clone());
-
-        let plan = StreamHopWindow::new(new_logical, new_pk).into();
-        if self.output_indices != default_indices {
-            let logical_project = LogicalProject::with_mapping(
-                plan,
-                ColIndexMapping::with_remaining_columns(
-                    &new_output_indices,
-                    new_internal_column_num,
-                ),
-            );
-            Ok(StreamProject::new(logical_project).into())
-        } else {
-            Ok(plan)
-        }
+        Ok(StreamHopWindow::new(new_logical).into())
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {

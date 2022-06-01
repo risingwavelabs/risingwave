@@ -374,17 +374,13 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
             }
         }
 
-        let chunk = if schema.is_empty() {
-            // Generate some dummy data to ensure a correct cardinality, which might be used by
-            // count(*).
-            DataChunk::new_dummy(row_count)
-        } else {
+        let chunk = {
             let columns: Vec<Column> = builders
                 .into_iter()
                 .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
                 .try_collect()
                 .map_err(err)?;
-            DataChunk::builder().columns(columns).build()
+            DataChunk::new(columns, row_count)
         };
 
         if chunk.cardinality() == 0 {

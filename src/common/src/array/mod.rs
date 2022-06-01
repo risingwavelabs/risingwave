@@ -42,7 +42,7 @@ pub use chrono_array::{
     NaiveTimeArray, NaiveTimeArrayBuilder,
 };
 pub use column_proto_readers::*;
-pub use data_chunk::{DataChunk, DataChunkTestExt};
+pub use data_chunk::{DataChunk, DataChunkTestExt, Vis};
 pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};

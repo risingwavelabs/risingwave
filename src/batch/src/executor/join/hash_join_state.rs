@@ -279,7 +279,7 @@ impl<K: HashKey> ProbeTable<K> {
             match self.params.join_type() {
                 JoinType::Inner => self.do_inner_join(),
                 JoinType::LeftOuter => self.do_left_outer_join_with_non_equi_condition(),
-                JoinType::LeftAnti => self.do_left_anti_join_with_non_equi_conditon(),
+                JoinType::LeftAnti => self.do_left_anti_join_with_non_equi_condition(),
                 JoinType::LeftSemi => self.do_left_semi_join_with_non_equi_condition(),
                 JoinType::RightOuter => self.do_right_outer_join_with_non_equi_condition(),
                 JoinType::RightAnti => self.do_right_anti_join_with_non_equi_condition(),
@@ -346,7 +346,7 @@ impl<K: HashKey> ProbeTable<K> {
             }
         }
         assert_eq!(result_row_id, chunk_len);
-        // push the last probe_match vec back bacause the probe may not be finished
+        // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
         new_filter.try_into()
     }
@@ -386,7 +386,7 @@ impl<K: HashKey> ProbeTable<K> {
             }
         }
         assert_eq!(result_row_id, chunk_len);
-        // push the last probe_match vec back bacause the probe may not be finished
+        // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
         new_filter.try_into()
     }
@@ -429,7 +429,7 @@ impl<K: HashKey> ProbeTable<K> {
             }
         }
         assert_eq!(result_row_id, chunk_len);
-        // push the last probe_match vec back bacause the probe may not be finished
+        // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
         new_filter.try_into()
     }
@@ -533,7 +533,7 @@ impl<K: HashKey> ProbeTable<K> {
             }
         }
         assert_eq!(result_row_id, chunk_len);
-        // push the last probe_match vec back bacause the probe may not be finished
+        // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
         self.probe_matched_list = Some(probe_matched_list);
         new_filter.try_into()
@@ -745,7 +745,7 @@ impl<K: HashKey> ProbeTable<K> {
         Ok(None)
     }
 
-    fn do_left_anti_join_with_non_equi_conditon(&mut self) -> Result<Option<DataChunk>> {
+    fn do_left_anti_join_with_non_equi_condition(&mut self) -> Result<Option<DataChunk>> {
         self.do_full_outer_join_with_non_equi_condition()
     }
 
