@@ -47,7 +47,7 @@ where
 }
 
 #[inline(always)]
-pub fn general_shift<T1, T2,  F>(l: T1, r: T2, atm: F) -> Result<T1>
+pub fn general_shift<T1, T2, F>(l: T1, r: T2, atm: F) -> Result<T1>
 where
     T1: Debug,
     T2: TryInto<u32> + Debug,

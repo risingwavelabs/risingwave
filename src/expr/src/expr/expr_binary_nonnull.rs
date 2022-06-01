@@ -103,9 +103,8 @@ macro_rules! gen_cmp_impl {
     };
 }
 
-///
-/// 
-
+/// This macro helps create bitwise shift expression. The Output type is same as LHS of the
+/// expression and the RHS of the expression is being match into u32. Similar to `gen_atm_impl`.
 macro_rules! gen_shift_impl {
     ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $func:ident },)*) => {
         match ($l.return_type(), $r.return_type()) {
@@ -121,10 +120,10 @@ macro_rules! gen_shift_impl {
                             $l,
                             $r,
                             $ret,
-                            $func::<    
+                            $func::<
                                 <$i1! { type_array } as Array>::OwnedItem,
-                                <$i2! { type_array } as Array>::OwnedItem>, 
-                                
+                                <$i2! { type_array } as Array>::OwnedItem>,
+
                         )
                     )
                 },
@@ -135,9 +134,6 @@ macro_rules! gen_shift_impl {
         }
     };
 }
-
-
-
 
 /// Based on the data type of `$l`, `$r`, `$ret`, return corresponding expression struct with scalar
 /// function inside.
@@ -276,11 +272,11 @@ macro_rules! gen_binary_expr_shift {
     };
 }
 
-
 /// `gen_binary_expr_shift` is similar to `gen_binary_expr_bitwise`.
 /// They are differentiate because shift operation have different typing rules.
-/// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
-/// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
+/// * `$general_f`: generic atm function
+/// `$rt` is not required because Type of the output is same as the Type of LHS of expression.
+/// * `$i1`, `$i2`, `$func`: extra list passed to `$macro` directly
 macro_rules! gen_binary_expr_shift {
     (
         $macro:ident,

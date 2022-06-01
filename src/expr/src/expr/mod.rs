@@ -83,8 +83,9 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
-        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr
-        | BitwiseXor => build_binary_expr_prost(prost),
+        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor => {
+            build_binary_expr_prost(prost)
+        }
         And | Or | IsDistinctFrom => build_nullable_binary_expr_prost(prost),
         ToChar => build_to_char_expr(prost),
         Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
