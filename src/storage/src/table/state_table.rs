@@ -31,7 +31,7 @@ use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
 use crate::{Keyspace, StateStore};
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
     keyspace: Keyspace<S>,
