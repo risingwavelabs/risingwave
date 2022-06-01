@@ -608,17 +608,19 @@ mod tests {
             test_simple_infer_type(expr, vec![t1, t2], tr);
         }
 
-        for (expr, (t1, t2)) in iproduct!(vec![ExprType::BitwiseShiftLeft,ExprType::BitwiseShiftRight,], 
+        for (expr, (t1, t2)) in iproduct!(
+            vec![ExprType::BitwiseShiftLeft, ExprType::BitwiseShiftRight,],
             vec![
-            (Int16, Int16, Int16),
-            (Int32, Int16, Int32),
-            (Int64, Int16, Int64),
-            (Int16, Int32, Int16),
-            (Int64, Int32, Int64),
-            (Int32, Int32, Int32),]) {
+                (Int16, Int16, Int16),
+                (Int32, Int16, Int32),
+                (Int64, Int16, Int64),
+                (Int16, Int32, Int16),
+                (Int64, Int32, Int64),
+                (Int32, Int32, Int32),
+            ]
+        ) {
             test_simple_infer_type(expr, vec![t1, t2], tr);
         }
-        
     }
     #[test]
     fn test_bool_num_not_exist() {
