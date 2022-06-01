@@ -25,15 +25,15 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
+use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
+    CompactMetrics, CompactTask, CompactionConfig, HummockVersion, Level, TableSetStatistics,
 };
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
     HashStrategy, OverlapStrategy, RangeOverlapStrategy,
 };
-use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
 use crate::hummock::level_handler::LevelHandler;
 
 const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4GB
@@ -41,9 +41,9 @@ const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
 const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
-const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: usize = 16;
+const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 16;
 
-const MAX_LEVEL: usize = 6;
+const MAX_LEVEL: u64 = 6;
 
 pub struct CompactStatus {
     compaction_group_id: CompactionGroupId,
@@ -86,38 +86,23 @@ pub struct SearchResult {
     split_ranges: Vec<KeyRange>,
 }
 
-// TODO #2065: consider to remove this and use prost type directly
-#[derive(Clone, Debug, PartialEq)]
-pub enum CompactionMode {
-    RangeMode,
-    ConsistentHashMode,
+pub fn default_compaction_config() -> CompactionConfig {
+    CompactionConfig {
+        max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE,
+        max_bytes_for_level_multiplier: 10,
+        max_level: MAX_LEVEL,
+        max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
+        min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
+        level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
+        level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
+        compaction_mode: CompactionMode::ConsistentHashMode as i32,
+    }
 }
 
-// TODO #2065: consider to remove this and use prost type directly
-#[derive(Clone, Debug, PartialEq)]
-pub struct CompactionConfig {
-    pub max_bytes_for_level_base: u64,
-    pub max_level: usize,
-    pub max_bytes_for_level_multiplier: u64,
-    pub max_compaction_bytes: u64,
-    pub min_compaction_bytes: u64,
-    pub level0_tigger_file_numer: usize,
-    pub level0_tier_compact_file_number: usize,
-    pub compaction_mode: CompactionMode,
-}
-
-impl Default for CompactionConfig {
-    fn default() -> Self {
-        Self {
-            max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE, // 1GB
-            max_bytes_for_level_multiplier: 10,
-            max_level: MAX_LEVEL,
-            max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
-            min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
-            level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
-            level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
-            compaction_mode: ConsistentHashMode,
-        }
+pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
+    match compaction_mode {
+        CompactionMode::RangeMode => Arc::new(RangeOverlapStrategy::default()),
+        CompactionMode::ConsistentHashMode => Arc::new(HashStrategy::default()),
     }
 }
 
@@ -130,10 +115,7 @@ impl CompactStatus {
         for level in 0..=config.max_level {
             level_handlers.push(LevelHandler::new(level as u32));
         }
-        let overlap_strategy = match config.compaction_mode {
-            RangeMode => Arc::new(RangeOverlapStrategy::default()) as Arc<dyn OverlapStrategy>,
-            ConsistentHashMode => Arc::new(HashStrategy::default()),
-        };
+        let overlap_strategy = create_overlap_strategy(config.compaction_mode());
         CompactStatus {
             compaction_group_id,
             level_handlers,

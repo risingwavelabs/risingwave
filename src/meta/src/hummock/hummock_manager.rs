@@ -30,15 +30,15 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
-    SstableInfo,
+    CompactTask, CompactTaskAssignment, CompactionConfig, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
+    SstableIdInfo, SstableInfo,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
-use crate::hummock::compaction::{CompactStatus, CompactionConfig};
+use crate::hummock::compaction::{default_compaction_config, CompactStatus};
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
@@ -207,7 +207,7 @@ where
         metrics: Arc<MetaMetrics>,
     ) -> Result<HummockManager<S>> {
         // TODO: load it from etcd or configuration file.
-        Self::new_with_config(env, cluster_manager, metrics, CompactionConfig::default()).await
+        Self::new_with_config(env, cluster_manager, metrics, default_compaction_config()).await
     }
 
     /// Load state from meta store.

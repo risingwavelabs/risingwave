@@ -247,8 +247,8 @@ service CompactorService {}
 
 message CompactionConfig {
   enum CompactionMode {
-      RangeMode = 0;
-      ConsistentHashMode = 1;
+    RangeMode = 0;
+    ConsistentHashMode = 1;
   }
   uint64 max_bytes_for_level_base = 1;
   uint64 max_level = 2;

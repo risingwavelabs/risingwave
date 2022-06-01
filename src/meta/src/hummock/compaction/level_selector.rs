@@ -23,14 +23,13 @@ use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::Level;
 
 use crate::hummock::compaction::compaction_picker::{CompactionPicker, MinOverlappingPicker};
-use crate::hummock::compaction::overlap_strategy::{
-    HashStrategy, OverlapStrategy, RangeOverlapStrategy,
-};
+use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::tier_compaction_picker::{
     LevelCompactionPicker, TierCompactionPicker,
 };
-use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
-use crate::hummock::compaction::{CompactionConfig, SearchResult};
+use crate::hummock::compaction::{
+    create_overlap_strategy, default_compaction_config, CompactionConfig, SearchResult,
+};
 use crate::hummock::level_handler::LevelHandler;
 
 const SCORE_BASE: u64 = 100;
@@ -68,11 +67,8 @@ pub struct DynamicLevelSelector {
 
 impl Default for DynamicLevelSelector {
     fn default() -> Self {
-        let config = Arc::new(CompactionConfig::default());
-        let overlap_strategy = match &config.compaction_mode {
-            RangeMode => Arc::new(RangeOverlapStrategy::default()) as Arc<dyn OverlapStrategy>,
-            ConsistentHashMode => Arc::new(HashStrategy::default()),
-        };
+        let config = Arc::new(default_compaction_config());
+        let overlap_strategy = create_overlap_strategy(config.compaction_mode());
         DynamicLevelSelector::new(config, overlap_strategy)
     }
 }
@@ -141,7 +137,7 @@ impl DynamicLevelSelector {
 
         if max_level_size == 0 {
             // Use the bottommost level.
-            ctx.base_level = self.config.max_level;
+            ctx.base_level = self.config.max_level as usize;
             return ctx;
         }
 
@@ -149,7 +145,7 @@ impl DynamicLevelSelector {
         let base_bytes_min = base_bytes_max / self.config.max_bytes_for_level_multiplier;
 
         let mut cur_level_size = max_level_size;
-        for _ in first_non_empty_level..self.config.max_level {
+        for _ in first_non_empty_level..self.config.max_level as usize {
             cur_level_size /= self.config.max_bytes_for_level_multiplier;
         }
 
@@ -170,7 +166,7 @@ impl DynamicLevelSelector {
 
         let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
         let mut level_size = base_level_size;
-        for i in ctx.base_level..=self.config.max_level {
+        for i in ctx.base_level..=self.config.max_level as usize {
             // Don't set any level below base_bytes_max. Otherwise, the LSM can
             // assume an hourglass shape where L1+ sizes are smaller than L0. This
             // causes compaction scoring, which depends on level sizes, to favor L1+
@@ -189,7 +185,7 @@ impl DynamicLevelSelector {
         let mut ctx = self.calculate_level_base_size(levels);
 
         // The bottommost level can not be input level.
-        for level in &levels[..self.config.max_level] {
+        for level in &levels[..self.config.max_level as usize] {
             let level_idx = level.level_idx as usize;
             let mut total_size = 0;
             let mut idle_file_count = 0;
@@ -263,12 +259,12 @@ pub mod tests {
     use std::ops::Range;
 
     use itertools::Itertools;
+    use risingwave_pb::hummock::compaction_config::CompactionMode::RangeMode;
     use risingwave_pb::hummock::{LevelType, SstableInfo};
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::tier_compaction_picker::tests::generate_table;
-    use crate::hummock::compaction::CompactionMode::RangeMode;
 
     pub fn generate_tables(
         ids: Range<u64>,
@@ -298,7 +294,7 @@ pub mod tests {
             min_compaction_bytes: 1,
             level0_tigger_file_numer: 1,
             level0_tier_compact_file_number: 2,
-            compaction_mode: RangeMode,
+            compaction_mode: RangeMode as i32,
         };
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
@@ -376,7 +372,7 @@ pub mod tests {
             min_compaction_bytes: 200,
             level0_tigger_file_numer: 8,
             level0_tier_compact_file_number: 4,
-            compaction_mode: RangeMode,
+            compaction_mode: RangeMode as i32,
         };
         let mut levels = vec![
             Level {

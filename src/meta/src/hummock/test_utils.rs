@@ -20,10 +20,10 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
 use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
-use crate::hummock::compaction::CompactionConfig;
+use crate::hummock::compaction::default_compaction_config;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
@@ -160,7 +160,7 @@ pub async fn setup_compute_env(
         level0_tier_compact_file_number: 1,
         min_compaction_bytes: 1,
         max_bytes_for_level_base: 1,
-        ..Default::default()
+        ..default_compaction_config()
     };
     let hummock_manager = Arc::new(
         HummockManager::new_with_config(
