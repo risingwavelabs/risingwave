@@ -19,7 +19,9 @@ use std::hash::{Hash, Hasher};
 
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
+use prost::Message;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
+use risingwave_pb::expr::ListValue as ProstListValue;
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, RowRef,
@@ -209,6 +211,12 @@ impl Array for ListArray {
         )?;
         Ok(ArrayBuilderImpl::List(array_builder))
     }
+
+    fn array_meta(&self) -> ArrayMeta {
+        ArrayMeta::List {
+            datatype: Box::new(self.value_type.clone()),
+        }
+    }
 }
 
 impl ListArray {
@@ -311,6 +319,22 @@ impl ListValue {
     pub fn values(&self) -> &[Datum] {
         &self.values
     }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        let value = ProstListValue {
+            fields: self
+                .values
+                .iter()
+                .map(|f| match f {
+                    None => {
+                        vec![]
+                    }
+                    Some(s) => s.to_protobuf(),
+                })
+                .collect_vec(),
+        };
+        value.encode_to_vec()
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -390,7 +414,7 @@ impl Display for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let values = self.values_ref().iter().map(display_datum_ref).join(",");
-        write!(f, "{{{}}}", values)
+        write!(f, "[{}]", values)
     }
 }
 
@@ -658,6 +682,6 @@ mod tests {
     fn test_list_ref_display() {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
-        assert_eq!("{1,NULL}".to_string(), format!("{}", r));
+        assert_eq!("[1,NULL]".to_string(), format!("{}", r));
     }
 }

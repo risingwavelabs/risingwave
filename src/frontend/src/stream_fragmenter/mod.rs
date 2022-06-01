@@ -200,50 +200,60 @@ impl StreamFragmenter {
             _ => {}
         };
 
-        // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-        // with only equal conditions
-        if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_mut().unwrap() {
-            // Allocate local table id. It will be rewrite to global table id after get table id
-            // offset from id generator.
-            hash_join_node.left_table_id = state.gen_table_id();
-            hash_join_node.right_table_id = state.gen_table_id();
-            if hash_join_node.is_delta_join {
-                if hash_join_node.get_join_type()? == JoinType::Inner
-                    && hash_join_node.condition.is_none()
+        match stream_node.node_body.as_mut().unwrap() {
+            // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+            // with only equal conditions
+            NodeBody::HashJoin(hash_join_node) => {
+                // Allocate local table id. It will be rewrite to global table id after get table id
+                // offset from id generator.
+                hash_join_node.left_table_id = state.gen_table_id();
+                hash_join_node.right_table_id = state.gen_table_id();
+                if hash_join_node.is_delta_join {
+                    if hash_join_node.get_join_type()? == JoinType::Inner
+                        && hash_join_node.condition.is_none()
+                    {
+                        return self.build_delta_join(state, current_fragment, stream_node);
+                    } else {
+                        panic!(
+                        "only inner join without non-equal condition is supported for delta joins"
+                    );
+                    }
+                }
+            }
+
+            NodeBody::DeltaIndexJoin(delta_index_join) => {
+                if delta_index_join.get_join_type()? == JoinType::Inner
+                    && delta_index_join.condition.is_none()
                 {
-                    return self.build_delta_join(state, current_fragment, stream_node);
+                    return self.build_delta_join_without_arrange(
+                        state,
+                        current_fragment,
+                        stream_node,
+                    );
                 } else {
                     panic!(
                         "only inner join without non-equal condition is supported for delta joins"
                     );
                 }
             }
-        }
 
-        if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap()
-        {
-            if delta_index_join.get_join_type()? == JoinType::Inner
-                && delta_index_join.condition.is_none()
-            {
-                return self.build_delta_join_without_arrange(state, current_fragment, stream_node);
-            } else {
-                panic!("only inner join without non-equal condition is supported for delta joins");
-            }
-        }
-
-        // Rewrite hash agg. One agg call -> one table id.
-        if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_mut().unwrap() {
-            for _ in &hash_agg_node.agg_calls {
-                hash_agg_node.table_ids.push(state.gen_table_id());
-            }
-        }
-
-        match stream_node.node_body.as_mut().unwrap() {
             NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
                 for _ in &node.agg_calls {
                     node.table_ids.push(state.gen_table_id());
                 }
             }
+
+            // Rewrite hash agg. One agg call -> one table id.
+            NodeBody::HashAgg(hash_agg_node) => {
+                for _ in &hash_agg_node.agg_calls {
+                    hash_agg_node.table_ids.push(state.gen_table_id());
+                }
+            }
+
+            NodeBody::TopN(top_n_node) => {
+                top_n_node.table_id = state.gen_table_id();
+            }
+
             _ => {}
         }
 

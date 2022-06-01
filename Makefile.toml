@@ -489,11 +489,6 @@ echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput
 """
 description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
 
-[tasks.apply-ci-template]
-category = "RiseDev - Check"
-command = ".github/workflow-template/generate.sh"
-description = "Update CI workflow by applying templates"
-
 [tasks.c]
 alias = "check"
 

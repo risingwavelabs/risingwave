@@ -33,7 +33,6 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
     - [End-to-end tests](#end-to-end-tests)
     - [End-to-end tests on CI](#end-to-end-tests-on-ci)
   - [Miscellaneous checks](#miscellaneous-checks)
-  - [Update CI workflow](#update-ci-workflow)
   - [Update Grafana dashboard](#update-grafana-dashboard)
   - [Add new files](#add-new-files)
   - [Add new dependencies](#add-new-dependencies)
@@ -313,29 +312,6 @@ For Protobufs, we rely on [buf](https://docs.buf.build/installation) for code fo
 ```shell
 buf format -d --exit-code
 buf lint
-```
-
-## Update CI workflow
-
-We use scripts to generate GitHub Action configurations based on templates in `.github/workflow-template`.
-
-To edit the workflow files, you will need to install `yq` >= 4.16.
-
-```shell
-> brew install yq
-> yq --version
-yq (https://github.com/mikefarah/yq/) version 4.16.1
-```
-
-Then, you may edit the files in `workflow-template`.
-
-* `template.yml` + `main-override.yml` = `main.yml`
-* `template.yml` + `pr-override.yml` = `pull-request.yml`
-
-After that, run `apply-ci-template` to update the final workflow config.
-
-```shell
-./risedev apply-ci-template
 ```
 
 ## Update Grafana dashboard
