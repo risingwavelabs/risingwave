@@ -16,7 +16,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::HashSet;
-use risingwave_common::array::{Array, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{Array, ArrayRef, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_common::hash::HashKey;
@@ -580,16 +580,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         append_only_optimize: bool,
     ) {
         let chunk = chunk.compact()?;
-        let (ops, columns, visibility) = chunk.into_inner();
-
-        let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().columns(columns);
-            if let Some(visibility) = visibility {
-                data_chunk_builder.visibility(visibility).build()
-            } else {
-                data_chunk_builder.build()
-            }
-        };
+        let (data_chunk, ops) = chunk.into_parts();
 
         let (side_update, side_match) = if SIDE == SideType::Left {
             (&mut side_l, &mut side_r)

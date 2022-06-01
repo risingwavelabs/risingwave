@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -49,6 +51,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
         distribution_keys: Vec<usize>,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
+        let arrange_columns_set: HashSet<usize> =
+            keys.iter().map(|k| k.column_idx).collect::<HashSet<_>>();
+        let dist_key_set = distribution_keys.iter().copied().collect::<HashSet<_>>();
+        assert!(dist_key_set.is_subset(&arrange_columns_set));
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
         let column_descs = column_ids
@@ -62,23 +68,13 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 type_name: "".to_string(),
             })
             .collect_vec();
-        let pk_dist_indices = distribution_keys
-            .into_iter()
-            .map(|dist_idx| {
-                arrange_columns
-                    .iter()
-                    .find_position(|&pk_idx| *pk_idx == dist_idx)
-                    .unwrap()
-                    .0
-            })
-            .collect_vec();
         Self {
             input,
             state_table: StateTable::new(
                 keyspace,
                 column_descs,
                 arrange_order_types,
-                Some(pk_dist_indices),
+                Some(distribution_keys),
                 arrange_columns.clone(),
             ),
             arrange_columns: arrange_columns.clone(),
@@ -125,10 +121,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                         match op {
                             Insert | UpdateInsert => {
-                                self.state_table.insert(arrange_row, row)?;
+                                self.state_table.insert(&arrange_row, row)?;
                             }
                             Delete | UpdateDelete => {
-                                self.state_table.delete(arrange_row, row)?;
+                                self.state_table.delete(&arrange_row, row)?;
                             }
                         }
                     }

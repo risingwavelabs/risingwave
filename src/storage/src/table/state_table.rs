@@ -76,7 +76,9 @@ impl<S: StateStore> StateTable<S> {
 
     /// read methods
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        let mem_table_res = self.mem_table.get_row(pk).map_err(err)?;
+        let pk_bytes =
+            serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()).map_err(err)?;
+        let mem_table_res = self.mem_table.get_row(&pk_bytes).map_err(err)?;
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row) => Ok(Some(row.clone())),
@@ -88,15 +90,19 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: Row, value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        self.mem_table.insert(pk, value)?;
+        let pk_bytes =
+            serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()).map_err(err)?;
+        self.mem_table.insert(pk_bytes, value)?;
         Ok(())
     }
 
-    pub fn delete(&mut self, pk: Row, old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        self.mem_table.delete(pk, old_value)?;
+        let pk_bytes =
+            serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()).map_err(err)?;
+        self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }
 
@@ -126,7 +132,6 @@ impl<S: StateStore> StateTable<S> {
             &self.keyspace,
             self.column_descs.clone(),
             mem_table_iter,
-            &self.order_types,
             epoch,
         ))
     }
@@ -134,7 +139,7 @@ impl<S: StateStore> StateTable<S> {
 
 pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>> + 'a;
 
-type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
+type MemTableIter<'a> = btree_map::Iter<'a, Vec<u8>, RowOp>;
 
 struct StateTableRowIter<S: StateStore> {
     _phantom: PhantomData<S>,
@@ -151,7 +156,6 @@ impl<S: StateStore> StateTableRowIter<S> {
         keyspace: &'a Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         mem_table_iter: MemTableIter<'a>,
-        order_types_vec: &'a [OrderType],
         epoch: u64,
     ) {
         let cell_based_table_iter: futures::stream::Peekable<_> =
@@ -161,9 +165,8 @@ impl<S: StateStore> StateTableRowIter<S> {
                 .peekable();
         pin_mut!(cell_based_table_iter);
 
-        let pk_serializer = OrderedRowSerializer::new(order_types_vec.to_vec());
         let mut mem_table_iter = mem_table_iter
-            .map(|(k, v)| Ok::<_, StorageError>((serialize_pk(k, &pk_serializer).map_err(err)?, v)))
+            .map(|(k, v)| Ok::<_, StorageError>((k, v)))
             .peekable();
 
         loop {

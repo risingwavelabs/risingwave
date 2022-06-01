@@ -266,7 +266,7 @@ impl OrderByExecutor {
                 .into_iter()
                 .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
-            let chunk = DataChunk::builder().columns(columns).build();
+            let chunk = DataChunk::new(columns, chunk_size);
             yield chunk
         }
     }
