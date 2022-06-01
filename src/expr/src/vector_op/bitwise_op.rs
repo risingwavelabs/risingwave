@@ -23,11 +23,10 @@ use risingwave_common::error::{Result, RwError};
 use crate::vector_op::arithmetic_op::general_atm;
 
 #[inline(always)]
-pub fn general_shl<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+pub fn general_shl<T1, T2>(l: T1, r: T2) -> Result<T1>
 where
-    T1: TryInto<T3> + Debug,
+    T1: CheckedShl + Debug,
     T2: TryInto<u32> + Debug,
-    T3: CheckedShl,
 {
     general_shift(l, r, |a, b| match a.checked_shl(b) {
         Some(c) => Ok(c),
@@ -36,11 +35,10 @@ where
 }
 
 #[inline(always)]
-pub fn general_shr<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+pub fn general_shr<T1, T2>(l: T1, r: T2) -> Result<T1>
 where
-    T1: TryInto<T3> + Debug,
+    T1: CheckedShr + Debug,
     T2: TryInto<u32> + Debug,
-    T3: CheckedShr,
 {
     general_shift(l, r, |a, b| match a.checked_shr(b) {
         Some(c) => Ok(c),
@@ -49,20 +47,13 @@ where
 }
 
 #[inline(always)]
-pub fn general_shift<T1, T2, T3, F>(l: T1, r: T2, atm: F) -> Result<T3>
+pub fn general_shift<T1, T2,  F>(l: T1, r: T2, atm: F) -> Result<T1>
 where
-    T1: TryInto<T3> + Debug,
+    T1: Debug,
     T2: TryInto<u32> + Debug,
-    F: FnOnce(T3, u32) -> Result<T3>,
+    F: FnOnce(T1, u32) -> Result<T1>,
 {
     // TODO: We need to improve the error message
-    let l: T3 = l.try_into().map_err(|_| {
-        RwError::from(InternalError(format!(
-            "Can't convert {} to {}",
-            type_name::<T1>(),
-            type_name::<T3>()
-        )))
-    })?;
     let r: u32 = r.try_into().map_err(|_| {
         RwError::from(InternalError(format!(
             "Can't convert {} to {}",

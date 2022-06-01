@@ -264,11 +264,10 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     build_binary_atm_funcs(
         &mut map,
         &[
-            E::PgBitwiseShiftLeft,
-            E::PgBitwiseShiftRight,
+            E::BitwiseShiftLeft,
+            E::BitwiseShiftRight,
             E::BitwiseAnd,
             E::BitwiseOr,
-            E::BitwiseNot,
             E::BitwiseXor,
         ],
         &[T::Int16, T::Int32, T::Int64],
@@ -593,8 +592,8 @@ mod tests {
             ExprType::BitwiseAnd,
             ExprType::BitwiseNot,
             ExprType::BitwiseXor,
-            ExprType::PgBitwiseShiftLeft,
-            ExprType::PgBitwiseShiftRight,
+            ExprType::BitwiseShiftLeft,
+            ExprType::BitwiseShiftRight,
         ];
         let num_promote_table = vec![
             (Int16, Int16, Int16),

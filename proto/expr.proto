@@ -34,8 +34,8 @@ message ExprNode {
     BITWISE_OR = 32;
     BITWISE_XOR = 33;
     BITWISE_NOT = 34;
-    PG_BITWISE_SHIFT_LEFT = 35;
-    PG_BITWISE_SHIFT_RIGHT = 36;
+    BITWISE_SHIFT_LEFT = 35;
+    BITWISE_SHIFT_RIGHT = 36;
     // date functions
     EXTRACT = 101;
     TUMBLE_START = 103;

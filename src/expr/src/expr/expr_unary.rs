@@ -305,7 +305,7 @@ pub fn new_unary_expr(
         }
         (ProstType::BitwiseNot, _, _) => {
             gen_unary_impl! {
-                [ "Bitwisenot", child_expr, return_type],
+                [ "BitwiseNot", child_expr, return_type],
                 { int16, int16, general_bitnot },
                 { int32, int32, general_bitnot },
                 { int64, int64, general_bitnot },

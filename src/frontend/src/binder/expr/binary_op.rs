@@ -46,8 +46,8 @@ impl Binder {
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
-            BinaryOperator::PGBitwiseShiftLeft => ExprType::PgBitwiseShiftLeft,
-            BinaryOperator::PGBitwiseShiftRight => ExprType::PgBitwiseShiftRight,
+            BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
+            BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
 
             _ => return Err(ErrorCode::NotImplemented(format!("{:?}", op), 112.into()).into()),
         };

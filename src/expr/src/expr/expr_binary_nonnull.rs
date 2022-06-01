@@ -103,6 +103,42 @@ macro_rules! gen_cmp_impl {
     };
 }
 
+///
+/// 
+
+macro_rules! gen_shift_impl {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $func:ident },)*) => {
+        match ($l.return_type(), $r.return_type()) {
+            $(
+                ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+                    Box::new(
+                        BinaryExpression::<
+                            $i1! { type_array },
+                            $i2! { type_array },
+                            $i1! { type_array },
+                            _
+                        >::new(
+                            $l,
+                            $r,
+                            $ret,
+                            $func::<    
+                                <$i1! { type_array } as Array>::OwnedItem,
+                                <$i2! { type_array } as Array>::OwnedItem>, 
+                                
+                        )
+                    )
+                },
+            )*
+            _ => {
+                unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type(), $ret)
+            }
+        }
+    };
+}
+
+
+
+
 /// Based on the data type of `$l`, `$r`, `$ret`, return corresponding expression struct with scalar
 /// function inside.
 /// * `$l`: left expression
@@ -207,9 +243,8 @@ macro_rules! gen_binary_expr_atm {
     };
 }
 
-/// `gen_binary_expr_shift` is similar to `gen_binary_expr_atm`.
-///  `shift` means arithmetic shift here.
-/// They are differentiate cuz shift operation does not support for float datatype.
+/// `gen_binary_expr_bitwise` is similar to `gen_binary_expr_atm`.
+/// They are differentiate because bitwise operation does not support for float datatype.
 /// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
 /// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
 macro_rules! gen_binary_expr_shift {
@@ -236,6 +271,37 @@ macro_rules! gen_binary_expr_shift {
             { int64, int64, int64, $general_f },
             $(
                 { $i1, $i2, $rt, $func },
+            )*
+        }
+    };
+}
+
+
+/// `gen_binary_expr_shift` is similar to `gen_binary_expr_bitwise`.
+/// They are differentiate because shift operation have different typing rules.
+/// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
+/// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
+macro_rules! gen_binary_expr_shift {
+    (
+        $macro:ident,
+        $l:expr,
+        $r:expr,
+        $ret:expr,
+        $general_f:ident,
+        {
+            $( { $i1:ident, $i2:ident, $func:ident }, )*
+        } $(,)?
+    ) => {
+        $macro! {
+            [$l, $r, $ret],
+            { int16, int16, $general_f },
+            { int32, int16, $general_f },
+            { int16, int32, $general_f },
+            { int32, int32, $general_f },
+            { int64, int16, $general_f },
+            { int64, int32, $general_f },
+            $(
+                { $i1, $i2, $func },
             )*
         }
     };
@@ -351,9 +417,9 @@ pub fn new_binary_expr(
             }
         }
         // BitWise Operation
-        Type::PgBitwiseShiftLeft => {
+        Type::BitwiseShiftLeft => {
             gen_binary_expr_shift! {
-                gen_atm_impl,
+                gen_shift_impl,
                 l, r, ret,
                 general_shl,
                 {
@@ -361,9 +427,9 @@ pub fn new_binary_expr(
                 },
             }
         }
-        Type::PgBitwiseShiftRight => {
+        Type::BitwiseShiftRight => {
             gen_binary_expr_shift! {
-                gen_atm_impl,
+                gen_shift_impl,
                 l, r, ret,
                 general_shr,
                 {
