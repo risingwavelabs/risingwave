@@ -16,15 +16,17 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
-use risingwave_common::array::{Array, ArrayImpl};
+use risingwave_common::array::{Array, ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::{VirtualNode, *};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::storage_value::{StorageValue, ValueMeta};
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
+use smallvec::SmallVec;
 
 use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
@@ -103,6 +105,7 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()>;
 
     /// Get the output of the state. Must flush before getting output.
@@ -112,7 +115,7 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
     fn is_dirty(&self) -> bool;
 
     /// Flush the internal state to a write batch.
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> StreamExecutorResult<()>;
+    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()>;
 }
 
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
@@ -177,6 +180,7 @@ where
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
 
@@ -205,15 +209,24 @@ where
             }
 
             // sort key may be null
-            let key = option_to_owned_scalar(&key);
+            let key: Option<A::OwnedItem> = option_to_owned_scalar(&key);
 
             // Concat pk with the original key to create a composed key
             let composed_key = (
                 key.clone(),
                 // Collect pk from columns
-                pk_columns.iter().map(|col| col.datum_at(id)).collect(),
+                pk_columns
+                    .iter()
+                    .map(|col| col.datum_at(id))
+                    .collect::<ExtremePk>(),
             );
 
+            let sort_key = key.map(|key| key.into());
+
+            let mut sort_key_vec = vec![sort_key.clone()];
+            sort_key_vec.extend(composed_key.1.clone().into_iter());
+            let relational_pk = Row::new(sort_key_vec);
+            let relational_value = Row::new(vec![sort_key.clone()]);
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut do_insert = false;
@@ -240,18 +253,21 @@ where
                         }
                     }
 
-                    let value: Option<ScalarImpl> = key.clone().map(|x| x.into());
+                    // let value: Option<ScalarImpl> = key.clone().map(|x| x.into());
+                    let value = sort_key.clone();
 
                     if do_insert {
                         self.top_n.insert(composed_key.clone(), value.clone());
                     }
 
-                    FlushStatus::do_insert(self.flush_buffer.entry(composed_key), value);
+                    // FlushStatus::do_insert(self.flush_buffer.entry(composed_key), value);
+                    state_table.insert(relational_pk, relational_value)?;
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
                     self.top_n.remove(&composed_key);
-                    FlushStatus::do_delete(self.flush_buffer.entry(composed_key));
+                    // FlushStatus::do_delete(self.flush_buffer.entry(composed_key));
+                    state_table.delete(relational_pk, relational_value);
                     self.total_count -= 1;
                 }
             }
@@ -317,7 +333,7 @@ where
     }
 
     /// Flush the internal state to a write batch.
-    fn flush_inner(&mut self, write_batch: &mut WriteBatch<S>) -> StreamExecutorResult<()> {
+    fn flush_inner(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         // Generally, we require the state the be dirty before flushing. However, it is possible
         // that after a sequence of operations, the flush buffer becomes empty. Then, the
         // state becomes "dirty", but we do not need to flush anything.
@@ -326,25 +342,27 @@ where
             return Ok(());
         }
 
-        let mut local = write_batch.prefixify(&self.keyspace);
+        // let mut local = write_batch.prefixify(&self.keyspace);
         let value_meta = ValueMeta::with_vnode(self.vnode);
 
         // TODO: we can populate the cache while flushing, but that's hard.
 
         for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
-            let key_encoded = self.serializer.serialize(key, &pks)?;
+            // let key_encoded = self.serializer.serialize(key.unwrap().clone(), &pks)?;
+            let relational_pk = Row::new(vec![key.map(|key| key.into()), pks[0]]);
             match v.into_option() {
                 Some(v) => {
-                    local.put(
-                        key_encoded,
-                        StorageValue::new_put(
-                            value_meta,
-                            serialize_cell(&v).map_err(StreamExecutorError::serde_error)?,
-                        ),
-                    );
+                    let value = Row::new(vec![v]);
+                    state_table.insert(relational_pk, value);
+                    // local.put(
+                    //     key_encoded,
+                    //     StorageValue::new_put(value_meta, serialize_cell(&v)?),
+                    // );
                 }
                 None => {
-                    local.delete_with_value_meta(key_encoded, value_meta);
+                    // local.delete_with_value_meta(key_encoded, value_meta);
+                    state_table.delete(relational_pk, Row::new(vec![]));
+                    // state_table.delete_with_value_meta();
                 }
             }
         }
@@ -368,6 +386,7 @@ where
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         _epoch: u64,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_batch_inner(ops, visibility, data).await
     }
@@ -381,8 +400,8 @@ where
         !self.flush_buffer.is_empty()
     }
 
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> StreamExecutorResult<()> {
-        self.flush_inner(write_batch)
+    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+        self.flush_inner(state_table)
     }
 }
 

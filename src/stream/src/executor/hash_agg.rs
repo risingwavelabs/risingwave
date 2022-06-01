@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -76,7 +78,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// Schema from input
     input_schema: Schema,
 
-    /// The executor operates on this keyspace.
+    // /// The executor operates on this keyspace.
     keyspace: Vec<Keyspace<S>>,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
@@ -200,16 +202,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn apply_chunk(
-        &HashAggExecutorExtra::<S> {
+        &mut HashAggExecutorExtra::<S> {
             ref key_indices,
             ref agg_calls,
             ref input_pk_indices,
             ref input_schema,
             ref keyspace,
             ref schema,
-            ref state_tables,
+            ref mut state_tables,
             ..
-        }: &HashAggExecutorExtra<S>,
+        }: &mut HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         chunk: StreamChunk,
         epoch: u64,
@@ -290,12 +292,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 states.may_mark_as_dirty(epoch).await?;
 
                 // 3. Apply batch to each of the state (per agg_call)
-                for (agg_state, data) in
-                    states.managed_states.iter_mut().zip_eq(all_agg_data.iter())
+                for ((agg_state, data), state_table) in states
+                    .managed_states
+                    .iter_mut()
+                    .zip_eq(all_agg_data.iter())
+                    .zip_eq(state_tables.iter_mut())
                 {
                     let data = data.iter().map(|d| &**d).collect_vec();
                     agg_state
-                        .apply_batch(&ops, Some(&vis_map), &data, epoch)
+                        .apply_batch(&ops, Some(&vis_map), &data, epoch, state_table)
                         .await?;
                 }
 
@@ -316,7 +321,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     async fn flush_data<'a>(
         &mut HashAggExecutorExtra::<S> {
             ref key_indices,
-            ref keyspace,
+            // ref keyspace,
             ref schema,
             ref mut state_tables,
             ..
@@ -325,12 +330,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         epoch: u64,
     ) {
         // The state store of each keyspace is the same so just need the first.
-        let store = keyspace[0].state_store();
+        // let store = keyspace[0].state_store();
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been
         // fully flushed.
         let (write_batch, dirty_cnt) = {
-            let mut write_batch = store.start_write_batch();
+            // let mut write_batch = store.start_write_batch();
             let mut dirty_cnt = 0;
 
             for states in state_map.values_mut() {
@@ -343,7 +348,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .iter_mut()
                         .zip_eq(state_tables.iter_mut())
                     {
-                        state.flush(&mut write_batch, state_table).await?;
+                        state
+                            .flush(state_table)
+                            .await?;
                     }
                 }
             }
@@ -353,15 +360,21 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 state_table.commit(epoch).await?;
             }
 
-            (write_batch, dirty_cnt)
+            ((), dirty_cnt)
         };
 
         if dirty_cnt == 0 {
             // Nothing to flush.
-            assert!(write_batch.is_empty());
+            // assert!(write_batch.is_empty());
             return Ok(());
         } else {
-            write_batch.ingest(epoch).await?;
+            // write_batch
+            //     .ingest(epoch)
+            //     .await
+            //     .map_err(StreamExecutorError::agg_state_error)?;
+            for state_table in state_tables {
+                state_table.commit(epoch).await?;
+            }
 
             // --- Produce the stream chunk ---
             let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
@@ -431,7 +444,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&extra, &mut state_map, chunk, epoch).await?;
+                    Self::apply_chunk(&mut extra, &mut state_map, chunk, epoch).await?;
                 }
                 Message::Barrier(barrier) => {
                     let next_epoch = barrier.epoch.curr;

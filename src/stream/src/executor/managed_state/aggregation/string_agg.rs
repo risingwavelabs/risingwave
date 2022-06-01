@@ -20,9 +20,10 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::ordered::OrderedArraysSerializer;
+use risingwave_common::util::ordered::{OrderedArraysSerializer, OrderedRowSerializer};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -241,27 +242,26 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         self.dirty
     }
 
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> StreamExecutorResult<()> {
+    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             return Ok(());
         }
 
-        let mut local = write_batch.prefixify(&self.keyspace);
+        // let mut local = write_batch.prefixify(&self.keyspace);
 
         for (key, value) in std::mem::take(&mut self.cache) {
             let value = value.into_option();
             match value {
                 Some(val) => {
                     // TODO(Yuanxin): Implement value meta
-                    local.put(
-                        key,
-                        StorageValue::new_default_put(
-                            serialize_cell(&Some(val)).map_err(StreamExecutorError::serde_error)?,
-                        ),
-                    );
+                    // local.put(
+                    //     key,
+                    //     StorageValue::new_default_put(serialize_cell(&Some(val))?),
+                    // );
                 }
                 None => {
-                    local.delete(key);
+                    // local.delete(key);
+                    // state_table.delete()
                 }
             }
         }

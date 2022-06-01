@@ -142,7 +142,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         keyspace: &[Keyspace<S>],
         chunk: StreamChunk,
         epoch: u64,
-        state_tables: &[StateTable<S>],
+        state_tables: &mut [StateTable<S>],
     ) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -184,9 +184,14 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         states.may_mark_as_dirty(epoch).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
+        for ((agg_state, data), state_table) in states
+            .managed_states
+            .iter_mut()
+            .zip_eq(all_agg_data.iter())
+            .zip_eq(state_tables.iter_mut())
+        {
             agg_state
-                .apply_batch(&ops, visibility.as_ref(), data, epoch)
+                .apply_batch(&ops, visibility.as_ref(), data, epoch, state_table)
                 .await?;
         }
 
@@ -217,7 +222,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             .iter_mut()
             .zip_eq(state_tables.iter_mut())
         {
-            state.flush(&mut write_batch, state_table).await?;
+            state
+                .flush(state_table)
+                .await?;
         }
         write_batch.ingest(epoch).await?;
 
@@ -279,7 +286,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                         &keyspace,
                         chunk,
                         epoch,
-                        &state_tables,
+                        &mut state_tables,
                     )
                     .await?;
                 }

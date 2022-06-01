@@ -68,10 +68,15 @@ impl<S: StateStore> ManagedStateImpl<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_batch(ops, visibility, data).await,
-            Self::Table(state) => state.apply_batch(ops, visibility, data, epoch).await,
+            Self::Table(state) => {
+                state
+                    .apply_batch(ops, visibility, data, epoch, state_table)
+                    .await
+            }
         }
     }
 
@@ -94,12 +99,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
     /// Flush the internal state to a write batch.
     pub async fn flush(
         &mut self,
-        write_batch: &mut WriteBatch<S>,
+        // write_batch: &mut WriteBatch<S>,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.flush(write_batch, state_table).await,
-            Self::Table(state) => state.flush(write_batch),
+            Self::Value(state) => state.flush(state_table).await,
+            Self::Table(state) => state.flush(state_table),
         }
     }
 
