@@ -64,4 +64,18 @@ impl UserInfoManager {
             .iter()
             .any(|privilege| privileges.contains(privilege))
     }
+
+    pub fn clear(&mut self) {
+        self.users.clear();
+    }
+
+    /// Get the user info cache's version.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Set the user info cache's version.
+    pub fn set_version(&mut self, version: UserInfoVersion) {
+        self.version = version;
+    }
 }
