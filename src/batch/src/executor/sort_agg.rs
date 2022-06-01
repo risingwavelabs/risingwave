@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::vector_op::agg::{
@@ -53,14 +53,12 @@ pub struct SortAggExecutor {
 impl BoxedExecutorBuilder for SortAggExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 1);
-        let proto_child =
-            source.plan_node().get_children().get(0).ok_or_else(|| {
-                ErrorCode::InternalError("SortAgg must have child node".to_string())
-            })?;
-        let child = source.clone_for_plan(proto_child).build().await?;
-
+        ensure!(
+            inputs.len() == 1,
+            "Sort aggregation executor should have only 1 child!"
+        );
         let sort_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::SortAgg
@@ -94,7 +92,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             agg_states,
             group_keys,
             sorted_groupers,
-            child,
+            child: inputs.remove(0),
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
             output_size_limit: DEFAULT_CHUNK_BUFFER_SIZE,

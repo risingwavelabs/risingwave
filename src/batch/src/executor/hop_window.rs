@@ -46,8 +46,12 @@ pub struct HopWindowExecutor {
 impl BoxedExecutorBuilder for HopWindowExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 1);
+        ensure!(
+            inputs.len() == 1,
+            "HopWindowExecutor should have only one child!"
+        );
         let hop_window_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::HopWindow
@@ -61,33 +65,31 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             .copied()
             .map(|x| x as usize)
             .collect_vec();
-        if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build().await?;
-            let original_schema: Schema = child
-                .schema()
-                .clone()
-                .into_fields()
-                .into_iter()
-                .chain([
-                    Field::with_name(DataType::Timestamp, "window_start"),
-                    Field::with_name(DataType::Timestamp, "window_end"),
-                ])
-                .collect();
-            let output_indices_schema: Schema = output_indices
-                .iter()
-                .map(|&idx| original_schema[idx].clone())
-                .collect();
-            return Ok(Box::new(HopWindowExecutor::new(
-                child,
-                output_indices_schema,
-                time_col,
-                window_slide,
-                window_size,
-                source.plan_node().get_identity().clone(),
-                output_indices,
-            )));
-        }
-        Err(ErrorCode::InternalError("HopWindow must have one child".to_string()).into())
+
+        let child = inputs.remove(0);
+        let original_schema: Schema = child
+            .schema()
+            .clone()
+            .into_fields()
+            .into_iter()
+            .chain([
+                Field::with_name(DataType::Timestamp, "window_start"),
+                Field::with_name(DataType::Timestamp, "window_end"),
+            ])
+            .collect();
+        let output_indices_schema: Schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
+        Ok(Box::new(HopWindowExecutor::new(
+            child,
+            output_indices_schema,
+            time_col,
+            window_slide,
+            window_size,
+            source.plan_node().get_identity().clone(),
+            output_indices,
+        )))
     }
 }
 
