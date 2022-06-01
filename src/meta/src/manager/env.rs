@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use super::{HashMappingManager, HashMappingManagerRef};
@@ -48,6 +49,8 @@ where
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
 
+    info: MetaLeaderInfo,
+
     /// options read by all services
     pub opts: Arc<MetaOpts>,
 }
@@ -56,6 +59,7 @@ where
 pub struct MetaOpts {
     pub enable_recovery: bool,
     pub checkpoint_interval: Duration,
+    pub lease_interval_secs: u64,
 }
 
 impl Default for MetaOpts {
@@ -63,6 +67,7 @@ impl Default for MetaOpts {
         Self {
             enable_recovery: false,
             checkpoint_interval: Duration::from_millis(100),
+            lease_interval_secs: 10,
         }
     }
 }
@@ -71,7 +76,7 @@ impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(opts: MetaOpts, meta_store: Arc<S>) -> Self {
+    pub async fn new(opts: MetaOpts, meta_store: Arc<S>, info: MetaLeaderInfo) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -84,6 +89,7 @@ where
             notification_manager,
             hash_mapping_manager,
             stream_client_pool,
+            info,
             opts: opts.into(),
         }
     }
@@ -127,6 +133,10 @@ where
     pub fn stream_client_pool(&self) -> &StreamClientPool {
         self.stream_client_pool.deref()
     }
+
+    pub fn get_leader_info(&self) -> MetaLeaderInfo {
+        self.info.clone()
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -146,6 +156,10 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             hash_mapping_manager,
             stream_client_pool,
+            info: MetaLeaderInfo {
+                lease_id: 0,
+                node_address: "".to_string(),
+            },
             opts: MetaOpts::default().into(),
         }
     }

@@ -14,9 +14,10 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
+use prost::Message;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -25,6 +26,7 @@ use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
+use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -44,7 +46,8 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
-use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
+use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
+use crate::storage::{Error, EtcdMetaStore, MemStore, MetaStore, Transaction};
 use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
 
 #[derive(Debug)]
@@ -54,7 +57,8 @@ pub enum MetaStoreBackend {
 }
 
 pub async fn rpc_serve(
-    addr: SocketAddr,
+    addr: String,
+    listen_addr: SocketAddr,
     prometheus_addr: Option<SocketAddr>,
     dashboard_addr: Option<SocketAddr>,
     meta_store_backend: MetaStoreBackend,
@@ -74,8 +78,11 @@ pub async fn rpc_serve(
             .await
             .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
+            let info = register_leader_for_meta(addr, meta_store.clone(), opts.lease_interval_secs)
+                .await?;
             rpc_serve_with_store(
-                addr,
+                info,
+                listen_addr,
                 prometheus_addr,
                 dashboard_addr,
                 meta_store,
@@ -87,8 +94,11 @@ pub async fn rpc_serve(
         }
         MetaStoreBackend::Mem => {
             let meta_store = Arc::new(MemStore::default());
+            let info = register_leader_for_meta(addr, meta_store.clone(), opts.lease_interval_secs)
+                .await?;
             rpc_serve_with_store(
-                addr,
+                info,
+                listen_addr,
                 prometheus_addr,
                 dashboard_addr,
                 meta_store,
@@ -101,7 +111,118 @@ pub async fn rpc_serve(
     })
 }
 
+pub async fn register_leader_for_meta<S: MetaStore>(
+    addr: String,
+    meta_store: Arc<S>,
+    lease_time: u64,
+) -> Result<MetaLeaderInfo> {
+    loop {
+        let old_leader_info = meta_store
+            .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
+            .await?;
+        let old_leader_lease = meta_store
+            .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
+            .await?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards");
+        if !old_leader_lease.is_empty() {
+            let lease_info = MetaLeaseInfo::decode(&mut old_leader_lease.as_slice()).unwrap();
+
+            if lease_info.lease_expire_time < now.as_secs()
+                && lease_info.leader.as_ref().unwrap().node_address != addr
+            {
+                tracing::warn!(
+                    "the lease {:?} does not expire, now time: {}.",
+                    lease_info,
+                    now.as_secs()
+                );
+                tokio::time::interval(Duration::from_secs(10)).tick().await;
+                continue;
+            }
+        }
+        let lease_id = if !old_leader_info.is_empty() {
+            let leader_info = MetaLeaderInfo::decode(&mut old_leader_info.as_slice()).unwrap();
+            leader_info.lease_id + 1
+        } else {
+            0
+        };
+        let mut txn = Transaction::default();
+        let leader_info = MetaLeaderInfo {
+            lease_id,
+            node_address: addr.to_string(),
+        };
+        let lease_info = MetaLeaseInfo {
+            leader: Some(leader_info.clone()),
+            lease_register_time: now.as_secs(),
+            lease_expire_time: now.as_secs() + lease_time,
+        };
+        txn.check_equal(
+            META_CF_NAME.to_string(),
+            META_LEADER_KEY.as_bytes().to_vec(),
+            old_leader_info,
+        );
+        txn.put(
+            META_CF_NAME.to_string(),
+            META_LEADER_KEY.as_bytes().to_vec(),
+            leader_info.encode_to_vec(),
+        );
+        txn.put(
+            META_CF_NAME.to_string(),
+            META_LEASE_KEY.as_bytes().to_vec(),
+            lease_info.encode_to_vec(),
+        );
+        if let Err(e) = meta_store
+            .txn(txn)
+            .await
+            .map_err(|e| RwError::from(Error::from(e)))
+        {
+            tracing::warn!("register leader failed, Error: {:?}", e);
+            continue;
+        }
+        let leader = leader_info.clone();
+        tokio::spawn(async move {
+            loop {
+                let mut txn = Transaction::default();
+                let lease_info = MetaLeaseInfo {
+                    leader: Some(leader_info.clone()),
+                    lease_register_time: now.as_secs(),
+                    lease_expire_time: now.as_secs() + lease_time,
+                };
+                txn.check_equal(
+                    META_CF_NAME.to_string(),
+                    META_LEADER_KEY.as_bytes().to_vec(),
+                    leader_info.encode_to_vec(),
+                );
+                txn.put(
+                    META_CF_NAME.to_string(),
+                    META_LEASE_KEY.as_bytes().to_vec(),
+                    lease_info.encode_to_vec(),
+                );
+                if let Err(e) = meta_store.txn(txn).await {
+                    match e {
+                        Error::TransactionAbort() => {
+                            panic!("keep lease failed, another node has become new leader");
+                        }
+                        Error::Internal(e) => {
+                            tracing::warn!("keep lease failed, try again later, Error: {:?}", e);
+                        }
+                        Error::ItemNotFound(e) => {
+                            tracing::warn!("keep lease failed, Error: {:?}", e);
+                        }
+                    }
+                }
+                tokio::time::interval(Duration::from_secs(lease_time))
+                    .tick()
+                    .await;
+            }
+        });
+        return Ok(leader);
+    }
+}
+
 pub async fn rpc_serve_with_store<S: MetaStore>(
+    info: MetaLeaderInfo,
     addr: SocketAddr,
     prometheus_addr: Option<SocketAddr>,
     dashboard_addr: Option<SocketAddr>,
@@ -110,7 +231,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     ui_path: Option<String>,
     opts: MetaOpts,
 ) -> (JoinHandle<()>, Sender<()>) {
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());

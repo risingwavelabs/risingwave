@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use tokio::sync::oneshot::Sender;
@@ -33,9 +34,11 @@ impl LocalMeta {
 
     /// Start a local meta node in the background.
     pub async fn start(port: u16) -> Self {
-        let addr = Self::meta_addr_inner(port).parse().unwrap();
+        let addr = Self::meta_addr_inner(port);
+        let listen_addr: SocketAddr = addr.parse().unwrap();
         let (join_handle, shutdown_sender) = crate::rpc::server::rpc_serve(
             addr,
+            listen_addr,
             None,
             None,
             MetaStoreBackend::Mem,
