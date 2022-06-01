@@ -54,7 +54,7 @@ use clap::{ArgEnum, Parser};
 use risingwave_common::config::ComputeNodeConfig;
 
 use crate::manager::MetaOpts;
-use crate::rpc::server::{rpc_serve, MetaStoreBackend};
+use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Copy, Clone, Debug, ArgEnum)]
 enum Backend {
@@ -110,7 +110,7 @@ fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
 /// Start meta node
 pub async fn start(opts: MetaNodeOpts) {
     let compute_config = load_config(&opts);
-    let meta_addr = opts.host.unwrap_or(opts.listen_addr.clone());
+    let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
     let listen_addr = opts.listen_addr.parse().unwrap();
     let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
     let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
@@ -129,18 +129,21 @@ pub async fn start(opts: MetaNodeOpts) {
         Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
 
     tracing::info!("Meta server listening at {}", listen_addr);
-    let (join_handle, _shutdown_send) = rpc_serve(
-        meta_addr,
+    let add_info = AddressInfo {
+        addr: meta_addr,
         listen_addr,
         prometheus_addr,
         dashboard_addr,
+        ui_path: opts.dashboard_ui_path,
+    };
+    let (join_handle, _shutdown_send) = rpc_serve(
+        add_info,
         backend,
         max_heartbeat_interval,
-        opts.dashboard_ui_path,
+        opts.meta_leader_lease_secs,
         MetaOpts {
             enable_recovery: !opts.disable_recovery,
             checkpoint_interval,
-            lease_interval_secs: opts.meta_leader_lease_secs,
         },
     )
     .await

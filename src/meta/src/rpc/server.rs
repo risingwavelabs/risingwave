@@ -56,14 +56,31 @@ pub enum MetaStoreBackend {
     Mem,
 }
 
+pub struct AddressInfo {
+    pub addr: String,
+    pub listen_addr: SocketAddr,
+    pub prometheus_addr: Option<SocketAddr>,
+    pub dashboard_addr: Option<SocketAddr>,
+    pub ui_path: Option<String>,
+}
+
+impl Default for AddressInfo {
+    fn default() -> Self {
+        Self {
+            addr: "127.0.0.1:0000".to_string(),
+            listen_addr: SocketAddr::V4("127.0.0.1:0000".parse().unwrap()),
+            prometheus_addr: None,
+            dashboard_addr: None,
+            ui_path: None,
+        }
+    }
+}
+
 pub async fn rpc_serve(
-    addr: String,
-    listen_addr: SocketAddr,
-    prometheus_addr: Option<SocketAddr>,
-    dashboard_addr: Option<SocketAddr>,
+    address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
-    ui_path: Option<String>,
+    lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> Result<(JoinHandle<()>, Sender<()>)> {
     Ok(match meta_store_backend {
@@ -78,33 +95,39 @@ pub async fn rpc_serve(
             .await
             .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
-            let info = register_leader_for_meta(addr, meta_store.clone(), opts.lease_interval_secs)
-                .await?;
+            let info = register_leader_for_meta(
+                address_info.addr.clone(),
+                meta_store.clone(),
+                lease_interval_secs,
+            )
+            .await?;
+            let env = MetaSrvEnv::<EtcdMetaStore>::new(opts, meta_store.clone(), info).await;
             rpc_serve_with_store(
-                info,
-                listen_addr,
-                prometheus_addr,
-                dashboard_addr,
-                meta_store,
+                env,
+                address_info.listen_addr,
+                address_info.prometheus_addr,
+                address_info.dashboard_addr,
                 max_heartbeat_interval,
-                ui_path,
-                opts,
+                address_info.ui_path,
             )
             .await
         }
         MetaStoreBackend::Mem => {
             let meta_store = Arc::new(MemStore::default());
-            let info = register_leader_for_meta(addr, meta_store.clone(), opts.lease_interval_secs)
-                .await?;
+            let info = register_leader_for_meta(
+                address_info.addr.clone(),
+                meta_store.clone(),
+                lease_interval_secs,
+            )
+            .await?;
+            let env = MetaSrvEnv::<MemStore>::new(opts, meta_store.clone(), info).await;
             rpc_serve_with_store(
-                info,
-                listen_addr,
-                prometheus_addr,
-                dashboard_addr,
-                meta_store,
+                env,
+                address_info.listen_addr,
+                address_info.prometheus_addr,
+                address_info.dashboard_addr,
                 max_heartbeat_interval,
-                ui_path,
-                opts,
+                address_info.ui_path,
             )
             .await
         }
@@ -116,13 +139,29 @@ pub async fn register_leader_for_meta<S: MetaStore>(
     meta_store: Arc<S>,
     lease_time: u64,
 ) -> Result<MetaLeaderInfo> {
+    let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
     loop {
-        let old_leader_info = meta_store
+        tick_interval.tick().await;
+        let old_leader_info = match meta_store
             .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
-            .await?;
-        let old_leader_lease = meta_store
+            .await
+        {
+            Err(Error::ItemNotFound(_)) => vec![],
+            Ok(v) => v,
+            _ => {
+                continue;
+            }
+        };
+        let old_leader_lease = match meta_store
             .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
-            .await?;
+            .await
+        {
+            Err(Error::ItemNotFound(_)) => vec![],
+            Ok(v) => v,
+            _ => {
+                continue;
+            }
+        };
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards");
@@ -137,7 +176,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     lease_info,
                     now.as_secs()
                 );
-                tokio::time::interval(Duration::from_secs(10)).tick().await;
                 continue;
             }
         }
@@ -157,27 +195,38 @@ pub async fn register_leader_for_meta<S: MetaStore>(
             lease_register_time: now.as_secs(),
             lease_expire_time: now.as_secs() + lease_time,
         };
-        txn.check_equal(
-            META_CF_NAME.to_string(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            old_leader_info,
-        );
-        txn.put(
-            META_CF_NAME.to_string(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            leader_info.encode_to_vec(),
-        );
+
+        if !old_leader_info.is_empty() {
+            txn.check_equal(
+                META_CF_NAME.to_string(),
+                META_LEADER_KEY.as_bytes().to_vec(),
+                old_leader_info,
+            );
+        } else {
+            tracing::warn!("begin put leader info");
+            if let Err(e) = meta_store
+                .put_cf(
+                    META_CF_NAME,
+                    META_LEADER_KEY.as_bytes().to_vec(),
+                    leader_info.encode_to_vec(),
+                )
+                .await
+            {
+                tracing::warn!("put new leader failed, Error: {:?}", e);
+                continue;
+            }
+            txn.check_equal(
+                META_CF_NAME.to_string(),
+                META_LEADER_KEY.as_bytes().to_vec(),
+                leader_info.encode_to_vec(),
+            );
+        }
         txn.put(
             META_CF_NAME.to_string(),
             META_LEASE_KEY.as_bytes().to_vec(),
             lease_info.encode_to_vec(),
         );
-        if let Err(e) = meta_store
-            .txn(txn)
-            .await
-            .map_err(|e| RwError::from(Error::from(e)))
-        {
-            tracing::warn!("register leader failed, Error: {:?}", e);
+        if let Err(e) = meta_store.txn(txn).await {
             continue;
         }
         let leader = leader_info.clone();
@@ -222,17 +271,13 @@ pub async fn register_leader_for_meta<S: MetaStore>(
 }
 
 pub async fn rpc_serve_with_store<S: MetaStore>(
-    info: MetaLeaderInfo,
+    env: MetaSrvEnv<S>,
     addr: SocketAddr,
     prometheus_addr: Option<SocketAddr>,
     dashboard_addr: Option<SocketAddr>,
-    meta_store: Arc<S>,
     max_heartbeat_interval: Duration,
     ui_path: Option<String>,
-    opts: MetaOpts,
 ) -> (JoinHandle<()>, Sender<()>) {
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
-
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let compactor_manager = Arc::new(hummock::CompactorManager::new());

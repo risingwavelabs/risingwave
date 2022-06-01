@@ -105,13 +105,10 @@ impl MetaStore for MemStore {
                     }
                 }
                 KeyEqual { cf, key, value } => {
-                    let v = if let Some(v) =
-                        inner.cf_ref(cf.as_str()).map(|cf| cf.get(key.as_slice()))
-                    {
-                        v
-                    } else {
-                        None
-                    };
+                    let v = inner
+                        .cf_ref(cf.as_str())
+                        .map(|cf| cf.get(key.as_slice()))
+                        .unwrap_or(None);
                     if !v.map_or(false, |v| v.eq(&value)) {
                         return Err(Error::TransactionAbort());
                     }

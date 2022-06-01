@@ -59,7 +59,6 @@ where
 pub struct MetaOpts {
     pub enable_recovery: bool,
     pub checkpoint_interval: Duration,
-    pub lease_interval_secs: u64,
 }
 
 impl Default for MetaOpts {
@@ -67,7 +66,6 @@ impl Default for MetaOpts {
         Self {
             enable_recovery: false,
             checkpoint_interval: Duration::from_millis(100),
-            lease_interval_secs: 10,
         }
     }
 }

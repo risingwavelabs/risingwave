@@ -20,6 +20,7 @@ use tokio::task::JoinHandle;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::MetaStoreBackend;
+use crate::AddressInfo;
 
 pub struct LocalMeta {
     port: u16,
@@ -36,14 +37,16 @@ impl LocalMeta {
     pub async fn start(port: u16) -> Self {
         let addr = Self::meta_addr_inner(port);
         let listen_addr: SocketAddr = addr.parse().unwrap();
-        let (join_handle, shutdown_sender) = crate::rpc::server::rpc_serve(
+        let address_info = AddressInfo {
             addr,
             listen_addr,
-            None,
-            None,
+            ..Default::default()
+        };
+        let (join_handle, shutdown_sender) = crate::rpc::server::rpc_serve(
+            address_info,
             MetaStoreBackend::Mem,
             Duration::from_secs(3600),
-            None,
+            10,
             MetaOpts::default(),
         )
         .await
