@@ -150,6 +150,7 @@ mod tests {
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
             vec![],
             None,
+            vec![],
         );
         let mut managed_state =
             ManagedValueState::new(create_test_count_state(), Some(0), None, &state_table)
@@ -208,11 +209,13 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only() {
         let keyspace = create_in_memory_keyspace();
+        let pk_index = vec![0_usize, 1_usize];
         let mut state_table = StateTable::new(
             keyspace.clone(),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
             vec![],
             None,
+            pk_index,
         );
         let mut managed_state = ManagedValueState::new(
             create_test_max_agg_append_only(),

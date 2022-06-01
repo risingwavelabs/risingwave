@@ -45,6 +45,8 @@ pub struct StateTable<S: StateStore> {
 
     /// Relation layer
     cell_based_table: CellBasedTable<S>,
+
+    _pk_index: Vec<usize>,
 }
 impl<S: StateStore> StateTable<S> {
     pub fn new(
@@ -52,6 +54,7 @@ impl<S: StateStore> StateTable<S> {
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         dist_key_indices: Option<Vec<usize>>,
+        _pk_index: Vec<usize>,
     ) -> Self {
         let cell_based_keyspace = keyspace.clone();
         let cell_based_column_descs = column_descs.clone();
@@ -67,6 +70,7 @@ impl<S: StateStore> StateTable<S> {
                 Arc::new(StateStoreMetrics::unused()),
                 dist_key_indices,
             ),
+            _pk_index,
         }
     }
 
