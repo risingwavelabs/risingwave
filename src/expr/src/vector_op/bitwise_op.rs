@@ -14,7 +14,7 @@
 use std::any::type_name;
 use std::convert::TryInto;
 use std::fmt::Debug;
-use std::ops::{BitAnd, BitOr, BitXor, Not};
+use std::ops::{BitAnd, BitOr, BitXor, Not,};
 
 use num_traits::{CheckedShl, CheckedShr};
 use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
@@ -25,24 +25,24 @@ use crate::vector_op::arithmetic_op::general_atm;
 #[inline(always)]
 pub fn general_shl<T1, T2>(l: T1, r: T2) -> Result<T1>
 where
-    T1: CheckedShl + Debug,
+    T1: CheckedShl + Debug + BitXor<Output = T1> + std::marker::Copy,
     T2: TryInto<u32> + Debug,
 {
     general_shift(l, r, |a, b| match a.checked_shl(b) {
         Some(c) => Ok(c),
-        None => Err(RwError::from(NumericValueOutOfRange)),
+        None => Ok(a.bitxor(a)),
     })
 }
 
 #[inline(always)]
 pub fn general_shr<T1, T2>(l: T1, r: T2) -> Result<T1>
 where
-    T1: CheckedShr + Debug,
+    T1: CheckedShr + Debug + BitXor<Output = T1> + std::marker::Copy,
     T2: TryInto<u32> + Debug,
 {
     general_shift(l, r, |a, b| match a.checked_shr(b) {
         Some(c) => Ok(c),
-        None => Err(RwError::from(NumericValueOutOfRange)),
+        None => Ok(a.bitxor(a))
     })
 }
 
