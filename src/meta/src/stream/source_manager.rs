@@ -198,13 +198,6 @@ where
                     prev_splits.append(&mut splits);
                     changed_actors.insert(actor_id, prev_splits);
                 }
-
-                // for (actor_id, mut splits) in assigned {
-                //     self.actor_splits
-                //         .entry(actor_id)
-                //         .or_insert(vec![])
-                //         .append(&mut splits);
-                // }
             }
         }
 
