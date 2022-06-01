@@ -203,7 +203,6 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 old_leader_info,
             );
         } else {
-            tracing::warn!("begin put leader info");
             if let Err(e) = meta_store
                 .put_cf(
                     META_CF_NAME,
@@ -212,7 +211,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 )
                 .await
             {
-                tracing::warn!("put new leader failed, Error: {:?}", e);
+                tracing::warn!("new cluster put leader info failed, Error: {:?}", e);
                 continue;
             }
             txn.check_equal(
@@ -227,6 +226,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
             lease_info.encode_to_vec(),
         );
         if let Err(e) = meta_store.txn(txn).await {
+            tracing::warn!("add leader info failed, Error: {:?}, try again later", e);
             continue;
         }
         let leader = leader_info.clone();
