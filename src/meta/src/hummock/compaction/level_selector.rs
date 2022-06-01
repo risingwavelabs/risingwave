@@ -259,7 +259,7 @@ pub mod tests {
     use std::ops::Range;
 
     use itertools::Itertools;
-    use risingwave_pb::hummock::compaction_config::CompactionMode::RangeMode;
+    use risingwave_pb::hummock::compaction_config::CompactionMode;
     use risingwave_pb::hummock::{LevelType, SstableInfo};
 
     use super::*;
@@ -294,7 +294,7 @@ pub mod tests {
             min_compaction_bytes: 1,
             level0_tigger_file_numer: 1,
             level0_tier_compact_file_number: 2,
-            compaction_mode: RangeMode as i32,
+            compaction_mode: CompactionMode::Range as i32,
         };
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
@@ -372,7 +372,7 @@ pub mod tests {
             min_compaction_bytes: 200,
             level0_tigger_file_numer: 8,
             level0_tier_compact_file_number: 4,
-            compaction_mode: RangeMode as i32,
+            compaction_mode: CompactionMode::Range as i32,
         };
         let mut levels = vec![
             Level {

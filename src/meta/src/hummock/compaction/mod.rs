@@ -95,14 +95,14 @@ pub fn default_compaction_config() -> CompactionConfig {
         min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
         level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
         level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
-        compaction_mode: CompactionMode::ConsistentHashMode as i32,
+        compaction_mode: CompactionMode::ConsistentHash as i32,
     }
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
     match compaction_mode {
-        CompactionMode::RangeMode => Arc::new(RangeOverlapStrategy::default()),
-        CompactionMode::ConsistentHashMode => Arc::new(HashStrategy::default()),
+        CompactionMode::Range => Arc::new(RangeOverlapStrategy::default()),
+        CompactionMode::ConsistentHash => Arc::new(HashStrategy::default()),
     }
 }
 
