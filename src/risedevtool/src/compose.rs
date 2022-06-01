@@ -22,9 +22,10 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, FrontendConfig,
-    FrontendService, GrafanaConfig, GrafanaGen, MetaNodeConfig, MetaNodeService, MinioConfig,
-    MinioService, PrometheusConfig, PrometheusGen, PrometheusService, RedPandaConfig,
+    CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, EtcdConfig,
+    EtcdService, FrontendConfig, FrontendService, GrafanaConfig, GrafanaGen, MetaNodeConfig,
+    MetaNodeService, MinioConfig, MinioService, PrometheusConfig, PrometheusGen, PrometheusService,
+    RedPandaConfig,
 };
 
 #[serde_with::skip_serializing_none]
@@ -60,6 +61,7 @@ pub struct DockerImageConfig {
     pub grafana: String,
     pub minio: String,
     pub redpanda: String,
+    pub etcd: String,
 }
 
 pub struct ComposeConfig {
@@ -388,6 +390,28 @@ impl Compose for GrafanaConfig {
                 "./grafana-risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/grafana-risedev-dashboard.yml".to_string(),
                 "./risingwave-dashboard.json:/risingwave-dashboard.json".to_string()
             ],
+            ..Default::default()
+        };
+
+        Ok(service)
+    }
+}
+
+impl Compose for EtcdConfig {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
+        let mut command = Command::new("/usr/local/bin/etcd");
+        EtcdService::apply_command_args(&mut command, self)?;
+        let command = get_cmd_args(&command, true)?;
+
+        let service = ComposeService {
+            image: config.image.etcd.clone(),
+            command,
+            expose: vec![self.port.to_string()],
+            ports: vec![
+                format!("{}:{}", self.port, self.port),
+                format!("{}:{}", self.peer_port, self.peer_port),
+            ],
+            volumes: vec![format!("{}:/etcd-data", self.id)],
             ..Default::default()
         };
 

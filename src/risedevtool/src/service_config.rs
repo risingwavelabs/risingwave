@@ -138,6 +138,8 @@ pub struct EtcdConfig {
 
     pub peer_port: u16,
     pub unsafe_no_fsync: bool,
+
+    pub exporter_port: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -157,6 +159,7 @@ pub struct PrometheusConfig {
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
+    pub provide_etcd: Option<Vec<EtcdConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

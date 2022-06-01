@@ -434,7 +434,7 @@ script = """
 #!@shell
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
-cargo hakari generate
+(cargo hakari verify > /dev/null) || cargo hakari generate
 test $? -eq 0 || exit 1
 """
 
