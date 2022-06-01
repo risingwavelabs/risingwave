@@ -44,12 +44,12 @@ pub(crate) fn make_prost_user_info(
             CreateUserOption::NoLogin => user_info.can_login = false,
             CreateUserOption::EncryptedPassword(p) => {
                 if !p.0.is_empty() {
-                    user_info.auth_info = Some(encrypt_default(&p.0));
+                    user_info.auth_info = Some(encrypt_default(&user_info.name, &p.0));
                 }
             }
             CreateUserOption::Password(opt) => {
                 if let Some(password) = opt {
-                    user_info.auth_info = try_extract(&password.0);
+                    user_info.auth_info = try_extract(&user_info.name, &password.0);
                 }
             }
         }
