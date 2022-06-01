@@ -14,7 +14,7 @@
 
 //! Generate docker compose yaml files for risedev components.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -38,7 +38,7 @@ pub struct ComposeService {
     pub depends_on: Vec<String>,
     pub volumes: Vec<String>,
     pub entrypoint: Option<String>,
-    pub environment: HashMap<String, String>,
+    pub environment: BTreeMap<String, String>,
     pub user: Option<String>,
     pub container_name: String,
     pub network_mode: Option<String>,
@@ -103,8 +103,8 @@ fn get_cmd_args(cmd: &Command, with_argv_0: bool) -> Result<Vec<String>> {
     Ok(result)
 }
 
-fn get_cmd_envs(cmd: &Command) -> Result<HashMap<String, String>> {
-    let mut result = HashMap::new();
+fn get_cmd_envs(cmd: &Command) -> Result<BTreeMap<String, String>> {
+    let mut result = BTreeMap::new();
     for (k, v) in cmd.get_envs() {
         let k = k
             .to_str()

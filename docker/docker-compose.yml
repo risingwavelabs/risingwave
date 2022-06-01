@@ -172,10 +172,10 @@ services:
       - "minio-0:/data"
     entrypoint: "\n/bin/sh -c '\nset -e\nmkdir -p \"/data/hummock001\"\n/usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"\n'"
     environment:
-      MINIO_ROOT_PASSWORD: hummockadmin
-      MINIO_PROMETHEUS_URL: "http://prometheus-0:9500"
-      MINIO_ROOT_USER: hummockadmin
       MINIO_PROMETHEUS_AUTH_TYPE: public
+      MINIO_PROMETHEUS_URL: "http://prometheus-0:9500"
+      MINIO_ROOT_PASSWORD: hummockadmin
+      MINIO_ROOT_USER: hummockadmin
     container_name: minio-0
   prometheus-0:
     image: "prom/prometheus:latest"
