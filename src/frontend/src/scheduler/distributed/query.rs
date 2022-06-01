@@ -202,7 +202,7 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
-    #[allow(unused)]
+    #[allow(dead_code)]
     pub async fn abort(&mut self) -> Result<()> {
         todo!()
     }
@@ -257,7 +257,8 @@ impl QueryRunner {
                         info!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
                             .clone()
-                            .unpin_snapshot(self.epoch, self.query.query_id());
+                            .unpin_snapshot(self.epoch, self.query.query_id())
+                            .await?;
                     }
 
                     if self.scheduled_stages_count == self.stage_executions.len() {
