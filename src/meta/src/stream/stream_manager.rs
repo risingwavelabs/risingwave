@@ -471,8 +471,7 @@ where
 
         self.source_manager
             .register_source(source_fragments, None)
-            .await
-            .unwrap();
+            .await?;
 
         let split_assignment = self
             .source_manager

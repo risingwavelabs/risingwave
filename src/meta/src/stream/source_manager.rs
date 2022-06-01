@@ -49,15 +49,16 @@ pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
 
+type SharedSplitMapRef = Arc<Mutex<Option<BTreeMap<String, SplitImpl>>>>;
+
 pub struct ConnectorSourceWorker {
     source_id: SourceId,
-    current_splits: Arc<Mutex<Option<BTreeMap<String, SplitImpl>>>>,
+    current_splits: SharedSplitMapRef,
     enumerator: SplitEnumeratorImpl,
-    stop_tx: oneshot::Sender<()>,
+    _stop_tx: oneshot::Sender<()>,
 }
 
 impl ConnectorSourceWorker {
@@ -75,7 +76,7 @@ impl ConnectorSourceWorker {
             source_id,
             current_splits,
             enumerator,
-            stop_tx,
+            _stop_tx: stop_tx,
         })
     }
 
@@ -112,7 +113,7 @@ impl ConnectorSourceWorker {
 
 pub struct SourceManagerCore<S: MetaStore> {
     pub fragment_manager: FragmentManagerRef<S>,
-    pub managed_sources: HashMap<SourceId, Arc<Mutex<Option<BTreeMap<String, SplitImpl>>>>>,
+    pub managed_sources: HashMap<SourceId, SharedSplitMapRef>,
     pub source_fragments: HashMap<SourceId, Vec<FragmentId>>,
     pub actor_splits: HashMap<ActorId, Vec<String>>,
 }
@@ -130,6 +131,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     async fn tick(&mut self) -> Result<()> {
         let table_frags = self.fragment_manager.list_table_fragments().await?;
         let mut frag_actors = HashMap::new();
@@ -143,7 +145,7 @@ where
             }
         }
 
-        println!("frags {:?}", frag_actors);
+        let mut changed_actors = HashMap::new();
 
         for (source_id, splits) in &self.managed_sources {
             let frag_ids = match self.source_fragments.get(source_id) {
@@ -188,12 +190,21 @@ where
                 }
 
                 for (actor_id, mut splits) in assigned {
-                    println!("assign {} => {:?}", actor_id, splits);
-                    self.actor_splits
-                        .entry(actor_id)
-                        .or_insert(vec![])
-                        .append(&mut splits);
+                    let mut prev_splits = self
+                        .actor_splits
+                        .get(&actor_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    prev_splits.append(&mut splits);
+                    changed_actors.insert(actor_id, prev_splits);
                 }
+
+                // for (actor_id, mut splits) in assigned {
+                //     self.actor_splits
+                //         .entry(actor_id)
+                //         .or_insert(vec![])
+                //         .append(&mut splits);
+                // }
             }
         }
 
@@ -212,13 +223,12 @@ where
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Result<Self> {
-        let core = Arc::new(Mutex::new(SourceManagerCore::new(fragment_manager.clone())));
+        let core = Arc::new(Mutex::new(SourceManagerCore::new(fragment_manager)));
 
         Ok(Self {
             env,
             cluster_manager,
             catalog_manager,
-            fragment_manager,
             core,
         })
     }
@@ -388,12 +398,6 @@ where
 
     pub async fn run(&self) -> Result<()> {
         // todo: in the future, split change will be pushed as a long running service
-        let mut interval = time::interval(Duration::from_secs(1));
-        loop {
-            interval.tick().await;
-
-            let mut core_guard = self.core.lock().await;
-            let _ = core_guard.tick().await;
-        }
+        Ok(())
     }
 }
