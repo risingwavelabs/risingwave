@@ -141,16 +141,16 @@ fn test_arithmetic() {
 fn test_bitwise() {
     // check the boundary
 
-    assert_eq!(general_shl::<i32, i32, i64>(1i32, 0i32).unwrap(), 1i64);
+    assert_eq!(general_shl::<i32, i32>(1i32, 0i32).unwrap(), 1i32);
     assert_eq!(
-        general_shl::<i32, i32, i64>(1i32, 31i32).unwrap(),
+        general_shl::<i64, i32 >(1i32, 31i32).unwrap(),
         2147483648i64
     );
     assert_eq!(
-        general_shr::<i32, i32, i64>(-2147483648i32, 31i32).unwrap(),
+        general_shr::<i64, i32>(-2147483648i32, 31i32).unwrap(),
         -1i64
     );
-    assert_eq!(general_shr::<i32, i32, i64>(1i32, 0i32), Ok(1i64));
+    assert_eq!(general_shr::<i64, i32>(1i32, 0i32), Ok(1i64));
     // truth table
     assert_eq!(
         general_bitand::<u32, u32, u64>(0b0011u32, 0b0101u32),
