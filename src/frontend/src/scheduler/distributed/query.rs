@@ -202,7 +202,6 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
-    #[allow(dead_code)]
     pub async fn abort(&mut self) -> Result<()> {
         todo!()
     }
