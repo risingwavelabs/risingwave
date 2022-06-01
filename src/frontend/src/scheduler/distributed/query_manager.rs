@@ -27,13 +27,10 @@ use risingwave_rpc_client::{
 };
 use uuid::Uuid;
 
-use super::HummockSnapshotManagerRef;
-use crate::scheduler::distributed::QueryExecution;
+use super::QueryExecution;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::ExecutionContextRef;
-
-pub trait DataChunkStream = Stream<Item = Result<DataChunk>>;
+use crate::scheduler::{DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef};
 
 pub struct QueryResultFetcher {
     // TODO: Remove these after implemented worker node level snapshot pinnning
@@ -45,7 +42,7 @@ pub struct QueryResultFetcher {
     compute_client_pool: ComputeClientPoolRef,
 }
 
-/// Manages execution of batch queries.
+/// Manages execution of distributed batch queries.
 #[derive(Clone)]
 pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,

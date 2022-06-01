@@ -24,8 +24,9 @@ use crate::binder::{Binder, BoundStatement};
 use crate::config::QueryMode;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
-use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
-use crate::scheduler::{ExecutionContext, ExecutionContextRef, LocalQueryExecution};
+use crate::scheduler::{
+    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
+};
 use crate::session::OptimizerContext;
 
 pub static QUERY_MODE: &str = "query_mode";
