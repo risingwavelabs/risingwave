@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Error as IoError, Error, ErrorKind, Result};
+use std::io::{Error as IoError, ErrorKind, Result};
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
@@ -164,16 +164,12 @@ where
     }
 
     fn process_startup_msg(&mut self, msg: FeStartupMessage) -> Result<()> {
-        // TODO: Replace `DEFAULT_DATABASE_NAME` with true database name in `FeStartupMessage`.
         let db_name = {
             match msg.config.get("database") {
-                None => Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "database name is null".to_string(),
-                )),
-                Some(v) => Ok(v.to_string()),
+                None => "dev".to_string(),
+                Some(v) => v.to_string(),
             }
-        }?;
+        };
         self.session = Some(self.session_mgr.connect(&db_name).map_err(IoError::other)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
