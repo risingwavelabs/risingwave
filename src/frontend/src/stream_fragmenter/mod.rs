@@ -200,14 +200,13 @@ impl StreamFragmenter {
             _ => {}
         };
 
+        Self::assign_local_table_id_to_stream_node(state, &mut stream_node);
+
+        // handle join logic
         match stream_node.node_body.as_mut().unwrap() {
             // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
             // with only equal conditions
             NodeBody::HashJoin(hash_join_node) => {
-                // Allocate local table id. It will be rewrite to global table id after get table id
-                // offset from id generator.
-                hash_join_node.left_table_id = state.gen_table_id();
-                hash_join_node.right_table_id = state.gen_table_id();
                 if hash_join_node.is_delta_join {
                     if hash_join_node.get_join_type()? == JoinType::Inner
                         && hash_join_node.condition.is_none()
@@ -235,23 +234,6 @@ impl StreamFragmenter {
                         "only inner join without non-equal condition is supported for delta joins"
                     );
                 }
-            }
-
-            NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
-                for _ in &node.agg_calls {
-                    node.table_ids.push(state.gen_table_id());
-                }
-            }
-
-            // Rewrite hash agg. One agg call -> one table id.
-            NodeBody::HashAgg(hash_agg_node) => {
-                for _ in &hash_agg_node.agg_calls {
-                    hash_agg_node.table_ids.push(state.gen_table_id());
-                }
-            }
-
-            NodeBody::TopN(top_n_node) => {
-                top_n_node.table_id = state.gen_table_id();
             }
 
             _ => {}
@@ -329,5 +311,42 @@ impl StreamFragmenter {
             .collect();
         fragment_graph.table_ids_cnt = next_table_id;
         fragment_graph
+    }
+
+    /// This function assigns the `table_id` based on the type of `StreamNode`
+    /// Be careful it has side effects and will change the `StreamNode`
+    fn assign_local_table_id_to_stream_node(
+        state: &mut BuildFragmentGraphState,
+        stream_node: &mut StreamNode,
+    ) {
+        match stream_node.node_body.as_mut().unwrap() {
+            // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+            // with only equal conditions
+            NodeBody::HashJoin(hash_join_node) => {
+                // Allocate local table id. It will be rewrite to global table id after get table id
+                // offset from id generator.
+                hash_join_node.left_table_id = state.gen_table_id();
+                hash_join_node.right_table_id = state.gen_table_id();
+            }
+
+            NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
+                for _ in &node.agg_calls {
+                    node.table_ids.push(state.gen_table_id());
+                }
+            }
+
+            // Rewrite hash agg. One agg call -> one table id.
+            NodeBody::HashAgg(hash_agg_node) => {
+                for _ in &hash_agg_node.agg_calls {
+                    hash_agg_node.table_ids.push(state.gen_table_id());
+                }
+            }
+
+            NodeBody::TopN(top_n_node) => {
+                top_n_node.table_id = state.gen_table_id();
+            }
+
+            _ => {}
+        }
     }
 }
