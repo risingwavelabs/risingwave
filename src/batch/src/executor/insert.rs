@@ -120,7 +120,7 @@ impl InsertExecutor {
             array_builder.append(Some(rows_inserted as i64))?;
 
             let array = array_builder.finish()?;
-            let ret_chunk = DataChunk::builder().columns(vec![array.into()]).build();
+            let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk
         }
@@ -220,7 +220,7 @@ mod tests {
         .map(|x| Arc::new(x.into()))
         .unwrap();
         let col3 = Column::new(array);
-        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2, col3]).build();
+        let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 
         // Create the table.

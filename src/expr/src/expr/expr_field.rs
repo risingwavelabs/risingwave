@@ -117,7 +117,7 @@ mod tests {
         .unwrap();
 
         let column = Column::new(array);
-        let data_chunk = DataChunk::builder().columns(vec![column]).build();
+        let data_chunk = DataChunk::new(vec![column], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
@@ -159,7 +159,7 @@ mod tests {
         .unwrap();
 
         let column = Column::new(array);
-        let data_chunk = DataChunk::builder().columns(vec![column]).build();
+        let data_chunk = DataChunk::new(vec![column], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Float32(1.0.into())));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Float32(2.0.into())));

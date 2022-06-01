@@ -38,7 +38,6 @@ impl BatchHashAgg {
         let input_dist = input.distribution();
         let dist = match input_dist {
             Distribution::Single => Distribution::Single,
-            Distribution::Broadcast => unreachable!(),
             Distribution::HashShard(_) => logical
                 .i2o_col_mapping()
                 .rewrite_provided_distribution(input_dist),

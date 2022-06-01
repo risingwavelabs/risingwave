@@ -18,7 +18,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
@@ -225,21 +225,30 @@ impl HopWindowExecutor {
         }
         let window_start_col_index = child.schema().len();
         let window_end_col_index = child.schema().len() + 1;
+        let contains_window_start = output_indices.contains(&window_start_col_index);
+        let contains_window_end = output_indices.contains(&window_end_col_index);
+        if !contains_window_start && !contains_window_end {
+            // make sure that either window_start or window_end is in output indices.
+            return Err(RwError::from(ErrorCode::InternalError(
+                "neither window_start or window_end is in output_indices".to_string(),
+            )));
+        }
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
             let hop_start = hop_expr.eval(&data_chunk)?;
-            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], None);
+            let len = hop_start.len();
+            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
             let (origin_cols, visibility) = data_chunk.into_parts();
             // SAFETY: Already compacted.
-            assert!(visibility.is_none());
+            assert!(matches!(visibility, Vis::Compact(_)));
             for i in 0..units {
-                let window_start_col = if output_indices.contains(&window_start_col_index) {
+                let window_start_col = if contains_window_start {
                     Some(window_start_exprs[i].eval(&hop_start_chunk)?)
                 } else {
                     None
                 };
-                let window_end_col = if output_indices.contains(&window_end_col_index) {
+                let window_end_col = if contains_window_end {
                     Some(window_end_exprs[i].eval(&hop_start_chunk)?)
                 } else {
                     None
@@ -258,7 +267,17 @@ impl HopWindowExecutor {
                         }
                     })
                     .collect_vec();
-                let new_chunk = DataChunk::new(new_cols, None);
+                let len = {
+                    if let Some(col) = &window_start_col {
+                        col.len()
+                    } else if let Some(col) = &window_end_col {
+                        col.len()
+                    } else {
+                        // SAFETY: Either window_start or window_end is in output indices.
+                        unreachable!();
+                    }
+                };
+                let new_chunk = DataChunk::new(new_cols, len);
                 yield new_chunk;
             }
         }

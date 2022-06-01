@@ -82,17 +82,12 @@ message ExecuteRequest {
   uint64 epoch = 3;
 }
 
-message ExecuteResponse {
-  common.Status status = 1;
-  data.DataChunk record_batch = 2;
-}
-
 service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc GetTaskInfo(GetTaskInfoRequest) returns (GetTaskInfoResponse);
   rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
   rpc RemoveTask(RemoveTaskRequest) returns (RemoveTaskResponse);
-  rpc Execute(ExecuteRequest) returns (stream ExecuteResponse);
+  rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
 }
 
 message GetDataRequest {
