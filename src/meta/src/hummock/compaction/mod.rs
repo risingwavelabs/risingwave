@@ -25,10 +25,9 @@ use std::sync::Arc;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::Result;
-use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
+    CompactMetrics, CompactTask, HummockVersion, KeyRange, Level, TableSetStatistics,
 };
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
@@ -37,6 +36,7 @@ use crate::hummock::compaction::overlap_strategy::{
 };
 use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
 use crate::hummock::level_handler::LevelHandler;
+use crate::hummock::model::key_range::KeyRangeExt;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::Transactional;
 use crate::storage;
@@ -187,12 +187,9 @@ impl CompactStatus {
         let target_level_id = ret.target_level.level_idx;
 
         let splits = if ret.split_ranges.is_empty() {
-            vec![KeyRange::inf().into()]
+            vec![KeyRange::inf()]
         } else {
             ret.split_ranges
-                .iter()
-                .map(|v| v.clone().into())
-                .collect_vec()
         };
         let compact_task = CompactTask {
             input_ssts: vec![ret.select_level, ret.target_level],
@@ -296,8 +293,8 @@ impl CompactStatus {
             new_version.levels[compact_task.target_level as usize]
                 .table_infos
                 .sort_by(|sst1, sst2| {
-                    let a = KeyRange::from(sst1.key_range.as_ref().unwrap());
-                    let b = KeyRange::from(sst2.key_range.as_ref().unwrap());
+                    let a = sst1.key_range.as_ref().unwrap();
+                    let b = sst2.key_range.as_ref().unwrap();
                     a.cmp(&b)
                 });
         }

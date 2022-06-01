@@ -14,8 +14,9 @@
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
+
+use crate::hummock::model::key_range::KeyRangeExt;
 
 pub trait OverlapInfo {
     fn check_overlap(&self, a: &SstableInfo) -> bool;
@@ -97,12 +98,12 @@ impl OverlapInfo for RangeOverlapInfo {
     }
 
     fn update(&mut self, table: &SstableInfo) {
-        let other = KeyRange::from(table.key_range.as_ref().unwrap());
+        let other = table.key_range.as_ref().unwrap();
         if let Some(range) = self.target_range.as_mut() {
-            range.full_key_extend(&other);
+            range.full_key_extend(other);
             return;
         }
-        self.target_range = Some(other);
+        self.target_range = Some(other.clone());
     }
 }
 
@@ -129,12 +130,12 @@ impl OverlapInfo for HashOverlapInfo {
     }
 
     fn update(&mut self, table: &SstableInfo) {
-        let other = KeyRange::from(table.key_range.as_ref().unwrap());
+        let other = table.key_range.as_ref().unwrap();
         if let Some(range) = self.target_range.as_mut() {
-            range.full_key_extend(&other);
+            range.full_key_extend(other);
             return;
         }
-        self.target_range = Some(other);
+        self.target_range = Some(other.clone());
     }
 }
 
@@ -143,8 +144,8 @@ pub struct RangeOverlapStrategy {}
 
 impl OverlapStrategy for RangeOverlapStrategy {
     fn check_overlap(&self, a: &SstableInfo, b: &SstableInfo) -> bool {
-        let key_range = KeyRange::from(a.key_range.as_ref().unwrap());
-        check_table_overlap(&key_range, b)
+        let key_range = a.key_range.as_ref().unwrap();
+        check_table_overlap(key_range, b)
     }
 
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {
@@ -153,8 +154,8 @@ impl OverlapStrategy for RangeOverlapStrategy {
 }
 
 fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
-    let other = KeyRange::from(table.key_range.as_ref().unwrap());
-    key_range.full_key_overlap(&other)
+    let other = table.key_range.as_ref().unwrap();
+    key_range.full_key_overlap(other)
 }
 
 #[derive(Default)]
@@ -162,8 +163,8 @@ pub struct HashStrategy {}
 
 impl OverlapStrategy for HashStrategy {
     fn check_overlap(&self, a: &SstableInfo, b: &SstableInfo) -> bool {
-        let key_range = KeyRange::from(a.key_range.as_ref().unwrap());
-        check_table_overlap(&key_range, b)
+        let key_range = a.key_range.as_ref().unwrap();
+        check_table_overlap(key_range, b)
     }
 
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {

@@ -14,6 +14,7 @@
 
 mod compact_task_assignment;
 mod current_version_id;
+pub mod key_range;
 mod pinned_snapshot;
 mod pinned_version;
 pub mod sstable_id_info;
