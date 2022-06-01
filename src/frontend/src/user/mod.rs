@@ -77,12 +77,12 @@ pub fn encrypt_default(name: &str, password: &str) -> AuthInfo {
 }
 
 pub fn valid_sha256_password(password: &str) -> bool {
-    return password.starts_with(SHA256_ENCRYPTED_PREFIX)
-        && password.len() == VALID_SHA256_ENCRYPTED_LEN;
+    password.starts_with(SHA256_ENCRYPTED_PREFIX)
+        && password.len() == VALID_SHA256_ENCRYPTED_LEN
 }
 
 pub fn valid_md5_password(password: &str) -> bool {
-    return password.starts_with(MD5_ENCRYPTED_PREFIX) && password.len() == VALID_MD5_ENCRYPTED_LEN;
+    password.starts_with(MD5_ENCRYPTED_PREFIX) && password.len() == VALID_MD5_ENCRYPTED_LEN
 }
 
 /// Encrypt "`password`+`name`" with SHA-256.
