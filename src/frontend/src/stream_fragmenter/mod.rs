@@ -427,7 +427,7 @@ mod tests {
                     global_simple_agg_node.table_ids.len()
                 );
 
-                for table_id in global_simple_agg_node.table_ids.iter() {
+                for table_id in &global_simple_agg_node.table_ids {
                     expect_table_id += 1;
                     assert_eq!(expect_table_id, *table_id);
                 }
@@ -453,7 +453,7 @@ mod tests {
             if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_ref().unwrap() {
                 assert_eq!(hash_agg_node.agg_calls.len(), hash_agg_node.table_ids.len());
 
-                for table_id in hash_agg_node.table_ids.iter() {
+                for table_id in &hash_agg_node.table_ids {
                     expect_table_id += 1;
                     assert_eq!(expect_table_id, *table_id);
                 }
