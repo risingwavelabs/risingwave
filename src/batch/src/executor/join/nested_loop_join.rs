@@ -21,7 +21,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
@@ -192,8 +191,12 @@ impl NestedLoopJoinExecutor {
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 2);
+        ensure!(
+            inputs.len() == 2,
+            "NestedLoopJoinExecutor should have 2 children!"
+        );
 
         let nested_loop_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -202,65 +205,57 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
 
         let join_type = JoinType::from_prost(nested_loop_join_node.get_join_type()?);
         let join_expr = expr_build_from_prost(nested_loop_join_node.get_join_cond()?)?;
-        // Note: Assume that optimizer has set up probe side and build side. Left is the probe side,
-        // right is the build side. This is the same for all join executors.
-        let left_plan_opt = source.plan_node().get_children().get(0);
-        let right_plan_opt = source.plan_node().get_children().get(1);
-        match (left_plan_opt, right_plan_opt) {
-            (Some(left_plan), Some(right_plan)) => {
-                let left_child = source.clone_for_plan(left_plan).build().await?;
-                let probe_side_schema = left_child.schema().data_types();
-                let right_child = source.clone_for_plan(right_plan).build().await?;
 
-                // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
-                let fields = match join_type {
-                    JoinType::LeftSemi => left_child.schema().fields.clone(),
-                    JoinType::LeftAnti => left_child.schema().fields.clone(),
-                    JoinType::RightSemi => right_child.schema().fields.clone(),
-                    JoinType::RightAnti => right_child.schema().fields.clone(),
-                    _ => left_child
-                        .schema()
-                        .fields
-                        .iter()
-                        .chain(right_child.schema().fields.iter())
-                        .cloned()
-                        .collect(),
-                };
+        let left_child = inputs.remove(0);
+        let probe_side_schema = left_child.schema().data_types();
+        let right_child = inputs.remove(0);
 
-                let schema = Schema { fields };
-                match join_type {
-                    JoinType::Inner
-                    | JoinType::LeftOuter
-                    | JoinType::RightOuter
-                    | JoinType::LeftSemi
-                    | JoinType::LeftAnti
-                    | JoinType::RightSemi
-                    | JoinType::RightAnti => {
-                        // TODO: Support FULL OUTER.
-                        let outer_table_source = RowLevelIter::new(left_child);
+        // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
+        let fields = match join_type {
+            JoinType::LeftSemi => left_child.schema().fields.clone(),
+            JoinType::LeftAnti => left_child.schema().fields.clone(),
+            JoinType::RightSemi => right_child.schema().fields.clone(),
+            JoinType::RightAnti => right_child.schema().fields.clone(),
+            _ => left_child
+                .schema()
+                .fields
+                .iter()
+                .chain(right_child.schema().fields.iter())
+                .cloned()
+                .collect(),
+        };
 
-                        Ok(Box::new(Self {
-                            join_expr,
-                            join_type,
-                            chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
-                            schema,
-                            last_chunk: None,
-                            probe_side_schema,
-                            probe_side_source: outer_table_source,
-                            build_table: RowLevelIter::new(right_child),
-                            probe_remain_chunk_idx: 0,
-                            probe_remain_row_idx: 0,
-                            identity: "NestedLoopJoinExecutor2".to_string(),
-                        }))
-                    }
-                    _ => Err(ErrorCode::NotImplemented(
-                        format!("Do not support {:?} join type now.", join_type),
-                        None.into(),
-                    )
-                    .into()),
-                }
+        let schema = Schema { fields };
+        match join_type {
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::LeftSemi
+            | JoinType::LeftAnti
+            | JoinType::RightSemi
+            | JoinType::RightAnti => {
+                // TODO: Support FULL OUTER.
+                let outer_table_source = RowLevelIter::new(left_child);
+
+                Ok(Box::new(Self {
+                    join_expr,
+                    join_type,
+                    chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
+                    schema,
+                    last_chunk: None,
+                    probe_side_schema,
+                    probe_side_source: outer_table_source,
+                    build_table: RowLevelIter::new(right_child),
+                    probe_remain_chunk_idx: 0,
+                    probe_remain_row_idx: 0,
+                    identity: "NestedLoopJoinExecutor2".to_string(),
+                }))
             }
-            (_, _) => Err(InternalError("Filter must have one children".to_string()).into()),
+            _ => Err(ErrorCode::NotImplemented(
+                format!("Do not support {:?} join type now.", join_type),
+                None.into(),
+            )
+            .into()),
         }
     }
 }

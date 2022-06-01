@@ -571,6 +571,10 @@ impl StreamGraphBuilder {
                     }
                 }
 
+                if let NodeBody::TopN(node) = new_stream_node.node_body.as_mut().unwrap() {
+                    node.table_id += table_id_offset;
+                }
+
                 match new_stream_node.node_body.as_mut().unwrap() {
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
                         assert_eq!(node.table_ids.len(), node.agg_calls.len());

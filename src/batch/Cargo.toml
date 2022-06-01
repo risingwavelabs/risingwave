@@ -5,6 +5,7 @@ version = "0.1.7"
 
 [dependencies]
 anyhow = "1"
+async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 byteorder = "1"
