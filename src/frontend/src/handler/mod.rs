@@ -95,8 +95,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
                     .await
             }
             ObjectType::User => {
-                drop_user::handle_drop_user(context, object_name, if_exists, drop_mode.into())
-                    .await
+                drop_user::handle_drop_user(context, object_name, if_exists, drop_mode.into()).await
             }
             _ => Err(
                 ErrorCode::InvalidInputSyntax(format!("DROP {} is unsupported", object_type))

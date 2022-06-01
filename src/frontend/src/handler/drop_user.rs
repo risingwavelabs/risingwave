@@ -16,6 +16,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
+use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_user(
@@ -28,18 +29,22 @@ pub async fn handle_drop_user(
     if mode.is_some() {
         return Err(ErrorCode::BindError("Drop user not support drop mode".to_string()).into());
     }
-    if if_exists {
-        {
-            let user_info_reader = session.env().user_info_reader();
-            let user = user_info_reader
-                .read_guard()
-                .get_user_by_name(&user_name.to_string()).cloned();
-            if user.is_none() {
-                return Ok(PgResponse::empty_result_with_notice(
+
+    {
+        let user_info_reader = session.env().user_info_reader();
+        let user = user_info_reader
+            .read_guard()
+            .get_user_by_name(&user_name.to_string())
+            .cloned();
+        if user.is_none() {
+            return if if_exists {
+                Ok(PgResponse::empty_result_with_notice(
                     StatementType::DROP_USER,
                     format!("NOTICE: user {} does not exist, skipping", user_name),
-                ));
-            }
+                ))
+            } else {
+                Err(CatalogError::NotFound("user", user_name.to_string()).into())
+            };
         }
     }
     let user_info_writer = session.env().user_info_writer();
@@ -58,9 +63,15 @@ mod tests {
         let user_info_reader = session.env().user_info_reader();
 
         frontend.run_sql("CREATE USER user").await.unwrap();
-        assert!(user_info_reader.read_guard().get_user_by_name("user").is_some());
+        assert!(user_info_reader
+            .read_guard()
+            .get_user_by_name("user")
+            .is_some());
 
         frontend.run_sql("DROP USER user").await.unwrap();
-        assert!(user_info_reader.read_guard().get_user_by_name("user").is_none());
+        assert!(user_info_reader
+            .read_guard()
+            .get_user_by_name("user")
+            .is_none());
     }
 }

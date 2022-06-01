@@ -57,16 +57,12 @@ impl UserInfoManager {
         self.users.insert(user_info.name.clone(), user_info);
     }
 
-    pub fn verify(&mut self, _user_name: UserName, _password: &str) -> bool {
+    pub fn verify(&mut self, _user_name: &str, _password: &str) -> bool {
         todo!()
     }
 
-    pub fn authorize(&self, user_name: &UserName, privileges: &[GrantPrivilege]) -> bool {
-        let user_info = self.users.get(user_name).unwrap();
-        user_info
-            .grant_privileges
-            .iter()
-            .any(|privilege| privileges.contains(privilege))
+    pub fn authorize(&self, _user_name: &str, _privileges: &[GrantPrivilege]) -> bool {
+        todo!()
     }
 
     pub fn clear(&mut self) {

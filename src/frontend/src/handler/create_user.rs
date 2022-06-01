@@ -20,6 +20,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::Binder;
+use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 use crate::user::{encrypt_default, try_extract};
 
@@ -63,6 +64,15 @@ pub async fn handle_create_user(
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let user_info = make_prost_user_info(stmt.user_name, &stmt.with_options)?;
+
+    {
+        let user_reader = session.env().user_info_reader();
+        let reader = user_reader.read_guard();
+        if reader.get_user_by_name(&user_info.name).is_some() {
+            return Err(CatalogError::Duplicated("user", user_info.name).into());
+        }
+    }
+
     let user_info_writer = session.env().user_info_writer();
     user_info_writer.create_user(user_info).await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_USER))
