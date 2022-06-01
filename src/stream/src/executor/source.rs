@@ -238,6 +238,34 @@ macro_rules! impl_take_snapshot {
 }
 
 impl<S: StateStore> SourceExecutor<S> {
+    fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
+        // this case can never reach because we do not support split number reduction
+        if rhs.is_none() {
+            unreachable!()
+        }
+
+        let split_change = rhs.unwrap();
+        let mut target_state: Vec<SplitImpl> = Vec::with_capacity(split_change.len());
+        let mut no_change_flag = true;
+        for sc in &split_change {
+            // SplitImpl is identified by its id, target_state always follows offsets in cache
+            // here we introduce a hypothesis that every split is polled at least once in one epoch
+            match self.state_cache.get(&sc.id()) {
+                Some(s) => target_state.push(s.clone()),
+                None => {
+                    no_change_flag = false;
+                    target_state.push(sc.clone())
+                }
+            }
+        }
+
+        if no_change_flag {
+            None
+        } else {
+            Some(target_state)
+        }
+    }
+
     async fn take_snapshot(&mut self, epoch: u64) -> Result<()> {
         let cache = self
             .state_cache
@@ -253,7 +281,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 { datagen, DATAGEN_CONNECTOR}
 
             );
-            self.state_cache.clear();
         }
         Ok(())
     }
@@ -320,7 +347,7 @@ impl<S: StateStore> SourceExecutor<S> {
         };
         yield Message::Barrier(barrier);
 
-        let (_inject_source_tx, inject_source_rx) =
+        let (inject_source_tx, inject_source_rx) =
             unbounded_channel::<Box<dyn StreamSourceReader>>();
         #[for_await]
         for msg in reader.into_stream(inject_source_rx) {
@@ -333,9 +360,26 @@ impl<S: StateStore> SourceExecutor<S> {
                             self.take_snapshot(epoch)
                                 .await
                                 .map_err(StreamExecutorError::source_error)?;
-                            if let Some(Mutation::SourceChangeSplit(_)) =
+                            if let Some(Mutation::SourceChangeSplit(mapping)) =
                                 barrier.mutation.as_deref()
-                            {}
+                            {
+                                if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
+                                    match self.get_diff(target_splits) {
+                                        None => {}
+                                        Some(target_state) => {
+                                            let reader = self
+                                                .build_stream_source_reader(Some(target_state))
+                                                .await
+                                                .map_err(StreamExecutorError::source_error)?;
+                                            inject_source_tx
+                                                .send(reader)
+                                                .to_rw_result()
+                                                .map_err(StreamExecutorError::source_error)?;
+                                        }
+                                    }
+                                }
+                            }
+                            self.state_cache.clear();
                             yield Message::Barrier(barrier)
                         }
                         _ => unreachable!(),
