@@ -340,7 +340,7 @@ impl LevelCompactionPicker {
             target_level_ssts.tables.sort_by(|a, b| {
                 let r1 = a.key_range.as_ref().unwrap();
                 let r2 = b.key_range.as_ref().unwrap();
-                r1.cmp(&r2)
+                r1.cmp(r2)
             });
             return (select_level_ssts, target_level_ssts.tables);
         }

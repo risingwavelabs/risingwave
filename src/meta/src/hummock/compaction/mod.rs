@@ -295,7 +295,7 @@ impl CompactStatus {
                 .sort_by(|sst1, sst2| {
                     let a = sst1.key_range.as_ref().unwrap();
                     let b = sst2.key_range.as_ref().unwrap();
-                    a.cmp(&b)
+                    a.cmp(b)
                 });
         }
         new_version

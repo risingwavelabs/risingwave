@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::level_handler::SstTask;
 use risingwave_pb::hummock::SstableInfo;
 
