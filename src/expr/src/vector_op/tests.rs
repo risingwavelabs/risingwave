@@ -147,7 +147,7 @@ fn test_bitwise() {
         general_shr::<i64, i32>(-2147483648i64, 31i32).unwrap(),
         -1i64
     );
-    assert_eq!(general_shr::<i64, i32>(1i32, 0i32), Ok(1i64));
+    assert_eq!(general_shr::<i64, i32>(i64, 0i32), Ok(1i64));
     // truth table
     assert_eq!(
         general_bitand::<u32, u32, u64>(0b0011u32, 0b0101u32),
