@@ -119,7 +119,12 @@ pub struct GenerateSeriesExecutorBuilder {}
 impl BoxedExecutorBuilder for GenerateSeriesExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(
+            inputs.is_empty(),
+            "GenerateSeriesExecutor should not have child!"
+        );
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::GenerateSeries

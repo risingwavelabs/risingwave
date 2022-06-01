@@ -113,7 +113,9 @@ impl ValuesExecutor {
 impl BoxedExecutorBuilder for ValuesExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(inputs.is_empty(), "ValuesExecutor should have no child!");
         let value_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Values
