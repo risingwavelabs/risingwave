@@ -22,6 +22,10 @@ drop database ddl_database;
 statement ok
 drop schema ddl_database.ddl_schema;
 
+# Drop the schema.
+statement ok
+drop schema ddl_database.dev;
+
 # Drop the database.
 statement ok
 drop database ddl_database;
