@@ -19,6 +19,8 @@ use std::time::Duration;
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::monitor::object_metrics::ObjectStoreMetrics;
+use risingwave_common::object::{parse_object_store, ObjectStoreImpl, ObjectStoreRef};
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
@@ -53,15 +55,21 @@ pub enum MetaStoreBackend {
     Mem,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn rpc_serve(
     addr: SocketAddr,
     prometheus_addr: Option<SocketAddr>,
     dashboard_addr: Option<SocketAddr>,
     meta_store_backend: MetaStoreBackend,
+    object_store_url: String,
     max_heartbeat_interval: Duration,
     ui_path: Option<String>,
     opts: MetaOpts,
 ) -> Result<(JoinHandle<()>, Sender<()>)> {
+    let object_store = Arc::new(ObjectStoreImpl::new(
+        parse_object_store(&object_store_url, false).await,
+        Arc::new(ObjectStoreMetrics::unused()),
+    ));
     Ok(match meta_store_backend {
         MetaStoreBackend::Etcd { endpoints } => {
             let client = EtcdClient::connect(
@@ -79,6 +87,7 @@ pub async fn rpc_serve(
                 prometheus_addr,
                 dashboard_addr,
                 meta_store,
+                object_store,
                 max_heartbeat_interval,
                 ui_path,
                 opts,
@@ -92,6 +101,7 @@ pub async fn rpc_serve(
                 prometheus_addr,
                 dashboard_addr,
                 meta_store,
+                object_store,
                 max_heartbeat_interval,
                 ui_path,
                 opts,
@@ -101,16 +111,18 @@ pub async fn rpc_serve(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn rpc_serve_with_store<S: MetaStore>(
     addr: SocketAddr,
     prometheus_addr: Option<SocketAddr>,
     dashboard_addr: Option<SocketAddr>,
     meta_store: Arc<S>,
+    object_store: ObjectStoreRef,
     max_heartbeat_interval: Duration,
     ui_path: Option<String>,
     opts: MetaOpts,
 ) -> (JoinHandle<()>, Sender<()>) {
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), object_store).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());

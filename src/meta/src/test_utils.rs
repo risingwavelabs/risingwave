@@ -39,6 +39,7 @@ impl LocalMeta {
             None,
             None,
             MetaStoreBackend::Mem,
+            "memory".to_string(),
             Duration::from_secs(3600),
             None,
             MetaOpts::default(),

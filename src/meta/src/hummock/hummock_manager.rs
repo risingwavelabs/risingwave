@@ -18,6 +18,7 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use bytes::Bytes;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::util::compress::compress_data;
@@ -31,11 +32,12 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
-    SstableInfo,
+    HummockSnapshot, HummockStaleSstables, HummockVersion, HummockVersionObjectRef, Level,
+    LevelType, SstableIdInfo, SstableInfo,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::RwLock;
+use tracing::error;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::{CompactStatus, CompactionConfig};
@@ -47,7 +49,9 @@ use crate::hummock::model::{
     INVALID_TIMESTAMP,
 };
 use crate::manager::{IdCategory, MetaSrvEnv};
-use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
+use crate::model::{
+    BTreeMapEntryTransaction, MetadataModel, ValTransaction, VarTransaction, Worker,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
 
@@ -116,6 +120,7 @@ macro_rules! abort_multi_var {
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
+    hummock_versions_object_ref: BTreeMap<HummockVersionId, HummockVersionObjectRef>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     stale_sstables: BTreeMap<HummockVersionId, HummockStaleSstables>,
@@ -151,6 +156,7 @@ where
             versioning: RwLock::new(Versioning {
                 current_version_id: CurrentHummockVersionId::new(),
                 hummock_versions: Default::default(),
+                hummock_versions_object_ref: Default::default(),
                 pinned_versions: Default::default(),
                 pinned_snapshots: Default::default(),
                 stale_sstables: Default::default(),
@@ -204,11 +210,23 @@ where
             .await?
             .unwrap_or_else(CurrentHummockVersionId::new);
 
-        versioning_guard.hummock_versions = HummockVersion::list(self.env.meta_store())
-            .await?
-            .into_iter()
-            .map(|version| (version.id, version))
-            .collect();
+        let versioning = versioning_guard.deref_mut();
+
+        versioning.hummock_versions_object_ref =
+            HummockVersionObjectRef::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .map(|hummock_version_object| (hummock_version_object.id, hummock_version_object))
+                .collect();
+
+        for object_ref in versioning.hummock_versions_object_ref.values() {
+            let hummock_version = self
+                .read_hummock_version_object(object_ref.version_object_id)
+                .await?;
+            versioning
+                .hummock_versions
+                .insert(object_ref.id, hummock_version);
+        }
 
         // Insert the initial version.
         if versioning_guard.hummock_versions.is_empty() {
@@ -607,7 +625,6 @@ where
             let old_version = versioning_guard.current_version();
             let versioning = versioning_guard.deref_mut();
             let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
-            let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
             let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
             let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
             let mut version_stale_sstables = stale_sstables.new_entry_txn_or_default(
@@ -625,7 +642,22 @@ where
             let mut new_version = CompactStatus::apply_compact_result(compact_task, old_version);
             current_version_id.increase();
             new_version.id = current_version_id.id();
-            hummock_versions.insert(new_version.id, new_version);
+            let object_id = self.put_hummock_version_object(&new_version).await?;
+            let new_version_id = new_version.id;
+            let new_version_txn = BTreeMapEntryTransaction::new_or_default(
+                &mut versioning.hummock_versions,
+                new_version_id,
+                new_version,
+            )
+            .only_in_mem();
+            let new_version_object_ref_txn = BTreeMapEntryTransaction::new_or_default(
+                &mut versioning.hummock_versions_object_ref,
+                new_version_id,
+                HummockVersionObjectRef {
+                    id: new_version_id,
+                    version_object_id: object_id,
+                },
+            );
 
             for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
                 match sstable_id_infos.get_mut(sst_id) {
@@ -647,7 +679,8 @@ where
                 compact_status,
                 compact_task_assignment,
                 current_version_id,
-                hummock_versions,
+                new_version_txn,
+                new_version_object_ref_txn,
                 version_stale_sstables,
                 sstable_id_infos
             )?;
@@ -698,11 +731,14 @@ where
         let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
-        let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
         current_version_id.increase();
-        let mut new_hummock_version =
-            hummock_versions.new_entry_txn_or_default(current_version_id.id(), old_version);
+        let mut new_hummock_version = BTreeMapEntryTransaction::new_or_default(
+            &mut versioning.hummock_versions,
+            current_version_id.id(),
+            old_version,
+        )
+        .only_in_mem();
         new_hummock_version.id = current_version_id.id();
         if epoch <= new_hummock_version.max_committed_epoch {
             return Err(Error::InternalError(format!(
@@ -754,10 +790,22 @@ where
         );
         version_first_level.table_infos.extend(sstables);
         new_hummock_version.max_committed_epoch = epoch;
+        let object_id = self
+            .put_hummock_version_object(&new_hummock_version)
+            .await?;
+        let new_hummock_version_object_ref = BTreeMapEntryTransaction::new_or_default(
+            &mut versioning.hummock_versions_object_ref,
+            current_version_id.id(),
+            HummockVersionObjectRef {
+                id: current_version_id.id(),
+                version_object_id: object_id,
+            },
+        );
         commit_multi_var!(
             self,
             None,
             new_hummock_version,
+            new_hummock_version_object_ref,
             current_version_id,
             sstable_id_infos
         )?;
@@ -964,11 +1012,16 @@ where
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let pinned_versions_ref = &versioning.pinned_versions;
+        // TODO: introduce a new type of transaction to avoid copying the whole map
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
+        let mut hummock_versions_object_ref =
+            VarTransaction::new(&mut versioning.hummock_versions_object_ref);
         let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
+        let mut removed_object_ref = Vec::new();
         for version_id in version_ids {
-            if hummock_versions.remove(version_id).is_none() {
-                continue;
+            hummock_versions.remove(version_id);
+            if let Some(object_ref) = hummock_versions_object_ref.remove(version_id) {
+                removed_object_ref.push(object_ref);
             }
             if let Some(ssts_to_delete) = stale_sstables.get_mut(version_id) {
                 if !ssts_to_delete.id.is_empty() {
@@ -987,7 +1040,26 @@ where
                 );
             }
         }
-        commit_multi_var!(self, None, hummock_versions, stale_sstables)?;
+        commit_multi_var!(
+            self,
+            None,
+            hummock_versions,
+            stale_sstables,
+            hummock_versions_object_ref
+        )?;
+
+        for object_ref in removed_object_ref {
+            let object_path = Self::get_hummock_version_object_path(object_ref.version_object_id);
+            // TODO: should develop a more solid way to GC unused object
+            let _ = self
+                .env
+                .object_store()
+                .delete(&object_path)
+                .await
+                .inspect_err(|err| {
+                    error!("Failed to delete object {}: {:?}", object_path, err);
+                });
+        }
 
         #[cfg(test)]
         {
@@ -1208,5 +1280,45 @@ where
             return sender.try_send(compaction_group);
         }
         false
+    }
+
+    fn get_hummock_version_object_path(object_id: u64) -> String {
+        // TODO: may want the path prefix to be configurable
+        format!("meta/version/{}", object_id)
+    }
+
+    pub async fn read_hummock_version_object(&self, object_id: u64) -> Result<HummockVersion> {
+        let path = Self::get_hummock_version_object_path(object_id);
+        let bytes = self
+            .env
+            .object_store()
+            .read(path.as_str(), None)
+            .await
+            .map_err(Error::ObjectStoreError)?;
+        Ok(HummockVersion::decode(bytes.as_ref()).unwrap_or_else(|e| {
+            panic!(
+                "should be able to hummock version object provide object id {}. Err: {:?}, bytes: {:?}",
+                object_id,
+                e,
+                bytes
+            )
+        }))
+    }
+
+    pub async fn put_hummock_version_object(&self, version: &HummockVersion) -> Result<u64> {
+        // TODO: may want to generate the object id with `nanoid` or `uuid`
+        let object_id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::ObjectId }>()
+            .await? as u64;
+        let path = Self::get_hummock_version_object_path(object_id);
+        let bytes = Bytes::from(version.encode_to_vec());
+        self.env
+            .object_store()
+            .upload(path.as_str(), bytes)
+            .await
+            .map_err(Error::ObjectStoreError)?;
+        Ok(object_id)
     }
 }

@@ -15,15 +15,16 @@
 use std::cmp::Ordering;
 use std::time::Duration;
 
+use futures::executor::block_on;
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
+    HummockContextId, HummockSSTableId, HummockVersionId, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionObjectRef,
     HummockVersionRefId,
 };
 
@@ -143,15 +144,18 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap()
         .unwrap();
-    let hummock_version1 = HummockVersion::select(
-        env.meta_store(),
-        &HummockVersionRefId {
-            id: version_id1.id(),
-        },
-    )
-    .await
-    .unwrap()
-    .unwrap();
+
+    let get_hummock_version = |version_id: HummockVersionId| {
+        let object_ref = block_on(HummockVersionObjectRef::select(
+            env.meta_store(),
+            &HummockVersionRefId { id: version_id },
+        ))
+        .unwrap()
+        .unwrap();
+        block_on(hummock_manager.read_hummock_version_object(object_ref.version_object_id)).unwrap()
+    };
+
+    let hummock_version1 = get_hummock_version(version_id1.id());
 
     // safe epoch should be INVALID before success compaction
     assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
@@ -194,15 +198,7 @@ async fn test_hummock_compaction_task() {
         .unwrap()
         .unwrap();
 
-    let hummock_version2 = HummockVersion::select(
-        env.meta_store(),
-        &HummockVersionRefId {
-            id: version_id2.id(),
-        },
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let hummock_version2 = get_hummock_version(version_id2.id());
 
     // safe epoch should still be INVALID since comapction task is canceled
     assert_eq!(INVALID_EPOCH, hummock_version2.safe_epoch);
@@ -233,15 +229,7 @@ async fn test_hummock_compaction_task() {
         .unwrap()
         .unwrap();
 
-    let hummock_version3 = HummockVersion::select(
-        env.meta_store(),
-        &HummockVersionRefId {
-            id: version_id3.id(),
-        },
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let hummock_version3 = get_hummock_version(version_id3.id());
 
     // Since there is no pinned epochs, the safe epoch in version should be max_committed_epoch
     assert_eq!(epoch, hummock_version3.safe_epoch);

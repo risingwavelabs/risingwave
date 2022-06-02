@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, RwError, ToErrorStr};
+use risingwave_common::object::ObjectError;
 use risingwave_hummock_sdk::HummockContextId;
 use thiserror::Error;
 
@@ -26,6 +27,8 @@ pub enum Error {
     InvalidContext(HummockContextId),
     #[error(transparent)]
     MetaStoreError(anyhow::Error),
+    #[error(transparent)]
+    ObjectStoreError(ObjectError),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
     #[error("compactor {0} is busy")]
@@ -78,6 +81,7 @@ impl From<Error> for ErrorCode {
                     task_id, context_id
                 ))
             }
+            Error::ObjectStoreError(err) => ErrorCode::ObjectStoreError(err),
         }
     }
 }

@@ -47,6 +47,11 @@ message HummockVersionRefId {
   uint64 id = 1;
 }
 
+message HummockVersionObjectRef {
+  uint64 id = 1;
+  uint64 version_object_id = 2;
+}
+
 message HummockVersion {
   uint64 id = 1;
   repeated Level levels = 2;

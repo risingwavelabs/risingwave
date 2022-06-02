@@ -16,6 +16,11 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(any(test, feature = "test"))]
+use risingwave_common::monitor::object_metrics::ObjectStoreMetrics;
+use risingwave_common::object::ObjectStoreRef;
+#[cfg(any(test, feature = "test"))]
+use risingwave_common::object::{InMemObjectStore, ObjectStoreImpl};
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use super::{HashMappingManager, HashMappingManagerRef};
@@ -38,6 +43,9 @@ where
 
     /// meta store.
     meta_store: Arc<S>,
+
+    /// object store.
+    object_store: ObjectStoreRef,
 
     /// notification manager.
     notification_manager: NotificationManagerRef,
@@ -71,7 +79,7 @@ impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(opts: MetaOpts, meta_store: Arc<S>) -> Self {
+    pub async fn new(opts: MetaOpts, meta_store: Arc<S>, object_store: ObjectStoreRef) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -81,6 +89,7 @@ where
         Self {
             id_gen_manager,
             meta_store,
+            object_store,
             notification_manager,
             hash_mapping_manager,
             stream_client_pool,
@@ -94,6 +103,10 @@ where
 
     pub fn meta_store(&self) -> &S {
         self.meta_store.deref()
+    }
+
+    pub fn object_store(&self) -> &ObjectStoreRef {
+        &self.object_store
     }
 
     pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef<S> {
@@ -135,6 +148,10 @@ impl MetaSrvEnv<MemStore> {
     pub async fn for_test() -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = Arc::new(MemStore::default());
+        let object_store = Arc::new(ObjectStoreImpl::new(
+            Box::new(InMemObjectStore::new(false)),
+            Arc::new(ObjectStoreMetrics::unused()),
+        ));
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new());
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -143,6 +160,7 @@ impl MetaSrvEnv<MemStore> {
         Self {
             id_gen_manager,
             meta_store,
+            object_store,
             notification_manager,
             hash_mapping_manager,
             stream_client_pool,

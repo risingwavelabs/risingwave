@@ -19,6 +19,7 @@ mod stream;
 mod user;
 
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
@@ -79,7 +80,18 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
         let bytes_vec = store.list_cf(&Self::cf_name()).await?;
         Ok(bytes_vec
             .iter()
-            .map(|bytes| Self::from_protobuf(Self::ProstType::decode(bytes.as_slice()).unwrap()))
+            .map(|bytes| {
+                Self::from_protobuf(
+                    Self::ProstType::decode(bytes.as_slice()).unwrap_or_else(|e| {
+                        panic!(
+                            "should be able to decode {} proto. Err: {:?}, bytes: {:?}",
+                            std::any::type_name::<Self>(),
+                            e,
+                            bytes
+                        )
+                    }),
+                )
+            })
             .collect::<Vec<_>>())
     }
 
@@ -151,7 +163,7 @@ where
 
 /// Trait that wraps a local memory value and applies the change to the local memory value on
 /// `commit` or leaves the local memory value untouched on `abort`.
-pub trait ValTransaction: Sized {
+pub trait ValTransaction<'a>: Sized {
     /// Commit the change to local memory value
     fn commit(self);
 
@@ -161,6 +173,50 @@ pub trait ValTransaction: Sized {
     /// Abort the `VarTransaction` and leave the local memory value untouched
     fn abort(self) {
         drop(self);
+    }
+
+    fn only_in_mem(self) -> OnlyInMemTransaction<'a, Self> {
+        OnlyInMemTransaction::new(self)
+    }
+}
+
+/// The transaction only happens in memory. The change will not be applied to `Transaction`
+pub struct OnlyInMemTransaction<'a, TXN: ValTransaction<'a>> {
+    txn: TXN,
+    _phantom: PhantomData<&'a TXN>,
+}
+
+impl<'a, TXN: ValTransaction<'a>> OnlyInMemTransaction<'a, TXN> {
+    pub fn new(txn: TXN) -> OnlyInMemTransaction<'a, TXN> {
+        OnlyInMemTransaction {
+            txn,
+            _phantom: PhantomData::default(),
+        }
+    }
+}
+
+impl<'a, TXN: ValTransaction<'a>> ValTransaction<'a> for OnlyInMemTransaction<'a, TXN> {
+    fn commit(self) {
+        self.txn.commit();
+    }
+
+    fn apply_to_txn(&self, _txn: &mut Transaction) -> Result<()> {
+        // Do nothing when apply to a transaction
+        Ok(())
+    }
+}
+
+impl<'a, TXN: ValTransaction<'a>> Deref for OnlyInMemTransaction<'a, TXN> {
+    type Target = TXN;
+
+    fn deref(&self) -> &Self::Target {
+        &self.txn
+    }
+}
+
+impl<'a, TXN: ValTransaction<'a>> DerefMut for OnlyInMemTransaction<'a, TXN> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.txn
     }
 }
 
@@ -212,7 +268,7 @@ where
     }
 }
 
-impl<'a, T> ValTransaction for VarTransaction<'a, T>
+impl<'a, T> ValTransaction<'a> for VarTransaction<'a, T>
 where
     T: Transactional + PartialEq,
 {
@@ -236,7 +292,7 @@ where
     }
 }
 
-impl<'a, K, V> ValTransaction for VarTransaction<'a, BTreeMap<K, V>>
+impl<'a, K, V> ValTransaction<'a> for VarTransaction<'a, BTreeMap<K, V>>
 where
     K: Ord,
     V: Transactional + PartialEq,
@@ -325,7 +381,7 @@ impl<'a, K, V> DerefMut for BTreeMapEntryTransaction<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord, V: PartialEq + Transactional> ValTransaction
+impl<'a, K: Ord, V: PartialEq + Transactional> ValTransaction<'a>
     for BTreeMapEntryTransaction<'a, K, V>
 {
     fn commit(self) {

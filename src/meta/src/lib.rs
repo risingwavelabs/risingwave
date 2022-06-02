@@ -33,6 +33,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
 #![feature(drain_filter)]
+#![feature(result_option_inspect)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 mod barrier;
@@ -93,6 +94,10 @@ pub struct MetaNodeOpts {
     /// e2e tests.
     #[clap(long)]
     disable_recovery: bool,
+
+    /// The url to object store
+    #[clap(long)]
+    object_store_url: String,
 }
 
 fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
@@ -125,6 +130,7 @@ pub async fn start(opts: MetaNodeOpts) {
         prometheus_addr,
         dashboard_addr,
         backend,
+        opts.object_store_url,
         max_heartbeat_interval,
         opts.dashboard_ui_path,
         MetaOpts {
