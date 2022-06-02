@@ -4265,6 +4265,7 @@ dependencies = [
  "uuid 1.1.0",
  "value-encoding",
  "workspace-hack",
+ "zstd",
 ]
 
 [[package]]
