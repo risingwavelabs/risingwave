@@ -384,17 +384,13 @@ pub mod tests {
             compaction_mode: RangeMode,
         };
         let mut levels = vec![
-            Level {
-                level_idx: 0,
-                level_type: LevelType::Overlapping as i32,
-                table_infos: generate_tables(15..25, 0..600, 3, 10),
-                total_file_size: 0,
-            },
+            generate_level(0, generate_tables(15..25, 0..600, 3, 10)),
             generate_level(1, vec![]),
             generate_level(2, generate_tables(0..5, 0..1000, 3, 10)),
             generate_level(3, generate_tables(5..10, 0..1000, 2, 50)),
             generate_level(4, generate_tables(10..15, 0..1000, 1, 200)),
         ];
+        levels[0].level_type = LevelType::Overlapping as i32;
 
         let selector = DynamicLevelSelector::new(
             Arc::new(config.clone()),
