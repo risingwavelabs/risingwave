@@ -240,7 +240,7 @@ macro_rules! gen_binary_expr_atm {
 }
 
 /// `gen_binary_expr_bitwise` is similar to `gen_binary_expr_atm`.
-/// They are differentiate because bitwise operation does not support for float datatype.
+/// They are differentiate because bitwise operation only supports integral datatype.
 /// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
 /// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
 macro_rules! gen_binary_expr_bitwise {

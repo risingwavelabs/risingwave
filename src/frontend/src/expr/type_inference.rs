@@ -271,9 +271,6 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         T::Decimal,
     );
 
-    build_round_funcs(&mut map, E::Round);
-    build_round_funcs(&mut map, E::Ceil);
-    build_round_funcs(&mut map, E::Floor);
     // build bitwise operator
     // bitwise operator
     build_binary_atm_funcs(

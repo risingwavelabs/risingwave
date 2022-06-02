@@ -23,8 +23,9 @@ use risingwave_common::error::{Result, RwError};
 use crate::vector_op::arithmetic_op::general_atm;
 
 // Conscious decision for shl and shr is made here to diverge from PostgreSQL.
-// If overflow happens, instead of truncated to zero, we return overflow error as this is unexpected
-// behaviour If the RHS is negative, instead of having an unexpected answer, we return an error.
+// If overflow happens, instead of truncated to zero, we return overflow error as this is 
+// undefined behaviour. If the RHS is negative, instead of having an unexpected answer, we return an error.
+// If PG had clearly defined behavior rather than relying on UB of C, we would follow it even when it is different from rust std.
 #[inline(always)]
 pub fn general_shl<T1, T2>(l: T1, r: T2) -> Result<T1>
 where
