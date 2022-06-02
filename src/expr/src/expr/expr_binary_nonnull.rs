@@ -243,7 +243,7 @@ macro_rules! gen_binary_expr_atm {
 /// They are differentiate because bitwise operation does not support for float datatype.
 /// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
 /// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
-macro_rules! gen_binary_expr_shift {
+macro_rules! gen_binary_expr_bitwise {
     (
         $macro:ident,
         $l:expr,
@@ -434,7 +434,7 @@ pub fn new_binary_expr(
             }
         }
         Type::BitwiseAnd => {
-            gen_binary_expr_shift! {
+            gen_binary_expr_bitwise! {
                 gen_atm_impl,
                 l, r, ret,
                 general_bitand,
@@ -443,7 +443,7 @@ pub fn new_binary_expr(
             }
         }
         Type::BitwiseOr => {
-            gen_binary_expr_shift! {
+            gen_binary_expr_bitwise! {
                 gen_atm_impl,
                 l, r, ret,
                 general_bitor,
@@ -452,7 +452,7 @@ pub fn new_binary_expr(
             }
         }
         Type::BitwiseXor => {
-            gen_binary_expr_shift! {
+            gen_binary_expr_bitwise! {
                 gen_atm_impl,
                 l, r, ret,
                 general_bitxor,
