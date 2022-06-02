@@ -23,7 +23,6 @@ use prost::Message;
 use risingwave_common::util::compress::compress_data;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
     HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -38,7 +37,8 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
-use crate::hummock::compaction::{default_compaction_config, CompactStatus};
+use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
@@ -47,7 +47,7 @@ use crate::hummock::model::{
     INVALID_TIMESTAMP,
 };
 use crate::manager::{IdCategory, MetaSrvEnv};
-use crate::model::{MetadataModel, Transactional, ValTransaction, VarTransaction, Worker};
+use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
 
@@ -59,6 +59,7 @@ use crate::storage::{MetaStore, Transaction};
 pub struct HummockManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
+    compaction_group_manager: CompactionGroupManagerRef<S>,
     // When trying to locks compaction and versioning at the same time, compaction lock should
     // be requested before versioning lock.
     compaction: RwLock<Compaction>,
@@ -68,14 +69,18 @@ pub struct HummockManager<S: MetaStore> {
 
     /// `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
     compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
+    // TODO: refactor to remove this field
     config: Arc<CompactionConfig>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
 
+#[derive(Default)]
 struct Compaction {
-    compact_task_assignment: BTreeMap<u64, CompactTaskAssignment>,
+    /// Compaction task that is already assigned to a compactor
+    compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
     // TODO: may want fine-grained lock for each compaction group
+    /// `CompactStatus` of each compaction group
     compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
     /// Available compaction task ids for use
     next_task_ids: VecDeque<HummockCompactionTaskId>,
@@ -123,6 +128,7 @@ macro_rules! commit_multi_var {
     };
 }
 
+#[derive(Default)]
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
@@ -148,49 +154,22 @@ impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    // only for test
-    pub async fn new_with_config(
+    pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
-        config: CompactionConfig,
+        compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> Result<HummockManager<S>> {
-        let config = Arc::new(config);
-
-        // TODO: Move compaction group initiation out of here. We temporarily do it here because of
-        // the `config`.
-        let static_compaction_groups: [(CompactionGroupId, CompactStatus); 2] = [
-            (
-                StaticCompactionGroupId::StateDefault.into(),
-                CompactStatus::new(StaticCompactionGroupId::StateDefault.into(), config.clone()),
-            ),
-            (
-                StaticCompactionGroupId::MaterializedView.into(),
-                CompactStatus::new(
-                    StaticCompactionGroupId::MaterializedView.into(),
-                    config.clone(),
-                ),
-            ),
-        ];
+        let config = compaction_group_manager.config().clone();
         let instance = HummockManager {
             env,
-            versioning: RwLock::new(Versioning {
-                current_version_id: CurrentHummockVersionId::new(),
-                hummock_versions: Default::default(),
-                pinned_versions: Default::default(),
-                pinned_snapshots: Default::default(),
-                stale_sstables: Default::default(),
-                sstable_id_infos: Default::default(),
-            }),
-            compaction: RwLock::new(Compaction {
-                compaction_statuses: BTreeMap::from(static_compaction_groups),
-                compact_task_assignment: Default::default(),
-                next_task_ids: Default::default(),
-            }),
+            versioning: RwLock::new(Default::default()),
+            compaction: RwLock::new(Default::default()),
             metrics,
             cluster_manager,
+            compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
-            config,
+            config: Arc::new(config),
         };
 
         instance.load_meta_store_state().await?;
@@ -199,15 +178,6 @@ where
         // Release snapshots pinned by meta on restarting.
         instance.release_contexts([META_NODE_ID]).await?;
         Ok(instance)
-    }
-
-    pub async fn new(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        metrics: Arc<MetaMetrics>,
-    ) -> Result<HummockManager<S>> {
-        // TODO: load it from etcd or configuration file.
-        Self::new_with_config(env, cluster_manager, metrics, default_compaction_config()).await
     }
 
     /// Load state from meta store.
@@ -221,11 +191,17 @@ where
         if !compaction_statuses.is_empty() {
             compaction_guard.compaction_statuses = compaction_statuses;
         } else {
-            let mut trx = Transaction::default();
-            for compact_status in compaction_guard.compaction_statuses.values_mut() {
-                compact_status.upsert_in_transaction(&mut trx)?
+            // Initialize compact status for each compaction group
+            let mut compaction_statuses =
+                VarTransaction::new(&mut compaction_guard.compaction_statuses);
+            for compaction_group in self.compaction_group_manager.compaction_groups().await {
+                let compact_status = CompactStatus::new(
+                    compaction_group.group_id(),
+                    Arc::new(compaction_group.compaction_config().clone()),
+                );
+                compaction_statuses.insert(compact_status.compaction_group_id(), compact_status);
             }
-            self.commit_trx(self.env.meta_store(), trx, None).await?;
+            commit_multi_var!(self, None, compaction_statuses)?;
         }
         compaction_guard.compact_task_assignment =
             CompactTaskAssignment::list(self.env.meta_store())

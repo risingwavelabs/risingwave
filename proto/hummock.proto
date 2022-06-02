@@ -158,6 +158,7 @@ message CompactStatus {
 message CompactionGroup {
   uint64 id = 1;
   repeated bytes member_prefixes = 2;
+  CompactionConfig compaction_config = 3;
 }
 
 message CompactTaskAssignment {

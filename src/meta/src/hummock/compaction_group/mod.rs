@@ -12,26 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod manager;
+
 use std::borrow::Borrow;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::CompactionConfig;
 
 use crate::model::MetadataModel;
 
-#[derive(Debug)]
-#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
     group_id: CompactionGroupId,
     member_prefixes: Vec<Prefix>,
+    compaction_config: CompactionConfig,
 }
 
 impl CompactionGroup {
-    pub fn new(group_id: CompactionGroupId) -> Self {
+    pub fn new(group_id: CompactionGroupId, compaction_config: CompactionConfig) -> Self {
         Self {
             group_id,
             member_prefixes: vec![],
+            compaction_config,
         }
     }
 
@@ -41,6 +45,10 @@ impl CompactionGroup {
 
     pub fn member_prefixes(&self) -> &Vec<Prefix> {
         &self.member_prefixes
+    }
+
+    pub fn compaction_config(&self) -> &CompactionConfig {
+        &self.compaction_config
     }
 }
 
@@ -56,6 +64,11 @@ impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
                     u.into()
                 })
                 .collect(),
+            compaction_config: compaction_group
+                .compaction_config
+                .as_ref()
+                .cloned()
+                .unwrap(),
         }
     }
 }
@@ -65,6 +78,7 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
         Self {
             id: compaction_group.group_id,
             member_prefixes: compaction_group.member_prefixes.iter().map_into().collect(),
+            compaction_config: Some(compaction_group.compaction_config.clone()),
         }
     }
 }

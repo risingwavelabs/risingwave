@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod compaction;
-mod compaction_group;
+pub mod compaction_group;
 mod compaction_scheduler;
 mod compactor_manager;
 pub mod error;

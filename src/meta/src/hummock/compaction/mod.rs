@@ -48,6 +48,7 @@ const MAX_LEVEL: u64 = 6;
 pub struct CompactStatus {
     compaction_group_id: CompactionGroupId,
     pub(crate) level_handlers: Vec<LevelHandler>,
+    // TODO: remove this `CompactionConfig`, which is a duplicate of that in `CompactionGroup`.
     compaction_config: CompactionConfig,
     compaction_selector: Arc<dyn LevelSelector>,
 }

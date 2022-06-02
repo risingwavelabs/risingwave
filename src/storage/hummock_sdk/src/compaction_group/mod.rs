@@ -44,7 +44,8 @@ impl From<&Prefix> for Vec<u8> {
     }
 }
 
-/// Indicates the compaction group a compaction task belongs to
+/// A compaction task's `StaticCompactionGroupId` indicates the compaction group that all its input
+/// SSTs belong to.
 pub enum StaticCompactionGroupId {
     /// All shared buffer local compaction task goes to here.
     SharedBuffer = 1,
