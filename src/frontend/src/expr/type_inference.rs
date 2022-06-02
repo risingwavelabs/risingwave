@@ -278,23 +278,15 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     // bitwise operator
     build_binary_atm_funcs(
         &mut map,
-        &[
-            E::BitwiseAnd,
-            E::BitwiseOr,
-            E::BitwiseXor,
-        ],
+        &[E::BitwiseAnd, E::BitwiseOr, E::BitwiseXor],
         &[T::Int16, T::Int32, T::Int64],
     );
 
     build_binary_shift_funcs(
         &mut map,
-        &[
-            E::BitwiseShiftLeft, 
-            E::BitwiseShiftRight
-        ],
+        &[E::BitwiseShiftLeft, E::BitwiseShiftRight],
         &[T::Int16, T::Int32, T::Int64],
     );
-
 
     build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
 
