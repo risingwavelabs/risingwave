@@ -254,12 +254,12 @@ impl MetaClient {
 
     pub async fn grant_privilege(
         &self,
-        user_name: &str,
+        users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
-            user_name: user_name.to_string(),
+            users,
             privileges,
             with_grant_option,
         };
@@ -269,12 +269,12 @@ impl MetaClient {
 
     pub async fn revoke_privilege(
         &self,
-        user_name: &str,
+        users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         revoke_grant_option: bool,
     ) -> Result<u64> {
         let request = RevokePrivilegeRequest {
-            user_name: user_name.to_string(),
+            users,
             privileges,
             revoke_grant_option,
         };

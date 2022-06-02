@@ -1353,8 +1353,18 @@ pub enum GrantObjects {
     AllSequencesInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL TABLES IN SCHEMA <schema_name> [, ...]`
     AllTablesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SOURCES IN SCHEMA <schema_name> [, ...]`
+    AllSourcesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL MATERIALIZED VIEWS IN SCHEMA <schema_name> [, ...]`
+    AllMviewsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on specific databases
+    Databases(Vec<ObjectName>),
     /// Grant privileges on specific schemas
     Schemas(Vec<ObjectName>),
+    /// Grant privileges on specific sources
+    Sources(Vec<ObjectName>),
+    /// Grant privileges on specific materialized views
+    Mviews(Vec<ObjectName>),
     /// Grant privileges on specific sequences
     Sequences(Vec<ObjectName>),
     /// Grant privileges on specific tables
@@ -1386,6 +1396,29 @@ impl fmt::Display for GrantObjects {
                     "ALL TABLES IN SCHEMA {}",
                     display_comma_separated(schemas)
                 )
+            }
+            GrantObjects::AllSourcesInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SOURCES IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllMviewsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL MATERIALIZED VIEWS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::Databases(databases) => {
+                write!(f, "DATABASE {}", display_comma_separated(databases))
+            }
+            GrantObjects::Sources(sources) => {
+                write!(f, "SOURCE {}", display_comma_separated(sources))
+            }
+            GrantObjects::Mviews(mviews) => {
+                write!(f, "MATERIALIZED VIEW {}", display_comma_separated(mviews))
             }
         }
     }
