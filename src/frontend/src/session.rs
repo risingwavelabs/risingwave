@@ -43,6 +43,9 @@ use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
+use crate::test_utils::MockUserInfoWriter;
+use crate::user::user_manager::UserInfoManager;
+use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -125,6 +128,8 @@ pub struct FrontendEnv {
     meta_client: Arc<dyn FrontendMetaClient>,
     catalog_writer: Arc<dyn CatalogWriter>,
     catalog_reader: CatalogReader,
+    user_info_writer: Arc<dyn UserInfoWriter>,
+    user_info_reader: UserInfoReader,
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -144,6 +149,9 @@ impl FrontendEnv {
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
+        let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
+        let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
+        let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
@@ -157,6 +165,8 @@ impl FrontendEnv {
             meta_client,
             catalog_writer,
             catalog_reader,
+            user_info_writer,
+            user_info_reader,
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
@@ -206,12 +216,22 @@ impl FrontendEnv {
             compute_client_pool,
         );
 
+        let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
+        let (user_info_updated_tx, user_info_updated_rx) = watch::channel(0);
+        let user_info_reader = UserInfoReader::new(user_info_manager.clone());
+        let user_info_writer = Arc::new(UserInfoWriterImpl::new(
+            meta_client.clone(),
+            user_info_updated_rx,
+        ));
+
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
             frontend_address.clone(),
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
+            user_info_manager,
+            user_info_updated_tx,
             hummock_snapshot_manager.clone(),
         )
         .await;
@@ -223,6 +243,8 @@ impl FrontendEnv {
             Self {
                 catalog_reader,
                 catalog_writer,
+                user_info_reader,
+                user_info_writer,
                 worker_node_manager,
                 meta_client: frontend_meta_client,
                 query_manager,
@@ -242,6 +264,16 @@ impl FrontendEnv {
     /// Get a reference to the frontend env's catalog reader.
     pub fn catalog_reader(&self) -> &CatalogReader {
         &self.catalog_reader
+    }
+
+    /// Get a reference to the frontend env's user info writer.
+    pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
+        &*self.user_info_writer
+    }
+
+    /// Get a reference to the frontend env's user info reader.
+    pub fn user_info_reader(&self) -> &UserInfoReader {
+        &self.user_info_reader
     }
 
     pub fn worker_node_manager(&self) -> &WorkerNodeManager {

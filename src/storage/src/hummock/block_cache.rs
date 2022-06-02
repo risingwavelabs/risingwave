@@ -18,10 +18,11 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use futures::Future;
+use risingwave_common::cache::{CachableEntry, LruCache};
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use super::cache::{CachableEntry, LruCache};
 use super::{Block, HummockResult};
+use crate::hummock::HummockError;
 
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
@@ -118,12 +119,18 @@ impl BlockCache {
         let key = (sst_id, block_idx);
         let entry = self
             .inner
-            .lookup_with_request_dedup(h, key, || async {
+            .lookup_with_request_dedup::<_, HummockError, _>(h, key, || async {
                 let block = f.await?;
                 let len = block.len();
                 Ok((block, len))
             })
-            .await?;
+            .await
+            .map_err(|e| {
+                HummockError::other(format!(
+                    "block cache lookup request dedup get cancel: {:?}",
+                    e,
+                ))
+            })??;
         Ok(BlockHolder::from_cached_block(entry))
     }
 
@@ -140,6 +147,9 @@ impl BlockCache {
 
     #[cfg(test)]
     pub fn clear(&self) {
-        self.inner.clear();
+        // This is only a method for test. Therefore it should be safe to call the unsafe method.
+        unsafe {
+            self.inner.clear();
+        }
     }
 }

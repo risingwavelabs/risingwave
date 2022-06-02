@@ -21,21 +21,21 @@ use risingwave_pb::user::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::{CatalogManagerRef, UserManager};
+use crate::manager::{CatalogManagerRef, UserInfoManagerRef};
 use crate::storage::MetaStore;
 
 // TODO: Change user manager as a part of the catalog manager, to ensure that operations on Catalog
 // and User are transactional.
 pub struct UserServiceImpl<S: MetaStore> {
     catalog_manager: CatalogManagerRef<S>,
-    user_manager: UserManager<S>,
+    user_manager: UserInfoManagerRef<S>,
 }
 
 impl<S> UserServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(catalog_manager: CatalogManagerRef<S>, user_manager: UserManager<S>) -> Self {
+    pub fn new(catalog_manager: CatalogManagerRef<S>, user_manager: UserInfoManagerRef<S>) -> Self {
         Self {
             catalog_manager,
             user_manager,
@@ -114,14 +114,15 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
     ) -> Result<Response<CreateUserResponse>, Status> {
         let req = request.into_inner();
         let user = req.get_user().map_err(tonic_err)?;
-        self.user_manager
+        let version = self
+            .user_manager
             .create_user(user)
             .await
             .map_err(tonic_err)?;
 
         Ok(Response::new(CreateUserResponse {
             status: None,
-            version: 0, // TODO: fill version when supported in notification manager.
+            version,
         }))
     }
 
@@ -132,14 +133,15 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
     ) -> Result<Response<DropUserResponse>, Status> {
         let req = request.into_inner();
         let user_name = req.name;
-        self.user_manager
+        let version = self
+            .user_manager
             .drop_user(&user_name)
             .await
             .map_err(tonic_err)?;
 
         Ok(Response::new(DropUserResponse {
             status: None,
-            version: 0, // TODO: fill version when supported in notification manager.
+            version,
         }))
     }
 
@@ -154,14 +156,15 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .expand_privilege(req.get_privileges(), Some(req.with_grant_option))
             .await
             .map_err(tonic_err)?;
-        self.user_manager
+        let version = self
+            .user_manager
             .grant_privilege(user_name, &new_privileges)
             .await
             .map_err(tonic_err)?;
 
         Ok(Response::new(GrantPrivilegeResponse {
             status: None,
-            version: 0, // TODO: fill version when supported in notification manager.
+            version,
         }))
     }
 
@@ -177,14 +180,15 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .await
             .map_err(tonic_err)?;
         let revoke_grant_option = req.revoke_grant_option;
-        self.user_manager
+        let version = self
+            .user_manager
             .revoke_privilege(user_name, &privileges, revoke_grant_option)
             .await
             .map_err(tonic_err)?;
 
         Ok(Response::new(RevokePrivilegeResponse {
             status: None,
-            version: 0, // TODO: fill version when supported in notification manager.
+            version,
         }))
     }
 }

@@ -20,3 +20,9 @@
 
 - input: DROP SCHEMA IF EXISTS t
   formatted_sql: DROP SCHEMA IF EXISTS t
+
+- input: DROP USER user
+  formatted_sql: DROP USER user
+
+- input: DROP USER IF EXISTS user
+  formatted_sql: DROP USER IF EXISTS user

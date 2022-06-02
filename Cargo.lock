@@ -3707,6 +3707,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "smallvec",
+ "spin 0.9.3",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -3728,6 +3729,7 @@ dependencies = [
  "madsim-tonic",
  "prometheus",
  "risingwave_common",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
@@ -3934,6 +3936,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
+ "md5",
  "num-integer",
  "num-traits",
  "parking_lot",
@@ -3950,6 +3953,7 @@ dependencies = [
  "risingwave_sqlparser",
  "risingwave_storage",
  "serde_json",
+ "sha2",
  "smallvec",
  "tempfile",
  "thiserror",
@@ -4067,6 +4071,30 @@ dependencies = [
  "tracing",
  "uuid 1.1.0",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_object_store"
+version = "0.1.7"
+dependencies = [
+ "async-trait",
+ "aws-config",
+ "aws-endpoint",
+ "aws-sdk-s3",
+ "aws-smithy-http",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fail",
+ "futures",
+ "itertools",
+ "madsim-tokio",
+ "prometheus",
+ "risingwave_common",
+ "spin 0.9.3",
+ "tempfile",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -4207,12 +4235,6 @@ version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
- "aws-config",
- "aws-endpoint",
- "aws-sdk-s3",
- "aws-smithy-http",
- "aws-smithy-types",
- "aws-types",
  "byteorder",
  "bytes",
  "chrono",
@@ -4249,6 +4271,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_meta",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "serde",
@@ -4263,6 +4286,7 @@ dependencies = [
  "uuid 1.1.0",
  "value-encoding",
  "workspace-hack",
+ "zstd",
 ]
 
 [[package]]

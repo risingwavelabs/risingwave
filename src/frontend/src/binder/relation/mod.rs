@@ -66,6 +66,22 @@ impl Binder {
         Ok((first_name, second_name))
     }
 
+    /// return first name in identifiers, must have only one name.
+    fn resolve_single_name(mut identifiers: Vec<Ident>, ident_desc: &str) -> Result<String> {
+        if identifiers.len() > 1 {
+            return Err(internal_error(format!(
+                "{} must contain 1 argument",
+                ident_desc
+            )));
+        }
+        let name = identifiers
+            .pop()
+            .ok_or_else(|| ErrorCode::InternalError(format!("empty {}", ident_desc)))?
+            .value;
+
+        Ok(name)
+    }
+
     /// return the (`schema_name`, `table_name`)
     pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
         Self::resolve_double_name(name.0, "empty table name", DEFAULT_SCHEMA_NAME)
@@ -81,16 +97,12 @@ impl Binder {
 
     /// return the `database_name`
     pub fn resolve_database_name(name: ObjectName) -> Result<String> {
-        let mut identifiers = name.0;
-        if identifiers.len() > 1 {
-            return Err(internal_error("database name must contain 1 argument"));
-        }
-        let database_name = identifiers
-            .pop()
-            .ok_or_else(|| internal_error("empty database name"))?
-            .value;
+        Self::resolve_single_name(name.0, "database name")
+    }
 
-        Ok(database_name)
+    /// return the `user_name`
+    pub fn resolve_user_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "user name")
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.
