@@ -1,6 +1,3 @@
 # Create a test database.
 statement ok
 create database test;
-
-statement ok
-create schema test.dev;
