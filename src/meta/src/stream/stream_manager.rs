@@ -455,24 +455,6 @@ where
             }
         }
 
-        let mut source_fragments = HashMap::new();
-        for fragment in table_fragments.fragments() {
-            for actor in &fragment.actors {
-                if let Some(source_id) =
-                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
-                {
-                    source_fragments
-                        .entry(source_id)
-                        .or_insert(vec![])
-                        .push(fragment.fragment_id as FragmentId);
-                }
-            }
-        }
-
-        self.source_manager
-            .register_source(source_fragments, affiliated_source.clone())
-            .await?;
-
         let split_assignment = self
             .source_manager
             .schedule_split_for_actors(source_actors_group_by_fragment, affiliated_source)
@@ -689,8 +671,6 @@ where
 
         Ok(())
     }
-
-    // fn
 }
 
 #[cfg(test)]
