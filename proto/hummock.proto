@@ -6,10 +6,6 @@ import "common.proto";
 
 option optimize_for = SPEED;
 
-message SstableRefId {
-  uint64 id = 1;
-}
-
 message SstableIdInfo {
   uint64 id = 1;
   // Timestamp when the sstable id is created, in seconds.
@@ -41,10 +37,6 @@ message Level {
 message UncommittedEpoch {
   uint64 epoch = 1;
   repeated SstableInfo tables = 2;
-}
-
-message HummockVersionRefId {
-  uint64 id = 1;
 }
 
 message HummockVersion {
@@ -165,10 +157,6 @@ message CompactTaskAssignment {
   uint32 context_id = 2;
 }
 
-message CompactTaskRefId {
-  uint64 id = 1;
-}
-
 message GetCompactionTasksRequest {}
 
 message GetCompactionTasksResponse {
@@ -182,10 +170,6 @@ message ReportCompactionTasksRequest {
 
 message ReportCompactionTasksResponse {
   common.Status status = 1;
-}
-
-message HummockContextRefId {
-  uint32 id = 1;
 }
 
 message HummockPinnedVersion {
