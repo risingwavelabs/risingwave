@@ -1,0 +1,27 @@
+[package]
+name = "risingwave_object_store"
+version = "0.1.7"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1"
+aws-config = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-endpoint = { version = "0.12", default-features = false }
+aws-sdk-s3 = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.42"
+aws-smithy-types = "0.42"
+aws-types = { version = "0.12", features = ["hardcoded-credentials"] }
+bytes = { version = "1", features = ["serde"] }
+fail = "0.5"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+itertools = "0.10"
+prometheus = { version = "0.13", features = ["process"] }
+risingwave_common = { path = "../common" }
+spin = "0.9"
+tempfile = "3"
+thiserror = "1"
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
+    "fs",
+] }
+tracing = { version = "0.1" }
