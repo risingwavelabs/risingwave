@@ -145,12 +145,12 @@ fn build_binary_atm_funcs(
 fn build_binary_shift_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     exprs: &[ExprType],
-    args: &[DataTypeName],
+    argsl: &[DataTypeName],
+    argsr: &[DataTypeName],
 ) {
-    rhs = [T::Int16, T::Int32];
     for e in exprs {
-        for (li, lt) in args.iter().enumerate() {
-            for (ri, rt) in rhs.iter().enumerate() {
+        for (li, lt) in argsl.iter().enumerate() {
+            for (ri, rt) in argsr.iter().enumerate() {
                 map.insert(FuncSign::new(*e, vec![*lt, *rt]), *lt);
             }
         }
@@ -286,6 +286,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &mut map,
         &[E::BitwiseShiftLeft, E::BitwiseShiftRight],
         &[T::Int16, T::Int32, T::Int64],
+        &[T::Int16, T::Int32],
     );
 
     build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
