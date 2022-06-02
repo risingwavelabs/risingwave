@@ -45,28 +45,25 @@ impl Block {
 
         // Decompress.
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
+        let compressed_data = &buf[..buf.len() - 9];
         let buf = match compression {
             CompressionAlgorithm::None => buf.slice(..buf.len() - 9),
             CompressionAlgorithm::Lz4 => {
-                let mut decoder = lz4::Decoder::new(buf.reader())
-                    .map_err(HummockError::decode_error)
-                    .unwrap();
+                let mut decoder = lz4::Decoder::new(compressed_data.reader())
+                    .map_err(HummockError::decode_error)?;
                 let mut decoded = Vec::with_capacity(DEFAULT_BLOCK_SIZE);
                 decoder
                     .read_to_end(&mut decoded)
-                    .map_err(HummockError::decode_error)
-                    .unwrap();
+                    .map_err(HummockError::decode_error)?;
                 Bytes::from(decoded)
             }
             CompressionAlgorithm::Zstd => {
-                let mut decoder = zstd::Decoder::new(buf[..buf.len() - 9].reader())
-                    .map_err(HummockError::decode_error)
-                    .unwrap();
+                let mut decoder = zstd::Decoder::new(compressed_data.reader())
+                    .map_err(HummockError::decode_error)?;
                 let mut decoded = Vec::with_capacity(DEFAULT_BLOCK_SIZE);
                 decoder
                     .read_to_end(&mut decoded)
-                    .map_err(HummockError::decode_error)
-                    .unwrap();
+                    .map_err(HummockError::decode_error)?;
                 Bytes::from(decoded)
             }
         };
