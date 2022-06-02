@@ -84,6 +84,7 @@ message PinSnapshotResponse {
 message UnpinSnapshotRequest {
   uint32 context_id = 1;
   repeated HummockSnapshot snapshots = 2;
+  HummockSnapshot min_snapshot = 3;
 }
 
 message UnpinSnapshotResponse {
@@ -222,6 +223,7 @@ service HummockManagerService {
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
+  rpc UnpinSnapshotBefore(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);

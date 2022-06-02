@@ -397,8 +397,24 @@ impl HummockMetaClient for MetaClient {
                     epoch: epoch.to_owned(),
                 })
                 .collect(),
+            // For unpin_snapshot, we do not care about the min epoch. May need to change in future.
+            ..Default::default()
         };
         self.inner.unpin_snapshot(req).await?;
+        Ok(())
+    }
+
+    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()> {
+        // tracing::info!("Unpin in meta client");
+        let req = UnpinSnapshotRequest {
+            context_id: self.worker_id(),
+            // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
+            snapshots: vec![],
+            min_snapshot: Some(HummockSnapshot {
+                epoch: pinned_epochs,
+            }),
+        };
+        self.inner.unpin_snapshot_before(req).await?;
         Ok(())
     }
 
@@ -517,6 +533,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
+            ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }

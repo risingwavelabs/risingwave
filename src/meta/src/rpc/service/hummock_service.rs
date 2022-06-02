@@ -146,6 +146,21 @@ where
         Ok(Response::new(UnpinSnapshotResponse { status: None }))
     }
 
+    async fn unpin_snapshot_before(
+        &self,
+        request: Request<UnpinSnapshotRequest>,
+    ) -> Result<Response<UnpinSnapshotResponse>, Status> {
+        let req = request.into_inner();
+        if let Err(e) = self
+            .hummock_manager
+            .unpin_snapshot_before(req.context_id, req.min_snapshot.unwrap())
+            .await
+        {
+            return Err(tonic_err(e));
+        }
+        Ok(Response::new(UnpinSnapshotResponse { status: None }))
+    }
+
     async fn get_new_table_id(
         &self,
         _request: Request<GetNewTableIdRequest>,
