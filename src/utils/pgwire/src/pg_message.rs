@@ -21,7 +21,7 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_response::StatementType;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
@@ -35,6 +35,7 @@ pub enum FeMessage {
     Describe(FeDescribeMessage),
     Bind(FeBindMessage),
     Execute(FeExecuteMessage),
+    Close(FeCloseMessage),
     Sync,
     CancelQuery,
     Terminate,
@@ -68,47 +69,103 @@ pub struct FeQueryMessage {
 }
 
 #[derive(Debug)]
-pub struct FeBindMessage {}
+pub struct FeBindMessage {
+    pub format_codes: Vec<i16>,
+    pub result_format_codes: Vec<i16>,
+    pub params: Vec<Bytes>,
+    pub portal_name: Bytes,
+    pub statement_name: Bytes,
+}
 
 #[derive(Debug)]
 pub struct FeExecuteMessage {
+    pub portal_name: Bytes,
     pub max_rows: i32,
 }
 
 #[derive(Debug)]
 pub struct FeParseMessage {
+    pub statement_name: Bytes,
     pub query_string: Bytes,
+    pub type_ids: Vec<i32>,
 }
 
 #[derive(Debug)]
 pub struct FeDescribeMessage {
     // 'S' to describe a prepared statement; or 'P' to describe a portal.
+    pub query_name: Bytes,
     pub kind: u8,
+}
+
+#[derive(Debug)]
+pub struct FeCloseMessage {
+    pub kind: u8,
+    pub query_name: Bytes,
 }
 
 impl FeDescribeMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let kind = buf.get_u8();
-        let _pstmt_name = read_null_terminated(&mut buf)?;
+        let query_name = read_null_terminated(&mut buf)?;
 
         if kind != b'S' {
             unimplemented!("only prepared statement Describe is implemented");
         }
 
-        Ok(FeMessage::Describe(FeDescribeMessage { kind }))
+        Ok(FeMessage::Describe(FeDescribeMessage { query_name, kind }))
     }
 }
 
 impl FeBindMessage {
+    // Bind Message Header
+    // +-----+-----------+
+    // | 'B' | int32 len |
+    // +-----+-----------+
+    // Bind Message Body
+    // +----------------+---------------+
+    // | str portalname | str statement |
+    // +----------------+---------------+
+    // +---------------------+------------------+-------+
+    // | int16 numFormatCode | int16 FormatCode |  ...  |
+    // +---------------------+------------------+-------+
+    // +-----------------+-------------------+---------------+
+    // | int16 numParams | int32 valueLength |  byte value.. |
+    // +-----------------+-------------------+---------------+
+    // +----------------------------------+------------------+-------+
+    // | int16 numResultColumnFormatCodes | int16 FormatCode |  ...  |
+    // +----------------------------------+------------------+-------+
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let portal_name = read_null_terminated(&mut buf)?;
-        let _pstmt_name = read_null_terminated(&mut buf)?;
-
-        if !portal_name.is_empty() {
-            unimplemented!("named portals not implemented");
+        let statement_name = read_null_terminated(&mut buf)?;
+        let mut format_codes = Vec::new();
+        let mut params = Vec::new();
+        let mut result_format_codes = Vec::new();
+        // Read FormatCode
+        let len = buf.get_i16();
+        for i in 0..len {
+            let code = buf.get_i16();
+            format_codes.push(code);
         }
-
-        Ok(FeMessage::Bind(FeBindMessage {}))
+        // Read Params
+        let len = buf.get_i16();
+        for i in 0..len {
+            let val_len = buf.get_i32();
+            let val = buf.copy_to_bytes(val_len as usize);
+            params.push(val);
+        }
+        // Read ResultFormatCode
+        let len = buf.get_i16();
+        for i in 0..len {
+            let code = buf.get_i16();
+            result_format_codes.push(code);
+        }
+        Ok(FeMessage::Bind(FeBindMessage {
+            format_codes,
+            params,
+            result_format_codes,
+            portal_name,
+            statement_name,
+        }))
     }
 }
 
@@ -117,29 +174,33 @@ impl FeExecuteMessage {
         let portal_name = read_null_terminated(&mut buf)?;
         let max_rows = buf.get_i32();
 
-        if !portal_name.is_empty() {
-            unimplemented!("named portals not implemented");
-        }
-
         if max_rows != 0 {
             unimplemented!("row limit in Execute message not supported");
         }
 
-        Ok(FeMessage::Execute(FeExecuteMessage { max_rows }))
+        Ok(FeMessage::Execute(FeExecuteMessage {
+            portal_name,
+            max_rows,
+        }))
     }
 }
 
 impl FeParseMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
-        let _pstmt_name = read_null_terminated(&mut buf)?;
+        let statement_name = read_null_terminated(&mut buf)?;
         let query_string = read_null_terminated(&mut buf)?;
         let nparams = buf.get_i16();
 
-        if nparams != 0 {
-            unimplemented!("query params not implemented");
+        let mut type_ids = Vec::new();
+        for i in 0..nparams {
+            let type_id = buf.get_i32();
+            type_ids.push(type_id);
         }
-
-        Ok(FeMessage::Parse(FeParseMessage { query_string }))
+        Ok(FeMessage::Parse(FeParseMessage {
+            statement_name,
+            query_string,
+            type_ids,
+        }))
     }
 }
 
@@ -157,6 +218,14 @@ impl FeQueryMessage {
                 format!("Input end error: {}", err),
             )),
         }
+    }
+}
+
+impl FeCloseMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let kind = buf.get_u8();
+        let query_name = read_null_terminated(&mut buf)?;
+        Ok(FeMessage::Close(FeCloseMessage { kind, query_name }))
     }
 }
 
@@ -181,6 +250,7 @@ impl FeMessage {
             b'E' => FeExecuteMessage::parse(sql_bytes),
             b'S' => Ok(FeMessage::Sync),
             b'X' => Ok(FeMessage::Terminate),
+            b'C' => FeCloseMessage::parse(sql_bytes),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("Unsupported tag of regular message: {}", val),
@@ -248,13 +318,14 @@ pub enum BeMessage<'a> {
     EmptyQueryResponse,
     ParseComplete,
     BindComplete,
-    ParameterDescription,
+    ParameterDescription(&'a [TypeOid]),
     NoData,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
     ErrorResponse(BoxedError),
+    CloseComplete,
 }
 
 #[derive(Debug)]
@@ -429,14 +500,23 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |_| Ok(()))?;
             }
 
-            BeMessage::ParameterDescription => {
+            BeMessage::CloseComplete => {
+                buf.put_u8(b'3');
+                write_body(buf, |_| Ok(()))?;
+            }
+            // ParameterDescription
+            // +-----+-----------+--------------------+---------------+-----+---------------+
+            // | 't' | int32 len | int16 ParameterNum | int32 typeOID | ... | int32 typeOID |
+            // +-----+-----------+-----------------+--+---------------+-----+---------------+
+            BeMessage::ParameterDescription(para_descs) => {
                 buf.put_u8(b't');
                 write_body(buf, |buf| {
-                    // we don't support params, so always 0
-                    buf.put_i16(0);
+                    buf.put_i16(para_descs.len() as i16);
+                    for oid in para_descs.iter() {
+                        buf.put_i32(oid.as_number());
+                    }
                     Ok(())
-                })
-                .unwrap();
+                })?;
             }
 
             BeMessage::NoData => {

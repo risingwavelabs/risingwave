@@ -105,6 +105,14 @@ pub enum TypeOid {
 }
 
 impl TypeOid {
+    // Error handle need modify later!
+    pub fn as_type(oid: i32) -> Result<TypeOid, String> {
+        match oid {
+            1043 => Ok(TypeOid::Varchar),
+            _ => Err("didn't implement".to_string()),
+        }
+    }
+
     pub fn as_number(&self) -> i32 {
         match self {
             TypeOid::Boolean => 16,
