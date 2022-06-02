@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use prost::Message;
-use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::hummock::{HummockContextRefId, HummockPinnedVersion};
+use risingwave_hummock_sdk::{HummockContextId, HummockVersionId};
+use risingwave_pb::hummock::HummockPinnedVersion;
 
 use crate::model::MetadataModel;
 
 /// Column family name for hummock pinned version
-/// `cf(hummock_pinned_version)`: `HummockContextRefId` -> `HummockPinnedVersion`
+/// `cf(hummock_pinned_version)`: `HummockContextId` -> `HummockPinnedVersion`
 const HUMMOCK_PINNED_VERSION_CF_NAME: &str = "cf/hummock_pinned_version";
 
 /// `HummockPinnedVersion` tracks pinned versions by given context id.
 impl MetadataModel for HummockPinnedVersion {
-    type KeyType = HummockContextRefId;
+    type KeyType = HummockContextId;
     type ProstType = HummockPinnedVersion;
 
     fn cf_name() -> String {
@@ -44,9 +44,7 @@ impl MetadataModel for HummockPinnedVersion {
     }
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(HummockContextRefId {
-            id: self.context_id,
-        })
+        Ok(self.context_id)
     }
 }
 
