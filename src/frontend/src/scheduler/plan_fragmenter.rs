@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{ExchangeInfo, PlanNode};
+use risingwave_pb::batch_plan::ExchangeInfo;
 use risingwave_pb::plan_common::Field as FieldProst;
 use uuid::Uuid;
 
@@ -142,7 +142,7 @@ impl Query {
         self.stage_graph
             .stages
             .iter()
-            .filter(|(stage_id, stage_query)| stage_query.has_table_scan)
+            .filter(|(_stage_id, stage_query)| stage_query.has_table_scan)
             .map(|(id, _)| *id)
             .collect::<Vec<_>>()
     }
