@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
 
 use futures::Stream;
 use futures_async_stream::try_stream;
@@ -22,9 +21,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
 use risingwave_pb::common::HostAddress;
-use risingwave_rpc_client::{
-    ComputeClient, ComputeClientPool, ComputeClientPoolRef, ExchangeSource,
-};
+use risingwave_rpc_client::{ComputeClientPoolRef, ExchangeSource};
 use uuid::Uuid;
 
 use super::QueryExecution;
@@ -184,8 +181,6 @@ impl QueryResultFetcher {
         while let Some(chunk) = source.take_data().await? {
             yield chunk;
         }
-
-        let epoch = self.epoch;
     }
 }
 
