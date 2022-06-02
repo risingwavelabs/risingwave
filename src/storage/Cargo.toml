@@ -6,12 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-aws-config = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-endpoint = { version = "0.12", default-features = false }
-aws-sdk-s3 = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.42"
-aws-smithy-types = "0.42"
-aws-types = { version = "0.12", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -42,6 +36,7 @@ prost = "0.10"
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 # rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
@@ -79,7 +74,6 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
-tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 
 [features]

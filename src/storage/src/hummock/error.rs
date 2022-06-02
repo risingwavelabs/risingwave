@@ -14,9 +14,8 @@
 
 use std::backtrace::Backtrace;
 
+use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
-
-use crate::object::ObjectError;
 
 #[derive(Error, Debug)]
 enum HummockErrorInner {
