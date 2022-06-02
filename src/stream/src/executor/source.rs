@@ -153,28 +153,46 @@ impl SourceReader {
         mut stream_reader: Box<dyn StreamSourceReader>,
         notifier: Arc<Notify>,
         expected_barrier_latency_ms: u64,
-        mut inject_source: UnboundedReceiver<Box<dyn StreamSourceReader>>,
+        mut inject_source_rx: UnboundedReceiver<Box<dyn StreamSourceReader>>,
     ) {
         'outer: loop {
             let now = Instant::now();
 
             // We allow data to flow for `expected_barrier_latency_ms` milliseconds.
             while now.elapsed().as_millis() < expected_barrier_latency_ms as u128 {
-                if let Some(reader) = inject_source.recv().await {
-                    stream_reader = reader;
-                }
-                match stream_reader.next().await {
-                    Ok(chunk) => yield chunk,
-                    Err(e) => {
-                        // TODO: report this error to meta service to mark the actors failed.
-                        error!("hang up stream reader due to polling error: {}", e);
+                let x = tokio::select! {
+                    biased;
+                    inject_source = inject_source_rx.recv().await => { if let Some(reader) = inject_source {stream_reader = reader; None } }
+                    chunk = stream_reader.next().await => {
+                        match chunk {
+                            Ok(c) => Some(c),
+                            Err(e) => {
+                                // TODO: report this error to meta service to mark the actors failed.
+                                error!("hang up stream reader due to polling error: {}", e);
 
-                        // Drop the reader, then the error might be caught by the writer side.
-                        drop(stream_reader);
-                        // Then hang up this stream by breaking the loop.
-                        break 'outer;
+                                // Drop the reader, then the error might be caught by the writer side.
+                                drop(stream_reader);
+                                // Then hang up this stream by breaking the loop.
+                                break 'outer;
+                            }
+                        }
                     }
+                };
+                if let Some(chunk) = x {
+                    yield chunk;
                 }
+                // match stream_reader.next().await {
+                //     Ok(chunk) => yield chunk,
+                //     Err(e) => {
+                //         // TODO: report this error to meta service to mark the actors failed.
+                //         error!("hang up stream reader due to polling error: {}", e);
+
+                //         // Drop the reader, then the error might be caught by the writer side.
+                //         drop(stream_reader);
+                //         // Then hang up this stream by breaking the loop.
+                //         break 'outer;
+                //     }
+                // }
             }
 
             // Here we consider two cases:
