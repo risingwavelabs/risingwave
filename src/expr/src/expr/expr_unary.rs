@@ -342,7 +342,6 @@ pub fn new_unary_expr(
     Ok(expr)
 }
 
-
 pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
     Box::new(UnaryExpression::<Utf8Array, I64Array, _>::new(
         expr_ia1,
