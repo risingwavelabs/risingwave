@@ -470,6 +470,7 @@ impl StreamFragmenter {
                 condition: hash_join_node.condition.clone(),
                 left_info: Some(arrange_0_info),
                 right_info: Some(arrange_1_info),
+                output_indices: hash_join_node.output_indices.clone(),
             })),
             ..node
         };

@@ -118,14 +118,25 @@ impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{} {{ type: {:?}, predicate: {} }}",
+            "{} {{ type: {:?}, predicate: {}, output_indices: {} }}",
             if self.is_delta {
                 "StreamDeltaHashJoin"
             } else {
                 "StreamHashJoin"
             },
             self.logical.join_type(),
-            self.eq_join_predicate()
+            self.eq_join_predicate(),
+            if self
+                .logical
+                .output_indices()
+                .iter()
+                .copied()
+                .eq(0..self.logical.internal_column_num())
+            {
+                "all".to_string()
+            } else {
+                format!("{:?}", self.logical.output_indices())
+            }
         )
     }
 }
@@ -178,6 +189,12 @@ impl ToStreamProst for StreamHashJoin {
                 .map(|idx| *idx as u32)
                 .collect_vec(),
             is_delta_join: self.is_delta,
+            output_indices: self
+                .logical
+                .output_indices()
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
             ..Default::default()
         })
     }

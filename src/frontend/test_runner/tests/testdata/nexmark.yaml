@@ -92,8 +92,8 @@
         A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$3, $4, $5, $0] }
-        BatchHashJoin { type: Inner, predicate: $1 = $2 }
+      BatchProject { exprs: [$1, $2, $3, $0] }
+        BatchHashJoin { type: Inner, predicate: $1 = $2, output_indices: [0, 3, 4, 5] }
           BatchExchange { order: [], dist: HashShard([1]) }
             BatchProject { exprs: [$0, $1] }
               BatchFilter { predicate: ($2 = 10:Int32) }
@@ -104,8 +104,8 @@
   stream_plan: |
     StreamMaterialize { columns: [name, city, state, id, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
       StreamExchange { dist: HashShard([4, 5]) }
-        StreamProject { exprs: [$4, $5, $6, $0, $2, $7] }
-          StreamHashJoin { type: Inner, predicate: $1 = $3 }
+        StreamProject { exprs: [$1, $2, $3, $0, $4, $5] }
+          StreamHashJoin { type: Inner, predicate: $1 = $3, output_indices: [0, 4, 5, 6, 2, 7] }
             StreamExchange { dist: HashShard([1]) }
               StreamProject { exprs: [$0, $1, $3] }
                 StreamFilter { predicate: ($2 = 10:Int32) }
@@ -136,7 +136,7 @@
               BatchHashAgg { group_keys: [$0, $1], aggs: [max($2)] }
                 BatchProject { exprs: [$0, $3, $5] }
                   BatchFilter { predicate: ($6 >= $1) AND ($6 <= $2) }
-                    BatchHashJoin { type: Inner, predicate: $0 = $4 }
+                    BatchHashJoin { type: Inner, predicate: $0 = $4, output_indices: all }
                       BatchExchange { order: [], dist: HashShard([0]) }
                         BatchScan { table: auction, columns: [id, dateTime, expires, category] }
                       BatchExchange { order: [], dist: HashShard([0]) }
@@ -150,7 +150,7 @@
               StreamHashAgg { group_keys: [$0, $1], aggs: [count, max($2)] }
                 StreamProject { exprs: [$0, $3, $6, $4, $8] }
                   StreamFilter { predicate: ($7 >= $1) AND ($7 <= $2) }
-                    StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                    StreamHashJoin { type: Inner, predicate: $0 = $5, output_indices: all }
                       StreamExchange { dist: HashShard([0]) }
                         StreamTableScan { table: auction, columns: [id, dateTime, expires, category, _row_id], pk_indices: [4] }
                       StreamExchange { dist: HashShard([0]) }
@@ -163,7 +163,7 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, $1] }
         BatchFilter { predicate: ($1 >= $3) }
-          BatchHashJoin { type: Inner, predicate: $2 = $4 }
+          BatchHashJoin { type: Inner, predicate: $2 = $4, output_indices: all }
             BatchExchange { order: [], dist: HashShard([2]) }
               BatchProject { exprs: [$1, $2, $0] }
                 BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
@@ -183,7 +183,7 @@
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
       StreamProject { exprs: [$0, $1, $2, $4] }
         StreamFilter { predicate: ($1 >= $3) }
-          StreamHashJoin { type: Inner, predicate: $2 = $4 }
+          StreamHashJoin { type: Inner, predicate: $2 = $4, output_indices: all }
             StreamExchange { dist: HashShard([2]) }
               StreamProject { exprs: [$1, $3, $0] }
                 StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }

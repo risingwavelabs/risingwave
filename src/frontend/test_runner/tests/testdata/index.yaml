@@ -10,10 +10,9 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, v3, v4, v5, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
       StreamExchange { dist: HashShard([5, 6]) }
-        StreamProject { exprs: [$0, $1, $3, $4, $5, $2, $6] }
-          StreamDeltaJoin { type: Inner, predicate: $0 = $3 }
-            StreamIndexScan { index: t1_v1, columns: [v1, v2, _row_id], pk_indices: [2] }
-            StreamIndexScan { index: t2_v3, columns: [v3, v4, v5, _row_id], pk_indices: [3] }
+        StreamDeltaJoin { type: Inner, predicate: $0 = $3, output_indices: [0, 1, 3, 4, 5, 2, 6] }
+          StreamIndexScan { index: t1_v1, columns: [v1, v2, _row_id], pk_indices: [2] }
+          StreamIndexScan { index: t2_v3, columns: [v3, v4, v5, _row_id], pk_indices: [3] }
 - id: index_slt
   sql: |
     create table iii_t1 (v1 int, v2 int);
@@ -29,10 +28,9 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, v3, v4, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
       StreamExchange { dist: HashShard([4, 5]) }
-        StreamProject { exprs: [$0, $1, $3, $4, $2, $5] }
-          StreamDeltaJoin { type: Inner, predicate: $0 = $3 }
-            StreamIndexScan { index: iii_index_1, columns: [v1, v2, _row_id], pk_indices: [2] }
-            StreamIndexScan { index: iii_index_2, columns: [v3, v4, _row_id], pk_indices: [2] }
+        StreamDeltaJoin { type: Inner, predicate: $0 = $3, output_indices: [0, 1, 3, 4, 2, 5] }
+          StreamIndexScan { index: iii_index_1, columns: [v1, v2, _row_id], pk_indices: [2] }
+          StreamIndexScan { index: iii_index_2, columns: [v3, v4, _row_id], pk_indices: [2] }
 - before:
     - index_slt
   sql: |
@@ -40,7 +38,6 @@
   stream_plan: |
     StreamMaterialize { columns: [v4, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
       StreamExchange { dist: HashShard([1, 2]) }
-        StreamProject { exprs: [$3, $1, $4] }
-          StreamDeltaJoin { type: Inner, predicate: $0 = $2 }
-            StreamIndexScan { index: iii_index_1, columns: [v1, _row_id], pk_indices: [1] }
-            StreamIndexScan { index: iii_index_2, columns: [v3, v4, _row_id], pk_indices: [2] }
+        StreamDeltaJoin { type: Inner, predicate: $0 = $2, output_indices: [3, 1, 4] }
+          StreamIndexScan { index: iii_index_1, columns: [v1, _row_id], pk_indices: [1] }
+          StreamIndexScan { index: iii_index_2, columns: [v3, v4, _row_id], pk_indices: [2] }
