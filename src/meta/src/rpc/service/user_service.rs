@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{tonic_err, Result as RwResult};
-use risingwave_pb::user::grant_privilege::{GrantSource, GrantTable, Target};
+use risingwave_pb::user::grant_privilege::{GrantSource, GrantTable, Object};
 use risingwave_pb::user::user_service_server::UserService;
 use risingwave_pb::user::{
     CreateUserRequest, CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilege,
@@ -42,7 +42,7 @@ where
         }
     }
 
-    /// Expands `GrantPrivilege` with target `GrantAllTables` or `GrantAllSources` to specific
+    /// Expands `GrantPrivilege` with object `GrantAllTables` or `GrantAllSources` to specific
     /// tables and sources, and set `with_grant_option` inside when grant privilege to a user.
     async fn expand_privilege(
         &self,
@@ -51,40 +51,40 @@ where
     ) -> RwResult<Vec<GrantPrivilege>> {
         let mut expanded_privileges = Vec::new();
         for privilege in privileges {
-            if let Some(Target::GrantAllTables(target)) = &privilege.target {
+            if let Some(Object::GrantAllTables(object)) = &privilege.object {
                 let tables = self
                     .catalog_manager
-                    .list_tables(target.database_id, target.schema_id)
+                    .list_tables(object.database_id, object.schema_id)
                     .await?;
                 for table_id in tables {
                     let mut privilege = privilege.clone();
-                    privilege.target = Some(Target::GrantTable(GrantTable {
-                        database_id: target.database_id,
-                        schema_id: target.schema_id,
+                    privilege.object = Some(Object::GrantTable(GrantTable {
+                        database_id: object.database_id,
+                        schema_id: object.schema_id,
                         table_id,
                     }));
                     if let Some(true) = with_grant_option {
                         privilege
-                            .privilege_with_opts
+                            .action_with_opts
                             .iter_mut()
                             .for_each(|p| p.with_grant_option = true);
                     }
                     expanded_privileges.push(privilege);
                 }
-            } else if let Some(Target::GrantAllSources(target)) = &privilege.target {
+            } else if let Some(Object::GrantAllSources(object)) = &privilege.object {
                 let sources = self
                     .catalog_manager
-                    .list_sources(target.database_id, target.schema_id)
+                    .list_sources(object.database_id, object.schema_id)
                     .await?;
                 for source_id in sources {
                     let mut privilege = privilege.clone();
-                    privilege.target = Some(Target::GrantSource(GrantSource {
-                        database_id: target.database_id,
-                        schema_id: target.schema_id,
+                    privilege.object = Some(Object::GrantSource(GrantSource {
+                        database_id: object.database_id,
+                        schema_id: object.schema_id,
                         source_id,
                     }));
                     if let Some(with_grant_option) = with_grant_option {
-                        privilege.privilege_with_opts.iter_mut().for_each(|p| {
+                        privilege.action_with_opts.iter_mut().for_each(|p| {
                             p.with_grant_option = with_grant_option;
                         });
                     }
@@ -93,7 +93,7 @@ where
             } else {
                 let mut privilege = privilege.clone();
                 if let Some(with_grant_option) = with_grant_option {
-                    privilege.privilege_with_opts.iter_mut().for_each(|p| {
+                    privilege.action_with_opts.iter_mut().for_each(|p| {
                         p.with_grant_option = with_grant_option;
                     });
                 }

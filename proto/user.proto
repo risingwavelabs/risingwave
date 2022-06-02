@@ -64,7 +64,7 @@ message GrantPrivilege {
     uint32 schema_id = 2;
   }
 
-  enum Privilege {
+  enum Action {
     UNKNOWN = 0;
     SELECT = 1;
     INSERT = 2;
@@ -74,12 +74,12 @@ message GrantPrivilege {
     CONNECT = 6;
   }
 
-  message PrivilegeWithGrantOption {
-    Privilege privilege = 1;
+  message ActionWithGrantOption {
+    Action action = 1;
     bool with_grant_option = 2;
   }
 
-  oneof target {
+  oneof object {
     GrantDatabase grant_database = 1;
     GrantSchema grant_schema = 2;
     GrantTable grant_table = 3;
@@ -87,7 +87,7 @@ message GrantPrivilege {
     GrantAllTables grant_all_tables = 5;
     GrantAllSources grant_all_sources = 6;
   }
-  repeated PrivilegeWithGrantOption privilege_with_opts = 7;
+  repeated ActionWithGrantOption action_with_opts = 7;
 }
 
 message CreateUserRequest {

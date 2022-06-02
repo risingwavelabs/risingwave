@@ -309,9 +309,9 @@ impl UserInfoWriter for MockUserInfoWriter {
         let privileges = privileges
             .into_iter()
             .map(|mut p| {
-                p.privilege_with_opts
+                p.action_with_opts
                     .iter_mut()
-                    .for_each(|po| po.with_grant_option = with_grant_option);
+                    .for_each(|ao| ao.with_grant_option = with_grant_option);
                 p
             })
             .collect::<Vec<_>>();
@@ -332,24 +332,24 @@ impl UserInfoWriter for MockUserInfoWriter {
         if let Some(u) = self.user_info.write().get_user_mut(user_name) {
             u.grant_privileges.iter_mut().for_each(|p| {
                 for rp in &privileges {
-                    if rp.target != p.target {
+                    if rp.object != p.object {
                         continue;
                     }
                     if revoke_grant_option {
-                        for po in &mut p.privilege_with_opts {
+                        for ao in &mut p.action_with_opts {
                             if rp
-                                .privilege_with_opts
+                                .action_with_opts
                                 .iter()
-                                .any(|rpo| rpo.privilege == po.privilege)
+                                .any(|rao| rao.action == ao.action)
                             {
-                                po.with_grant_option = false;
+                                ao.with_grant_option = false;
                             }
                         }
                     } else {
-                        p.privilege_with_opts.retain(|po| {
-                            rp.privilege_with_opts
+                        p.action_with_opts.retain(|po| {
+                            rp.action_with_opts
                                 .iter()
-                                .all(|rpo| rpo.privilege != po.privilege)
+                                .all(|rao| rao.action != po.action)
                         });
                     }
                 }

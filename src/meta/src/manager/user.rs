@@ -20,7 +20,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_pb::user::grant_privilege::{PrivilegeWithGrantOption, Target};
+use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::{AuthInfo, GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -153,25 +153,25 @@ impl<S: MetaStore> UserManager<S> {
     // Merge new granted privilege.
     #[inline(always)]
     fn merge_privilege(origin_privilege: &mut GrantPrivilege, new_privilege: &GrantPrivilege) {
-        assert_eq!(origin_privilege.target, new_privilege.target);
+        assert_eq!(origin_privilege.object, new_privilege.object);
 
-        let mut privilege_map = HashMap::<i32, bool>::from_iter(
+        let mut action_map = HashMap::<i32, bool>::from_iter(
             origin_privilege
-                .privilege_with_opts
+                .action_with_opts
                 .iter()
-                .map(|po| (po.privilege, po.with_grant_option)),
+                .map(|ao| (ao.action, ao.with_grant_option)),
         );
-        for npo in &new_privilege.privilege_with_opts {
-            if let Some(po) = privilege_map.get_mut(&npo.privilege) {
-                *po |= npo.with_grant_option;
+        for nao in &new_privilege.action_with_opts {
+            if let Some(o) = action_map.get_mut(&nao.action) {
+                *o |= nao.with_grant_option;
             } else {
-                privilege_map.insert(npo.privilege, npo.with_grant_option);
+                action_map.insert(nao.action, nao.with_grant_option);
             }
         }
-        origin_privilege.privilege_with_opts = privilege_map
+        origin_privilege.action_with_opts = action_map
             .into_iter()
-            .map(|(privilege, with_grant_option)| PrivilegeWithGrantOption {
-                privilege,
+            .map(|(action, with_grant_option)| ActionWithGrantOption {
+                action,
                 with_grant_option,
             })
             .collect();
@@ -199,7 +199,7 @@ impl<S: MetaStore> UserManager<S> {
             if let Some(privilege) = user
                 .grant_privileges
                 .iter_mut()
-                .find(|p| p.target == new_grant_privilege.target)
+                .find(|p| p.object == new_grant_privilege.object)
             {
                 Self::merge_privilege(privilege, new_grant_privilege);
             } else {
@@ -217,36 +217,33 @@ impl<S: MetaStore> UserManager<S> {
         Ok(version)
     }
 
-    // Revoke privilege from target.
+    // Revoke privilege from object.
     #[inline(always)]
     fn revoke_privilege_inner(
         origin_privilege: &mut GrantPrivilege,
         revoke_grant_privilege: &GrantPrivilege,
         revoke_grant_option: bool,
     ) {
-        assert_eq!(origin_privilege.target, revoke_grant_privilege.target);
+        assert_eq!(origin_privilege.object, revoke_grant_privilege.object);
 
         if revoke_grant_option {
             // Only revoke with grant option.
-            origin_privilege
-                .privilege_with_opts
-                .iter_mut()
-                .for_each(|po| {
-                    if revoke_grant_privilege
-                        .privilege_with_opts
-                        .iter()
-                        .any(|ro| ro.privilege == po.privilege)
-                    {
-                        po.with_grant_option = false;
-                    }
-                })
+            origin_privilege.action_with_opts.iter_mut().for_each(|ao| {
+                if revoke_grant_privilege
+                    .action_with_opts
+                    .iter()
+                    .any(|ro| ro.action == ao.action)
+                {
+                    ao.with_grant_option = false;
+                }
+            })
         } else {
             // Revoke all privileges matched with revoke_grant_privilege.
-            origin_privilege.privilege_with_opts.retain(|po| {
+            origin_privilege.action_with_opts.retain(|ao| {
                 !revoke_grant_privilege
-                    .privilege_with_opts
+                    .action_with_opts
                     .iter()
-                    .any(|ro| ro.privilege == po.privilege)
+                    .any(|rao| rao.action == ao.action)
             });
         }
     }
@@ -275,13 +272,13 @@ impl<S: MetaStore> UserManager<S> {
             .iter()
             .for_each(|revoke_grant_privilege| {
                 for privilege in &mut user.grant_privileges {
-                    if privilege.target == revoke_grant_privilege.target {
+                    if privilege.object == revoke_grant_privilege.object {
                         Self::revoke_privilege_inner(
                             privilege,
                             revoke_grant_privilege,
                             revoke_grant_option,
                         );
-                        empty_privilege |= privilege.privilege_with_opts.is_empty();
+                        empty_privilege |= privilege.action_with_opts.is_empty();
                         break;
                     }
                 }
@@ -289,7 +286,7 @@ impl<S: MetaStore> UserManager<S> {
 
         if empty_privilege {
             user.grant_privileges
-                .retain(|privilege| !privilege.privilege_with_opts.is_empty());
+                .retain(|privilege| !privilege.action_with_opts.is_empty());
         }
 
         user.insert(self.env.meta_store()).await?;
@@ -302,9 +299,9 @@ impl<S: MetaStore> UserManager<S> {
         Ok(version)
     }
 
-    /// `release_privileges` removes the privileges with given target from all users, it will be
+    /// `release_privileges` removes the privileges with given object from all users, it will be
     /// called when a database/schema/table/source is dropped.
-    pub async fn release_privileges(&self, target: &Target) -> Result<()> {
+    pub async fn release_privileges(&self, object: &Object) -> Result<()> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
         let mut users_need_update = vec![];
@@ -312,7 +309,7 @@ impl<S: MetaStore> UserManager<S> {
             let cnt = user.grant_privileges.len();
             let mut user = user.clone();
             user.grant_privileges
-                .retain(|p| p.target.as_ref().unwrap() != target);
+                .retain(|p| p.object.as_ref().unwrap() != object);
             if cnt != user.grant_privileges.len() {
                 user.upsert_in_transaction(&mut transaction)?;
                 users_need_update.push(user);
@@ -333,7 +330,7 @@ impl<S: MetaStore> UserManager<S> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::user::grant_privilege::{GrantTable, Privilege};
+    use risingwave_pb::user::grant_privilege::{Action, GrantTable};
 
     use super::*;
 
@@ -345,16 +342,16 @@ mod tests {
     }
 
     fn make_privilege(
-        target: Target,
-        privileges: &[Privilege],
+        object: Object,
+        actions: &[Action],
         with_grant_option: bool,
     ) -> GrantPrivilege {
         GrantPrivilege {
-            target: Some(target),
-            privilege_with_opts: privileges
+            object: Some(object),
+            action_with_opts: actions
                 .iter()
-                .map(|&p| PrivilegeWithGrantOption {
-                    privilege: p as i32,
+                .map(|&action| ActionWithGrantOption {
+                    action: action as i32,
                     with_grant_option,
                 })
                 .collect(),
@@ -374,7 +371,7 @@ mod tests {
         let users = user_manager.list_users().await?;
         assert_eq!(users.len(), 2);
 
-        let target = Target::GrantTable(GrantTable {
+        let object = Object::GrantTable(GrantTable {
             database_id: 0,
             schema_id: 0,
             table_id: 0,
@@ -384,18 +381,18 @@ mod tests {
             .grant_privilege(
                 &test_user.to_string(),
                 &[make_privilege(
-                    target.clone(),
-                    &[Privilege::Select, Privilege::Insert],
+                    object.clone(),
+                    &[Action::Select, Action::Insert],
                     false,
                 )],
             )
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
         assert_eq!(user.grant_privileges.len(), 1);
-        assert_eq!(user.grant_privileges[0].target, Some(target.clone()));
-        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 2);
+        assert_eq!(user.grant_privileges[0].object, Some(object.clone()));
+        assert_eq!(user.grant_privileges[0].action_with_opts.len(), 2);
         assert!(user.grant_privileges[0]
-            .privilege_with_opts
+            .action_with_opts
             .iter()
             .all(|p| !p.with_grant_option));
 
@@ -404,18 +401,18 @@ mod tests {
             .grant_privilege(
                 &test_user.to_string(),
                 &[make_privilege(
-                    target.clone(),
-                    &[Privilege::Select, Privilege::Insert],
+                    object.clone(),
+                    &[Action::Select, Action::Insert],
                     true,
                 )],
             )
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
         assert_eq!(user.grant_privileges.len(), 1);
-        assert_eq!(user.grant_privileges[0].target, Some(target.clone()));
-        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 2);
+        assert_eq!(user.grant_privileges[0].object, Some(object.clone()));
+        assert_eq!(user.grant_privileges[0].action_with_opts.len(), 2);
         assert!(user.grant_privileges[0]
-            .privilege_with_opts
+            .action_with_opts
             .iter()
             .all(|p| p.with_grant_option));
 
@@ -424,18 +421,18 @@ mod tests {
             .grant_privilege(
                 &test_user.to_string(),
                 &[make_privilege(
-                    target.clone(),
-                    &[Privilege::Select, Privilege::Update, Privilege::Delete],
+                    object.clone(),
+                    &[Action::Select, Action::Update, Action::Delete],
                     true,
                 )],
             )
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
         assert_eq!(user.grant_privileges.len(), 1);
-        assert_eq!(user.grant_privileges[0].target, Some(target.clone()));
-        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 4);
+        assert_eq!(user.grant_privileges[0].object, Some(object.clone()));
+        assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
         assert!(user.grant_privileges[0]
-            .privilege_with_opts
+            .action_with_opts
             .iter()
             .all(|p| p.with_grant_option));
 
@@ -444,12 +441,12 @@ mod tests {
             .revoke_privilege(
                 &test_user.to_string(),
                 &[make_privilege(
-                    target.clone(),
+                    object.clone(),
                     &[
-                        Privilege::Select,
-                        Privilege::Insert,
-                        Privilege::Delete,
-                        Privilege::Update,
+                        Action::Select,
+                        Action::Insert,
+                        Action::Delete,
+                        Action::Update,
                     ],
                     false,
                 )],
@@ -457,9 +454,9 @@ mod tests {
             )
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
-        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 4);
+        assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
         assert!(user.grant_privileges[0]
-            .privilege_with_opts
+            .action_with_opts
             .iter()
             .all(|p| !p.with_grant_option));
 
@@ -468,8 +465,8 @@ mod tests {
             .revoke_privilege(
                 &test_user.to_string(),
                 &[make_privilege(
-                    target.clone(),
-                    &[Privilege::Select, Privilege::Insert, Privilege::Delete],
+                    object.clone(),
+                    &[Action::Select, Action::Insert, Action::Delete],
                     false,
                 )],
                 false,
@@ -477,10 +474,10 @@ mod tests {
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
         assert_eq!(user.grant_privileges.len(), 1);
-        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 1);
+        assert_eq!(user.grant_privileges[0].action_with_opts.len(), 1);
 
-        // Release all privileges with target.
-        user_manager.release_privileges(&target).await?;
+        // Release all privileges with object.
+        user_manager.release_privileges(&object).await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
         assert!(user.grant_privileges.is_empty());
 
