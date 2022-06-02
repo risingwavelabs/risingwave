@@ -21,7 +21,7 @@ use prost::DecodeError;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk, Row};
+use crate::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::types::{DataType, NaiveDateTimeWrapper};
@@ -70,12 +70,24 @@ impl Op {
 pub type Ops<'a> = &'a [Op];
 
 /// `StreamChunk` is used to pass data over the streaming pathway.
-#[derive(Default, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,
 
     pub(super) data: DataChunk,
+}
+
+impl Default for StreamChunk {
+    /// Create a 0-row-0-col `StreamChunk`. Only used in some existing tests.
+    /// This is NOT the same as an **empty** chunk, which has 0 rows but with
+    /// columns aligned with executor schema.
+    fn default() -> Self {
+        Self {
+            ops: Default::default(),
+            data: DataChunk::new(vec![], 0),
+        }
+    }
 }
 
 impl StreamChunk {
@@ -84,7 +96,11 @@ impl StreamChunk {
             assert_eq!(col.array_ref().len(), ops.len());
         }
 
-        let data = DataChunk::new(columns, visibility);
+        let vis = match visibility {
+            Some(b) => Vis::Bitmap(b),
+            None => Vis::Compact(ops.len()),
+        };
+        let data = DataChunk::new(columns, vis);
         StreamChunk { ops, data }
     }
 
@@ -169,12 +185,20 @@ impl StreamChunk {
     }
 
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
-        let (columns, visibility) = data_chunk.into_parts();
+        let (columns, vis) = data_chunk.into_parts();
+        let visibility = match vis {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
+        };
         Self::new(ops, columns, visibility)
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
-        let (columns, visibility) = self.data.into_parts();
+        let (columns, vis) = self.data.into_parts();
+        let visibility = match vis {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
+        };
         (self.ops, columns, visibility)
     }
 
@@ -203,7 +227,7 @@ impl StreamChunk {
         &self.ops
     }
 
-    pub fn visibility(&self) -> &Option<Bitmap> {
+    pub fn visibility(&self) -> Option<&Bitmap> {
         self.data.visibility()
     }
 

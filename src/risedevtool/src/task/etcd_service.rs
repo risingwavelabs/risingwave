@@ -37,6 +37,40 @@ impl EtcdService {
     fn etcd() -> Result<Command> {
         Ok(Command::new(Self::path()?))
     }
+
+    /// Apply command args accroding to config
+    pub fn apply_command_args(cmd: &mut Command, config: &EtcdConfig) -> Result<()> {
+        let listen_urls = format!("http://{}:{}", config.listen_address, config.port);
+        let advertise_urls = format!("http://{}:{}", config.address, config.port);
+        let peer_urls = format!("http://{}:{}", config.listen_address, config.peer_port);
+        let advertise_peer_urls = format!("http://{}:{}", config.address, config.peer_port);
+        let exporter_urls = format!("http://{}:{}", config.listen_address, config.exporter_port);
+
+        cmd.arg("--listen-client-urls")
+            .arg(&listen_urls)
+            .arg("--advertise-client-urls")
+            .arg(&advertise_urls)
+            .arg("--listen-peer-urls")
+            .arg(&peer_urls)
+            .arg("--initial-advertise-peer-urls")
+            .arg(&advertise_peer_urls)
+            .arg("--listen-metrics-urls")
+            .arg(&exporter_urls)
+            .arg("--name")
+            .arg("risedev-meta")
+            .arg("--max-txn-ops")
+            .arg("999999")
+            .arg("--auto-compaction-mode")
+            .arg("revision")
+            .arg("--auto-compaction-retention")
+            .arg("100");
+
+        if config.unsafe_no_fsync {
+            cmd.arg("--unsafe-no-fsync");
+        }
+
+        Ok(())
+    }
 }
 
 impl Task for EtcdService {
@@ -53,33 +87,11 @@ impl Task for EtcdService {
         }
 
         let mut cmd = Self::etcd()?;
-        let listen_urls = format!("http://{}:{}", self.config.listen_address, self.config.port);
-        let advertise_urls = format!("http://{}:{}", self.config.address, self.config.port);
-        let peer_urls = format!("http://{}:{}", self.config.address, self.config.peer_port);
+        Self::apply_command_args(&mut cmd, &self.config)?;
 
         let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
         std::fs::create_dir_all(&path)?;
-
-        cmd.arg("--data-dir")
-            .arg(&path)
-            .arg("--listen-client-urls")
-            .arg(&listen_urls)
-            .arg("--advertise-client-urls")
-            .arg(&advertise_urls)
-            .arg("--listen-peer-urls")
-            .arg(&peer_urls)
-            .arg("--name")
-            .arg("risedev-meta")
-            .arg("--max-txn-ops")
-            .arg("999999")
-            .arg("--auto-compaction-mode")
-            .arg("revision")
-            .arg("--auto-compaction-retention")
-            .arg("100");
-
-        if self.config.unsafe_no_fsync {
-            cmd.arg("--unsafe-no-fsync");
-        }
+        cmd.arg("--data-dir").arg(&path);
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 

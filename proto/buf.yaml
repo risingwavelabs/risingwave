@@ -11,3 +11,5 @@ lint:
     # We guarantee that every file is one package. So this check isn't necessary.
     - DIRECTORY_SAME_PACKAGE
     - PACKAGE_DIRECTORY_MATCH
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - RPC_RESPONSE_STANDARD_NAME

@@ -83,6 +83,19 @@ risedev:
     - use: compute-node
     - use: frontend
 
+  docker-playground:
+    - use: meta-node
+      enable-dashboard-v2: false
+      unsafe-disable-recovery: true
+      listen-address: "0.0.0.0"
+      address: "127.0.0.1"
+    - use: compute-node
+      listen-address: "0.0.0.0"
+      address: "127.0.0.1"
+    - use: frontend
+      listen-address: "0.0.0.0"
+      address: "127.0.0.1"
+
   ######################################
   ### Configurations used in Compose ###
   ######################################
@@ -132,6 +145,11 @@ risedev:
       address: ${id}
       id: grafana-0
 
+    - use: etcd
+      listen-address: "0.0.0.0"
+      address: ${id}
+      id: etcd-0
+
   # special config for deployment, see related PR for more information
   compose-3node-deploy:
     - use: minio
@@ -143,6 +161,13 @@ risedev:
     # - use: aws-s3
     #   bucket: ${terraform:s3-bucket}
 
+    # Not enabled by default as all previous benchmarks are not done with etcd.
+    # Also we currently only support node-level docker volume tear down.
+    # - use: etcd
+    #   listen-address: "0.0.0.0"
+    #   address: ${dns-host:rw-meta-0}
+    #   id: etcd-0
+
     - use: meta-node
       # Id must starts with `meta-node`, therefore to be picked up by other
       # components.
@@ -151,7 +176,6 @@ risedev:
       # Advertise address can be `id`, so as to use docker's DNS. If running
       # in host network mode, we should use IP directly in this field.
       address: ${dns-host:rw-meta-0}
-
       listen-address: "0.0.0.0"
 
     - use: compute-node
@@ -244,6 +268,7 @@ compose:
   minio: "quay.io/minio/minio:latest"
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
   grafana: "grafana/grafana-oss:latest"
+  etcd: "quay.io/coreos/etcd:latest"
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
@@ -293,6 +318,9 @@ template:
 
     # Peer listen port of the single-node etcd.
     peer-port: 2389
+
+    # Prometheus exporter listen port
+    exporter-port: 2379
 
     # Whether to enable fsync (NEVER SET TO TRUE IN PRODUCTION ENVIRONMENT!)
     unsafe-no-fsync: false
@@ -392,6 +420,9 @@ template:
 
     # Compactors used by this Prometheus instance
     provide-compactor: "compactor*"
+
+    # Etcd used by this Prometheus instance
+    provide-etcd: "etcd*"
 
   frontend:
     # Advertise address of frontend

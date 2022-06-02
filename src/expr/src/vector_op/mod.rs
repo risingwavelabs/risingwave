@@ -24,6 +24,7 @@ pub mod length;
 pub mod like;
 pub mod lower;
 pub mod ltrim;
+pub mod md5;
 pub mod position;
 pub mod replace;
 pub mod round;

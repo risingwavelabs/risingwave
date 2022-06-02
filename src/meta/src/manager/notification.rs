@@ -26,7 +26,7 @@ use crate::cluster::WorkerKey;
 
 pub type Notification = std::result::Result<SubscribeResponse, Status>;
 
-type NotificationVersion = u64;
+pub type NotificationVersion = u64;
 
 #[derive(Clone)]
 pub enum LocalNotification {

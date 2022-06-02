@@ -5,11 +5,12 @@ version = "0.1.7"
 
 [dependencies]
 anyhow = "1"
+async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 byteorder = "1"
 bytes = "1"
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crc32fast = "1"
 either = "1"
 farmhash = "1"

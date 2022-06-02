@@ -55,6 +55,12 @@ use risingwave_pb::meta::{
     SubscribeRequest, SubscribeResponse,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::user_service_client::UserServiceClient;
+use risingwave_pb::user::{
+    CreateUserRequest, CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilege,
+    GrantPrivilegeRequest, GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse,
+    UserInfo,
+};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -231,6 +237,51 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    // TODO: using UserInfoVersion instead as return type.
+    pub async fn create_user(&self, user: UserInfo) -> Result<u64> {
+        let request = CreateUserRequest { user: Some(user) };
+        let resp = self.inner.create_user(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_user(&self, user_name: &str) -> Result<u64> {
+        let request = DropUserRequest {
+            name: user_name.to_string(),
+        };
+        let resp = self.inner.drop_user(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn grant_privilege(
+        &self,
+        user_name: &str,
+        privileges: Vec<GrantPrivilege>,
+        with_grant_option: bool,
+    ) -> Result<u64> {
+        let request = GrantPrivilegeRequest {
+            user_name: user_name.to_string(),
+            privileges,
+            with_grant_option,
+        };
+        let resp = self.inner.grant_privilege(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn revoke_privilege(
+        &self,
+        user_name: &str,
+        privileges: Vec<GrantPrivilege>,
+        revoke_grant_option: bool,
+    ) -> Result<u64> {
+        let request = RevokePrivilegeRequest {
+            user_name: user_name.to_string(),
+            privileges,
+            revoke_grant_option,
+        };
+        let resp = self.inner.revoke_privilege(request).await?;
+        Ok(resp.version)
+    }
+
     /// Unregister the current node to the cluster.
     pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
@@ -393,6 +444,7 @@ pub struct GrpcMetaClient {
     pub hummock_client: HummockManagerServiceClient<Channel>,
     pub notification_client: NotificationServiceClient<Channel>,
     pub stream_client: StreamManagerServiceClient<Channel>,
+    pub user_client: UserServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -409,7 +461,8 @@ impl GrpcMetaClient {
         let ddl_client = DdlServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
-        let stream_client = StreamManagerServiceClient::new(channel);
+        let stream_client = StreamManagerServiceClient::new(channel.clone());
+        let user_client = UserServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
@@ -417,6 +470,7 @@ impl GrpcMetaClient {
             hummock_client,
             notification_client,
             stream_client,
+            user_client,
         })
     }
 }
@@ -467,6 +521,10 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
+            ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
+            ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
+            ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
+            ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
         }
     };
 }

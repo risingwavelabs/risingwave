@@ -84,14 +84,14 @@ fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::StructValue;
+    use risingwave_common::array::{ListValue, StructValue};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::expr::expr_node::RexNode;
 
     use crate::expr::literal::literal_to_protobuf;
 
     #[test]
-    fn test_literal_to_protobuf() {
+    fn test_struct_to_protobuf() {
         let value = StructValue::new(vec![
             Some(ScalarImpl::Utf8("12222".to_string())),
             Some(2.into()),
@@ -109,6 +109,24 @@ mod tests {
             )
             .unwrap();
             assert_eq!(ScalarImpl::Struct(value), data2);
+        }
+    }
+
+    #[test]
+    fn test_list_to_protobuf() {
+        let value = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+        let data = Some(ScalarImpl::List(value.clone()));
+        let node = literal_to_protobuf(&data);
+        if let RexNode::Constant(prost) = node.as_ref().unwrap() {
+            let data2 = ScalarImpl::bytes_to_scalar(
+                prost.get_body(),
+                &DataType::List {
+                    datatype: Box::new(DataType::Int32),
+                }
+                .to_protobuf(),
+            )
+            .unwrap();
+            assert_eq!(ScalarImpl::List(value), data2);
         }
     }
 }

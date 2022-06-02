@@ -26,7 +26,7 @@ mod block_cache;
 pub use block_cache::*;
 mod sstable;
 pub use sstable::*;
-mod cache;
+
 pub mod compaction_executor;
 pub mod compactor;
 #[cfg(test)]
@@ -51,8 +51,8 @@ mod utils;
 mod vacuum;
 pub mod value;
 
-pub use cache::{CachableEntry, LookupResult, LruCache};
 pub use error::*;
+pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use value::*;
 
 use self::iterator::HummockIterator;

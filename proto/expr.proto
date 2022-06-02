@@ -60,6 +60,8 @@ message ExprNode {
     FLOOR = 222;
     TO_CHAR = 223;
 
+    MD5 = 224;
+
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
@@ -102,6 +104,11 @@ message ConstantValue {
 
 // For serializing struct value to vec<bytes>.
 message StructValue {
+  repeated bytes fields = 1;
+}
+
+// For serializing list value to vec<bytes>.
+message ListValue {
   repeated bytes fields = 1;
 }
 

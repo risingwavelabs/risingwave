@@ -17,11 +17,11 @@
 //!  only as a required property    x  can used as both required
 //!                                 x  and provided property
 //!                                 x
-//!            ┌───┐                x┌──────┐  ┌─────────┐
-//!            │Any◄──────────┬──────┤single│  │broadcast│
-//!            └─▲─┘          │     x└──────┘  └┬────────┘
-//!              │            │     x           │
-//!              │            └─────────────────┘
+//!            ┌───┐                x┌──────┐
+//!            │Any◄─────────────────┤single│
+//!            └─▲─┘                x└──────┘
+//!              │                  x
+//!              │                  x
 //!              │                  x
 //!          ┌───┴────┐             x┌──────────┐
 //!          │AnyShard◄──────────────┤SomeShard │
@@ -33,19 +33,19 @@
 //!              │  │            │  x                  │
 //!              │  │            └─────────────────────┘
 //!              │  │               x
-//!              │ ┌┴────────────┐  x┌────────────┐  
-//!              │ │ShardByKey(a)◄───┤HashShard(a)│  
-//!              │ └─────────────┘  x└────────────┘  
+//!              │ ┌┴────────────┐  x┌────────────┐
+//!              │ │ShardByKey(a)◄───┤HashShard(a)│
+//!              │ └─────────────┘  x└────────────┘
 //!              │                  x
-//!             ┌┴────────────┐     x┌────────────┐  
-//!             │ShardByKey(b)◄──────┤HashShard(b)│  
-//!             └─────────────┘     x└────────────┘  
+//!             ┌┴────────────┐     x┌────────────┐
+//!             │ShardByKey(b)◄──────┤HashShard(b)│
+//!             └─────────────┘     x└────────────┘
 //!                                 x
-//!                                 x                                   s
+//!                                 x
 use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::{
-    BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
+    Distribution as DistributionProst, DistributionMode, HashInfo,
 };
 use risingwave_pb::batch_plan::ExchangeInfo;
 
@@ -58,8 +58,6 @@ use crate::optimizer::PlanRef;
 pub enum Distribution {
     /// there only one partition, and all records on it.
     Single,
-    /// every partition have all same records.
-    Broadcast,
     /// records are shard on partitions, and satisfy the `AnyShard` but without any guarantee about
     /// their placed rules.
     SomeShard,
@@ -88,16 +86,12 @@ impl Distribution {
         ExchangeInfo {
             mode: match self {
                 Distribution::Single => DistributionMode::Single,
-                Distribution::Broadcast => DistributionMode::Broadcast,
                 Distribution::HashShard(_) => DistributionMode::Hash,
                 // TODO: add round robin DistributionMode
                 Distribution::SomeShard => DistributionMode::Single,
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
-                Distribution::Broadcast => Some(DistributionProst::BroadcastInfo(BroadcastInfo {
-                    count: output_count,
-                })),
                 Distribution::HashShard(keys) => Some(DistributionProst::HashInfo(HashInfo {
                     output_count,
                     keys: keys.iter().map(|num| *num as u32).collect(),
