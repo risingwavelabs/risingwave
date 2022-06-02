@@ -1,4 +1,12 @@
 query T
 show schemas;
 ----
-schema1
+dev
+
+statement ok
+create table ddl_t (v1 int not null);
+
+query T
+show tables;
+----
+ddl_t
