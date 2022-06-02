@@ -2948,6 +2948,7 @@ dependencies = [
  "bytes",
  "madsim",
  "madsim-tokio",
+ "regex",
  "thiserror",
  "tokio-postgres",
  "tracing",

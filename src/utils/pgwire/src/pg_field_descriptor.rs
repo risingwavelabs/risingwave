@@ -109,7 +109,7 @@ impl TypeOid {
     pub fn as_type(oid: i32) -> Result<TypeOid, String> {
         match oid {
             1043 => Ok(TypeOid::Varchar),
-            _ => Err("didn't implement".to_string()),
+            _ => todo!(),
         }
     }
 

@@ -1,40 +1,54 @@
-use bytes::{Bytes, BytesMut};
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::ops::Sub;
+
+use bytes::Bytes;
 use regex::Regex;
 
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use crate::pg_protocol::cstr_to_str;
 
-// NOTE : Code dundancy , may need to modify later
-fn cstr_to_str(b: &Bytes) -> &str {
-    let without_null = if b.last() == Some(&0) {
-        &b[..b.len() - 1]
-    } else {
-        &b[..]
-    };
-    std::str::from_utf8(without_null).unwrap()
+fn replace_params(query_string: String, generic_params: &[usize], params: &[Bytes]) -> String {
+    let mut tmp = query_string;
+    for &i in generic_params.iter() {
+        let pattern = Regex::new(format!(r"(?P<x>\${})(?P<y>[,;\s]+)", i).as_str()).unwrap();
+        let param = cstr_to_str(&params[i.sub(1)]).unwrap();
+        tmp = pattern
+            .replace_all(&tmp, format!("{}$y", param))
+            .to_string();
+    }
+
+    tmp
 }
 
-pub struct pg_statement {
+#[derive(Default)]
+pub struct PgStatement {
     name: String,
     query_string: Bytes,
     type_description: Vec<TypeOid>,
     row_description: Vec<PgFieldDescriptor>,
 }
 
-impl pg_statement {
+impl PgStatement {
     pub fn new(
         name: String,
         query_string: Bytes,
         type_description: Vec<TypeOid>,
         row_description: Vec<PgFieldDescriptor>,
     ) -> Self {
-        // LIMIT: the number of type_description should equal to the number of generic parameter
-        {
-            let parameter_parttern = Regex::new(r"\$[0-9][0-9]*").unwrap();
-            let s = cstr_to_str(&query_string);
-            let count = parameter_parttern.find_iter(s).count();
-            assert_eq!(count, type_description.len());
-        }
-        pg_statement {
+        PgStatement {
             name,
             query_string,
             type_description,
@@ -42,67 +56,143 @@ impl pg_statement {
         }
     }
 
-    pub fn get_name(&self) -> String {
+    pub fn name(&self) -> String {
         self.name.clone()
     }
 
-    pub fn get_type_desc(&self) -> Vec<TypeOid> {
+    pub fn type_desc(&self) -> Vec<TypeOid> {
         self.type_description.clone()
     }
 
-    pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
+    pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_description.clone()
     }
 
-    pub fn instance(&self, name: String, params: &Vec<Bytes>) -> pg_portal {
-        let statement = cstr_to_str(&self.query_string).to_owned();
-        // Step 1 Identify all the $n
-        let parameter_parttern = Regex::new(r"\$[0-9][0-9]*").unwrap();
-        let mut generic_params: Vec<&str> = parameter_parttern
+    pub fn instance(&self, name: String, params: &[Bytes]) -> PgPortal {
+        let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
+
+        // 1. Identify all the $n.
+        let parameter_pattern = Regex::new(r"\$[0-9][0-9]*").unwrap();
+        let generic_params: Vec<usize> = parameter_pattern
             .find_iter(statement.as_str())
-            .map(|mat| mat.as_str())
+            .map(|x| {
+                x.as_str()
+                    .strip_prefix('$')
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap()
+            })
             .collect();
-        // Step 2 Sort by len (From large to small )
-        generic_params.sort_by(|a, b| {
-            let a_num: i32 = a.trim_start_matches("$").parse().unwrap();
-            let b_num: i32 = b.trim_start_matches("$").parse().unwrap();
-            b_num.cmp(&a_num)
-        });
-        // LTIMIT: may need modify later;
-        {
-            assert!(generic_params.starts_with(&[format!("${}", generic_params.len()).as_str()]));
-            assert_eq!(generic_params.len(), params.len());
-        }
-        // Step 3 replace top-down
-        let mut tmp = statement.clone();
-        for i in 0..generic_params.len() {
-            let parttern = Regex::new(format!(r"\{}", generic_params[i]).as_str()).unwrap();
-            let param = cstr_to_str(&params[i]);
-            tmp = parttern.replace_all(tmp.as_str(), param).to_string();
-        }
-        // Step 4 Create a new portal
-        pg_portal {
-            name: name,
-            query_string: Bytes::from(tmp.to_owned()),
+
+        // 2. replace params
+        let instance_query_string = replace_params(statement, &generic_params, params);
+
+        // 3. Create a new portal.
+        PgPortal {
+            name,
+            query_string: Bytes::from(instance_query_string),
         }
     }
 }
 
-pub struct pg_portal {
+#[derive(Default)]
+pub struct PgPortal {
     name: String,
     query_string: Bytes,
 }
 
-impl pg_portal {
+impl PgPortal {
     pub fn new(name: String, query_string: Bytes) -> Self {
-        pg_portal { name, query_string }
+        PgPortal { name, query_string }
     }
 
-    pub fn get_name(&self) -> String {
+    pub fn name(&self) -> String {
         self.name.clone()
     }
 
-    pub fn get_query_string(&self) -> Bytes {
+    pub fn query_string(&self) -> Bytes {
         self.query_string.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+
+    use super::replace_params;
+    #[test]
+    fn test_replace_params() {
+        let res = replace_params(
+            "SELECT $3,$2,$1;".to_string(),
+            &[1, 2, 3],
+            &["A".into(), "B".into(), "C".into()],
+        );
+        assert!(res == "SELECT C,B,A;");
+
+        let res = replace_params(
+            "SELECT $2,$3,$1  ,$3 ,$2 ,$1     ;".to_string(),
+            &[1, 2, 3],
+            &["A".into(), "B".into(), "C".into()],
+        );
+        assert!(res == "SELECT B,C,A  ,C ,B ,A     ;");
+
+        let res = replace_params(
+            "SELECT $11,$2,$1;".to_string(),
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            &[
+                "A".into(),
+                "B".into(),
+                "C".into(),
+                "D".into(),
+                "E".into(),
+                "F".into(),
+                "G".into(),
+                "H".into(),
+                "I".into(),
+                "J".into(),
+                "K".into(),
+            ],
+        );
+        assert!(res == "SELECT K,B,A;");
+
+        let res = replace_params(
+            "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  \"He1ll2o\",1;".to_string(),
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            &[
+                "A".into(),
+                "B".into(),
+                "C".into(),
+                "D".into(),
+                "E".into(),
+                "F".into(),
+                "G".into(),
+                "H".into(),
+                "I".into(),
+                "J".into(),
+                "K".into(),
+                "L".into(),
+            ],
+        );
+        assert!(res == "SELECT B,A,K,J ,K, A,L , B,  \"He1ll2o\",1;");
+
+        let res = replace_params(
+            "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  \"He1ll2o\",1;".to_string(),
+            &[2, 1, 11, 10, 12, 9, 7, 8, 5, 6, 4, 3],
+            &[
+                "A".into(),
+                "B".into(),
+                "C".into(),
+                "D".into(),
+                "E".into(),
+                "F".into(),
+                "G".into(),
+                "H".into(),
+                "I".into(),
+                "J".into(),
+                "K".into(),
+                "L".into(),
+            ],
+        );
+        assert!(res == "SELECT B,A,K,J ,K, A,L , B,  \"He1ll2o\",1;");
     }
 }

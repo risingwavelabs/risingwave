@@ -93,8 +93,8 @@ pub struct FeParseMessage {
 #[derive(Debug)]
 pub struct FeDescribeMessage {
     // 'S' to describe a prepared statement; or 'P' to describe a portal.
-    pub query_name: Bytes,
     pub kind: u8,
+    pub query_name: Bytes,
 }
 
 #[derive(Debug)]
@@ -137,28 +137,21 @@ impl FeBindMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let portal_name = read_null_terminated(&mut buf)?;
         let statement_name = read_null_terminated(&mut buf)?;
-        let mut format_codes = Vec::new();
-        let mut params = Vec::new();
-        let mut result_format_codes = Vec::new();
         // Read FormatCode
         let len = buf.get_i16();
-        for i in 0..len {
-            let code = buf.get_i16();
-            format_codes.push(code);
-        }
+        let format_codes = (0..len).map(|_| buf.get_i16()).collect();
         // Read Params
         let len = buf.get_i16();
-        for i in 0..len {
-            let val_len = buf.get_i32();
-            let val = buf.copy_to_bytes(val_len as usize);
-            params.push(val);
-        }
+        let params = (0..len)
+            .map(|_| {
+                let val_len = buf.get_i32();
+                buf.copy_to_bytes(val_len as usize)
+            })
+            .collect();
         // Read ResultFormatCode
         let len = buf.get_i16();
-        for i in 0..len {
-            let code = buf.get_i16();
-            result_format_codes.push(code);
-        }
+        let result_format_codes = (0..len).map(|_| buf.get_i16()).collect();
+
         Ok(FeMessage::Bind(FeBindMessage {
             format_codes,
             params,
@@ -191,11 +184,8 @@ impl FeParseMessage {
         let query_string = read_null_terminated(&mut buf)?;
         let nparams = buf.get_i16();
 
-        let mut type_ids = Vec::new();
-        for i in 0..nparams {
-            let type_id = buf.get_i32();
-            type_ids.push(type_id);
-        }
+        let type_ids: Vec<i32> = (0..nparams).map(|_| buf.get_i32()).collect();
+
         Ok(FeMessage::Parse(FeParseMessage {
             statement_name,
             query_string,

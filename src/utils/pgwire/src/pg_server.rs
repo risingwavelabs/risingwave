@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::io;
 use std::io::ErrorKind;
 use std::result::Result;
@@ -20,7 +19,6 @@ use std::sync::Arc;
 
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::pg_extended::{pg_portal, pg_statement};
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
 
@@ -69,11 +67,10 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
 async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>) {
     let mut pg_proto = PgProtocol::new(socket, session_mgr);
 
-    let mut unnamed_statement =
-        pg_statement::new(String::new(), bytes::Bytes::new(), Vec::new(), Vec::new());
-    let mut unnamed_portal = pg_portal::new(String::new(), bytes::Bytes::new());
-    let mut named_statements = HashMap::new();
-    let mut named_portals = HashMap::new();
+    let mut unnamed_statement = Default::default();
+    let mut unnamed_portal = Default::default();
+    let mut named_statements = Default::default();
+    let mut named_portals = Default::default();
 
     loop {
         let terminate = pg_proto
@@ -105,13 +102,11 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>)
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use std::intrinsics::transmute;
     use std::sync::Arc;
 
     use tokio_postgres::types::*;
-    use tokio_postgres::{NoTls, Transaction};
+    use tokio_postgres::NoTls;
 
-    use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionManager};
     use crate::types::Row;
@@ -135,67 +130,30 @@ mod tests {
     impl Session for MockSession {
         async fn run_statement(
             self: Arc<Self>,
-            _sql: &str,
+            sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
-            let ans = if _sql.find("Hello").is_some() {
-                "Hello, World"
-            } else if _sql.find("Statement").is_some() {
-                "Statement is still useful"
-            } else if _sql.find("Portal").is_some() {
-                "Portal is still useful"
-            } else {
-                ""
-            };
+            let res: Vec<Option<String>> = sql
+                .split(&[' ', ',', ';'])
+                .skip(1)
+                .map(|x| Some(x.to_string()))
+                .collect();
 
             Ok(PgResponse::new(
                 StatementType::SELECT,
                 1,
-                vec![Row::new(vec![Some(ans.to_owned())])],
-                vec![PgFieldDescriptor::new(
-                    "VARCHAR".to_owned(),
-                    TypeOid::Varchar,
-                )],
+                vec![Row::new(res)],
+                // NOTE: Extended mode don't need.
+                vec![],
             ))
         }
     }
 
-    #[tokio::test]
-    /// The test below is copied from tokio-postgres doc.
-    async fn test_psql_extended_mode_connect() {
-        let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
-
-        // Connect to the database.
-        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
-            .await
-            .unwrap();
-
-        // The connection object performs the actual communication with the database,
-        // so spawn it off to run on its own.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
-            }
-        });
-
-        // Now we can execute a simple statement that just returns its parameter.
-        let rows = client.query("SELECT 'Hello, World'", &[]).await.unwrap();
-        // FIXME: Enable this after handle prepared statement.
-        // let rows = client
-        //     .query("SELECT $1::TEXT", &[&"hello world"])
-        //     .await
-        //     .unwrap();
-
-        let value: &str = rows[0].get(0);
-        assert_eq!(value, "Hello, World");
-    }
-
     // test_psql_extended_mode_explicit_simple
     // constrain:
-    // - explict parameter type (server needn't to infer parameter type)
-    // - generate row description by using explict paramter type
-    // - SELECT *
-    // - can't support SELECT *,* FROM Table
+    // - Only support simple SELECT statement.
+    // - Must provide all type description of the generic types.
+    // - Input description(params description) should include all the generic params description we
+    //   need.
     #[tokio::test]
     async fn test_psql_extended_mode_exlicit_simple() {
         let session_mgr = Arc::new(MockSessionManager {});
@@ -214,68 +172,113 @@ mod tests {
             }
         });
 
-        // FIXME:We can't support without parameters!
-        // non parameter (test pre_statement)
-        // {
-        // let statement1 = client.prepare("SELECT 1,true,'hello world'").await.unwrap();
-        // let statement2 = client
-        // .prepare("SELECT 2,false,'hello world'")
-        // .await
-        // .unwrap();
-        // let rows = client.query(&statement1, &[]).await.unwrap();
-        // let value: i32 = rows[0].get(0);
-        // assert_eq!(value, 1);
-        // let value: bool = rows[0].get(1);
-        // assert_eq!(value, true);
-        // let value: &str = rows[0].get(2);
-        // assert_eq!(value, "hello world");
-        // let rows = client.query(&statement2, &[]).await.unwrap();
-        // let value: i32 = rows[0].get(0);
-        // assert_eq!(value, 2);
-        // let value: bool = rows[0].get(1);
-        // assert_eq!(value, false);
-        // let value: &str = rows[0].get(2);
-        // assert_eq!(value, "hello world");
-        // }
-
         // explicit parameter (test pre_statement)
         {
             let statement = client
-                .prepare_typed("SELECT $1", &[Type::VARCHAR])
+                .prepare_typed("SELECT $1;", &[Type::VARCHAR])
                 .await
                 .unwrap();
-            let rows = client.query(&statement, &[&"Hello, World"]).await.unwrap();
+
+            let rows = client.query(&statement, &[&"AA"]).await.unwrap();
             let value: &str = rows[0].get(0);
-            assert_eq!(value, "Hello, World");
-            let rows = client
-                .query(&statement, &[&"Statement is still useful"])
-                .await
-                .unwrap();
+            assert_eq!(value, "AA");
+
+            let rows = client.query(&statement, &[&"BB"]).await.unwrap();
             let value: &str = rows[0].get(0);
-            assert_eq!(value, "Statement is still useful");
+            assert_eq!(value, "BB");
         }
         // explict parameter (test portal)
         {
             let transaction = client.transaction().await.unwrap();
             let statement = transaction
-                .prepare_typed("SELECT $1", &[Type::VARCHAR])
+                .prepare_typed("SELECT $1;", &[Type::VARCHAR])
                 .await
                 .unwrap();
-            let portal1 = transaction
-                .bind(&statement, &[&"Hello,World"])
-                .await
-                .unwrap();
-            let portal2 = transaction
-                .bind(&statement, &[&"Portal is still useful"])
-                .await
-                .unwrap();
+            let portal1 = transaction.bind(&statement, &[&"AA"]).await.unwrap();
+            let portal2 = transaction.bind(&statement, &[&"BB"]).await.unwrap();
             let rows = transaction.query_portal(&portal1, 0).await.unwrap();
             let value: &str = rows[0].get(0);
-            assert_eq!(value, "Hello, World");
+            assert_eq!(value, "AA");
             let rows = transaction.query_portal(&portal2, 0).await.unwrap();
             let value: &str = rows[0].get(0);
-            assert_eq!(value, "Portal is still useful");
+            assert_eq!(value, "BB");
             transaction.rollback().await.unwrap();
+        }
+        // mix parameter
+        {
+            let statement = client
+                .prepare_typed("SELECT $1,$2;", &[Type::VARCHAR, Type::VARCHAR])
+                .await
+                .unwrap();
+            let rows = client.query(&statement, &[&"AA", &"BB"]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "AA");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "BB");
+
+            let statement = client
+                .prepare_typed("SELECT $1,$1;", &[Type::VARCHAR])
+                .await
+                .unwrap();
+            let rows = client.query(&statement, &[&"AA"]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "AA");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "AA");
+
+            let statement = client
+                .prepare_typed(
+                    "SELECT $2,$3,$1,$3,$2;",
+                    &[Type::VARCHAR, Type::VARCHAR, Type::VARCHAR],
+                )
+                .await
+                .unwrap();
+            let rows = client
+                .query(&statement, &[&"AA", &"BB", &"CC"])
+                .await
+                .unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "BB");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "CC");
+            let value: &str = rows[0].get(2);
+            assert_eq!(value, "AA");
+            let value: &str = rows[0].get(3);
+            assert_eq!(value, "CC");
+            let value: &str = rows[0].get(4);
+            assert_eq!(value, "BB");
+
+            let statement = client
+                .prepare_typed(
+                    "SELECT $3,$1;",
+                    &[Type::VARCHAR, Type::VARCHAR, Type::VARCHAR],
+                )
+                .await
+                .unwrap();
+            let rows = client
+                .query(&statement, &[&"AA", &"BB", &"CC"])
+                .await
+                .unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "CC");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "AA");
+
+            let statement = client
+                .prepare_typed(
+                    "SELECT $2,$1;",
+                    &[Type::VARCHAR, Type::VARCHAR, Type::VARCHAR],
+                )
+                .await
+                .unwrap();
+            let rows = client
+                .query(&statement, &[&"AA", &"BB", &"CC"])
+                .await
+                .unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "BB");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "AA");
         }
     }
 }

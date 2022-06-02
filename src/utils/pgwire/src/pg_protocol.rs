@@ -1,6 +1,6 @@
 // Copyright 2022 Singularity Data
 //
-// Licensed under the Apache License, Versio&n 2.0 (the "License");
+// Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind, Result};
+use std::ops::Sub;
 use std::str;
 use std::sync::Arc;
 
@@ -21,7 +22,7 @@ use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use crate::error::PsqlError;
-use crate::pg_extended::{pg_portal, pg_statement};
+use crate::pg_extended::{PgPortal, PgStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FeStartupMessage,
@@ -56,7 +57,7 @@ enum PgProtocolState {
 
 // Truncate 0 from C string in Bytes and stringify it (returns slice, no allocations)
 // PG protocol strings are always C strings.
-fn cstr_to_str(b: &Bytes) -> Result<&str> {
+pub fn cstr_to_str(b: &Bytes) -> Result<&str> {
     let without_null = if b.last() == Some(&0) {
         &b[..b.len() - 1]
     } else {
@@ -83,10 +84,10 @@ where
 
     pub async fn process(
         &mut self,
-        unnamed_statement: &mut pg_statement,
-        unnamed_portal: &mut pg_portal,
-        named_statements: &mut HashMap<String, pg_statement>,
-        named_portals: &mut HashMap<String, pg_portal>,
+        unnamed_statement: &mut PgStatement,
+        unnamed_portal: &mut PgPortal,
+        named_statements: &mut HashMap<String, PgStatement>,
+        named_portals: &mut HashMap<String, PgPortal>,
     ) -> Result<bool> {
         if self
             .do_process(
@@ -105,10 +106,10 @@ where
 
     async fn do_process(
         &mut self,
-        unnamed_statement: &mut pg_statement,
-        unnamed_portal: &mut pg_portal,
-        named_statements: &mut HashMap<String, pg_statement>,
-        named_portals: &mut HashMap<String, pg_portal>,
+        unnamed_statement: &mut PgStatement,
+        unnamed_portal: &mut PgPortal,
+        named_statements: &mut HashMap<String, PgStatement>,
+        named_portals: &mut HashMap<String, PgPortal>,
     ) -> Result<bool> {
         let msg = match self.read_message().await {
             Ok(msg) => msg,
@@ -152,48 +153,75 @@ where
                 self.process_terminate();
             }
             FeMessage::Parse(m) => {
-                // Step 1: Create the types description
+                let query = cstr_to_str(&m.query_string).unwrap();
+
+                // TODO: make sure the query is a complete statement.
+                assert!(query.trim_end().ends_with(';'));
+
+                // 1. Create the types description.
                 let type_ids = m.type_ids;
-                let mut types = Vec::new();
-                for i in type_ids.into_iter() {
-                    types.push(TypeOid::as_type(i).unwrap());
-                }
-                // Step 2: Create the row description
-                let mut rows = Vec::new();
-                for i in types.iter() {
-                    let row = PgFieldDescriptor::new(String::new(), i.to_owned());
-                    rows.push(row);
-                }
-                // Step 3: Create the statement
-                let statement = pg_statement::new(
+                let types: Vec<TypeOid> = type_ids
+                    .into_iter()
+                    .map(|x| TypeOid::as_type(x).unwrap())
+                    .collect();
+
+                // 2. Create the row description.
+                let rows: Vec<PgFieldDescriptor> = query
+                    .split(&[' ', ',', ';'])
+                    .skip(1)
+                    .into_iter()
+                    .map(|x| {
+                        if let Some(str) = x.strip_prefix('$') {
+                            if let Ok(i) = str.parse() {
+                                i
+                            } else {
+                                -1
+                            }
+                        } else {
+                            -1
+                        }
+                    })
+                    .take_while(|x: &i32| x.is_positive())
+                    .map(|x| {
+                        // NOTE Make sure the type_description include all generic parametre
+                        // description we needed.
+                        assert!((x.sub(1) as usize) < types.len());
+                        PgFieldDescriptor::new(String::new(), types[x.sub(1) as usize].to_owned())
+                    })
+                    .collect();
+
+                // 3. Create the statement.
+                let statement = PgStatement::new(
                     cstr_to_str(&m.statement_name).unwrap().to_string(),
                     m.query_string,
                     types,
                     rows,
                 );
-                // Step 4: Insert the statement
-                let name = statement.get_name();
+
+                // 4. Insert the statement.
+                let name = statement.name();
                 if name.is_empty() {
                     *unnamed_statement = statement;
                 } else {
                     named_statements.insert(name, statement);
                 }
-                // println!("{}", cstr_to_str(&unnamed_query_string).unwrap());
                 self.write_message(&BeMessage::ParseComplete).await?;
             }
             FeMessage::Bind(m) => {
                 let statement_name = cstr_to_str(&m.statement_name).unwrap().to_string();
-                // Step 1 Get statement
+                // 1. Get statement.
                 let statement = if statement_name.is_empty() {
                     unnamed_statement
                 } else {
-                    // NOTE Error handle method may need to modified
-                    named_statements.get(&statement_name).unwrap()
+                    // NOTE Error handle method may need to modified.
+                    named_statements.get(&statement_name).expect("statement_name managed by client_driver, hence assume statement name always valid.")
                 };
-                // Step 2 instance
+
+                // 2. Instance the statement to get the portal.
                 let portal_name = cstr_to_str(&m.portal_name).unwrap().to_string();
                 let portal = statement.instance(portal_name.clone(), &m.params);
-                // Step 3 Store Portal
+
+                // 3. Insert the Portal.
                 if portal_name.is_empty() {
                     *unnamed_portal = portal;
                 } else {
@@ -202,35 +230,40 @@ where
                 self.write_message(&BeMessage::BindComplete).await?;
             }
             FeMessage::Execute(m) => {
-                // Step 1 Get portal
+                // 1. Get portal.
                 let portal_name = cstr_to_str(&m.portal_name).unwrap().to_string();
                 let portal = if m.portal_name.is_empty() {
                     unnamed_portal
                 } else {
-                    // NOTE: error handle need modify later;
-                    named_portals.get(&portal_name).unwrap()
+                    // NOTE Error handle need modify later.
+                    named_portals.get(&portal_name).expect("statement_name managed by client_driver, hence assume statement name always valid")
                 };
-                // Step 2 Execute instance statement using portal
-                self.process_query_msg(cstr_to_str(&portal.get_query_string()), true)
+
+                // 2. Execute instance statement using portal.
+                self.process_query_msg(cstr_to_str(&portal.query_string()), true)
                     .await?;
+
                 // NOTE there is no ReadyForQuery message.
             }
             FeMessage::Describe(m) => {
                 // FIXME: Introduce parser to analyze statements and bind data type. Here just
                 // hard-code a VARCHAR.
-                // Step 1 Get statement
+
+                // 1. Get statement.
                 let name = cstr_to_str(&m.query_name).unwrap().to_string();
                 let statement = if name.is_empty() {
                     unnamed_statement
                 } else {
-                    // NOTE: error handle need modify later;
+                    // NOTE Error handle need modify later.
                     named_statements.get(&name).unwrap()
                 };
-                // Step 2 Send parameter description
-                self.write_message(&BeMessage::ParameterDescription(&statement.get_type_desc()))
+
+                // 2. Send parameter description.
+                self.write_message(&BeMessage::ParameterDescription(&statement.type_desc()))
                     .await?;
-                // Step 3 Send row description
-                self.write_message(&BeMessage::RowDescription(&statement.get_row_desc()))
+
+                // 3. Send row description.
+                self.write_message(&BeMessage::RowDescription(&statement.row_desc()))
                     .await?;
             }
             FeMessage::Sync => {
@@ -243,7 +276,7 @@ where
                 } else if m.kind == b'P' {
                     named_portals.remove_entry(&name);
                 } else {
-                    // NOTE: error handle need modify later;
+                    // NOTE Error handle need modify later.
                 }
                 self.write_message(&BeMessage::CloseComplete).await?;
             }
