@@ -187,14 +187,9 @@ impl DynamicLevelSelector {
         // The bottommost level can not be input level.
         for level in &levels[..self.config.max_level] {
             let level_idx = level.level_idx as usize;
-            let mut total_size = 0;
-            let mut idle_file_count = 0;
-            for table in &level.table_infos {
-                if !handlers[level_idx].is_pending_compact(&table.id) {
-                    total_size += table.file_size;
-                    idle_file_count += 1;
-                }
-            }
+            let idle_file_count =
+                (level.table_infos.len() - handlers[level_idx].get_pending_file_count()) as u64;
+            let total_size = level.total_file_size - handlers[level_idx].get_pending_file_size();
             if total_size == 0 {
                 continue;
             }

@@ -24,7 +24,7 @@
 	"editable": true,
 	"fiscalYearStartMonth": 0,
 	"graphTooltip": 0,
-	"id": 1,
+	"id": 4,
 	"links": [],
 	"liveNow": true,
 	"panels": [
@@ -245,10 +245,6 @@
 			"type": "row"
 		},
 		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
 			"fieldConfig": {
 				"defaults": {
 					"color": {
@@ -297,7 +293,32 @@
 						]
 					}
 				},
-				"overrides": []
+				"overrides": [
+					{
+						"__systemRef": "hideSeriesFrom",
+						"matcher": {
+							"id": "byNames",
+							"options": {
+								"mode": "exclude",
+								"names": [
+									"6"
+								],
+								"prefix": "All except:",
+								"readOnly": true
+							}
+						},
+						"properties": [
+							{
+								"id": "custom.hideFrom",
+								"value": {
+									"legend": false,
+									"tooltip": false,
+									"viz": true
+								}
+							}
+						]
+					}
+				]
 			},
 			"gridPos": {
 				"h": 8,
@@ -308,9 +329,11 @@
 			"id": 140,
 			"options": {
 				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
+					"calcs": [
+						"max"
+					],
+					"displayMode": "table",
+					"placement": "right"
 				},
 				"tooltip": {
 					"mode": "single",
@@ -328,7 +351,7 @@
 					"expr": "sum(storage_level_sst_num) by (instance, level_index)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "{{level_index}}",
+					"legendFormat": "L{{level_index}}",
 					"range": true,
 					"refId": "B"
 				}
@@ -337,10 +360,6 @@
 			"type": "timeseries"
 		},
 		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -388,7 +407,8 @@
 								"value": 80
 							}
 						]
-					}
+					},
+					"unit": "kbytes"
 				},
 				"overrides": []
 			},
@@ -398,12 +418,14 @@
 				"x": 12,
 				"y": 10
 			},
-			"id": 164,
+			"id": 202,
 			"options": {
 				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
+					"calcs": [
+						"max"
+					],
+					"displayMode": "table",
+					"placement": "right"
 				},
 				"tooltip": {
 					"mode": "single",
@@ -416,16 +438,14 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
-					"editorMode": "code",
 					"exemplar": true,
-					"expr": "storage_level_compact_frequency",
+					"expr": "sum(storage_level_total_file_size) by (instance, level_index)",
 					"interval": "",
-					"legendFormat": "{{job}} @ {{instance}}",
-					"range": true,
+					"legendFormat": "L{{level_index}} ",
 					"refId": "A"
 				}
 			],
-			"title": "compaction count",
+			"title": "KBs level sst",
 			"type": "timeseries"
 		},
 		{
@@ -499,7 +519,7 @@
 					"displayMode": "table",
 					"placement": "right",
 					"sortBy": "Max",
-					"sortDesc": false
+					"sortDesc": true
 				},
 				"tooltip": {
 					"mode": "single",
@@ -613,6 +633,188 @@
 				"type": "prometheus",
 				"uid": "risedev-prometheus"
 			},
+			"description": "",
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 0,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "auto",
+						"spanNulls": false,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					}
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 18
+			},
+			"id": 164,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "storage_level_compact_frequency",
+					"interval": "",
+					"legendFormat": "{{job}} @ {{instance}}",
+					"range": true,
+					"refId": "A"
+				}
+			],
+			"title": "compaction count",
+			"type": "timeseries"
+		},
+		{
+			"description": "",
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 0,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "auto",
+						"spanNulls": false,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					}
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 26
+			},
+			"id": 166,
+			"options": {
+				"legend": {
+					"calcs": [
+						"max"
+					],
+					"displayMode": "table",
+					"placement": "right"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "storage_level_compact_cnt",
+					"interval": "",
+					"legendFormat": "L{{level_index}}",
+					"range": true,
+					"refId": "A"
+				}
+			],
+			"title": "compacting sst count",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fieldConfig": {
 				"defaults": {
 					"color": {
@@ -668,7 +870,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 18
+				"y": 26
 			},
 			"id": 182,
 			"options": {
@@ -730,201 +932,6 @@
 			"type": "timeseries"
 		},
 		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
-			"description": "",
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 0,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "auto",
-						"spanNulls": false,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					}
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 26
-			},
-			"id": 166,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single",
-					"sort": "none"
-				}
-			},
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"editorMode": "code",
-					"exemplar": true,
-					"expr": "storage_level_compact_cnt",
-					"interval": "",
-					"legendFormat": "{{level_index}}",
-					"range": true,
-					"refId": "A"
-				}
-			],
-			"title": "compacting sst count",
-			"type": "timeseries"
-		},
-		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
-			"description": "",
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "KB",
-						"axisPlacement": "left",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 0,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "auto",
-						"spanNulls": false,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					}
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 26
-			},
-			"id": 180,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single",
-					"sort": "none"
-				}
-			},
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "version_size / 1024.0",
-					"instant": false,
-					"interval": "",
-					"legendFormat": "version size",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"hide": false,
-					"refId": "B"
-				}
-			],
-			"title": "Hummock Version Size",
-			"type": "timeseries"
-		},
-		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -1004,7 +1011,7 @@
 					"exemplar": true,
 					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "{{level_index}} read bytes p50",
+					"legendFormat": "L{{level_index}} read bytes p50",
 					"refId": "A"
 				},
 				{
@@ -1016,7 +1023,7 @@
 					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "{{level_index}} read bytes p99",
+					"legendFormat": "L{{level_index}} read bytes p99",
 					"refId": "B"
 				}
 			],
@@ -1035,8 +1042,8 @@
 						"mode": "palette-classic"
 					},
 					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
+						"axisLabel": "KB",
+						"axisPlacement": "left",
 						"barAlignment": 0,
 						"drawStyle": "line",
 						"fillOpacity": 0,
@@ -1075,8 +1082,7 @@
 								"value": 80
 							}
 						]
-					},
-					"unit": "deckbytes"
+					}
 				},
 				"overrides": []
 			},
@@ -1086,7 +1092,7 @@
 				"x": 12,
 				"y": 34
 			},
-			"id": 168,
+			"id": 180,
 			"options": {
 				"legend": {
 					"calcs": [],
@@ -1105,9 +1111,10 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))",
+					"expr": "version_size / 1024.0",
+					"instant": false,
 					"interval": "",
-					"legendFormat": "{{level_index}} read bytes p50",
+					"legendFormat": "version size",
 					"refId": "A"
 				},
 				{
@@ -1115,22 +1122,14 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))",
 					"hide": false,
-					"interval": "",
-					"legendFormat": "{{level_index}} read bytes p99",
 					"refId": "B"
 				}
 			],
-			"title": "GBs read from current level",
+			"title": "Hummock Version Size",
 			"type": "timeseries"
 		},
 		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -1191,9 +1190,11 @@
 			"id": 174,
 			"options": {
 				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
+					"calcs": [
+						"max"
+					],
+					"displayMode": "table",
+					"placement": "right"
 				},
 				"tooltip": {
 					"mode": "single",
@@ -1209,7 +1210,7 @@
 					"exemplar": true,
 					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_read_sstn_curr_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "{{level_index}} p50",
+					"legendFormat": "L{{level_index}} p50",
 					"refId": "A"
 				},
 				{
@@ -1221,7 +1222,7 @@
 					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_read_sstn_curr_bucket[1m])) by (le, level_index))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "{{level_index}} p99",
+					"legendFormat": "L{{level_index}} p99",
 					"refId": "B"
 				}
 			],
@@ -1229,10 +1230,6 @@
 			"type": "timeseries"
 		},
 		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -1291,12 +1288,12 @@
 				"x": 12,
 				"y": 42
 			},
-			"id": 172,
+			"id": 168,
 			"options": {
 				"legend": {
 					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
+					"displayMode": "table",
+					"placement": "right"
 				},
 				"tooltip": {
 					"mode": "single",
@@ -1310,9 +1307,9 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))",
+					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "{{level_index}} write bytes p50",
+					"legendFormat": "L{{level_index}} read bytes p50",
 					"refId": "A"
 				},
 				{
@@ -1321,21 +1318,17 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))",
+					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "{{level_index}} write bytes p99",
+					"legendFormat": "{{level_index}} read bytes p99",
 					"refId": "B"
 				}
 			],
-			"title": "GBs written to next level",
+			"title": "GBs read from current level",
 			"type": "timeseries"
 		},
 		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -1396,9 +1389,11 @@
 			"id": 178,
 			"options": {
 				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
+					"calcs": [
+						"max"
+					],
+					"displayMode": "table",
+					"placement": "right"
 				},
 				"tooltip": {
 					"mode": "single",
@@ -1414,7 +1409,7 @@
 					"exemplar": true,
 					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_write_sstn_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "{{level_index}} write count p50",
+					"legendFormat": "L{{level_index}} write count p50",
 					"refId": "A"
 				},
 				{
@@ -1426,7 +1421,7 @@
 					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_write_sstn_bucket[1m])) by (le, level_index))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "{{level_index}} write count p99",
+					"legendFormat": "L{{level_index}} write count p99",
 					"refId": "B"
 				}
 			],
@@ -1434,10 +1429,107 @@
 			"type": "timeseries"
 		},
 		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
+			"description": "",
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 0,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "auto",
+						"spanNulls": false,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "deckbytes"
+				},
+				"overrides": []
 			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 50
+			},
+			"id": 172,
+			"options": {
+				"legend": {
+					"calcs": [
+						"max"
+					],
+					"displayMode": "table",
+					"placement": "right"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))",
+					"interval": "",
+					"legendFormat": "L{{level_index}} write bytes p50",
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "L{{level_index}} write bytes p99",
+					"refId": "B"
+				}
+			],
+			"title": "GBs written to next level",
+			"type": "timeseries"
+		},
+		{
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -1493,14 +1585,16 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 50
+				"y": 58
 			},
 			"id": 176,
 			"options": {
 				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
+					"calcs": [
+						"max"
+					],
+					"displayMode": "table",
+					"placement": "right"
 				},
 				"tooltip": {
 					"mode": "single",
@@ -1516,7 +1610,7 @@
 					"exemplar": true,
 					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_read_sstn_next_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "{{level_index}} read count p50",
+					"legendFormat": "L{{level_index}} read count p50",
 					"refId": "A"
 				},
 				{
@@ -1528,7 +1622,7 @@
 					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_read_sstn_next_bucket[1m])) by (le, level_index))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "{{level_index}} read count p99",
+					"legendFormat": "L{{level_index}} read count p99",
 					"refId": "B"
 				}
 			],
@@ -1536,7 +1630,7 @@
 			"type": "timeseries"
 		},
 		{
-			"collapsed": false,
+			"collapsed": true,
 			"datasource": {
 				"type": "prometheus",
 				"uid": "risedev-prometheus"
@@ -1545,458 +1639,459 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 58
+				"y": 66
 			},
 			"id": 184,
-			"panels": [],
+			"panels": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"fieldConfig": {
+						"defaults": {
+							"color": {
+								"mode": "palette-classic"
+							},
+							"custom": {
+								"axisLabel": "",
+								"axisPlacement": "auto",
+								"barAlignment": 0,
+								"drawStyle": "line",
+								"fillOpacity": 10,
+								"gradientMode": "none",
+								"hideFrom": {
+									"legend": false,
+									"tooltip": false,
+									"viz": false
+								},
+								"lineInterpolation": "linear",
+								"lineWidth": 1,
+								"pointSize": 5,
+								"scaleDistribution": {
+									"type": "linear"
+								},
+								"showPoints": "never",
+								"spanNulls": true,
+								"stacking": {
+									"group": "A",
+									"mode": "none"
+								},
+								"thresholdsStyle": {
+									"mode": "off"
+								}
+							},
+							"mappings": [],
+							"thresholds": {
+								"mode": "absolute",
+								"steps": [
+									{
+										"color": "green",
+										"value": null
+									},
+									{
+										"color": "red",
+										"value": 80
+									}
+								]
+							},
+							"unit": "Bps"
+						},
+						"overrides": []
+					},
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 11
+					},
+					"id": 186,
+					"options": {
+						"legend": {
+							"calcs": [
+								"min",
+								"max"
+							],
+							"displayMode": "table",
+							"placement": "right"
+						},
+						"tooltip": {
+							"mode": "single",
+							"sort": "none"
+						}
+					},
+					"pluginVersion": "8.3.3",
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"editorMode": "code",
+							"exemplar": true,
+							"expr": "sum(rate(object_store_read_bytes[1m]))by(job,instance)",
+							"interval": "",
+							"legendFormat": "read - {{job}} @ {{instance}}",
+							"range": true,
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"editorMode": "code",
+							"exemplar": true,
+							"expr": "sum(rate(object_store_write_bytes[1m]))by(job,instance)",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "write - {{job}} @ {{instance}}",
+							"range": true,
+							"refId": "B"
+						}
+					],
+					"title": "throughput",
+					"type": "timeseries"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"fieldConfig": {
+						"defaults": {
+							"color": {
+								"mode": "palette-classic"
+							},
+							"custom": {
+								"axisLabel": "",
+								"axisPlacement": "auto",
+								"barAlignment": 0,
+								"drawStyle": "line",
+								"fillOpacity": 10,
+								"gradientMode": "none",
+								"hideFrom": {
+									"legend": false,
+									"tooltip": false,
+									"viz": false
+								},
+								"lineInterpolation": "linear",
+								"lineWidth": 1,
+								"pointSize": 5,
+								"scaleDistribution": {
+									"type": "linear"
+								},
+								"showPoints": "never",
+								"spanNulls": true,
+								"stacking": {
+									"group": "A",
+									"mode": "none"
+								},
+								"thresholdsStyle": {
+									"mode": "off"
+								}
+							},
+							"mappings": [],
+							"thresholds": {
+								"mode": "absolute",
+								"steps": [
+									{
+										"color": "green",
+										"value": null
+									},
+									{
+										"color": "red",
+										"value": 80
+									}
+								]
+							},
+							"unit": "s"
+						},
+						"overrides": []
+					},
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 11
+					},
+					"id": 188,
+					"options": {
+						"legend": {
+							"calcs": [
+								"max"
+							],
+							"displayMode": "table",
+							"placement": "right",
+							"sortBy": "Max",
+							"sortDesc": true
+						},
+						"tooltip": {
+							"mode": "single",
+							"sort": "none"
+						}
+					},
+					"pluginVersion": "8.3.3",
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"editorMode": "code",
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type, job, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} p99 - {{job}} @ {{instance}}",
+							"range": true,
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"editorMode": "code",
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_latency_bucket[1m])) by (le, job, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} p90 - {{job}} @ {{instance}}",
+							"range": true,
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "sum by(le, type)(rate(object_store_operation_latency_sum[1m])) / sum by(le, type) (rate(object_store_operation_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} avg",
+							"refId": "D"
+						}
+					],
+					"title": "operation duration",
+					"type": "timeseries"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"fieldConfig": {
+						"defaults": {
+							"color": {
+								"mode": "palette-classic"
+							},
+							"custom": {
+								"axisLabel": "",
+								"axisPlacement": "auto",
+								"barAlignment": 0,
+								"drawStyle": "line",
+								"fillOpacity": 10,
+								"gradientMode": "none",
+								"hideFrom": {
+									"legend": false,
+									"tooltip": false,
+									"viz": false
+								},
+								"lineInterpolation": "linear",
+								"lineWidth": 1,
+								"pointSize": 5,
+								"scaleDistribution": {
+									"type": "linear"
+								},
+								"showPoints": "never",
+								"spanNulls": true,
+								"stacking": {
+									"group": "A",
+									"mode": "none"
+								},
+								"thresholdsStyle": {
+									"mode": "off"
+								}
+							},
+							"mappings": [],
+							"thresholds": {
+								"mode": "absolute",
+								"steps": [
+									{
+										"color": "green",
+										"value": null
+									},
+									{
+										"color": "red",
+										"value": 80
+									}
+								]
+							},
+							"unit": "ops"
+						},
+						"overrides": []
+					},
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 19
+					},
+					"id": 192,
+					"options": {
+						"legend": {
+							"calcs": [],
+							"displayMode": "list",
+							"placement": "bottom"
+						},
+						"tooltip": {
+							"mode": "single",
+							"sort": "none"
+						}
+					},
+					"pluginVersion": "8.3.3",
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"editorMode": "code",
+							"exemplar": true,
+							"expr": "sum(rate(object_store_operation_latency_count[1m])) by (le, type, job, instance)",
+							"interval": "",
+							"intervalFactor": 2,
+							"legendFormat": "{{type}} - {{job}} @ {{instance}}",
+							"range": true,
+							"refId": "A"
+						}
+					],
+					"title": "ops",
+					"type": "timeseries"
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 19
+					},
+					"hiddenSeries": false,
+					"id": 194,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
+							"format": "time_series",
+							"hide": false,
+							"interval": "",
+							"intervalFactor": 2,
+							"legendFormat": "{{type}}  p90",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} p80",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "ops size",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:37",
+							"format": "decbytes",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:38",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
 			"title": "Object Storage",
 			"type": "row"
 		},
 		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "Bps"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 59
-			},
-			"id": 186,
-			"options": {
-				"legend": {
-					"calcs": [
-						"min",
-						"max"
-					],
-					"displayMode": "table",
-					"placement": "right"
-				},
-				"tooltip": {
-					"mode": "single",
-					"sort": "none"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"editorMode": "code",
-					"exemplar": true,
-					"expr": "sum(rate(object_store_read_bytes[1m]))by(job,instance)",
-					"interval": "",
-					"legendFormat": "read - {{job}} @ {{instance}}",
-					"range": true,
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"editorMode": "code",
-					"exemplar": true,
-					"expr": "sum(rate(object_store_write_bytes[1m]))by(job,instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "write - {{job}} @ {{instance}}",
-					"range": true,
-					"refId": "B"
-				}
-			],
-			"title": "throughput",
-			"type": "timeseries"
-		},
-		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "s"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 59
-			},
-			"id": 188,
-			"options": {
-				"legend": {
-					"calcs": [
-						"max"
-					],
-					"displayMode": "table",
-					"placement": "right",
-					"sortBy": "Max",
-					"sortDesc": true
-				},
-				"tooltip": {
-					"mode": "single",
-					"sort": "none"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}} p50",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"editorMode": "code",
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type, job, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}} p99 - {{job}} @ {{instance}}",
-					"range": true,
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"editorMode": "code",
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_latency_bucket[1m])) by (le, job, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}} p90 - {{job}} @ {{instance}}",
-					"range": true,
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, type)(rate(object_store_operation_latency_sum[1m])) / sum by(le, type) (rate(object_store_operation_latency_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}} avg",
-					"refId": "D"
-				}
-			],
-			"title": "operation duration",
-			"type": "timeseries"
-		},
-		{
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "ops"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 67
-			},
-			"id": 192,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single",
-					"sort": "none"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"editorMode": "code",
-					"exemplar": true,
-					"expr": "sum(rate(object_store_operation_latency_count[1m])) by (le, type, job, instance)",
-					"interval": "",
-					"intervalFactor": 2,
-					"legendFormat": "{{type}} - {{job}} @ {{instance}}",
-					"range": true,
-					"refId": "A"
-				}
-			],
-			"title": "ops",
-			"type": "timeseries"
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 67
-			},
-			"hiddenSeries": false,
-			"id": 194,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
-					"format": "time_series",
-					"hide": false,
-					"interval": "",
-					"intervalFactor": 2,
-					"legendFormat": "{{type}}  p90",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}} p80",
-					"refId": "B"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "ops size",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:37",
-					"format": "decbytes",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:38",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"collapsed": false,
+			"collapsed": true,
 			"datasource": {
 				"type": "prometheus",
 				"uid": "risedev-prometheus"
@@ -2005,233 +2100,234 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 75
+				"y": 67
 			},
 			"id": 38,
-			"panels": [],
+			"panels": [
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 12
+					},
+					"hiddenSeries": false,
+					"id": 124,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "barrier_latency_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "barrier_latency_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "barrier_latency_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "rate(meta_barrier_duration_seconds_sum[1m]) / rate(meta_barrier_duration_seconds_count[1m])",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "barrier_latency_avg",
+							"refId": "D"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.999, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "barrier_latency_p999",
+							"refId": "E"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "barrier latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 12
+					},
+					"hiddenSeries": false,
+					"id": 16,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "rate(stream_source_output_rows_counts[15s])",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "source_id = {{source_id}}",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "source throughput",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:439",
+							"format": "rows/s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:440",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
 			"title": "Streaming",
 			"type": "row"
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 76
-			},
-			"hiddenSeries": false,
-			"id": 124,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
-					"interval": "",
-					"legendFormat": "barrier_latency_p50",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "barrier_latency_p90",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "barrier_latency_p99",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "rate(meta_barrier_duration_seconds_sum[1m]) / rate(meta_barrier_duration_seconds_count[1m])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "barrier_latency_avg",
-					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.999, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "barrier_latency_p999",
-					"refId": "E"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "barrier latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:437",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:438",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"datasource": {
-				"type": "prometheus",
-				"uid": "risedev-prometheus"
-			},
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 76
-			},
-			"hiddenSeries": false,
-			"id": 16,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "rate(stream_source_output_rows_counts[15s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "source_id = {{source_id}}",
-					"refId": "B"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "source throughput",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:439",
-					"format": "rows/s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:440",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
 		},
 		{
 			"collapsed": true,
@@ -2239,7 +2335,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 84
+				"y": 68
 			},
 			"id": 200,
 			"panels": [
@@ -2511,7 +2607,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 101
+				"y": 69
 			},
 			"id": 152,
 			"panels": [
@@ -2707,7 +2803,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 118
+				"y": 70
 			},
 			"id": 26,
 			"panels": [],
@@ -2774,7 +2870,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 119
+				"y": 71
 			},
 			"id": 30,
 			"options": {
@@ -2910,7 +3006,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 119
+				"y": 71
 			},
 			"id": 28,
 			"options": {
@@ -3144,7 +3240,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 119
+				"y": 79
 			},
 			"id": 128,
 			"options": {
@@ -3193,7 +3289,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 119
+				"y": 79
 			},
 			"hiddenSeries": false,
 			"id": 196,
@@ -3345,7 +3441,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 119
+				"y": 87
 			},
 			"id": 43,
 			"options": {
@@ -3453,7 +3549,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 119
+				"y": 87
 			},
 			"id": 40,
 			"options": {
@@ -3644,7 +3740,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 119
+				"y": 95
 			},
 			"id": 130,
 			"options": {
@@ -3784,7 +3880,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 119
+				"y": 95
 			},
 			"id": 32,
 			"options": {
@@ -3923,7 +4019,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 119
+				"y": 103
 			},
 			"id": 44,
 			"options": {
@@ -4015,7 +4111,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 119
+				"y": 103
 			},
 			"id": 45,
 			"options": {
@@ -4118,7 +4214,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 126
+				"y": 111
 			},
 			"id": 41,
 			"options": {
@@ -4246,7 +4342,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 126
+				"y": 111
 			},
 			"id": 132,
 			"options": {
@@ -4350,7 +4446,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 134
+				"y": 119
 			},
 			"id": 134,
 			"options": {
@@ -4478,7 +4574,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 134
+				"y": 119
 			},
 			"id": 48,
 			"options": {
@@ -4556,7 +4652,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 142
+				"y": 127
 			},
 			"id": 115,
 			"panels": [
@@ -5174,7 +5270,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 143
+				"y": 128
 			},
 			"id": 113,
 			"panels": [
@@ -5492,7 +5588,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 144
+				"y": 129
 			},
 			"id": 97,
 			"panels": [
@@ -6110,7 +6206,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 145
+				"y": 130
 			},
 			"id": 88,
 			"panels": [
@@ -6500,7 +6596,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 146
+				"y": 131
 			},
 			"id": 84,
 			"panels": [
@@ -6766,7 +6862,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 147
+				"y": 132
 			},
 			"id": 82,
 			"panels": [
@@ -7156,7 +7252,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 148
+				"y": 133
 			},
 			"id": 78,
 			"panels": [
@@ -7815,7 +7911,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 149
+				"y": 134
 			},
 			"id": 62,
 			"panels": [
