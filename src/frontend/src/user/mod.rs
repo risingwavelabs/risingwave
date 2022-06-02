@@ -17,7 +17,7 @@ use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::AuthInfo;
 use sha2::{Digest, Sha256};
 
-pub(crate) mod root_user;
+pub(crate) mod user_manager;
 pub(crate) mod user_service;
 
 pub type UserName = String;

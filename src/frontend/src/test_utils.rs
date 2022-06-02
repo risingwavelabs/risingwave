@@ -44,7 +44,7 @@ use crate::meta_client::FrontendMetaClient;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{FrontendEnv, OptimizerContext, SessionImpl};
-use crate::user::root_user::UserInfoManager;
+use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::FrontendOpts;
 

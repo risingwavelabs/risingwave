@@ -43,7 +43,7 @@ use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::test_utils::MockUserInfoWriter;
-use crate::user::root_user::UserInfoManager;
+use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::FrontendOpts;
 

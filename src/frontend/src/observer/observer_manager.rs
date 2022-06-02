@@ -29,7 +29,7 @@ use tokio::task::JoinHandle;
 use crate::catalog::root_catalog::Catalog;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::HummockSnapshotManagerRef;
-use crate::user::root_user::UserInfoManager;
+use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
 
 /// `ObserverManager` is used to update data based on notification from meta.

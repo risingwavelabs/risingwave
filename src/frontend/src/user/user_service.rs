@@ -22,7 +22,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
-use crate::user::root_user::UserInfoManager;
+use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
 
 pub type UserInfoReadGuard = ArcRwLockReadGuard<RawRwLock, UserInfoManager>;
