@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod my_stats;
-pub mod object_metrics;
 
 use prometheus::core::{AtomicU64, Collector, GenericCounter, GenericCounterVec, Metric};
 use prometheus::{Histogram, HistogramVec};

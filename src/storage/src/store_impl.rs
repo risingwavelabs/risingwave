@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::object::{parse_object_store, HybridObjectStore, ObjectStoreImpl};
+use risingwave_object_store::object::{parse_object_store, HybridObjectStore, ObjectStoreImpl};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;

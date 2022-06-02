@@ -49,7 +49,6 @@ pub mod collection;
 pub mod config;
 pub mod hash;
 pub mod monitor;
-pub mod object;
 pub mod service;
 #[cfg(test)]
 pub mod test_utils;

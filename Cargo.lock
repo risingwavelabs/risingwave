@@ -3680,19 +3680,12 @@ dependencies = [
  "async-stream",
  "async-trait",
  "auto_enums",
- "aws-config",
- "aws-endpoint",
- "aws-sdk-s3",
- "aws-smithy-http",
- "aws-smithy-types",
- "aws-types",
  "byteorder",
  "bytes",
  "chrono",
  "comfy-table",
  "crc32fast",
  "either",
- "fail",
  "futures",
  "hyper",
  "itertools",
@@ -3714,7 +3707,6 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.3",
- "tempfile",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -3736,6 +3728,7 @@ dependencies = [
  "madsim-tonic",
  "prometheus",
  "risingwave_common",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
@@ -4078,6 +4071,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_object_store"
+version = "0.1.7"
+dependencies = [
+ "async-trait",
+ "aws-config",
+ "aws-endpoint",
+ "aws-sdk-s3",
+ "aws-smithy-http",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fail",
+ "futures",
+ "itertools",
+ "madsim-tokio",
+ "prometheus",
+ "risingwave_common",
+ "spin 0.9.3",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "risingwave_pb"
 version = "0.1.0"
 dependencies = [
@@ -4251,6 +4268,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_meta",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "serde",

@@ -17,9 +17,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::object::{parse_object_store, ObjectStoreImpl};
 use risingwave_common::service::MetricsManager;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_object_store::object::{parse_object_store, ObjectStoreImpl};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
