@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{KeyRange, Level, LevelType, SstableInfo};
 
@@ -24,7 +25,6 @@ use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::key_range::KeyRangeExt;
 
 const MIN_COMPACTION_BYTES: u64 = 2 * 1024 * 1024; // 1MB
 
@@ -340,7 +340,7 @@ impl LevelCompactionPicker {
             target_level_ssts.tables.sort_by(|a, b| {
                 let r1 = a.key_range.as_ref().unwrap();
                 let r2 = b.key_range.as_ref().unwrap();
-                r1.cmp(r2)
+                r1.compare(r2)
             });
             return (select_level_ssts, target_level_ssts.tables);
         }

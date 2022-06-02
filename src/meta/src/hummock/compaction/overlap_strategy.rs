@@ -14,9 +14,8 @@
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::user_key;
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
-
-use crate::hummock::model::key_range::KeyRangeExt;
 
 pub trait OverlapInfo {
     fn check_overlap(&self, a: &SstableInfo) -> bool;

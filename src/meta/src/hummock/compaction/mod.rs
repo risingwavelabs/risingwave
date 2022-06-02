@@ -25,6 +25,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::Result;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockVersion, KeyRange, Level, TableSetStatistics,
@@ -36,7 +37,6 @@ use crate::hummock::compaction::overlap_strategy::{
 };
 use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
 use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::key_range::KeyRangeExt;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::Transactional;
 use crate::storage;
@@ -293,7 +293,7 @@ impl CompactStatus {
                 .sort_by(|sst1, sst2| {
                     let a = sst1.key_range.as_ref().unwrap();
                     let b = sst2.key_range.as_ref().unwrap();
-                    a.cmp(b)
+                    a.compare(b)
                 });
         }
         new_version

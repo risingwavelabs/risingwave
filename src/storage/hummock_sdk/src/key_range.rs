@@ -69,16 +69,65 @@ impl KeyRange {
     }
 }
 
-impl Ord for KeyRange {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match (self.inf, other.inf) {
-            (false, false) => VersionedComparator::compare_key(&self.left, &other.left)
-                .then_with(|| VersionedComparator::compare_key(&self.right, &other.right)),
+pub trait KeyRangeCommon {
+    fn full_key_overlap(&self, other: &Self) -> bool;
+    fn full_key_extend(&mut self, other: &Self);
+}
+
+#[macro_export]
+macro_rules! impl_key_range_common {
+    ($T:ty) => {
+        impl KeyRangeCommon for $T {
+            fn full_key_overlap(&self, other: &Self) -> bool {
+                self.inf
+                    || other.inf
+                    || (VersionedComparator::compare_key(&self.right, &other.left)
+                        != cmp::Ordering::Less
+                        && VersionedComparator::compare_key(&other.right, &self.left)
+                            != cmp::Ordering::Less)
+            }
+
+            fn full_key_extend(&mut self, other: &Self) {
+                if self.inf {
+                    return;
+                }
+                if other.inf {
+                    *self = Self::inf();
+                    return;
+                }
+                if VersionedComparator::compare_key(&other.left, &self.left) == cmp::Ordering::Less
+                {
+                    self.left = other.left.clone();
+                }
+                if VersionedComparator::compare_key(&other.right, &self.right)
+                    == cmp::Ordering::Greater
+                {
+                    self.right = other.right.clone();
+                }
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! key_range_cmp {
+    ($left:expr, $right:expr) => {{
+        match ($left.inf, $right.inf) {
+            (false, false) => VersionedComparator::compare_key(&$left.left, &$right.left)
+                .then_with(|| VersionedComparator::compare_key(&$left.right, &$right.right)),
 
             (false, true) => cmp::Ordering::Less,
             (true, false) => cmp::Ordering::Greater,
             (true, true) => cmp::Ordering::Equal,
         }
+    }};
+}
+
+impl_key_range_common!(KeyRange);
+
+impl Ord for KeyRange {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        key_range_cmp!(self, other)
     }
 }
 

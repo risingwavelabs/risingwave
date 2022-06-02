@@ -14,43 +14,20 @@
 
 use std::cmp;
 
-use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::KeyRange;
 
-/// Implements a subset methods of `hummock_sdk::KeyRange` for prost `KeyRange`
+use crate::key_range::KeyRangeCommon;
+use crate::{impl_key_range_common, key_range_cmp, VersionedComparator};
+
+impl_key_range_common!(KeyRange);
+
 pub trait KeyRangeExt {
-    fn full_key_overlap(&self, other: &Self) -> bool;
-    fn full_key_extend(&mut self, other: &Self);
     fn inf() -> Self;
     fn new(left: Vec<u8>, right: Vec<u8>) -> Self;
-    fn cmp(&self, other: &Self) -> cmp::Ordering;
+    fn compare(&self, other: &Self) -> cmp::Ordering;
 }
 
 impl KeyRangeExt for KeyRange {
-    fn full_key_overlap(&self, other: &Self) -> bool {
-        self.inf
-            || other.inf
-            || (VersionedComparator::compare_key(&self.right, &other.left) != cmp::Ordering::Less
-                && VersionedComparator::compare_key(&other.right, &self.left)
-                    != cmp::Ordering::Less)
-    }
-
-    fn full_key_extend(&mut self, other: &Self) {
-        if self.inf {
-            return;
-        }
-        if other.inf {
-            *self = Self::inf();
-            return;
-        }
-        if VersionedComparator::compare_key(&other.left, &self.left) == cmp::Ordering::Less {
-            self.left = other.left.clone();
-        }
-        if VersionedComparator::compare_key(&other.right, &self.right) == cmp::Ordering::Greater {
-            self.right = other.right.clone();
-        }
-    }
-
     fn inf() -> Self {
         Self {
             left: vec![],
@@ -67,15 +44,8 @@ impl KeyRangeExt for KeyRange {
         }
     }
 
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match (self.inf, other.inf) {
-            (false, false) => VersionedComparator::compare_key(&self.left, &other.left)
-                .then_with(|| VersionedComparator::compare_key(&self.right, &other.right)),
-
-            (false, true) => cmp::Ordering::Less,
-            (true, false) => cmp::Ordering::Greater,
-            (true, true) => cmp::Ordering::Equal,
-        }
+    fn compare(&self, other: &Self) -> cmp::Ordering {
+        key_range_cmp!(self, other)
     }
 }
 
@@ -83,10 +53,11 @@ impl KeyRangeExt for KeyRange {
 mod tests {
     use std::cmp;
 
-    use risingwave_hummock_sdk::key::key_with_epoch;
     use risingwave_pb::hummock::KeyRange;
 
-    use crate::hummock::model::key_range::KeyRangeExt;
+    use crate::key::key_with_epoch;
+    use crate::key_range::KeyRangeCommon;
+    use crate::prost_key_range::KeyRangeExt;
 
     #[test]
     fn test_cmp() {
@@ -107,19 +78,19 @@ mod tests {
         let kr1 = KeyRange::new(a2.clone(), a1.clone());
         let kr2 = KeyRange::new(a2, b1.clone());
         let kr3 = KeyRange::new(a1, b1);
-        assert_eq!(kr1.cmp(&kr1), cmp::Ordering::Equal);
-        assert_eq!(kr2.cmp(&kr2), cmp::Ordering::Equal);
-        assert_eq!(kr3.cmp(&kr3), cmp::Ordering::Equal);
-        assert_eq!(kr1.cmp(&kr2), cmp::Ordering::Less);
-        assert_eq!(kr1.cmp(&kr3), cmp::Ordering::Less);
-        assert_eq!(kr2.cmp(&kr3), cmp::Ordering::Less);
-        assert_eq!(kr2.cmp(&kr1), cmp::Ordering::Greater);
-        assert_eq!(kr3.cmp(&kr1), cmp::Ordering::Greater);
-        assert_eq!(kr3.cmp(&kr2), cmp::Ordering::Greater);
+        assert_eq!(kr1.compare(&kr1), cmp::Ordering::Equal);
+        assert_eq!(kr2.compare(&kr2), cmp::Ordering::Equal);
+        assert_eq!(kr3.compare(&kr3), cmp::Ordering::Equal);
+        assert_eq!(kr1.compare(&kr2), cmp::Ordering::Less);
+        assert_eq!(kr1.compare(&kr3), cmp::Ordering::Less);
+        assert_eq!(kr2.compare(&kr3), cmp::Ordering::Less);
+        assert_eq!(kr2.compare(&kr1), cmp::Ordering::Greater);
+        assert_eq!(kr3.compare(&kr1), cmp::Ordering::Greater);
+        assert_eq!(kr3.compare(&kr2), cmp::Ordering::Greater);
 
         let kr_inf = KeyRange::inf();
-        assert_eq!(kr_inf.cmp(&kr_inf), cmp::Ordering::Equal);
-        assert_eq!(kr1.cmp(&kr_inf), cmp::Ordering::Less);
+        assert_eq!(kr_inf.compare(&kr_inf), cmp::Ordering::Equal);
+        assert_eq!(kr1.compare(&kr_inf), cmp::Ordering::Less);
     }
 
     #[test]
@@ -164,15 +135,15 @@ mod tests {
 
         let mut kr = kr1;
         kr.full_key_extend(&kr2);
-        assert_eq!(kr.cmp(&kr2), cmp::Ordering::Equal);
+        assert_eq!(kr.compare(&kr2), cmp::Ordering::Equal);
         kr.full_key_extend(&kr3);
-        assert_eq!(kr.cmp(&KeyRange::new(a2, b1)), cmp::Ordering::Equal);
+        assert_eq!(kr.compare(&KeyRange::new(a2, b1)), cmp::Ordering::Equal);
 
         let kr_inf = KeyRange::inf();
         kr.full_key_extend(&kr_inf);
-        assert_eq!(kr.cmp(&kr_inf), cmp::Ordering::Equal);
+        assert_eq!(kr.compare(&kr_inf), cmp::Ordering::Equal);
 
         kr.full_key_extend(&kr_inf);
-        assert_eq!(kr.cmp(&kr_inf), cmp::Ordering::Equal);
+        assert_eq!(kr.compare(&kr_inf), cmp::Ordering::Equal);
     }
 }
