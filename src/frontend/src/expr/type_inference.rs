@@ -141,7 +141,7 @@ fn build_binary_atm_funcs(
     }
 }
 
-/// Same as build_binary_atm_funcs except the RHS are limited to Int16 and Int32
+// Same as build_binary_atm_funcs except the RHS are limited to Int16 and Int32
 fn build_binary_shift_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     exprs: &[ExprType],
@@ -149,8 +149,8 @@ fn build_binary_shift_funcs(
     argsr: &[DataTypeName],
 ) {
     for e in exprs {
-        for (li, lt) in argsl.iter().enumerate() {
-            for (ri, rt) in argsr.iter().enumerate() {
+        for (_li, lt) in argsl.iter().enumerate() {
+            for (_ri, rt) in argsr.iter().enumerate() {
                 map.insert(FuncSign::new(*e, vec![*lt, *rt]), *lt);
             }
         }
