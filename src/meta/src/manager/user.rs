@@ -13,16 +13,18 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use risingwave_common::catalog::{DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_PASSWORD};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{PrivilegeWithGrantOption, Target};
 use risingwave_pb::user::{AuthInfo, GrantPrivilege, UserInfo};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, NotificationVersion};
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
@@ -36,6 +38,8 @@ pub struct UserManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     core: Mutex<HashMap<UserName, UserInfo>>,
 }
+
+pub type UserInfoManagerRef<S> = Arc<UserManager<S>>;
 
 impl<S: MetaStore> UserManager<S> {
     pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
@@ -72,12 +76,18 @@ impl<S: MetaStore> UserManager<S> {
         Ok(())
     }
 
+    /// Used in `NotificationService::subscribe`.
+    /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
+    pub async fn get_user_core_guard(&self) -> MutexGuard<'_, HashMap<UserName, UserInfo>> {
+        self.core.lock().await
+    }
+
     pub async fn list_users(&self) -> Result<Vec<UserInfo>> {
         let core = self.core.lock().await;
         Ok(core.values().cloned().collect())
     }
 
-    pub async fn create_user(&self, user: &UserInfo) -> Result<()> {
+    pub async fn create_user(&self, user: &UserInfo) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         if core.contains_key(&user.name) {
             return Err(RwError::from(InternalError(format!(
@@ -87,8 +97,13 @@ impl<S: MetaStore> UserManager<S> {
         }
         user.insert(self.env.meta_store()).await?;
         core.insert(user.name.clone(), user.clone());
-        // TODO: add notification support.
-        Ok(())
+
+        let version = self
+            .env
+            .notification_manager()
+            .notify_frontend(Operation::Add, Info::User(user.to_owned()))
+            .await;
+        Ok(version)
     }
 
     pub async fn get_user(&self, user_name: &UserName) -> Result<UserInfo> {
@@ -99,7 +114,7 @@ impl<S: MetaStore> UserManager<S> {
             .ok_or_else(|| RwError::from(InternalError(format!("User {} not found", user_name))))
     }
 
-    pub async fn drop_user(&self, user_name: &UserName) -> Result<()> {
+    pub async fn drop_user(&self, user_name: &UserName) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.contains_key(user_name) {
             return Err(RwError::from(InternalError(format!(
@@ -122,14 +137,18 @@ impl<S: MetaStore> UserManager<S> {
 
         // TODO: add more check, like whether he owns any database/schema/table/source.
         UserInfo::delete(self.env.meta_store(), user_name).await?;
-        core.remove(user_name);
+        let user = core.remove(user_name).unwrap();
 
-        // TODO: add notification support.
-        Ok(())
+        let version = self
+            .env
+            .notification_manager()
+            .notify_frontend(Operation::Delete, Info::User(user))
+            .await;
+        Ok(version)
     }
 }
 
-/// Defines privilege grant for a user.
+// Defines privilege grant for a user.
 impl<S: MetaStore> UserManager<S> {
     // Merge new granted privilege.
     #[inline(always)]
@@ -162,7 +181,7 @@ impl<S: MetaStore> UserManager<S> {
         &self,
         user_name: &UserName,
         new_grant_privileges: &[GrantPrivilege],
-    ) -> Result<()> {
+    ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let mut user = core
             .get(user_name)
@@ -189,8 +208,13 @@ impl<S: MetaStore> UserManager<S> {
         });
 
         user.insert(self.env.meta_store()).await?;
-        core.insert(user_name.clone(), user);
-        Ok(())
+        core.insert(user_name.clone(), user.clone());
+        let version = self
+            .env
+            .notification_manager()
+            .notify_frontend(Operation::Update, Info::User(user))
+            .await;
+        Ok(version)
     }
 
     // Revoke privilege from target.
@@ -232,7 +256,7 @@ impl<S: MetaStore> UserManager<S> {
         user_name: &UserName,
         revoke_grant_privileges: &[GrantPrivilege],
         revoke_grant_option: bool,
-    ) -> Result<()> {
+    ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let mut user = core
             .get(user_name)
@@ -269,8 +293,13 @@ impl<S: MetaStore> UserManager<S> {
         }
 
         user.insert(self.env.meta_store()).await?;
-        core.insert(user_name.clone(), user);
-        Ok(())
+        core.insert(user_name.clone(), user.clone());
+        let version = self
+            .env
+            .notification_manager()
+            .notify_frontend(Operation::Update, Info::User(user))
+            .await;
+        Ok(version)
     }
 
     /// `release_privileges` removes the privileges with given target from all users, it will be
@@ -291,7 +320,11 @@ impl<S: MetaStore> UserManager<S> {
         }
         self.env.meta_store().txn(transaction).await?;
         for user in users_need_update {
-            core.insert(user.name.clone(), user);
+            core.insert(user.name.clone(), user.clone());
+            self.env
+                .notification_manager()
+                .notify_frontend(Operation::Update, Info::User(user))
+                .await;
         }
 
         Ok(())
