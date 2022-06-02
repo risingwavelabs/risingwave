@@ -607,7 +607,7 @@ mod tests {
         use DataType::*;
         let bitwise_exprs = vec![
             ExprType::BitwiseAnd,
-            ExprType::BitwiseNot,
+            ExprType::BitwiseOr,
             ExprType::BitwiseXor,
         ];
         let num_promote_table = vec![
