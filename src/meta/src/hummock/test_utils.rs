@@ -20,10 +20,10 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
 use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
-use crate::hummock::compaction::default_compaction_config;
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
@@ -156,13 +156,12 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
-    let config = CompactionConfig {
-        level0_tigger_file_numer: 2,
-        level0_tier_compact_file_number: 1,
-        min_compaction_bytes: 1,
-        max_bytes_for_level_base: 1,
-        ..default_compaction_config()
-    };
+    let config = CompactionConfigBuilder::new()
+        .level0_tigger_file_numer(2)
+        .level0_tier_compact_file_number(1)
+        .min_compaction_bytes(1)
+        .max_bytes_for_level_base(1)
+        .build();
     let compaction_group_manager =
         CompactionGroupManager::new_with_config(env.clone(), config.clone())
             .await

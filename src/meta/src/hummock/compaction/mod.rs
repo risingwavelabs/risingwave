@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod compaction_config;
 mod compaction_picker;
 mod level_selector;
 mod overlap_strategy;
@@ -27,23 +28,15 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, CompactionConfig, HummockVersion, Level, TableSetStatistics,
+    CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
 };
 
+use crate::hummock::compaction::compaction_config::CompactionConfig;
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
     HashStrategy, OverlapStrategy, RangeOverlapStrategy,
 };
 use crate::hummock::level_handler::LevelHandler;
-
-const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4GB
-const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
-const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
-
-// decrease this configure when the generation of checkpoint barrier is not frequent.
-const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 16;
-
-const MAX_LEVEL: u64 = 6;
 
 pub struct CompactStatus {
     compaction_group_id: CompactionGroupId,
@@ -87,19 +80,6 @@ pub struct SearchResult {
     split_ranges: Vec<KeyRange>,
 }
 
-pub fn default_compaction_config() -> CompactionConfig {
-    CompactionConfig {
-        max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE,
-        max_bytes_for_level_multiplier: 10,
-        max_level: MAX_LEVEL,
-        max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
-        min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
-        level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
-        level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
-        compaction_mode: CompactionMode::ConsistentHash as i32,
-    }
-}
-
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
     match compaction_mode {
         CompactionMode::Range => Arc::new(RangeOverlapStrategy::default()),
@@ -113,10 +93,10 @@ impl CompactStatus {
         config: Arc<CompactionConfig>,
     ) -> CompactStatus {
         let mut level_handlers = vec![];
-        for level in 0..=config.max_level {
+        for level in 0..=config.inner().max_level {
             level_handlers.push(LevelHandler::new(level as u32));
         }
-        let overlap_strategy = create_overlap_strategy(config.compaction_mode());
+        let overlap_strategy = create_overlap_strategy(config.inner().compaction_mode());
         CompactStatus {
             compaction_group_id,
             level_handlers,

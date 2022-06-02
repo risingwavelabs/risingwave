@@ -22,14 +22,13 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::Level;
 
+use crate::hummock::compaction::compaction_config::CompactionConfig;
 use crate::hummock::compaction::compaction_picker::{CompactionPicker, MinOverlappingPicker};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::tier_compaction_picker::{
     LevelCompactionPicker, TierCompactionPicker,
 };
-use crate::hummock::compaction::{
-    create_overlap_strategy, default_compaction_config, CompactionConfig, SearchResult,
-};
+use crate::hummock::compaction::{create_overlap_strategy, SearchResult};
 use crate::hummock::level_handler::LevelHandler;
 
 const SCORE_BASE: u64 = 100;
@@ -67,8 +66,8 @@ pub struct DynamicLevelSelector {
 
 impl Default for DynamicLevelSelector {
     fn default() -> Self {
-        let config = Arc::new(default_compaction_config());
-        let overlap_strategy = create_overlap_strategy(config.compaction_mode());
+        let config = Arc::new(CompactionConfig::default());
+        let overlap_strategy = create_overlap_strategy(config.inner().compaction_mode());
         DynamicLevelSelector::new(config, overlap_strategy)
     }
 }
@@ -133,20 +132,20 @@ impl DynamicLevelSelector {
         }
 
         ctx.level_max_bytes
-            .resize(self.config.max_level as usize + 1, u64::MAX);
+            .resize(self.config.inner().max_level as usize + 1, u64::MAX);
 
         if max_level_size == 0 {
             // Use the bottommost level.
-            ctx.base_level = self.config.max_level as usize;
+            ctx.base_level = self.config.inner().max_level as usize;
             return ctx;
         }
 
-        let base_bytes_max = std::cmp::max(self.config.max_bytes_for_level_base, l0_size);
-        let base_bytes_min = base_bytes_max / self.config.max_bytes_for_level_multiplier;
+        let base_bytes_max = std::cmp::max(self.config.inner().max_bytes_for_level_base, l0_size);
+        let base_bytes_min = base_bytes_max / self.config.inner().max_bytes_for_level_multiplier;
 
         let mut cur_level_size = max_level_size;
-        for _ in first_non_empty_level..self.config.max_level as usize {
-            cur_level_size /= self.config.max_bytes_for_level_multiplier;
+        for _ in first_non_empty_level..self.config.inner().max_level as usize {
+            cur_level_size /= self.config.inner().max_bytes_for_level_multiplier;
         }
 
         let base_level_size = if cur_level_size <= base_bytes_min {
@@ -159,14 +158,14 @@ impl DynamicLevelSelector {
             ctx.base_level = first_non_empty_level;
             while ctx.base_level > 1 && cur_level_size > base_bytes_max {
                 ctx.base_level -= 1;
-                cur_level_size /= self.config.max_bytes_for_level_multiplier;
+                cur_level_size /= self.config.inner().max_bytes_for_level_multiplier;
             }
             std::cmp::min(base_bytes_max, cur_level_size)
         };
 
-        let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
+        let level_multiplier = self.config.inner().max_bytes_for_level_multiplier as f64;
         let mut level_size = base_level_size;
-        for i in ctx.base_level..=self.config.max_level as usize {
+        for i in ctx.base_level..=self.config.inner().max_level as usize {
             // Don't set any level below base_bytes_max. Otherwise, the LSM can
             // assume an hourglass shape where L1+ sizes are smaller than L0. This
             // causes compaction scoring, which depends on level sizes, to favor L1+
@@ -185,7 +184,7 @@ impl DynamicLevelSelector {
         let mut ctx = self.calculate_level_base_size(levels);
 
         // The bottommost level can not be input level.
-        for level in &levels[..self.config.max_level as usize] {
+        for level in &levels[..self.config.inner().max_level as usize] {
             let level_idx = level.level_idx as usize;
             let mut total_size = 0;
             let mut idle_file_count = 0;
@@ -201,10 +200,12 @@ impl DynamicLevelSelector {
             if level_idx == 0 {
                 // trigger intra-l0 compaction at first when the number of files is too large.
                 let score = idle_file_count * SCORE_BASE
-                    / self.config.level0_tier_compact_file_number as u64;
+                    / self.config.inner().level0_tier_compact_file_number as u64;
                 ctx.score_levels.push((score, 0, 0));
-                let score = 2 * total_size * SCORE_BASE / self.config.max_bytes_for_level_base
-                    + idle_file_count * SCORE_BASE / self.config.level0_tigger_file_numer as u64;
+                let score = 2 * total_size * SCORE_BASE
+                    / self.config.inner().max_bytes_for_level_base
+                    + idle_file_count * SCORE_BASE
+                        / self.config.inner().level0_tigger_file_numer as u64;
                 ctx.score_levels.push((score, 0, ctx.base_level));
             } else {
                 ctx.score_levels.push((
@@ -263,6 +264,7 @@ pub mod tests {
     use risingwave_pb::hummock::{LevelType, SstableInfo};
 
     use super::*;
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::tier_compaction_picker::tests::generate_table;
 
@@ -286,16 +288,16 @@ pub mod tests {
 
     #[test]
     fn test_dynamic_level() {
-        let config = CompactionConfig {
-            max_bytes_for_level_base: 100,
-            max_level: 4,
-            max_bytes_for_level_multiplier: 5,
-            max_compaction_bytes: 0,
-            min_compaction_bytes: 1,
-            level0_tigger_file_numer: 1,
-            level0_tier_compact_file_number: 2,
-            compaction_mode: CompactionMode::Range as i32,
-        };
+        let config = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(100)
+            .max_level(4)
+            .max_bytes_for_level_multiplier(5)
+            .max_compaction_bytes(1)
+            .min_compaction_bytes(0)
+            .level0_tigger_file_numer(1)
+            .level0_tier_compact_file_number(2)
+            .compaction_mode(CompactionMode::Range as i32)
+            .build();
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
         let mut levels = vec![
@@ -364,16 +366,16 @@ pub mod tests {
 
     #[test]
     fn test_pick_compaction() {
-        let mut config = CompactionConfig {
-            max_bytes_for_level_base: 200,
-            max_level: 4,
-            max_bytes_for_level_multiplier: 5,
-            max_compaction_bytes: 10000,
-            min_compaction_bytes: 200,
-            level0_tigger_file_numer: 8,
-            level0_tier_compact_file_number: 4,
-            compaction_mode: CompactionMode::Range as i32,
-        };
+        let config = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(200)
+            .max_level(4)
+            .max_bytes_for_level_multiplier(5)
+            .max_compaction_bytes(10000)
+            .min_compaction_bytes(200)
+            .level0_tigger_file_numer(8)
+            .level0_tier_compact_file_number(4)
+            .compaction_mode(CompactionMode::Range as i32)
+            .build();
         let mut levels = vec![
             Level {
                 level_idx: 0,
@@ -415,9 +417,11 @@ pub mod tests {
         assert_eq!(compaction.select_level.table_infos.len(), 10);
         assert_eq!(compaction.target_level.table_infos.len(), 0);
 
-        config.min_compaction_bytes = 1;
-        config.max_bytes_for_level_base = 100;
-        config.level0_tigger_file_numer = 8;
+        let config = CompactionConfigBuilder::new_with(config)
+            .min_compaction_bytes(1)
+            .max_bytes_for_level_base(100)
+            .level0_tigger_file_numer(8)
+            .build();
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
