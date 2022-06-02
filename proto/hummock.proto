@@ -36,6 +36,7 @@ message Level {
   uint32 level_idx = 1;
   LevelType level_type = 2;
   repeated SstableInfo table_infos = 3;
+  uint64 total_file_size = 4;
 }
 
 message UncommittedEpoch {

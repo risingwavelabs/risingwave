@@ -122,17 +122,13 @@ impl DynamicLevelSelector {
 
         let mut l0_size = 0;
         for level in levels.iter() {
-            let mut total_file_size = 0;
-            for table in &level.table_infos {
-                total_file_size += table.file_size;
-            }
             if level.level_idx > 0 {
-                if total_file_size > 0 && first_non_empty_level == 0 {
+                if level.total_file_size > 0 && first_non_empty_level == 0 {
                     first_non_empty_level = level.level_idx as usize;
                 }
-                max_level_size = std::cmp::max(max_level_size, total_file_size);
+                max_level_size = std::cmp::max(max_level_size, level.total_file_size);
             } else {
-                l0_size = total_file_size;
+                l0_size = level.total_file_size;
             }
         }
 
@@ -288,6 +284,16 @@ pub mod tests {
         tables
     }
 
+    fn generate_level(level_idx: u32, table_infos: Vec<SstableInfo>) -> Level {
+        let total_file_size = table_infos.iter().map(|sst| sst.file_size).sum();
+        Level {
+            level_idx,
+            level_type: LevelType::Nonoverlapping as i32,
+            table_infos,
+            total_file_size,
+        }
+    }
+
     #[test]
     fn test_dynamic_level() {
         let config = CompactionConfig {
@@ -307,27 +313,12 @@ pub mod tests {
                 level_idx: 0,
                 level_type: LevelType::Overlapping as i32,
                 table_infos: vec![],
+                total_file_size: 0,
             },
-            Level {
-                level_idx: 1,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: vec![],
-            },
-            Level {
-                level_idx: 2,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: generate_tables(0..5, 0..1000, 3, 10),
-            },
-            Level {
-                level_idx: 3,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: generate_tables(5..10, 0..1000, 2, 50),
-            },
-            Level {
-                level_idx: 4,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: generate_tables(10..15, 0..1000, 1, 200),
-            },
+            generate_level(1, vec![]),
+            generate_level(2, generate_tables(0..5, 0..1000, 3, 10)),
+            generate_level(3, generate_tables(5..10, 0..1000, 2, 50)),
+            generate_level(4, generate_tables(10..15, 0..1000, 1, 200)),
         ];
         let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 2);
@@ -338,6 +329,12 @@ pub mod tests {
         levels[4]
             .table_infos
             .append(&mut generate_tables(15..20, 2000..3000, 1, 400));
+        levels[4].total_file_size = levels[4]
+            .table_infos
+            .iter()
+            .map(|sst| sst.file_size)
+            .sum::<u64>();
+
         let ctx = selector.calculate_level_base_size(&levels);
         // data size increase, so we need increase one level to place more data.
         assert_eq!(ctx.base_level, 1);
@@ -350,6 +347,12 @@ pub mod tests {
         levels[0]
             .table_infos
             .append(&mut generate_tables(20..26, 0..1000, 1, 100));
+        levels[0].total_file_size = levels[0]
+            .table_infos
+            .iter()
+            .map(|sst| sst.file_size)
+            .sum::<u64>();
+
         let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 2);
         assert_eq!(ctx.level_max_bytes[2], 600);
@@ -357,7 +360,14 @@ pub mod tests {
         assert_eq!(ctx.level_max_bytes[4], 3025);
 
         levels[0].table_infos.clear();
+        levels[0].total_file_size = 0;
         levels[1].table_infos = generate_tables(26..32, 0..1000, 1, 100);
+        levels[1].total_file_size = levels[1]
+            .table_infos
+            .iter()
+            .map(|sst| sst.file_size)
+            .sum::<u64>();
+
         let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 1);
         assert_eq!(ctx.level_max_bytes[1], 100);
@@ -383,27 +393,12 @@ pub mod tests {
                 level_idx: 0,
                 level_type: LevelType::Overlapping as i32,
                 table_infos: generate_tables(15..25, 0..600, 3, 10),
+                total_file_size: 0,
             },
-            Level {
-                level_idx: 1,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: vec![],
-            },
-            Level {
-                level_idx: 2,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: generate_tables(0..5, 0..1000, 3, 10),
-            },
-            Level {
-                level_idx: 3,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: generate_tables(5..10, 0..1000, 2, 50),
-            },
-            Level {
-                level_idx: 4,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: generate_tables(10..15, 0..1000, 1, 200),
-            },
+            generate_level(1, vec![]),
+            generate_level(2, generate_tables(0..5, 0..1000, 3, 10)),
+            generate_level(3, generate_tables(5..10, 0..1000, 2, 50)),
+            generate_level(4, generate_tables(10..15, 0..1000, 1, 200)),
         ];
 
         let selector = DynamicLevelSelector::new(
