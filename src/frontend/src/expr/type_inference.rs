@@ -141,6 +141,21 @@ fn build_binary_atm_funcs(
     }
 }
 
+/// Same as build_binary_atm_funcs except the RHS are limited to Int16 and Int32
+fn build_binary_shift_funcs(
+    map: &mut HashMap<FuncSign, DataTypeName>,
+    exprs: &[ExprType],
+    args: &[DataTypeName],
+) {
+    rhs = [T::Int16, T::Int32];
+    for e in exprs {
+        for (li, lt) in args.iter().enumerate() {
+            for (ri, rt) in rhs.iter().enumerate() {
+                map.insert(FuncSign::new(*e, vec![*lt, *rt]), *lt);
+            }
+        }
+    }
+}
 fn build_unary_atm_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     exprs: &[ExprType],
@@ -264,14 +279,23 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     build_binary_atm_funcs(
         &mut map,
         &[
-            E::BitwiseShiftLeft,
-            E::BitwiseShiftRight,
             E::BitwiseAnd,
             E::BitwiseOr,
             E::BitwiseXor,
         ],
         &[T::Int16, T::Int32, T::Int64],
     );
+
+    build_binary_shift_funcs(
+        &mut map,
+        &[
+            E::BitwiseShiftLeft, 
+            E::BitwiseShiftRight
+        ],
+        &[T::Int16, T::Int32, T::Int64],
+    );
+
+
     build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
 
     build_round_funcs(&mut map, E::Round);
