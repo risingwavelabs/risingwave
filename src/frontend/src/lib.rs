@@ -43,7 +43,7 @@ pub mod observer;
 pub mod optimizer;
 pub mod planner;
 #[allow(dead_code)]
-mod scheduler;
+pub mod scheduler;
 pub mod session;
 pub mod stream_fragmenter;
 pub mod utils;
