@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_batch::executor::BatchMetrics;
-use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
+use risingwave_batch::task::{BatchTaskContext, BatchTaskContextType, TaskOutput, TaskOutputId};
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_source::SourceManagerRef;
@@ -42,6 +42,10 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn stats(&self) -> Arc<BatchMetrics> {
+        todo!()
+    }
+
+    fn context_type(&self) -> BatchTaskContextType {
         todo!()
     }
 }

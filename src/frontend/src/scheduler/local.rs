@@ -82,6 +82,10 @@ impl LocalQueryExecution {
     /// We can convert a query to plan fragment since in local execution mode, there are at most
     /// two layers, e.g. root stage and its optional input stage. If it does have input stage, it
     /// will be embedded in exchange source, so we can always convert a query into a plan fragment.
+    ///
+    /// We remark that the boundary to determine which part should be executed on the frontend and
+    /// which part should be executed on the backend is the first exchange operator when looking
+    /// from the the root of the plan to the leaves.
     fn create_plan_fragment(&self) -> Result<PlanFragment> {
         let stage = self
             .query
@@ -90,11 +94,13 @@ impl LocalQueryExecution {
             .get(&self.query.root_stage_id())
             .unwrap();
         let plan_node_prost = self.convert_plan_node(&*stage.root)?;
-        let exchange_info = stage.exchange_info.clone();
 
         Ok(PlanFragment {
             root: Some(plan_node_prost),
-            exchange_info: Some(exchange_info),
+            // Intentionally leave this as `None` as this is the last stage for the frontend
+            // to really get the output of computation, which is single distribution
+            // but we do not need to explicitly specify this.
+            exchange_info: None,
         })
     }
 
