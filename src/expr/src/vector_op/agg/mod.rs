@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod aggregator;
+mod approx_count_distinct;
 mod count_star;
 mod functions;
 mod general_agg;
