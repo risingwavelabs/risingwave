@@ -67,7 +67,7 @@ pub trait SplitReader: Sized {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
 pub enum SplitImpl {
     Kafka(KafkaSplit),
     Pulsar(PulsarSplit),

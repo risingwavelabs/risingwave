@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use prost::Message;
-use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::{HummockContextRefId, HummockPinnedSnapshot};
+use risingwave_hummock_sdk::{HummockContextId, HummockEpoch};
+use risingwave_pb::hummock::HummockPinnedSnapshot;
 
 use crate::model::MetadataModel;
 
 /// Column family name for hummock pinned snapshot
-/// `cf(hummock_pinned_snapshot)`: `HummockContextRefId` -> `HummockPinnedSnapshot`
+/// `cf(hummock_pinned_snapshot)`: `HummockContextId` -> `HummockPinnedSnapshot`
 const HUMMOCK_PINNED_SNAPSHOT_CF_NAME: &str = "cf/hummock_pinned_snapshot";
 
 /// `HummockPinnedSnapshot` tracks pinned snapshots by given context id.
 impl MetadataModel for HummockPinnedSnapshot {
-    type KeyType = HummockContextRefId;
+    type KeyType = HummockContextId;
     type ProstType = HummockPinnedSnapshot;
 
     fn cf_name() -> String {
@@ -44,9 +44,7 @@ impl MetadataModel for HummockPinnedSnapshot {
     }
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(HummockContextRefId {
-            id: self.context_id,
-        })
+        Ok(self.context_id)
     }
 }
 

@@ -20,9 +20,10 @@ use prometheus::{
     register_histogram_with_registry, register_int_counter_vec_with_registry,
     register_int_counter_with_registry, Histogram, HistogramVec, IntGauge, Opts, Registry,
 };
+use risingwave_common::monitor::Print;
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use super::{monitor_process, Print};
+use super::monitor_process;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{BlockCache, LruCache, Sstable};
 

@@ -26,7 +26,7 @@ use risingwave_pb::batch_plan::{
     TaskId as TaskIdProst, TaskOutputId,
 };
 use risingwave_pb::common::HostAddress;
-use risingwave_rpc_client::{ComputeClient, ComputeClientPoolRef};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
