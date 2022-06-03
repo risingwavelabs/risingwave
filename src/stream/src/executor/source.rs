@@ -139,7 +139,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
 struct SourceReader {
     /// The reader for stream source.
-    stream_reader: Box<dyn StreamSourceReader>,
+    stream_reader: Box<SourceStreamReaderImpl>,
     /// The reader for barrier.
     barrier_receiver: UnboundedReceiver<Barrier>,
     /// Expected barrier latency in ms. If there are no barrier within the expected barrier
@@ -153,46 +153,28 @@ impl SourceReader {
         mut stream_reader: Box<dyn StreamSourceReader>,
         notifier: Arc<Notify>,
         expected_barrier_latency_ms: u64,
-        mut inject_source_rx: UnboundedReceiver<Box<dyn StreamSourceReader>>,
+        mut inject_source_rx: UnboundedReceiver<Box<SourceStreamReaderImpl>>,
     ) {
         'outer: loop {
             let now = Instant::now();
 
             // We allow data to flow for `expected_barrier_latency_ms` milliseconds.
             while now.elapsed().as_millis() < expected_barrier_latency_ms as u128 {
-                let x = tokio::select! {
-                    biased;
-                    inject_source = inject_source_rx.recv().await => { if let Some(reader) = inject_source {stream_reader = reader; None } }
-                    chunk = stream_reader.next().await => {
-                        match chunk {
-                            Ok(c) => Some(c),
-                            Err(e) => {
-                                // TODO: report this error to meta service to mark the actors failed.
-                                error!("hang up stream reader due to polling error: {}", e);
-
-                                // Drop the reader, then the error might be caught by the writer side.
-                                drop(stream_reader);
-                                // Then hang up this stream by breaking the loop.
-                                break 'outer;
-                            }
-                        }
-                    }
-                };
-                if let Some(chunk) = x {
-                    yield chunk;
+                if let Ok(reader) = inject_source_rx.try_recv() {
+                    stream_reader = reader;
                 }
-                // match stream_reader.next().await {
-                //     Ok(chunk) => yield chunk,
-                //     Err(e) => {
-                //         // TODO: report this error to meta service to mark the actors failed.
-                //         error!("hang up stream reader due to polling error: {}", e);
+                match stream_reader.next().await {
+                    Ok(chunk) => yield chunk,
+                    Err(e) => {
+                        // TODO: report this error to meta service to mark the actors failed.
+                        error!("hang up stream reader due to polling error: {}", e);
 
-                //         // Drop the reader, then the error might be caught by the writer side.
-                //         drop(stream_reader);
-                //         // Then hang up this stream by breaking the loop.
-                //         break 'outer;
-                //     }
-                // }
+                        // Drop the reader, then the error might be caught by the writer side.
+                        drop(stream_reader);
+                        // Then hang up this stream by breaking the loop.
+                        break 'outer;
+                    }
+                }
             }
 
             // Here we consider two cases:
@@ -220,7 +202,7 @@ impl SourceReader {
 
     fn into_stream(
         self,
-        inject_source: UnboundedReceiver<Box<dyn StreamSourceReader>>,
+        inject_source: UnboundedReceiver<Box<SourceStreamReaderImpl>>,
     ) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunkWithState>>> {
         let notifier = Arc::new(Notify::new());
 
@@ -306,7 +288,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn build_stream_source_reader(
         &mut self,
         state: ConnectorState,
-    ) -> Result<Box<dyn StreamSourceReader>> {
+    ) -> Result<Box<SourceStreamReaderImpl>> {
         let reader = match self.source_desc.source.as_ref() {
             SourceImpl::TableV2(t) => t
                 .stream_reader(self.column_ids.clone())
@@ -366,7 +348,7 @@ impl<S: StateStore> SourceExecutor<S> {
         yield Message::Barrier(barrier);
 
         let (inject_source_tx, inject_source_rx) =
-            unbounded_channel::<Box<dyn StreamSourceReader>>();
+            unbounded_channel::<Box<SourceStreamReaderImpl>>();
         #[for_await]
         for msg in reader.into_stream(inject_source_rx) {
             match msg {
@@ -389,10 +371,13 @@ impl<S: StateStore> SourceExecutor<S> {
                                                 .build_stream_source_reader(Some(target_state))
                                                 .await
                                                 .map_err(StreamExecutorError::source_error)?;
-                                            inject_source_tx
-                                                .send(reader)
-                                                .to_rw_result()
-                                                .map_err(StreamExecutorError::source_error)?;
+                                            inject_source_tx.send(reader).to_rw_result().map_err(
+                                                |e| {
+                                                    StreamExecutorError::channel_closed(
+                                                        e.to_string(),
+                                                    )
+                                                },
+                                            )?;
                                         }
                                     }
                                 }
