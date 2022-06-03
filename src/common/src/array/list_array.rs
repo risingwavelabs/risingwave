@@ -285,7 +285,7 @@ impl ListArray {
 
 #[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
 pub struct ListValue {
-    values: Vec<Datum>,
+    values: Box<[Datum]>,
 }
 
 impl fmt::Display for ListValue {
@@ -313,7 +313,9 @@ impl Ord for ListValue {
 
 impl ListValue {
     pub fn new(values: Vec<Datum>) -> Self {
-        Self { values }
+        Self {
+            values: values.into_boxed_slice(),
+        }
     }
 
     pub fn values(&self) -> &[Datum] {
