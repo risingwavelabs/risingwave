@@ -239,10 +239,7 @@ macro_rules! impl_take_snapshot {
 
 impl<S: StateStore> SourceExecutor<S> {
     fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
-        // this case can never reach because we do not support split number reduction
-        if rhs.is_none() {
-            unreachable!()
-        }
+        // rhs can not be None because we do not support split number reduction
 
         let split_change = rhs.unwrap();
         let mut target_state: Vec<SplitImpl> = Vec::with_capacity(split_change.len());
