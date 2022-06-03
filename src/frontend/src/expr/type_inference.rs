@@ -141,21 +141,6 @@ fn build_binary_atm_funcs(
     }
 }
 
-// Same as build_binary_atm_funcs except the RHS are limited to Int16 and Int32
-fn build_binary_shift_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
-    exprs: &[ExprType],
-    argsl: &[DataTypeName],
-    argsr: &[DataTypeName],
-) {
-    for e in exprs {
-        for (_li, lt) in argsl.iter().enumerate() {
-            for (_ri, rt) in argsr.iter().enumerate() {
-                map.insert(FuncSign::new(*e, vec![*lt, *rt]), *lt);
-            }
-        }
-    }
-}
 fn build_unary_atm_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     exprs: &[ExprType],
@@ -273,18 +258,24 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
 
     // build bitwise operator
     // bitwise operator
+    let integral_types = [T::Int16, T::Int32, T::Int64]; // reusable for and/or/xor/not
+
     build_binary_atm_funcs(
         &mut map,
         &[E::BitwiseAnd, E::BitwiseOr, E::BitwiseXor],
-        &[T::Int16, T::Int32, T::Int64],
+        &integral_types,
     );
 
-    build_binary_shift_funcs(
-        &mut map,
+    // Shift Operator is not using `build_binary_atm_funcs` because
+    // allowed rhs is different from allowed lhs
+    // return type is lhs rather than larger of the two
+    for (e, lt, rt) in iproduct!(
         &[E::BitwiseShiftLeft, E::BitwiseShiftRight],
-        &[T::Int16, T::Int32, T::Int64],
-        &[T::Int16, T::Int32],
-    );
+        &integral_types,
+        &[T::Int16, T::Int32]
+    ) {
+        map.insert(FuncSign::new(*e, vec![*lt, *rt]), *lt);
+    }
 
     build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
 

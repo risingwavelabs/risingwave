@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::str::FromStr;
 
 use chrono::{NaiveDate, NaiveDateTime};
+use risingwave_common::error::ErrorCode::NumericValueOutOfRange;
+use risingwave_common::error::RwError;
 use risingwave_common::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
 };
@@ -24,6 +27,7 @@ use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cast::date_to_timestamp;
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::*;
+
 #[test]
 fn test_arithmetic() {
     assert_eq!(
@@ -140,9 +144,12 @@ fn test_arithmetic() {
 #[test]
 fn test_bitwise() {
     // check the boundary
-
     assert_eq!(general_shl::<i32, i32>(1i32, 0i32).unwrap(), 1i32);
     assert_eq!(general_shl::<i64, i32>(1i64, 31i32).unwrap(), 2147483648i64);
+    assert_matches!(
+        general_shl::<i32, i32>(1i32, 32i32).unwrap_err().inner(),
+        NumericValueOutOfRange
+    );
     assert_eq!(
         general_shr::<i64, i32>(-2147483648i64, 31i32).unwrap(),
         -1i64
