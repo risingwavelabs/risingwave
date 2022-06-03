@@ -29,7 +29,7 @@ pub struct PulsarSplitEnumerator {
     start_offset: PulsarEnumeratorOffset,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum PulsarEnumeratorOffset {
     Earliest,
     Latest,
