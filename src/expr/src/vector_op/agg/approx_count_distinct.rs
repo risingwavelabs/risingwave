@@ -44,7 +44,7 @@ impl ApproxCountDistinct {
     /// Adds the count of the datum's hash into the register, if it is greater than the existing
     /// count at the register
     fn add_datum(&mut self, datum_ref: DatumRef) {
-        if let None = datum_ref {
+        if datum_ref.is_none() {
             return;
         }
 
@@ -59,8 +59,8 @@ impl ApproxCountDistinct {
         }
     }
 
-    /// Calculate the hash of the scalar_impl using Rust's default hasher
-    /// Perhaps a different hash like Murmur2 could be used instead?
+    /// Calculate the hash of the `scalar_impl` using Rust's default hasher
+    /// Perhaps a different hash like Murmur2 could be used instead for optimization?
     fn get_hash(&self, scalar_impl: ScalarImpl) -> u64 {
         let mut hasher = DefaultHasher::new();
         scalar_impl.hash(&mut hasher);
@@ -217,7 +217,7 @@ mod tests {
                 .unwrap(),
         );
 
-        return DataChunk::new(vec![col1], size);
+        DataChunk::new(vec![col1], size)
     }
 
     #[test]
