@@ -203,7 +203,7 @@ impl Rule for IndexDeltaJoinRule {
             inputs.push(plan);
         }
 
-        let lookup_union = LogicalLookupUnion::new(inputs);
+        let lookup_union = LogicalUnion::new(inputs, UnionMode::StreamLastToFirst);
 
         Some(lookup_union.into())
     }

@@ -21,20 +21,29 @@ use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::utils::{ColIndexMapping, Condition};
 
+#[derive(Debug, Clone, Copy)]
+pub enum UnionMode {
+    /// Pick any input that is available
+    StreamPickAvailable,
+    /// Within one epoch, pick from the last input to the first input
+    StreamLastToFirst,
+}
+
 #[derive(Debug, Clone)]
-pub struct LogicalLookupUnion {
+pub struct LogicalUnion {
     pub base: PlanBase,
+    pub mode: UnionMode,
     inputs: Vec<PlanRef>,
 }
 
-impl fmt::Display for LogicalLookupUnion {
+impl fmt::Display for LogicalUnion {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LogicalLookupUnion")
+        write!(f, "LogicalUnion {{ mode: {:?} }}", self.mode)
     }
 }
 
-impl LogicalLookupUnion {
-    pub(crate) fn new(inputs: Vec<PlanRef>) -> Self {
+impl LogicalUnion {
+    pub(crate) fn new(inputs: Vec<PlanRef>, mode: UnionMode) -> Self {
         assert!(!inputs.is_empty());
         let mut expected_pk_indices = inputs[0].plan_base().pk_indices.clone();
         expected_pk_indices.sort();
@@ -60,11 +69,11 @@ impl LogicalLookupUnion {
             inputs[0].schema().clone(),
             inputs[0].pk_indices().to_vec(),
         );
-        Self { base, inputs }
+        Self { base, mode, inputs }
     }
 }
 
-impl PlanTreeNode for LogicalLookupUnion {
+impl PlanTreeNode for LogicalUnion {
     fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         let mut vec = smallvec::SmallVec::new();
         vec.extend(self.inputs.clone().into_iter());
@@ -72,11 +81,11 @@ impl PlanTreeNode for LogicalLookupUnion {
     }
 
     fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
-        Self::new(inputs.to_vec()).into()
+        Self::new(inputs.to_vec(), self.mode).into()
     }
 }
 
-impl ColPrunable for LogicalLookupUnion {
+impl ColPrunable for LogicalUnion {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         self.clone_with_inputs(
             &self
@@ -88,7 +97,7 @@ impl ColPrunable for LogicalLookupUnion {
     }
 }
 
-impl PredicatePushdown for LogicalLookupUnion {
+impl PredicatePushdown for LogicalUnion {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
         let inputs = self
             .inputs
@@ -99,13 +108,13 @@ impl PredicatePushdown for LogicalLookupUnion {
     }
 }
 
-impl ToBatch for LogicalLookupUnion {
+impl ToBatch for LogicalUnion {
     fn to_batch(&self) -> Result<PlanRef> {
         todo!()
     }
 }
 
-impl ToStream for LogicalLookupUnion {
+impl ToStream for LogicalUnion {
     fn to_stream(&self) -> Result<PlanRef> {
         todo!()
     }
@@ -122,6 +131,9 @@ impl ToStream for LogicalLookupUnion {
                 out_col_change = Some(input_col_change);
             }
         }
-        Ok((Self::new(new_inputs).into(), out_col_change.unwrap()))
+        Ok((
+            Self::new(new_inputs, self.mode).into(),
+            out_col_change.unwrap(),
+        ))
     }
 }
