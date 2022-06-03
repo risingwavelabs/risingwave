@@ -17,7 +17,6 @@ use std::str::FromStr;
 
 use chrono::{NaiveDate, NaiveDateTime};
 use risingwave_common::error::ErrorCode::NumericValueOutOfRange;
-use risingwave_common::error::RwError;
 use risingwave_common::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
 };
