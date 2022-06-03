@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::str::FromStr;
 
 use chrono::{NaiveDate, NaiveDateTime};
+use risingwave_common::error::ErrorCode::NumericValueOutOfRange;
 use risingwave_common::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
 };
 
 use crate::vector_op::arithmetic_op::*;
+use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cast::date_to_timestamp;
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::*;
+
 #[test]
 fn test_arithmetic() {
     assert_eq!(
@@ -134,6 +138,36 @@ fn test_arithmetic() {
             NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
         )
     );
+}
+
+#[test]
+fn test_bitwise() {
+    // check the boundary
+    assert_eq!(general_shl::<i32, i32>(1i32, 0i32).unwrap(), 1i32);
+    assert_eq!(general_shl::<i64, i32>(1i64, 31i32).unwrap(), 2147483648i64);
+    assert_matches!(
+        general_shl::<i32, i32>(1i32, 32i32).unwrap_err().inner(),
+        NumericValueOutOfRange
+    );
+    assert_eq!(
+        general_shr::<i64, i32>(-2147483648i64, 31i32).unwrap(),
+        -1i64
+    );
+    assert_eq!(general_shr::<i64, i32>(1i64, 0i32), Ok(1i64));
+    // truth table
+    assert_eq!(
+        general_bitand::<u32, u32, u64>(0b0011u32, 0b0101u32),
+        Ok(0b1u64)
+    );
+    assert_eq!(
+        general_bitor::<u32, u32, u64>(0b0011u32, 0b0101u32),
+        Ok(0b0111u64)
+    );
+    assert_eq!(
+        general_bitxor::<u32, u32, u64>(0b0011u32, 0b0101u32),
+        Ok(0b0110u64)
+    );
+    assert_eq!(general_bitnot::<i32>(0b01i32), Ok(-2i32));
 }
 
 #[test]
