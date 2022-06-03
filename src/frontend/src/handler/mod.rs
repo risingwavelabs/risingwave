@@ -27,6 +27,7 @@ pub mod create_mv;
 mod create_schema;
 pub mod create_source;
 pub mod create_table;
+pub mod create_user;
 mod describe;
 pub mod dml;
 mod drop_database;
@@ -35,6 +36,7 @@ pub mod drop_mv;
 mod drop_schema;
 pub mod drop_source;
 pub mod drop_table;
+pub mod drop_user;
 mod explain;
 mod flush;
 #[allow(dead_code)]
@@ -66,6 +68,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             if_not_exists,
             ..
         } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
+        Statement::CreateUser(stmt) => create_user::handle_create_user(context, stmt).await,
         Statement::Describe { name } => describe::handle_describe(context, name).await,
         Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object).await,
         Statement::Drop(DropStatement {
@@ -90,6 +93,9 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ObjectType::Schema => {
                 drop_schema::handle_drop_schema(context, object_name, if_exists, drop_mode.into())
                     .await
+            }
+            ObjectType::User => {
+                drop_user::handle_drop_user(context, object_name, if_exists, drop_mode.into()).await
             }
             _ => Err(
                 ErrorCode::InvalidInputSyntax(format!("DROP {} is unsupported", object_type))

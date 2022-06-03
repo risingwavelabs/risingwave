@@ -1,0 +1,5 @@
+- sql: |
+    select (ARRAY['foo', 'bar'])[1];
+  logical_plan: |
+    LogicalProject { exprs: [ArrayAccess(Array('foo':Varchar, 'bar':Varchar), 1:Int32)] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }

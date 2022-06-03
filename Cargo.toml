@@ -12,6 +12,7 @@ members = [
   "src/frontend",
   "src/frontend/test_runner",
   "src/meta",
+  "src/object_store",
   "src/prost",
   "src/prost/helpers",
   "src/risedevtool",

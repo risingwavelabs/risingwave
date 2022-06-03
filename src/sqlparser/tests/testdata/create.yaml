@@ -44,3 +44,6 @@
 
 - input: CREATE TABLE T (a STRUCT<v1 INT>)
   formatted_sql: CREATE TABLE T (a STRUCT<v1 INT>)
+
+- input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
+  formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'

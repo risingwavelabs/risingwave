@@ -2954,6 +2954,28 @@ fn parse_materialized_drop_view() {
 }
 
 #[test]
+fn parse_create_user() {
+    let sql = "CREATE USER foo WITH NOSUPERUSER CREATEDB LOGIN PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'";
+    match verified_stmt(sql) {
+        Statement::CreateUser(stmt) => {
+            assert_eq!(ObjectName(vec![Ident::new("foo")]), stmt.user_name);
+            assert_eq!(
+                stmt.with_options.0,
+                vec![
+                    CreateUserOption::NoSuperUser,
+                    CreateUserOption::CreateDB,
+                    CreateUserOption::Login,
+                    CreateUserOption::Password(Some(AstString(
+                        "md5827ccb0eea8a706c4c34a16891f84e7b".into()
+                    ))),
+                ]
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn parse_invalid_subquery_without_parens() {
     let res = parse_sql_statements("SELECT SELECT 1 FROM bar WHERE 1=1 FROM baz");
     assert_eq!(
