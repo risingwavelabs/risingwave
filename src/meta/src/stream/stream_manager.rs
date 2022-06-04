@@ -858,7 +858,10 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
-            let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
+            let compaction_group_manager =
+                Arc::new(CompactionGroupManager::new(env.clone()).await?);
+            let fragment_manager =
+                Arc::new(FragmentManager::new(env.clone(), compaction_group_manager).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
