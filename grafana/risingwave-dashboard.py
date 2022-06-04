@@ -48,6 +48,7 @@ class Layout:
         self.w = 8
         return GridPos(h=8, w=8, x=x, y=y)
 
+
 class Panels:
     def __init__(self, datasource):
         self.layout = Layout()
