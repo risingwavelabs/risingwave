@@ -3,6 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+source ci/scripts/common.env.sh
+
 echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-dev target/debug/
