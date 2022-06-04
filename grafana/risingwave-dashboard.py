@@ -258,7 +258,7 @@ def section_object_storage(panels):
                 "histogram_quantile(0.99, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type, job, instance))", "{{type}} p99 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.9, sum(rate(object_store_operation_latency_bucket[1m])) by (le, job, instance))", "{{type}} p90 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.9, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type, job, instance))", "{{type}} p90 - {{job}} @ {{instance}}"
             ),
             panels.target(
                 "sum by(le, type)(rate(object_store_operation_latency_sum[1m])) / sum by(le, type) (rate(object_store_operation_latency_count[1m]))", "{{type}} avg"
@@ -280,26 +280,22 @@ def section_object_storage(panels):
     ]
 
 
+def quantile(f, percentiles):
+    return list(map(lambda p: f(p / 100.0, str(p)), percentiles))
+
+
 def section_streaming(panels):
     return [
         panels.row("Streaming"),
-        panels.timeseries_latency("Barrier Latency", [
-            panels.target(
-                "histogram_quantile(0.5, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))", "barrier_latency_p50"
-            ),
-            panels.target(
-                "histogram_quantile(0.9, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))", "barrier_latency_p90"
-            ),
-            panels.target(
-                "histogram_quantile(0.99, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))", "barrier_latency_p99"
-            ),
-            panels.target(
-                "rate(meta_barrier_duration_seconds_sum[1m]) / rate(meta_barrier_duration_seconds_count[1m])", "barrier_latency_avg"
-            ),
-            panels.target(
-                "histogram_quantile(0.999, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))", "barrier_latency_p999"
-            ),
-        ]),
+        panels.timeseries_latency(
+            "Barrier Latency",
+            quantile(lambda quantile, legend: panels.target(
+                f"histogram_quantile({quantile}, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))", f"barrier_latency_p{legend}"
+            ), [50, 90, 99, 999]) + [
+                panels.target(
+                    "rate(meta_barrier_duration_seconds_sum[1m]) / rate(meta_barrier_duration_seconds_count[1m])", "barrier_latency_avg"
+                ),
+            ]),
         panels.timeseries_rowsps("Source Throughput", [
             panels.target(
                 "rate(stream_source_output_rows_counts[15s])", "source_id = {{source_id}}"
@@ -412,7 +408,7 @@ def section_hummock(panels):
                 "avg(state_store_meta_cache_size) by (job,instance)", "meta cache - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "avg(state_store_block_cache_size) by (job,instance)", "block Cache - {{job}} @ {{instance}}"
+                "avg(state_store_block_cache_size) by (job,instance)", "data cache - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_ops("Write Ops", [
@@ -626,32 +622,17 @@ def section_hummock_table_comparison(outer_panels):
 def section_hummock_compaction_comparison(outer_panels):
     panels = outer_panels.sub_panel()
     return [
-        outer_panels.row_collapsed("gRPC Hummock Compaction Comparison", [
-            panels.timeseries_latency_small("report compation latency p50", [
+        outer_panels.row_collapsed(
+            "gRPC Hummock Compaction Comparison",
+            quantile(lambda quantile, legend: panels.timeseries_latency_small("report compation latency p50", [
                 panels.target(
-                    "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))", "hummock_manager_ ReportCompactionTasks_p50"
+                    f"histogram_quantile({quantile}, sum(irate(meta_grpc_duration_seconds_bucket{{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}}[1m])) by (le))", f"hummock_manager_ ReportCompactionTasks_p{legend}"
                 ),
                 panels.target(
-                    "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))", "hummock_client_ ReportCompactionTasks_p50 - {{instance}} "
+                    f"histogram_quantile({quantile}, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))", f"hummock_client_ ReportCompactionTasks_p{legend} - {{{{instance}}}}"
                 ),
-            ]),
-            panels.timeseries_latency_small("report compation latency p90", [
-                panels.target(
-                    "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))", "hummock_manager_ ReportCompactionTasks_p90"
-                ),
-                panels.target(
-                    "histogram_quantile(0.9, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))", "hummock_client_ ReportCompactionTasks_p90 - {{instance}} "
-                ),
-            ]),
-            panels.timeseries_latency_small("report compation latency p99", [
-                panels.target(
-                    "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))", "hummock_manager_ ReportCompactionTasks_p99"
-                ),
-                panels.target(
-                    "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))", "hummock_client_ ReportCompactionTasks_p99 - {{instance}} "
-                ),
-            ])
-        ])
+            ]), [50, 90, 99])
+        )
     ]
 
 
