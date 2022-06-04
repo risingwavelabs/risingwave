@@ -1,7 +1,6 @@
 from grafanalib.core import (
-    Dashboard, TimeSeries, GaugePanel,
-    Target, GridPos, RowPanel, Time, Graph,
-    OPS_FORMAT
+    Dashboard, TimeSeries,
+    Target, GridPos, RowPanel, Time
 )
 import logging
 
