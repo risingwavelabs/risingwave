@@ -14,13 +14,14 @@
 
 //! For expression that only accept two nullable arguments as input.
 
-use risingwave_common::array::{Array, BoolArray, Utf8Array};
+use risingwave_common::array::*;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::BoxedExpression;
 use crate::expr::template::BinaryNullableExpression;
 use crate::for_all_cmp_variants;
+use crate::vector_op::array_access::array_access;
 use crate::vector_op::cmp::{general_is_distinct_from, str_is_distinct_from};
 use crate::vector_op::conjunction::{and, or};
 
@@ -62,6 +63,7 @@ pub fn new_nullable_binary_expr(
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
+        Type::ArrayAccess => build_array_access_expr(ret, l, r),
         Type::And => Box::new(
             BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, and),
         ),
@@ -75,6 +77,43 @@ pub fn new_nullable_binary_expr(
                 tp
             )
         }
+    }
+}
+
+fn build_array_access_expr(
+    ret: DataType,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> BoxedExpression {
+    macro_rules! array_access_expression {
+        ($array:ty) => {
+            Box::new(
+                BinaryNullableExpression::<ListArray, I32Array, $array, _>::new(
+                    l,
+                    r,
+                    ret,
+                    array_access,
+                ),
+            )
+        };
+    }
+
+    match ret {
+        DataType::Boolean => array_access_expression!(BoolArray),
+        DataType::Int16 => array_access_expression!(I16Array),
+        DataType::Int32 => array_access_expression!(I32Array),
+        DataType::Int64 => array_access_expression!(I64Array),
+        DataType::Float32 => array_access_expression!(F32Array),
+        DataType::Float64 => array_access_expression!(F64Array),
+        DataType::Decimal => array_access_expression!(DecimalArray),
+        DataType::Date => array_access_expression!(NaiveDateArray),
+        DataType::Varchar => array_access_expression!(Utf8Array),
+        DataType::Time => array_access_expression!(NaiveTimeArray),
+        DataType::Timestamp => array_access_expression!(NaiveDateTimeArray),
+        DataType::Timestampz => array_access_expression!(PrimitiveArray::<i64>),
+        DataType::Interval => array_access_expression!(IntervalArray),
+        DataType::Struct { .. } => array_access_expression!(StructArray),
+        DataType::List { .. } => array_access_expression!(ListArray),
     }
 }
 

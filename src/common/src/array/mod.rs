@@ -666,6 +666,7 @@ mod tests {
         }
     }
 }
+
 #[cfg(test)]
 mod test_util {
     use std::hash::{BuildHasher, Hasher};

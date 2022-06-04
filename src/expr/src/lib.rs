@@ -30,6 +30,7 @@
 #![feature(is_sorted)]
 #![feature(backtrace)]
 #![feature(fn_traits)]
+#![feature(assert_matches)]
 
 pub mod expr;
 pub mod vector_op;

@@ -134,6 +134,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
     let stream_source = SourceExecutor::new(
+        0x3f3f3f,
         source_table_id,
         source_desc.clone(),
         keyspace,
