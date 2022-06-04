@@ -3,6 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+source ci/scripts/common.env.sh
+
 echo "--- Install required tools"
 rustup default "$(cat ./rust-toolchain)" && rustup component add llvm-tools-preview clippy
 cargo install cargo-llvm-cov
