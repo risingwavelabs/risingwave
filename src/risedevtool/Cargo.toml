@@ -12,7 +12,7 @@ console = "0.15"
 dialoguer = "0.10"
 enum-iterator = "1"
 indicatif = "0.16"
-isahc = "1"
+isahc = { version = "1", default-features = false, features = ["http2", "text-decoding"] }
 itertools = "0.10"
 kafka = { version = "0.9", default-features = false }
 regex = "1"

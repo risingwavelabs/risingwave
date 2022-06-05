@@ -4,11 +4,15 @@ version = "0.1.8"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+static-link = ["openssl/vendored", "isahc/static-curl"]
+
 [dependencies]
 async-trait = "0.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-isahc = "1" # isahc is the http client used for tracing. Always set it as the same version as opentelemetry-jaeger's.
+isahc = { version = "1", default-features = false, features = ["http2", "text-decoding"] } # isahc is the http client used for tracing. Always set it as the same version as opentelemetry-jaeger's.
 madsim = "=0.2.0-alpha.3"
+openssl = "0.10"
 opentelemetry = { version = "0.17", features = ["rt-tokio", "trace"] }
 opentelemetry-jaeger = { version = "0.16", features = [
     "rt-tokio",

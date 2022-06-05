@@ -16,7 +16,7 @@ echo "--- Build documentation"
 cargo doc --document-private-items --no-deps
 
 echo "--- Run unit tests with coverage"
-cargo llvm-cov nextest --lcov --output-path lcov.info --features=failpoints -- --no-fail-fast
+cargo llvm-cov nextest --lcov --output-path lcov.info --features failpoints -- --no-fail-fast
 
 echo "--- Run doctest"
 cargo test --doc
