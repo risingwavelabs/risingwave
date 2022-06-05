@@ -7,10 +7,10 @@ version = "0.1.8"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-kinesis = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.12", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-config = { version = "0.12", default-features = false, features = ["rt-tokio", "rustls"] }
+aws-sdk-kinesis = { version = "0.12", default-features = false, features = ["rt-tokio", "rustls"] }
+aws-sdk-s3 = { version = "0.12", default-features = false, features = ["rt-tokio","rustls"] }
+aws-sdk-sqs = { version = "0.12", default-features = false, features = ["rt-tokio", "rustls"] }
 aws-smithy-http = "0.42"
 aws-smithy-types = "0.42"
 aws-types = { version = "0.12", features = ["hardcoded-credentials"] }
