@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::iter::zip;
 
 use bytes::Bytes;
 use futures_async_stream::try_stream;
@@ -405,17 +406,11 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
             Ok(Some(chunk))
         }
     }
-}
 
-#[async_trait::async_trait]
-impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
-    async fn next(&mut self) -> StorageResult<Option<Row>> {
+    async fn next_pk_and_row(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
         loop {
             match self.iter.next().await? {
-                None => {
-                    let pk_and_row = self.cell_based_row_deserializer.take();
-                    return Ok(pk_and_row.map(|(_pk, row)| row));
-                }
+                None => return Ok(self.cell_based_row_deserializer.take()),
                 Some((key, value)) => {
                     tracing::trace!(
                         target: "events::storage::CellBasedTable::scan",
@@ -428,7 +423,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
                         .deserialize(&key, &value)
                         .map_err(err)?;
                     match pk_and_row {
-                        Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+                        Some(_) => return Ok(pk_and_row),
                         None => {}
                     }
                 }
@@ -437,12 +432,20 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
     }
 }
 
-pub struct PkDecodingInfo {
-    start: usize,
-    end: usize,
-    row_position: usize,
-    data_type: DataType,
+#[async_trait::async_trait]
+impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
+    async fn next(&mut self) -> StorageResult<Option<Row>> {
+        self.next_pk_and_row().await.map(|r| r.map(|(_pk, row)| row))
+    }
 }
+
+pub struct PkDecodingInfo {}
+// {
+//     start: usize,
+//     end: usize,
+//     row_position: usize,
+//     data_type: DataType,
+// }
 
 // Provides a layer on top of CellBasedTableRowIter
 // for decoding pk into its constituent datums.
@@ -450,7 +453,8 @@ pub struct PkDecodingInfo {
 // we can decode pk -> user_id, name.
 pub struct CellBasedTableRowWithPkIter<S: StateStore> {
     inner: CellBasedTableRowIter<S>,
-    pk_decoding_info: Vec<PkDecodingInfo>,
+    pk_decoder: OrderedRowDeserializer,
+    pk_to_row_mapping: Vec<usize>,
 }
 
 impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
@@ -459,13 +463,74 @@ impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
-        pk_decoding_info: Vec<PkDecodingInfo>,
+        pk_decoder: OrderedRowDeserializer,
+        pk_to_row_mapping: Vec<usize>,
     ) -> StorageResult<Self> {
         let inner = CellBasedTableRowIter::new(keyspace, table_descs, epoch, _stats).await?;
         Ok(Self {
             inner,
-            pk_decoding_info,
+            pk_decoder,
+            pk_to_row_mapping,
         })
+    }
+
+    // FIXME: This is duplicated from `inner`,
+    // so we could bind to the Trait Impl for this struct,
+    // instead of the inner struct.
+    // Maybe this should be implemented as a trait method instead?
+    pub async fn collect_data_chunk(
+        &mut self,
+        schema: &Schema,
+        chunk_size: Option<usize>,
+    ) -> StorageResult<Option<DataChunk>> {
+        let mut builders = schema
+            .create_array_builders(chunk_size.unwrap_or(0))
+            .map_err(err)?;
+
+        let mut row_count = 0;
+        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+            match self.next().await? {
+                Some(row) => {
+                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(&datum).map_err(err)?;
+                    }
+                    row_count += 1;
+                }
+                None => break,
+            }
+        }
+
+        let chunk = {
+            let columns: Vec<Column> = builders
+                .into_iter()
+                .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
+                .try_collect()
+                .map_err(err)?;
+            DataChunk::new(columns, row_count)
+        };
+
+        if chunk.cardinality() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(chunk))
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<S: StateStore> TableIter for CellBasedTableRowWithPkIter<S> {
+    async fn next(&mut self) -> StorageResult<Option<Row>> {
+        let row_opt = self.inner.next_pk_and_row().await?;
+        Ok(row_opt.map(|(pk_vec, row)| {
+            // FIXME: cleanup all these clones...
+            let mut new_row = row.clone();
+            if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
+                for (row_idx, datum) in zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec().clone()) {
+                    new_row.0[row_idx] = datum;
+                }
+            }
+            new_row
+        }))
     }
 }
 
