@@ -228,6 +228,13 @@ message ReportVacuumTaskResponse {
   common.Status status = 1;
 }
 
+message GetCompactionGroupsRequest {}
+
+message  GetCompactionGroupsResponse {
+  common.Status status = 1;
+  repeated CompactionGroup compaction_groups = 2;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
@@ -238,6 +245,7 @@ service HummockManagerService {
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
+  rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
 }
 
 service CompactorService {}
