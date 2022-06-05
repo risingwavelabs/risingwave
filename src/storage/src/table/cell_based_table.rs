@@ -336,18 +336,6 @@ fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
 }
 
-struct PkColumnsMapping {
-    start: usize,
-    end: usize,
-    row_position: usize,
-    data_type: DataType,
-}
-
-pub struct CellBasedTableRowWithPkIter<S: StateStore> {
-    inner: CellBasedTableRowIter<S>,
-    pk_descs: Vec<PkColumnsMapping>
-}
-
 // (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
 pub struct CellBasedTableRowIter<S: StateStore> {
@@ -446,6 +434,38 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
                 }
             }
         }
+    }
+}
+
+pub struct PkDecodingInfo {
+    start: usize,
+    end: usize,
+    row_position: usize,
+    data_type: DataType,
+}
+
+// Provides a layer on top of CellBasedTableRowIter
+// for decoding pk into its constituent datums.
+// For instance if pk was derived from `user_id, name`
+// we can decode pk -> user_id, name.
+pub struct CellBasedTableRowWithPkIter<S: StateStore> {
+    inner: CellBasedTableRowIter<S>,
+    pk_decoding_info: Vec<PkDecodingInfo>,
+}
+
+impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
+    pub async fn new(
+        keyspace: Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        epoch: u64,
+        _stats: Arc<StateStoreMetrics>,
+        pk_decoding_info: Vec<PkDecodingInfo>,
+    ) -> StorageResult<Self> {
+        let inner = CellBasedTableRowIter::new(keyspace, table_descs, epoch, _stats).await?;
+        Ok(Self {
+            inner,
+            pk_decoding_info,
+        })
     }
 }
 
