@@ -509,7 +509,7 @@ jobs:
           cargo fmt --all -- --check
       - name: Build Rust components
         run: |
-          cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --profile dev
+          cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --features static-link --profile dev
       - name: Compress RisingWave debug info
         run: |
           objcopy --compress-debug-sections=zlib-gnu target/debug/risingwave
@@ -581,7 +581,7 @@ jobs:
           cargo fmt --all -- --check
       - name: Build Rust components
         run: |
-          cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --profile release
+          cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --features static-link --profile release
       - name: Compress RisingWave debug info
         run: |
           objcopy --compress-debug-sections=zlib-gnu target/release/risingwave
