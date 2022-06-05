@@ -3,6 +3,9 @@ name = "risingwave_cmd"
 version = "0.1.8"
 edition = "2021"
 
+[features]
+static-link = ["risingwave_logging/static-link"]
+
 [dependencies]
 clap = { version = "3", features = ["derive"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
