@@ -1245,7 +1245,6 @@ checksum = "23734ec77368ec583c2e61dd3f0b0e5c98b93abe6d2a004ca06b91dd7e3e2762"
 dependencies = [
  "cc",
  "libc",
- "libnghttp2-sys",
  "libz-sys",
  "openssl-sys",
  "pkg-config",
@@ -2158,16 +2157,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libnghttp2-sys"
-version = "0.1.7+1.45.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57ed28aba195b38d5ff02b9170cbff627e336a20925e43b4945390401c5dc93f"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "libtest-mimic"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2721,6 +2710,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
+name = "openssl-src"
+version = "111.20.0+1.1.1o"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92892c4f87d56e376e469ace79f1128fdaded07646ddf73aa0be4706ff712dec"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "openssl-sys"
 version = "0.9.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2729,6 +2727,7 @@ dependencies = [
  "autocfg",
  "cc",
  "libc",
+ "openssl-src",
  "pkg-config",
  "vcpkg",
 ]
@@ -3650,6 +3649,7 @@ dependencies = [
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
+ "workspace-static-link",
 ]
 
 [[package]]
@@ -3671,6 +3671,7 @@ dependencies = [
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
+ "workspace-static-link",
 ]
 
 [[package]]
@@ -4095,6 +4096,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5690,7 +5692,6 @@ dependencies = [
  "chrono",
  "crossbeam-deque",
  "crossbeam-utils 0.7.2",
- "crossbeam-utils 0.8.8",
  "crypto-common",
  "digest",
  "either",
@@ -5706,6 +5707,7 @@ dependencies = [
  "hashbrown 0.11.2",
  "hyper",
  "indexmap",
+ "isahc",
  "libc",
  "libz-sys",
  "lock_api",
@@ -5735,6 +5737,14 @@ dependencies = [
  "tracing-futures",
  "url",
  "uuid 1.1.0",
+]
+
+[[package]]
+name = "workspace-static-link"
+version = "0.1.8"
+dependencies = [
+ "isahc",
+ "openssl",
 ]
 
 [[package]]

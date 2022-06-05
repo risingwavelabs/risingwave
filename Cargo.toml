@@ -28,6 +28,7 @@ members = [
   "src/utils/logging",
   "src/utils/memcomparable",
   "src/utils/pgwire",
+  "src/utils/static-link",
   "src/utils/value-encoding",
   "src/workspace-hack",
 ]
