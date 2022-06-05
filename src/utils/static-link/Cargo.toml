@@ -1,0 +1,11 @@
+[package]
+name = "workspace-static-link"
+version = "0.1.8"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+isahc = { version = "1", default-features = false, features = ["static-ssl", "static-curl"] }
+openssl = { version = "0.10", features = ["vendored"] }
+# workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+# Don't add workspace-hack into this crate!

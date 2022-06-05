@@ -10,7 +10,7 @@ rustup default "$(cat ./rust-toolchain)" && rustup component add llvm-tools-prev
 cargo install cargo-llvm-cov
 
 echo "--- Run clippy check"
-cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo clippy --all-targets --features failpoints --locked -- -D warnings
 
 echo "--- Build documentation"
 cargo doc --document-private-items --no-deps
