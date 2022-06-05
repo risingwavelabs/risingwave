@@ -22,6 +22,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::RwError;
+use risingwave_common::types::DataType;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -333,6 +334,18 @@ impl<S: StateStore> CellBasedTable<S> {
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
+}
+
+struct PkColumnsMapping {
+    start: usize,
+    end: usize,
+    row_position: usize,
+    data_type: DataType,
+}
+
+pub struct CellBasedTableRowWithPkIter<S: StateStore> {
+    inner: CellBasedTableRowIter<S>,
+    pk_descs: Vec<PkColumnsMapping>
 }
 
 // (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
