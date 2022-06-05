@@ -12,6 +12,5 @@ CMD bash
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update -y && apt-get install -yy ca-certificates lsb-release wget
-RUN apt-get install -yy curl lcov git unzip zip libssl-dev zlib1g-dev cmake build-essential
+RUN apt-get install -yy curl lcov git unzip zip zlib1g-dev cmake build-essential
 RUN apt-get install -yy pkg-config make golang psmisc
-

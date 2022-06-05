@@ -4,7 +4,7 @@ ENV LANG en_US.utf8
 
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl \
-    openssl libssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld
+    openssl libssl-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld
 
 SHELL ["/bin/bash", "-c"]
 

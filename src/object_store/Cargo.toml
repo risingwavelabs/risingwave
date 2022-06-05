@@ -25,3 +25,4 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "fs",
 ] }
 tracing = { version = "0.1" }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
