@@ -291,14 +291,6 @@ impl ToStream for LogicalProject {
         let stream_plan = if let Some(input_proj) = new_input.as_stream_project() {
             let outer_project = new_logical;
             let inner_project = input_proj.as_logical();
-            println!(
-                "outer: {}, {:?}\ninner: {}, {:?}\ninput: {}\n",
-                outer_project,
-                outer_project.schema(),
-                inner_project,
-                inner_project.schema(),
-                inner_project.input
-            );
             let mut subst = Substitute {
                 mapping: inner_project.exprs().clone(),
             };
