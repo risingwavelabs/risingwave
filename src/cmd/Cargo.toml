@@ -28,7 +28,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
 ] }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
-workspace-static-link = { path = "../utils/static-link", optional = true }
+workspace-static-link = { path = "../utils/static-link", optional = true, features = ["enabled"] }
 
 [[bin]]
 name = "frontend"
