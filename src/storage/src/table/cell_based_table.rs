@@ -490,14 +490,12 @@ impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
         let row_opt = self.inner.next_pk_and_row().await?;
         Ok(row_opt.map(|(pk_vec, mut row)| {
             if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
-                // FIXME: cleanup clone
-                for (row_idx_opt, datum) in
-                    zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec())
-                {
-                    if let Some(row_idx) = row_idx_opt {
-                        row.0[row_idx] = datum;
-                    }
-                }
+                zip(self.pk_to_row_mapping.iter(), pk_decoded.into_vec())
+                    .for_each(|(row_idx_opt, datum)| {
+                        if let Some(row_idx) = row_idx_opt {
+                            row.0[*row_idx] = datum;
+                        }
+                    })
             }
             row
         }))
