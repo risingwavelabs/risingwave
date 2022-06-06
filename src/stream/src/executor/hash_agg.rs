@@ -22,6 +22,7 @@ use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
 use madsim::collections::HashMap;
+use tokio::sync::RwLock;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
@@ -88,7 +89,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
 
-    state_tables: Vec<StateTable<S>>,
+    state_tables: Arc<RwLock<Vec<StateTable<S>>>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -144,7 +145,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 keyspace,
                 agg_calls,
                 key_indices,
-                state_tables,
+                state_tables: Arc::new(RwLock::new(state_tables)),
             },
             _phantom: PhantomData,
         })
@@ -281,7 +282,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 input_pk_data_types.clone(),
                                 epoch,
                                 Some(hash_code),
-                                state_tables,
+                                &*state_tables.read().await,
                             )
                             .await?,
                         ),
@@ -291,6 +292,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // 2. Mark the state as dirty by filling prev states
                 states.may_mark_as_dirty(epoch).await?;
 
+                let mut state_tables = state_tables.write().await;
                 // 3. Apply batch to each of the state (per agg_call)
                 for ((agg_state, data), state_table) in states
                     .managed_states
@@ -337,7 +339,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let (write_batch, dirty_cnt) = {
             // let mut write_batch = store.start_write_batch();
             let mut dirty_cnt = 0;
-
+            let mut state_tables = state_tables.write().await;
             for states in state_map.values_mut() {
                 if states.as_ref().unwrap().is_dirty() {
                     dirty_cnt += 1;
@@ -355,10 +357,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
             }
 
-            // Batch commit state table.
-            for state_table in state_tables.iter_mut() {
-                state_table.commit(epoch).await?;
-            }
+            // // Batch commit state table.
+            // for state_table in state_tables.iter_mut() {
+            //     state_table.commit(epoch).await?;
+            // }
 
             ((), dirty_cnt)
         };
@@ -372,9 +374,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             //     .ingest(epoch)
             //     .await
             //     .map_err(StreamExecutorError::agg_state_error)?;
-            for state_table in state_tables {
-                state_table.commit(epoch).await?;
-            }
+
+            // for state_table in state_tables.iter_mut() {
+            //     state_table.commit(epoch).await?;
+            // }
 
             // --- Produce the stream chunk ---
             let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);

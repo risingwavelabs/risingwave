@@ -261,13 +261,13 @@ where
                     }
 
                     // FlushStatus::do_insert(self.flush_buffer.entry(composed_key), value);
-                    state_table.insert(relational_pk, relational_value)?;
+                    state_table.insert(&relational_pk, relational_value)?;
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
                     self.top_n.remove(&composed_key);
                     // FlushStatus::do_delete(self.flush_buffer.entry(composed_key));
-                    state_table.delete(relational_pk, relational_value);
+                    state_table.delete(&relational_pk, relational_value)?;
                     self.total_count -= 1;
                 }
             }
@@ -349,11 +349,11 @@ where
 
         for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
             // let key_encoded = self.serializer.serialize(key.unwrap().clone(), &pks)?;
-            let relational_pk = Row::new(vec![key.map(|key| key.into()), pks[0]]);
+            let relational_pk = Row::new(vec![key.map(|key| key.into()), pks[0].as_ref().cloned()]);
             match v.into_option() {
                 Some(v) => {
                     let value = Row::new(vec![v]);
-                    state_table.insert(relational_pk, value);
+                    state_table.insert(&relational_pk, value)?;
                     // local.put(
                     //     key_encoded,
                     //     StorageValue::new_put(value_meta, serialize_cell(&v)?),
@@ -361,7 +361,7 @@ where
                 }
                 None => {
                     // local.delete_with_value_meta(key_encoded, value_meta);
-                    state_table.delete(relational_pk, Row::new(vec![]));
+                    state_table.delete(&relational_pk, Row::new(vec![]))?;
                     // state_table.delete_with_value_meta();
                 }
             }
@@ -388,7 +388,7 @@ where
         _epoch: u64,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        self.apply_batch_inner(ops, visibility, data).await
+        self.apply_batch_inner(ops, visibility, data, state_table).await
     }
 
     async fn get_output(&mut self, epoch: u64) -> StreamExecutorResult<Datum> {
