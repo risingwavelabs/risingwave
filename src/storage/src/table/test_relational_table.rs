@@ -1542,7 +1542,6 @@ async fn test_dedup_pk_multi_cell_based_table_iter() {
     assert!(res_2_2.is_none());
 }
 
-
 #[tokio::test]
 async fn test_cell_based_scan_empty_column_ids_cardinality() {
     let state_store = MemoryStateStore::new();
