@@ -135,3 +135,13 @@ select split_part('abc,def,ghi,jkl', ',', -2);
 ----
 ghi
 
+
+query I
+select char_length('hello world');
+----
+11
+
+query I
+select char_length('abcdefghijklmnopqrstuvwxyz');
+----
+26

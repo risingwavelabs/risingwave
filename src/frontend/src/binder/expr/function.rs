@@ -94,6 +94,8 @@ impl Binder {
                     inputs = Self::rewrite_two_bool_inputs(inputs)?;
                     ExprType::NotEqual
                 }
+                "char_length" => ExprType::CharLength,
+                "character_length" => ExprType::CharLength,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
