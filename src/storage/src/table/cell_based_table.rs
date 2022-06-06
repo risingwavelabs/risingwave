@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::iter::zip;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures_async_stream::try_stream;
@@ -23,7 +23,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::RwError;
-use risingwave_common::types::DataType;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -447,7 +446,9 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
 #[async_trait::async_trait]
 impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
     async fn next(&mut self) -> StorageResult<Option<Row>> {
-        self.next_pk_and_row().await.map(|r| r.map(|(_pk, row)| row))
+        self.next_pk_and_row()
+            .await
+            .map(|r| r.map(|(_pk, row)| row))
     }
 }
 
@@ -461,7 +462,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
 pub struct CellBasedTableRowWithPkIter<S: StateStore> {
     inner: CellBasedTableRowIter<S>,
     pk_decoder: OrderedRowDeserializer, // pk -> datum
-    pk_to_row_mapping: Vec<usize>, // pk datum positions in row.
+    pk_to_row_mapping: Vec<usize>,      // pk datum positions in row.
 }
 
 impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
@@ -530,9 +531,9 @@ impl<S: StateStore> TableIter for CellBasedTableRowWithPkIter<S> {
         let row_opt = self.inner.next_pk_and_row().await?;
         Ok(row_opt.map(|(pk_vec, row)| {
             // FIXME: cleanup all these clones...
-            let mut new_row = row.clone();
+            let mut new_row = row;
             if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
-                for (row_idx, datum) in zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec().clone()) {
+                for (row_idx, datum) in zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec()) {
                     new_row.0[row_idx] = datum;
                 }
             }

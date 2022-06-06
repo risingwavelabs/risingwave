@@ -211,7 +211,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table.iter(u64::MAX).await?,
+        table.iter_with_pk(u64::MAX).await?,
         1024,
         true,
         "RowSeqExecutor2".to_string(),
@@ -270,7 +270,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table.iter(u64::MAX).await?,
+        table.iter_with_pk(u64::MAX).await?,
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
@@ -338,7 +338,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table.iter(u64::MAX).await?,
+        table.iter_with_pk(u64::MAX).await?,
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
