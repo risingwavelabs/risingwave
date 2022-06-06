@@ -91,7 +91,6 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use crate::execution::grpc_exchange::GrpcExchangeSource;
-    use crate::task::ComputeNodeContext;
 
     struct FakeExchangeService {
         rpc_called: Arc<AtomicBool>,
@@ -153,19 +152,15 @@ mod tests {
         sleep(Duration::from_secs(1));
         assert!(server_run.load(Ordering::SeqCst));
 
-        let context = ComputeNodeContext::new_for_test();
         let exchange_source = ProstExchangeSource {
             task_output_id: Some(TaskOutputId {
                 task_id: Some(TaskId::default()),
                 ..Default::default()
             }),
             host: Some(HostAddr::from(addr).to_protobuf()),
-            plan: None,
-            epoch: u64::MAX,
+            local_execute_plan: None,
         };
-        let mut src = GrpcExchangeSource::create(exchange_source, context)
-            .await
-            .unwrap();
+        let mut src = GrpcExchangeSource::create(exchange_source).await.unwrap();
         for _ in 0..3 {
             assert!(src.take_data().await.unwrap().is_some());
         }
@@ -180,17 +175,15 @@ mod tests {
     #[tokio::test]
     async fn test_unconnectable_node() {
         let addr: HostAddr = "127.0.0.1:1001".parse().unwrap();
-        let context = ComputeNodeContext::new_for_test();
         let exchange_source = ProstExchangeSource {
             task_output_id: Some(TaskOutputId {
                 task_id: Some(TaskId::default()),
                 ..Default::default()
             }),
             host: Some(addr.to_protobuf()),
-            plan: None,
-            epoch: u64::MAX,
+            local_execute_plan: None,
         };
-        let res = GrpcExchangeSource::create(exchange_source, context).await;
+        let res = GrpcExchangeSource::create(exchange_source).await;
         assert!(res.is_err());
     }
 }

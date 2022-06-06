@@ -17,51 +17,49 @@ use std::fmt::{Debug, Formatter};
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::{ExchangeSource as ProstExchangeSource, TaskOutputId};
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource};
 use tonic::Streaming;
 
-use crate::task::{BatchTaskContext, BatchTaskContextType};
-
 /// Use grpc client as the source.
-pub struct GrpcExchangeSource<C: BatchTaskContext> {
+pub struct GrpcExchangeSource {
     stream: Streaming<GetDataResponse>,
 
     task_output_id: TaskOutputId,
-    context: C,
 }
 
-impl<C: BatchTaskContext> GrpcExchangeSource<C> {
-    pub async fn create(exchange_source: ProstExchangeSource, context: C) -> Result<Self> {
+impl GrpcExchangeSource {
+    pub async fn create(exchange_source: ProstExchangeSource) -> Result<Self> {
         let addr = exchange_source.get_host()?.into();
         let task_output_id = exchange_source.get_task_output_id()?.clone();
         let task_id = task_output_id.get_task_id()?.clone();
         let client = ComputeClient::new(addr).await?;
-        let stream = match context.context_type() {
+        let local_execute_plan = exchange_source.local_execute_plan;
+        let stream = match local_execute_plan {
             // When in the local execution mode, `GrpcExchangeSource` would send out
             // `ExecuteRequest` and get the data chunks back in a single RPC.
-            BatchTaskContextType::Frontend => {
-                let plan = exchange_source.plan.clone();
+            Some(local_execute_plan) => {
+                let plan = try_match_expand!(local_execute_plan, Plan)?;
                 let execute_request = ExecuteRequest {
                     task_id: Some(task_id),
-                    plan,
-                    epoch: exchange_source.epoch,
+                    plan: plan.plan,
+                    epoch: plan.epoch,
                 };
                 client.execute(execute_request).await?
             }
-            BatchTaskContextType::ComputeNode => client.get_data(task_output_id.clone()).await?,
+            None => client.get_data(task_output_id.clone()).await?,
         };
         let source = Self {
             stream,
             task_output_id,
-            context,
         };
         Ok(source)
     }
 }
 
-impl<C: BatchTaskContext> Debug for GrpcExchangeSource<C> {
+impl Debug for GrpcExchangeSource {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GrpcExchangeSource")
             .field("task_output_id", &self.task_output_id)
@@ -70,7 +68,7 @@ impl<C: BatchTaskContext> Debug for GrpcExchangeSource<C> {
 }
 
 #[async_trait::async_trait]
-impl<C: BatchTaskContext> ExchangeSource for GrpcExchangeSource<C> {
+impl ExchangeSource for GrpcExchangeSource {
     async fn take_data(&mut self) -> Result<Option<DataChunk>> {
         let res = match self.stream.next().await {
             None => return Ok(None),

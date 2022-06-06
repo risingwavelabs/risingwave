@@ -23,12 +23,6 @@ use risingwave_storage::StateStoreImpl;
 use crate::executor::BatchMetrics;
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
-/// Use enum to differentiate the concrete type of `BatchTaskContext`.
-pub enum BatchTaskContextType {
-    Frontend,
-    ComputeNode,
-}
-
 /// Context for batch task execution.
 ///
 /// This context is specific to one task execution, and should *not* be shared by different tasks.
@@ -58,8 +52,6 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     }
 
     fn stats(&self) -> Arc<BatchMetrics>;
-
-    fn context_type(&self) -> BatchTaskContextType;
 }
 
 /// Batch task context on compute node.
@@ -89,10 +81,6 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn stats(&self) -> Arc<BatchMetrics> {
         self.env.stats()
-    }
-
-    fn context_type(&self) -> BatchTaskContextType {
-        BatchTaskContextType::ComputeNode
     }
 }
 

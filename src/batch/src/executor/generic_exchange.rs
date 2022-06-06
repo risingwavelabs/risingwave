@@ -85,7 +85,7 @@ impl CreateSource for DefaultCreateSource {
             );
 
             Ok(Box::new(
-                GrpcExchangeSource::create(prost_source.clone(), context).await?,
+                GrpcExchangeSource::create(prost_source.clone()).await?,
             ))
         }
     }
