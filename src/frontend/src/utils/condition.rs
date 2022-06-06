@@ -17,11 +17,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_pb::batch_plan::ScanRange;
 
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
-    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
+    try_get_bool_constant, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
+use crate::optimizer::plan_node::CollectInputRef;
 
 #[derive(Debug, Clone)]
 pub struct Condition {
@@ -146,7 +148,7 @@ impl Condition {
                     subset_indices.push(idx);
                 }
             }
-            if subset_indices.len() != 2 || (only_eq && Self::as_eq_cond(&expr).is_none()) {
+            if subset_indices.len() != 2 || (only_eq && expr.as_eq_cond().is_none()) {
                 non_eq_join.push(expr);
             } else {
                 // The key has the canonical ordering (lower, higher)
@@ -169,23 +171,6 @@ impl Condition {
         )
     }
 
-    /// Returns the `InputRefs` of an Equality predicate if it matches
-    /// ordered by the canonical ordering (lower, higher), else returns None
-    fn as_eq_cond(expr: &ExprImpl) -> Option<(InputRef, InputRef)> {
-        if let ExprImpl::FunctionCall(function_call) = expr.clone()
-            && function_call.get_expr_type() == ExprType::Equal
-            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.decompose_as_binary()
-        {
-            if x.index() < y.index() {
-                Some((*x, *y))
-            } else {
-                Some((*y, *x))
-            }
-        } else {
-            None
-        }
-    }
-
     #[must_use]
     /// For [`EqJoinPredicate`], separate equality conditions which connect left columns and right
     /// columns from other conditions.
@@ -206,7 +191,7 @@ impl Condition {
             let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
             if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                 others.push(expr)
-            } else if let Some(columns) = Self::as_eq_cond(&expr) {
+            } else if let Some(columns) = expr.as_eq_cond() {
                 eq_keys.push(columns);
             } else {
                 others.push(expr)
@@ -236,6 +221,11 @@ impl Condition {
         .into_iter()
         .next_tuple()
         .unwrap()
+    }
+
+    /// See also [`ScanRange`].
+    pub fn split_to_scan_range(self, pk_idces: &[usize], num_cols: usize) -> (ScanRange, Self) {
+        todo!()
     }
 
     /// Split the condition expressions into `N` groups.

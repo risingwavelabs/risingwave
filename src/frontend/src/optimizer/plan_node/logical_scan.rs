@@ -20,9 +20,11 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::error::Result;
+use risingwave_pb::batch_plan::ScanRange;
 
 use super::{
-    ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan, ToBatch, ToStream,
+    BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
+    ToBatch, ToStream,
 };
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
@@ -211,10 +213,10 @@ impl LogicalScan {
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
-    fn predicate_pull_up(&self) -> PlanRef {
+    fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
         let mut predicate = self.predicate.clone();
         if predicate.always_true() {
-            return self.clone().into();
+            return (self.clone(), Condition::true_cond(), None);
         }
 
         let mut mapping =
@@ -230,12 +232,12 @@ impl LogicalScan {
             self.ctx(),
             Condition::true_cond(),
         );
-        let mut plan = LogicalFilter::create(scan_without_predicate.into(), predicate);
-        if self.required_col_idx != self.output_col_idx {
-            plan = LogicalProject::create(plan, self.output_idx_to_input_ref());
-        }
-        assert_eq!(self.schema(), plan.schema());
-        plan
+        let project_expr = if self.required_col_idx != self.output_col_idx {
+            Some(self.output_idx_to_input_ref())
+        } else {
+            None
+        };
+        (scan_without_predicate, predicate, project_expr)
     }
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
@@ -316,12 +318,31 @@ impl PredicatePushdown for LogicalScan {
     }
 }
 
+fn full_table_scan() -> ScanRange {
+    ScanRange {
+        eq_conds: vec![],
+        range: None,
+    }
+}
+
 impl ToBatch for LogicalScan {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.predicate.always_true() {
-            Ok(BatchSeqScan::new(self.clone()).into())
+            Ok(BatchSeqScan::new(self.clone(), full_table_scan()).into())
         } else {
-            self.predicate_pull_up().to_batch()
+            let (scan, predicate, project_expr) = self.predicate_pull_up();
+            let (scan_range, predicate) =
+                predicate.split_to_scan_range(&self.table_desc.pks, self.table_desc.columns.len());
+
+            let batch_scan = BatchSeqScan::new(scan, scan_range);
+            let batch_filter = BatchFilter::new(LogicalFilter::new(batch_scan.into(), predicate));
+            let plan: PlanRef = if let Some(exprs) = project_expr {
+                BatchProject::new(LogicalProject::new(batch_filter.into(), exprs)).into()
+            } else {
+                batch_filter.into()
+            };
+            assert_eq!(plan.schema(), self.schema());
+            Ok(plan)
         }
     }
 }
@@ -331,7 +352,12 @@ impl ToStream for LogicalScan {
         if self.predicate.always_true() {
             Ok(StreamTableScan::new(self.clone()).into())
         } else {
-            self.predicate_pull_up().to_stream()
+            let (scan, predicate, project_expr) = self.predicate_pull_up();
+            let mut plan = LogicalFilter::create(scan.into(), predicate);
+            if let Some(exprs) = project_expr {
+                plan = LogicalProject::create(plan, exprs)
+            }
+            plan.to_stream()
         }
     }
 

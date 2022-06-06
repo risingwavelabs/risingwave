@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::RowSeqScanNode;
+use risingwave_pb::batch_plan::{scan_range, RowSeqScanNode, ScanRange};
 use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc};
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
@@ -28,23 +28,32 @@ use crate::optimizer::property::{Distribution, Order};
 pub struct BatchSeqScan {
     pub base: PlanBase,
     logical: LogicalScan,
+    scan_range: ScanRange,
 }
 
 impl BatchSeqScan {
-    pub fn new_inner(logical: LogicalScan, dist: Distribution) -> Self {
+    pub fn new_inner(logical: LogicalScan, dist: Distribution, scan_range: ScanRange) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
 
-        Self { base, logical }
+        Self {
+            base,
+            logical,
+            scan_range,
+        }
     }
 
-    pub fn new(logical: LogicalScan) -> Self {
-        Self::new_inner(logical, Distribution::Single)
+    pub fn new(logical: LogicalScan, scan_range: ScanRange) -> Self {
+        Self::new_inner(logical, Distribution::Single, scan_range)
     }
 
-    pub fn with_dist(logical: LogicalScan) -> Self {
-        Self::new_inner(logical, Distribution::SomeShard)
+    pub fn clone_with_dist(&self) -> Self {
+        Self::new_inner(
+            self.logical.clone(),
+            Distribution::SomeShard,
+            self.scan_range.clone(),
+        )
     }
 
     /// Get a reference to the batch seq scan's logical.
@@ -69,7 +78,7 @@ impl fmt::Display for BatchSeqScan {
 
 impl ToDistributedBatch for BatchSeqScan {
     fn to_distributed(&self) -> Result<PlanRef> {
-        Ok(Self::with_dist(self.logical.clone()).into())
+        Ok(self.clone_with_dist().into())
     }
 }
 
@@ -88,12 +97,13 @@ impl ToBatchProst for BatchSeqScan {
                 pk: vec![], // TODO:
             }),
             column_descs,
+            scan_range: Some(self.scan_range.clone()),
         })
     }
 }
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        Ok(Self::with_dist(self.logical.clone()).into())
+        Ok(self.clone_with_dist().into())
     }
 }
