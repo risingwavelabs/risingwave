@@ -115,9 +115,6 @@ impl CompactStatus {
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
-        // TODO #2065: filter levels by compaction_group_id so that only touch SSTs within given
-        // compaction_group_id.
-
         let ret = match self.pick_compaction(levels, task_id) {
             Some(ret) => ret,
             None => return None,

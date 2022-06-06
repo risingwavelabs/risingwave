@@ -132,6 +132,7 @@ macro_rules! commit_multi_var {
 #[derive(Default)]
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
+    // TODO #2065: split levels by compaction group id in `HummockVersion`
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
