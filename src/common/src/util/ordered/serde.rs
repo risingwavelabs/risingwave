@@ -359,22 +359,13 @@ mod tests {
 pub fn mem_cmp_eq_value_enc(data_type: &DataType) -> bool {
     use DataType::*;
     match data_type {
-    Boolean|
-    Int16|
-    Int32|
-    Int64 => true,
+        Boolean | Int16 | Int32 | Int64 => true,
 
-    Float32|
-    Float64|
-    Decimal|
-    Date|
-    Varchar|
-    Time|
-    Timestamp|
-    Timestampz|
-    Interval => false,
+        Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz | Interval => {
+            false
+        }
 
-    Struct { fields } => fields.iter().all(|f| mem_cmp_eq_value_enc(f)),
-    List { datatype } => mem_cmp_eq_value_enc(datatype),
+        Struct { fields } => fields.iter().all(|f| mem_cmp_eq_value_enc(f)),
+        List { datatype } => mem_cmp_eq_value_enc(datatype),
     }
 }

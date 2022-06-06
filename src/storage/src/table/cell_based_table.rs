@@ -502,12 +502,13 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         println!("table_descs: {:#?}", table_descs);
         let pk_to_row_mapping = pk_descs
             .iter()
-            .map(|d| if mem_cmp_eq_value_enc(&d.column_desc.data_type) {
-                  col_id_to_row_idx
-                 .get(&d.column_desc.column_id)
-                 .map(|&i| i)
-            } else { None }
-            )
+            .map(|d| {
+                if mem_cmp_eq_value_enc(&d.column_desc.data_type) {
+                    col_id_to_row_idx.get(&d.column_desc.column_id).map(|&i| i)
+                } else {
+                    None
+                }
+            })
             .collect();
         Ok(Self {
             inner,
@@ -566,7 +567,9 @@ impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
         Ok(row_opt.map(|(pk_vec, mut row)| {
             if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
                 // FIXME: cleanup clone
-                for (row_idx_opt, datum) in zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec()) {
+                for (row_idx_opt, datum) in
+                    zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec())
+                {
                     if let Some(row_idx) = row_idx_opt {
                         row.0[row_idx] = datum;
                     }
