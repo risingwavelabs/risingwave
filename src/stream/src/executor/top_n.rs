@@ -175,6 +175,7 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
             cell_based_row_deserializer.clone(),
+            pk_indices.clone(),
         );
         let managed_middle_state = ManagedTopNBottomNState::new(
             cache_size,
@@ -183,6 +184,7 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
             cell_based_row_deserializer.clone(),
+            pk_indices.clone(),
         );
         let managed_highest_state = ManagedTopNState::<S, TOP_N_MIN>::new(
             cache_size,
@@ -191,6 +193,7 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             row_data_types,
             ordered_row_deserializer,
             cell_based_row_deserializer,
+            pk_indices.clone(),
         );
         Ok(Self {
             info: ExecutorInfo {
@@ -371,7 +374,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     {
                         // The current element in in the range of `[offset+limit, +inf)`
                         self.managed_highest_state
-                            .delete(&ordered_pk_row, epoch)
+                            .delete(&ordered_pk_row, row, epoch)
                             .await
                             .map_err(StreamExecutorError::top_n_state_error)?;
                     } else if self.managed_lowest_state.total_count() == self.offset
@@ -380,7 +383,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     {
                         // The current element in in the range of `[offset, offset+limit)`
                         self.managed_middle_state
-                            .delete(&ordered_pk_row, epoch)
+                            .delete(&ordered_pk_row, row,epoch)
                             .await
                             .map_err(StreamExecutorError::top_n_state_error)?;
                         new_ops.push(Op::Delete);
@@ -405,7 +408,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     } else {
                         // The current element in in the range of `[0, offset)`
                         self.managed_lowest_state
-                            .delete(&ordered_pk_row, epoch)
+                            .delete(&ordered_pk_row, row, epoch)
                             .await
                             .map_err(StreamExecutorError::top_n_state_error)?;
                         // We need to bring one, if any, from middle to lowest.

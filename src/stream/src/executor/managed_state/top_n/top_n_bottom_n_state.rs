@@ -16,16 +16,19 @@
 #![allow(dead_code)]
 
 use std::vec::Drain;
-
+use futures::pin_mut;
+use futures::stream::StreamExt;
 use madsim::collections::BTreeMap;
-use risingwave_common::array::Row;
+use risingwave_common::{array::Row, catalog::ColumnDesc};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::{cell_based_row_deserializer::CellBasedRowDeserializer, table::state_table::StateTable};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
+
+use crate::executor::{PkIndices, managed_state::top_n::deserialize_pk};
 
 use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::variants::TOP_N_MIN;
@@ -42,8 +45,8 @@ pub struct ManagedTopNBottomNState<S: StateStore> {
     top_n: BTreeMap<OrderedRow, Row>,
     /// Bottom-N Cache. We always try to first fill into the bottom-n cache.
     bottom_n: BTreeMap<OrderedRow, Row>,
-    /// Buffer for updates.
-    flush_buffer: BTreeMap<OrderedRow, FlushStatus<Row>>,
+    /// Relational table.
+    state_table: StateTable<S>,
     /// The number of elements in both cache and storage.
     total_count: usize,
     /// Number of entries to retain in top-n cache after each flush.
@@ -68,11 +71,21 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
         cell_based_row_deserializer: CellBasedRowDeserializer,
+        pk_indices: PkIndices,
     ) -> Self {
+        let order_type = ordered_row_deserializer.clone().order_types;
+        let column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| {
+                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
+            })
+            .collect::<Vec<_>>();
+        let state_table = StateTable::new(keyspace, column_descs, order_type, None, pk_indices);
         Self {
             top_n: BTreeMap::new(),
             bottom_n: BTreeMap::new(),
-            flush_buffer: BTreeMap::new(),
+            state_table,
             total_count,
             top_n_count: cache_size,
             bottom_n_count: cache_size,
@@ -88,7 +101,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     }
 
     pub fn is_dirty(&self) -> bool {
-        !self.flush_buffer.is_empty()
+        !self.state_table.mem_table.buffer.is_empty()
     }
 
     // May have weird cache policy in the future, reserve an `n`.
@@ -124,7 +137,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 &self.top_n
             };
             let key = cache_to_pop.last_key_value().unwrap().0.clone();
-            let value = self.delete(&key, epoch).await?;
+            let old_value = cache_to_pop.last_key_value().unwrap().1.clone();
+            let value = self.delete(&key, old_value,epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
@@ -139,7 +153,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 &self.bottom_n
             };
             let key = cache_to_pop.first_key_value().unwrap().0.clone();
-            let value = self.delete(&key, epoch).await?;
+            let old_value = cache_to_pop.last_key_value().unwrap().1.clone();
+            let value = self.delete(&key, old_value,epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
@@ -183,14 +198,16 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             &mut self.bottom_n
         };
         insert_to_cache.insert(key.clone(), value.clone());
-        FlushStatus::do_insert(self.flush_buffer.entry(key), value);
+        self.state_table
+            .insert(&key.clone().into_row(), value.clone())
+            .unwrap();
         self.total_count += 1;
     }
 
-    pub async fn delete(&mut self, key: &OrderedRow, epoch: u64) -> Result<Option<Row>> {
+    pub async fn delete(&mut self, key: &OrderedRow,value:Row, epoch: u64) -> Result<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
-        FlushStatus::do_delete(self.flush_buffer.entry(key.clone()));
+        self.state_table.delete(&key.clone().into_row(), value)?;
         self.total_count -= 1;
         // If we have nothing in both caches, we have to scan from the storage.
         if self.top_n.is_empty() && self.bottom_n.is_empty() && self.total_count > 0 {
@@ -206,58 +223,44 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// The same as the one in `ManagedTopNState`.
     pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
-        let iter = self.keyspace.iter(epoch).await?;
-        let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_MIN>::new(
-            iter,
-            &mut self.ordered_row_deserializer,
-            &mut self.cell_based_row_deserializer,
-        );
         let mut kv_pairs = vec![];
-        while let Some((pk, row)) = pk_and_row_iter.next().await? {
-            kv_pairs.push((pk, row));
-        }
-        let mut flush_buffer_iter = self.flush_buffer.iter().peekable();
-        let mut insert_process =
-            |cache: &mut BTreeMap<OrderedRow, Row>, part_kv_pairs: Drain<(OrderedRow, Row)>| {
-                for (key_from_storage, row_from_storage) in part_kv_pairs {
-                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek()
-                        && **key_from_buffer < key_from_storage
-                    {
-                        flush_buffer_iter.next();
+        let state_table_iter = self.state_table.iter(epoch).await?;
+        pin_mut!(state_table_iter);
+        loop {
+            match state_table_iter.next().await {
+                Some(next_res) => {
+                    let row = next_res.unwrap().into_owned();
+                    let mut pk_bytes = vec![];
+                    for pk_indice in &self.state_table.pk_indices {
+                        pk_bytes.append(&mut row.serialize_datum(*pk_indice).unwrap());
                     }
-                    if flush_buffer_iter.peek().is_none() {
-                        cache.insert(key_from_storage, row_from_storage);
-                        continue;
-                    }
-                    let (key_from_buffer, value_from_buffer) = flush_buffer_iter.peek().unwrap();
-                    match key_from_storage.cmp(key_from_buffer) {
-                        std::cmp::Ordering::Equal => {
-                            match value_from_buffer {
-                                FlushStatus::Delete => {
-                                    // do not put it into cache
-                                }
-                                FlushStatus::Insert(row) | FlushStatus::DeleteInsert(row) => {
-                                    cache.insert(key_from_storage, row.clone());
-                                }
-                            }
-                        }
-                        std::cmp::Ordering::Greater => {
-                            flush_buffer_iter.next();
-                        }
-                        _ => unreachable!(),
-                    }
+                    let pk = deserialize_pk::<TOP_N_MIN>(
+                        &mut pk_bytes.clone(),
+                        &mut self.ordered_row_deserializer,
+                    )?;
+                    kv_pairs.push((pk, row));
                 }
-            };
+                None => {
+                    break;
+                }
+            }
+        }
+       
         // The reason we can split the `kv_pairs` without caring whether the key to be inserted is
         // already in the top_n or bottom_n is that we would only trigger `scan_and_merge` when both
         // caches are empty.
+
         {
             let part1 = kv_pairs.drain(0..kv_pairs.len() / 2);
-            insert_process(&mut self.bottom_n, part1);
+            for (key, value) in part1 {
+                self.bottom_n.insert(key, value);
+            }
         }
         {
             let part2 = kv_pairs.drain(..);
-            insert_process(&mut self.top_n, part2);
+            for (key, value) in part2 {
+                self.top_n.insert(key, value);
+            }
         }
         Ok(())
     }
@@ -286,26 +289,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             return Ok(());
         }
 
-        let mut write_batch = self.keyspace.state_store().start_write_batch();
-        let mut local = write_batch.prefixify(&self.keyspace);
-
-        for (pk, cells) in std::mem::take(&mut self.flush_buffer) {
-            let row = cells.into_option();
-            let pk_buf = pk.serialize()?;
-            // TODO: use real column ids later.
-            let column_ids = (0..self.data_types.len() as i32)
-                .map(ColumnId::from)
-                .collect::<Vec<_>>();
-            let bytes = serialize_pk_and_row_state(&pk_buf, &row, &column_ids)?;
-            for (key, value) in bytes {
-                match value {
-                    // TODO(Yuanxin): Implement value meta
-                    Some(val) => local.put(key, StorageValue::new_default_put(val)),
-                    None => local.delete(key),
-                }
-            }
-        }
-        write_batch.ingest(epoch).await.unwrap();
+        self.state_table.commit(epoch).await?;
 
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
         Ok(())
@@ -365,6 +349,7 @@ mod tests {
             data_types,
             ordered_row_deserializer,
             cell_based_row_deserializer,
+            vec![0_usize, 1_usize],
         )
     }
 

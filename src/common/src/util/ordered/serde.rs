@@ -114,7 +114,7 @@ impl OrderedRowSerializer {
 #[derive(Clone)]
 pub struct OrderedRowDeserializer {
     data_types: Vec<DataType>,
-    order_types: Vec<OrderType>,
+    pub order_types: Vec<OrderType>,
 }
 
 impl OrderedRowDeserializer {
