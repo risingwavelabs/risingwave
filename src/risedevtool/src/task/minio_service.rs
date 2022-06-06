@@ -49,6 +49,9 @@ impl MinioService {
             .env("MINIO_ROOT_USER", &config.root_user)
             .env("MINIO_ROOT_PASSWORD", &config.root_password)
             .env("MINIO_PROMETHEUS_AUTH_TYPE", "public")
+            // Allow MinIO to be used on root disk, bypass restriction.
+            // https://github.com/singularity-data/risingwave/pull/3012
+            // https://docs.min.io/minio/baremetal/installation/deploy-minio-single-node-single-drive.html#id3
             .env("MINIO_CI_CD", "1");
 
         let provide_prometheus = config.provide_prometheus.as_ref().unwrap();
