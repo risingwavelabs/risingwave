@@ -463,8 +463,11 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
 // then fill in empty spots with datum decoded from pk: | user_id | age | name |
 pub struct DedupPkCellBasedTableRowIter<S: StateStore> {
     inner: CellBasedTableRowIter<S>,
-    pk_decoder: OrderedRowDeserializer, // pk -> datum
-    pk_to_row_mapping: Vec<Option<usize>>,      // pk datum positions in row, not all are mapped
+    pk_decoder: OrderedRowDeserializer,
+    // map pk datums to their positions in row.
+    // Only maps pk fields with value == memcomparable,
+    // and occupy positions in row.
+    pk_to_row_mapping: Vec<Option<usize>>,
 }
 
 impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
@@ -497,10 +500,14 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
             .collect();
         println!("pk_descs: {:#?}", pk_descs);
         println!("table_descs: {:#?}", table_descs);
-        // not every pk field has a row mapping.
         let pk_to_row_mapping = pk_descs
             .iter()
-            .map(|d| col_id_to_row_idx.get(&d.column_desc.column_id).map(|&i| i))
+            .map(|d| if mem_cmp_eq_value_enc(&d.column_desc.data_type) {
+                  col_id_to_row_idx
+                 .get(&d.column_desc.column_id)
+                 .map(|&i| i)
+            } else { None }
+            )
             .collect();
         Ok(Self {
             inner,
