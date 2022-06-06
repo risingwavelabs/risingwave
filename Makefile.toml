@@ -345,7 +345,7 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo install $tool
@@ -434,6 +434,9 @@ script = """
 #!@shell
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
+
+# cargo hakari will generate new Cargo.toml regardless whether the original Cargo.toml is correct or not.
+# So we always verify before generate, so as not to change the modified time of Cargo.toml.
 (cargo hakari verify > /dev/null) || cargo hakari generate
 test $? -eq 0 || exit 1
 """

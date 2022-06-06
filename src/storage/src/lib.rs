@@ -53,20 +53,9 @@ pub mod store_impl;
 pub mod table;
 pub mod write_batch;
 
-#[cfg(feature = "rocksdb-local")]
-pub mod rocksdb_local;
-#[cfg(not(feature = "rocksdb-local"))]
-#[path = "rocksdb_local_mock.rs"]
-pub mod rocksdb_local;
-
 #[cfg(test)]
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;
-#[cfg(feature = "tikv")]
-pub mod tikv;
-#[cfg(not(feature = "tikv"))]
-#[path = "tikv_mock.rs"]
-pub mod tikv;
 
 pub use keyspace::Keyspace;
 extern crate test;
