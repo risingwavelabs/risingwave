@@ -12,19 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-pub trait CheckedAdd<T>
-where
-    Self: Sized,
-{
-    fn checked_add(&self, rhs: T) -> Result<Self>;
+pub trait CheckedAdd<Rhs = Self> {
+    type Output;
+    fn checked_add(self, rhs: Rhs) -> Option<Self::Output>;
 }
 
 impl<T: num_traits::CheckedAdd> CheckedAdd<T> for T {
-    fn checked_add(&self, rhs: T) -> Result<Self> {
-        let res = <Self as num_traits::CheckedAdd>::checked_add(self, &rhs)
-            .ok_or_else(|| InternalError("CheckedAdd Error".to_string()))?;
-        Ok(res)
+    type Output = T;
+
+    fn checked_add(self, rhs: T) -> Option<Self> {
+        num_traits::CheckedAdd::checked_add(&self, &rhs)
     }
 }
