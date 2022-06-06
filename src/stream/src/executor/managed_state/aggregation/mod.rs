@@ -153,7 +153,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
             }
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
-            AggKind::Avg | AggKind::Count | AggKind::Sum => {
+            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
                 assert!(
                     is_row_count || row_count.is_some(),
                     "should set row_count for value states other than AggKind::RowCount"

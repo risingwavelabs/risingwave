@@ -239,12 +239,83 @@ pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 mod tests {
     use std::vec;
 
+    use risingwave_common::array::{ArrayImpl, Utf8Array};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 
     use super::*;
+
+    #[test]
+    fn test_array_access_expr() {
+        let values = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Varchar as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue {
+                        body: "foo".as_bytes().to_vec(),
+                    })),
+                },
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Varchar as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue {
+                        body: "bar".as_bytes().to_vec(),
+                    })),
+                },
+            ],
+        };
+        let array_index = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::Array as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::List as i32,
+                        field_type: vec![ProstDataType {
+                            type_name: TypeName::Varchar as i32,
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::FuncCall(values)),
+                },
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue {
+                        body: vec![0, 0, 0, 1],
+                    })),
+                },
+            ],
+        };
+        let access = ExprNode {
+            expr_type: Type::ArrayAccess as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::Varchar as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::FuncCall(array_index)),
+        };
+        let expr = build_nullable_binary_expr_prost(&access);
+        assert!(expr.is_ok());
+
+        let res = expr.unwrap().eval(&DataChunk::new_dummy(1)).unwrap();
+        assert_eq!(
+            *res,
+            ArrayImpl::Utf8(Utf8Array::from_slice(&[Some("foo")]).unwrap())
+        );
+    }
 
     #[test]
     fn test_build_in_expr() {

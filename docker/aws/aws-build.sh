@@ -10,7 +10,7 @@ if ! [[ "$DIR" =~ ^/ebs.* ]] ; then
 fi
 
 cd "$DIR/../.."
-cargo build -p risingwave_cmd_all --release
+cargo build -p risingwave_cmd_all --release --features static-link
 objcopy --compress-debug-sections=zlib-gnu target/release/risingwave "$DIR/risingwave"
 
 cd "$DIR"
