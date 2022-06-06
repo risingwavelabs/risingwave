@@ -88,6 +88,10 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="deckbytes", fillOpacity=10)
 
+    def timeseries_dollar(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="$", fillOpacity=10)
+
     def timeseries_ops(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ops", fillOpacity=10)
@@ -275,6 +279,20 @@ def section_object_storage(panels):
             ),
             panels.target(
                 "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))", "{{type}} p80"
+            ),
+        ]),
+        panels.timeseries_dollar("Estimated S3 Cost (Total)", [
+            panels.target(
+                "sum(object_store_read_bytes) * 0.01 / 1000 / 1000 / 1000", "Data Transfer Cost"
+            ),
+            panels.target(
+                "sum(object_store_operation_latency_count{type=~'read|delete'}) * 0.0004 / 1000", "GET + DELETE Request Cost"
+            ),
+            panels.target(
+                "sum(object_store_operation_latency_count{type='upload'}) * 0.005 / 1000", "PUT Request Cost"
+            ),
+            panels.target(
+                "sum(minio_bucket_usage_total_bytes) * 0.023 / 1000 / 1000 / 1000", "Storage Cost"
             ),
         ]),
     ]

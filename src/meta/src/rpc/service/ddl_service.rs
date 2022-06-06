@@ -434,7 +434,8 @@ where
             &mut ctx,
         )
         .await?;
-        let table_fragments = TableFragments::new(mview_id, graph);
+        let table_fragments =
+            TableFragments::new(mview_id, graph, ctx.internal_table_id_set.clone());
 
         // Create on compute node.
         self.stream_manager

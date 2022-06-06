@@ -71,6 +71,10 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
+    async fn unpin_snapshot_before(&self, _min_epoch: HummockEpoch) -> Result<()> {
+        unreachable!("Currently CNs should not call this function")
+    }
+
     async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         self.stats.get_new_table_id_counts.inc();
         let timer = self.stats.get_new_table_id_latency.start_timer();
