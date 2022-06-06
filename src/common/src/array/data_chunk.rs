@@ -437,9 +437,9 @@ impl DataChunk {
         table.to_string()
     }
 
-    /// Reorder columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
+    /// Reorder (and possibly remove) columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
     /// the chunk contains column `[a, b, c]`, then the output will be
-    /// `[c, b, a]`.
+    /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
     pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
         let mut new_columns = Vec::with_capacity(column_mapping.len());
         for &idx in column_mapping {

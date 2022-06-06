@@ -48,6 +48,9 @@ pub struct NestedLoopJoinExecutor {
     /// Executor should handle different join type.
     join_type: JoinType,
     schema: Schema,
+    /// We may only need certain columns.
+    /// [`output_indices`] are the indices of the columns that we needed.
+    output_indices: Vec<usize>,
     /// Return data chunk in batch.
     chunk_builder: DataChunkBuilder,
     /// Cache the chunk that has not been written into chunk builder
@@ -118,27 +121,27 @@ impl NestedLoopJoinExecutor {
                 NestedLoopJoinState::FirstProbe => {
                     let ret = self.probe(true, &mut state).await?;
                     if let Some(data_chunk) = ret {
-                        yield data_chunk;
+                        yield data_chunk.reorder_columns(&self.output_indices);
                     }
                 }
                 NestedLoopJoinState::Probe => {
                     let ret = self.probe(false, &mut state).await?;
                     if let Some(data_chunk) = ret {
-                        yield data_chunk;
+                        yield data_chunk.reorder_columns(&self.output_indices);
                     }
                 }
 
                 NestedLoopJoinState::ProbeRemaining => {
                     let ret = self.probe_remaining()?;
                     if let Some(data_chunk) = ret {
-                        yield data_chunk;
+                        yield data_chunk.reorder_columns(&self.output_indices);
                     }
                     state = NestedLoopJoinState::Done;
                 }
 
                 NestedLoopJoinState::Done => {
                     if let Some(data_chunk) = self.chunk_builder.consume_all()? {
-                        yield data_chunk;
+                        yield data_chunk.reorder_columns(&self.output_indices);
                     } else {
                         break;
                     };
@@ -224,8 +227,16 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                 .cloned()
                 .collect(),
         };
-
-        let schema = Schema { fields };
+        let output_indices: Vec<usize> = nested_loop_join_node
+            .output_indices
+            .iter()
+            .map(|&x| x as usize)
+            .collect();
+        let original_schema = Schema { fields };
+        let actual_schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
         match join_type {
             JoinType::Inner
             | JoinType::LeftOuter
@@ -240,8 +251,11 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                 Ok(Box::new(Self {
                     join_expr,
                     join_type,
-                    chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
-                    schema,
+                    chunk_builder: DataChunkBuilder::with_default_size(
+                        original_schema.data_types(),
+                    ),
+                    schema: actual_schema,
+                    output_indices,
                     last_chunk: None,
                     probe_side_schema,
                     probe_side_source: outer_table_source,
@@ -642,6 +656,7 @@ mod tests {
             probe_remain_chunk_idx: 0,
             probe_remain_row_idx: 0,
             identity: "NestedLoopJoinExecutor2".to_string(),
+            output_indices: vec![0, 1],
         };
         let const_row_chunk = source
             .convert_datum_refs_to_chunk(&row, 5, &probe_side_schema.data_types())
@@ -788,6 +803,7 @@ mod tests {
                 probe_remain_chunk_idx: 0,
                 probe_remain_row_idx: 0,
                 identity: "NestedLoopJoinExecutor2".to_string(),
+                output_indices: (0..schema.len()).into_iter().collect(),
             })
         }
 

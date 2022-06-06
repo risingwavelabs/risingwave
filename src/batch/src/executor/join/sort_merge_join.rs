@@ -50,6 +50,9 @@ pub struct SortMergeJoinExecutor {
     /// Last probe row key (Part of probe row). None for the first probe.
     last_probe_key: Option<Row>,
     schema: Schema,
+    /// We may only need certain columns.
+    /// [`output_indices`] are the indices of the columns that we needed.
+    output_indices: Vec<usize>,
     /// Sort key column index of probe side and build side.
     /// They should have the same length and be one-to-one mapping.
     probe_key_idxs: Vec<usize>,
@@ -105,7 +108,7 @@ impl SortMergeJoinExecutor {
                             .chunk_builder
                             .append_one_row_from_datum_refs(datum_refs)?
                         {
-                            yield ret_chunk;
+                            yield ret_chunk.reorder_columns(&self.output_indices);
                         }
                     }
                 }
@@ -172,7 +175,7 @@ impl SortMergeJoinExecutor {
                                 .append_one_row_from_datum_refs(join_datum_refs)?;
                             self.build_side_source.advance_row();
                             if let Some(ret_chunk) = ret {
-                                yield ret_chunk;
+                                yield ret_chunk.reorder_columns(&self.output_indices);
                             }
                         }
                     }
@@ -186,7 +189,7 @@ impl SortMergeJoinExecutor {
                 // Once probe row is None, consume all results or terminate.
                 (_, _) => {
                     if let Some(ret) = self.chunk_builder.consume_all()? {
-                        yield ret
+                        yield ret.reorder_columns(&self.output_indices)
                     } else {
                         break;
                     };
@@ -200,6 +203,7 @@ impl SortMergeJoinExecutor {
     pub(super) fn new(
         join_type: JoinType,
         schema: Schema,
+        output_indices: Vec<usize>,
         probe_side_source: RowLevelIter,
         build_side_source: RowLevelIter,
         probe_key_idxs: Vec<usize>,
@@ -219,6 +223,7 @@ impl SortMergeJoinExecutor {
             last_probe_key: None,
             sort_order: OrderType::Ascending,
             identity,
+            output_indices,
         }
     }
 
@@ -263,8 +268,16 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
             .chain(right_child.schema().fields.iter())
             .cloned()
             .collect();
-        let schema = Schema { fields };
-
+        let output_indices: Vec<usize> = sort_merge_join_node
+            .output_indices
+            .iter()
+            .map(|&x| x as usize)
+            .collect();
+        let original_schema = Schema { fields };
+        let actual_schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
         let left_keys = sort_merge_join_node.get_left_keys();
         let mut probe_key_idxs = vec![];
         for key in left_keys {
@@ -283,7 +296,8 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                 let build_table_source = RowLevelIter::new(right_child);
                 Ok(Box::new(Self::new(
                     join_type,
-                    schema,
+                    actual_schema,
+                    output_indices,
                     probe_table_source,
                     build_table_source,
                     probe_key_idxs,
@@ -420,10 +434,11 @@ mod tests {
                 .cloned()
                 .collect();
             let schema = Schema { fields };
-
+            let schema_len = schema.len();
             Box::new(SortMergeJoinExecutor::new(
                 join_type,
                 schema,
+                (0..schema_len).into_iter().collect(),
                 RowLevelIter::new(left_child),
                 RowLevelIter::new(right_child),
                 vec![0],
