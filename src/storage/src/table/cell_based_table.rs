@@ -52,7 +52,7 @@ pub struct CellBasedTable<S: StateStore> {
     column_descs: Vec<ColumnDesc>,
 
     /// Mapping from column id to column index
-    pk_serializer: Option<OrderedRowSerializer>,
+    pub pk_serializer: Option<OrderedRowSerializer>,
 
     cell_based_row_serializer: CellBasedRowSerializer,
 
@@ -198,35 +198,32 @@ impl<S: StateStore> CellBasedTable<S> {
 
     async fn batch_write_rows_inner<const WITH_VALUE_META: bool>(
         &mut self,
-        buffer: BTreeMap<Row, RowOp>,
+        buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
         // stateful executors need to compute vnode.
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        let ordered_row_serializer = self.pk_serializer.as_ref().unwrap();
         let hash_builder = CRC32FastBuilder {};
         for (pk, row_op) in buffer {
-            let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
-
-            let value_meta = if WITH_VALUE_META {
-                // If value meta is computed here, then the cell based table is guaranteed to have
-                // distribution keys. Also, it is guaranteed that distribution key indices will
-                // not exceed the length of pk. So we simply do unwrap here.
-                let vnode = pk
-                    .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
-                    .unwrap()
-                    .to_vnode();
-                ValueMeta::with_vnode(vnode)
-            } else {
-                ValueMeta::default()
-            };
+            // If value meta is computed here, then the cell based table is guaranteed to have
+            // distribution keys. Also, it is guaranteed that distribution key indices will
+            // not exceed the length of pk. So we simply do unwrap here.
 
             match row_op {
                 RowOp::Insert(row) => {
+                    let value_meta = if WITH_VALUE_META {
+                        let vnode = row
+                            .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
+                            .unwrap()
+                            .to_vnode();
+                        ValueMeta::with_vnode(vnode)
+                    } else {
+                        ValueMeta::default()
+                    };
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, row, &self.column_ids)
+                        .serialize(&pk, row, &self.column_ids)
                         .map_err(err)?;
                     for (key, value) in bytes {
                         local.put(key, StorageValue::new_put(value_meta, value))
@@ -234,22 +231,40 @@ impl<S: StateStore> CellBasedTable<S> {
                 }
                 RowOp::Delete(old_row) => {
                     // TODO(wcy-fdu): only serialize key on deletion
+                    let value_meta = if WITH_VALUE_META {
+                        let vnode = old_row
+                            .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
+                            .unwrap()
+                            .to_vnode();
+                        ValueMeta::with_vnode(vnode)
+                    } else {
+                        ValueMeta::default()
+                    };
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, old_row, &self.column_ids)
+                        .serialize(&pk, old_row, &self.column_ids)
                         .map_err(err)?;
                     for (key, _) in bytes {
                         local.delete_with_value_meta(key, value_meta);
                     }
                 }
                 RowOp::Update((old_row, new_row)) => {
+                    let value_meta = if WITH_VALUE_META {
+                        let vnode = new_row
+                            .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
+                            .unwrap()
+                            .to_vnode();
+                        ValueMeta::with_vnode(vnode)
+                    } else {
+                        ValueMeta::default()
+                    };
                     let delete_bytes = self
                         .cell_based_row_serializer
-                        .serialize_without_filter(&arrange_key_buf, old_row, &self.column_ids)
+                        .serialize_without_filter(&pk, old_row, &self.column_ids)
                         .map_err(err)?;
                     let insert_bytes = self
                         .cell_based_row_serializer
-                        .serialize_without_filter(&arrange_key_buf, new_row, &self.column_ids)
+                        .serialize_without_filter(&pk, new_row, &self.column_ids)
                         .map_err(err)?;
                     for (delete, insert) in
                         delete_bytes.into_iter().zip_eq(insert_bytes.into_iter())
@@ -277,7 +292,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn batch_write_rows_with_value_meta(
         &mut self,
-        buffer: BTreeMap<Row, RowOp>,
+        buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
         self.batch_write_rows_inner::<true>(buffer, epoch).await
@@ -285,7 +300,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn batch_write_rows(
         &mut self,
-        buffer: BTreeMap<Row, RowOp>,
+        buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
         self.batch_write_rows_inner::<false>(buffer, epoch).await

@@ -13,4 +13,4 @@ block_size_kb = 64
 bloom_false_positive = 0.01
 data_directory = "hummock_001"
 block_cache_capacity_mb = 4096
-meta_cache_capacity_mb = 256
+meta_cache_capacity_mb = 1024

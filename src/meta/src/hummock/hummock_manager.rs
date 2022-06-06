@@ -217,7 +217,7 @@ where
             CompactTaskAssignment::list(self.env.meta_store())
                 .await?
                 .into_iter()
-                .map(|assigned| (assigned.key().unwrap().id, assigned))
+                .map(|assigned| (assigned.key().unwrap(), assigned))
                 .collect();
 
         let mut versioning_guard = self.versioning.write().await;

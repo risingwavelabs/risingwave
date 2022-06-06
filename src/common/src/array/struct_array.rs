@@ -273,7 +273,7 @@ impl StructArray {
 
 #[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
 pub struct StructValue {
-    fields: Vec<Datum>,
+    fields: Box<[Datum]>,
 }
 
 impl fmt::Display for StructValue {
@@ -308,7 +308,9 @@ impl Ord for StructValue {
 
 impl StructValue {
     pub fn new(fields: Vec<Datum>) -> Self {
-        Self { fields }
+        Self {
+            fields: fields.into_boxed_slice(),
+        }
     }
 
     pub fn fields(&self) -> &[Datum] {

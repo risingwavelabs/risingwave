@@ -20,9 +20,12 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::ObjectType;
-use crate::ast::{display_comma_separated, ColumnDef, ObjectName, SqlOption, TableConstraint};
+use crate::ast::{
+    display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
+};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
+use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
 pub trait ParseTo: Sized {
@@ -298,6 +301,127 @@ impl<T> From<AstOption<T>> for Option<T> {
             AstOption::Some(t) => Some(t),
             AstOption::None => None,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateUserStatement {
+    pub user_name: ObjectName,
+    pub with_options: CreateUserWithOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateUserOption {
+    SuperUser,
+    NoSuperUser,
+    CreateDB,
+    NoCreateDB,
+    Login,
+    NoLogin,
+    EncryptedPassword(AstString),
+    Password(Option<AstString>),
+}
+
+impl fmt::Display for CreateUserOption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CreateUserOption::SuperUser => write!(f, "SUPERUSER"),
+            CreateUserOption::NoSuperUser => write!(f, "NOSUPERUSER"),
+            CreateUserOption::CreateDB => write!(f, "CREATEDB"),
+            CreateUserOption::NoCreateDB => write!(f, "NOCREATEDB"),
+            CreateUserOption::Login => write!(f, "LOGIN"),
+            CreateUserOption::NoLogin => write!(f, "NOLOGIN"),
+            CreateUserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
+            CreateUserOption::Password(None) => write!(f, "PASSWORD NULL"),
+            CreateUserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateUserWithOptions(pub Vec<CreateUserOption>);
+
+impl ParseTo for CreateUserWithOptions {
+    fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
+        let mut options = vec![];
+        if parser.parse_keyword(Keyword::WITH) {
+            loop {
+                let token = parser.peek_token();
+                if token == Token::EOF || token == Token::SemiColon {
+                    break;
+                }
+
+                if let Token::Word(ref w) = token {
+                    parser.next_token();
+                    let option = match w.keyword {
+                        Keyword::SUPERUSER => CreateUserOption::SuperUser,
+                        Keyword::NOSUPERUSER => CreateUserOption::NoSuperUser,
+                        Keyword::CREATEDB => CreateUserOption::CreateDB,
+                        Keyword::NOCREATEDB => CreateUserOption::NoCreateDB,
+                        Keyword::LOGIN => CreateUserOption::Login,
+                        Keyword::NOLOGIN => CreateUserOption::NoLogin,
+                        Keyword::PASSWORD => {
+                            if parser.parse_keyword(Keyword::NULL) {
+                                CreateUserOption::Password(None)
+                            } else {
+                                CreateUserOption::Password(Some(AstString::parse_to(parser)?))
+                            }
+                        }
+                        Keyword::ENCRYPTED => {
+                            parser.expect_keyword(Keyword::PASSWORD)?;
+                            CreateUserOption::EncryptedPassword(AstString::parse_to(parser)?)
+                        }
+                        _ => parser.expected(
+                            "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
+                            | NOLOGIN | ENCRYPTED | PASSWORD | NULL",
+                            token,
+                        )?,
+                    };
+                    options.push(option);
+                } else {
+                    parser.expected(
+                        "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
+                        | ENCRYPTED | PASSWORD | NULL",
+                        token,
+                    )?
+                }
+            }
+        }
+        Ok(Self(options))
+    }
+}
+
+impl fmt::Display for CreateUserWithOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.0.is_empty() {
+            write!(f, "WITH {}", display_separated(self.0.as_slice(), " "))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl ParseTo for CreateUserStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(user_name: ObjectName, p);
+        impl_parse_to!(with_options: CreateUserWithOptions, p);
+
+        Ok(CreateUserStatement {
+            user_name,
+            with_options,
+        })
+    }
+}
+
+impl fmt::Display for CreateUserStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(user_name, v, self);
+        impl_fmt_display!(with_options, v, self);
+        v.iter().join(" ").fmt(f)
     }
 }
 

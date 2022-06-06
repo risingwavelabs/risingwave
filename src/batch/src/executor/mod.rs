@@ -34,6 +34,7 @@ mod trace;
 mod update;
 mod values;
 
+use async_recursion::async_recursion;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
@@ -93,6 +94,7 @@ pub trait Executor: Send + 'static {
 pub trait BoxedExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor>;
 }
 
@@ -104,11 +106,11 @@ pub struct ExecutorBuilder<'a, C> {
 }
 
 macro_rules! build_executor {
-    ($source: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
+    ($source: expr, $inputs: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $source.plan_node().get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source)
+                    <$data_type>::new_boxed_executor($source, $inputs)
                 },
             )*
         }
@@ -155,8 +157,15 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         })
     }
 
+    #[async_recursion]
     async fn try_build(&self) -> Result<BoxedExecutor> {
-        let real_executor = build_executor! { self,
+        let mut inputs = Vec::with_capacity(self.plan_node.children.len());
+        for input_node in &self.plan_node.children {
+            let input = self.clone_for_plan(input_node).build().await?;
+            inputs.push(input);
+        }
+
+        let real_executor = build_executor! { self, inputs,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
             NodeBody::Insert => InsertExecutor,
             NodeBody::Delete => DeleteExecutor,
@@ -179,7 +188,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         }
         .await?;
         let input_desc = real_executor.identity().to_string();
-        Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
+        Ok(Box::new(TraceExecutor::new(real_executor, input_desc)) as BoxedExecutor)
     }
 }
 
