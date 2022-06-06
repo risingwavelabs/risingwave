@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use log::error;
@@ -60,27 +60,43 @@ impl HummockSnapshotManager {
 
     pub async fn unpin_snapshot(&self, epoch: u64, query_id: &QueryId) -> Result<()> {
         tracing::info!("Unpin epoch {} for query {:?}", epoch, &query_id);
-        let local_count = async {
+        let min_epoch = async {
+            // Decrease the ref count of corresponding epoch. If all last pinned epoch is dropped,
+            // mark as outdated.
             let mut core_guard = self.core.lock().await;
             let query_ids = core_guard.epoch_to_query_ids.get_mut(&epoch);
             if let Some(query_ids) = query_ids {
                 query_ids.remove(query_id);
-                if query_ids.is_empty() {
-                    core_guard.epoch_to_query_ids.remove(&epoch);
-                    if epoch == core_guard.last_pinned {
-                        core_guard.is_outdated = true;
-                    }
-                    return true;
+                if query_ids.is_empty() && epoch == core_guard.last_pinned {
+                    core_guard.is_outdated = true;
                 }
             }
-            false
+
+            // Iterate for all query and calculate the min epoch.
+            let mut min_epoch = None;
+            for (epoch, query_ids) in &core_guard.epoch_to_query_ids {
+                if query_ids.is_empty() {
+                    min_epoch = Some(*epoch);
+                    break;
+                }
+            }
+
+            if let Some(epoch_inner) = min_epoch {
+                core_guard.epoch_to_query_ids.remove(&epoch_inner);
+                assert!(epoch_inner <= core_guard.last_pinned);
+            }
+            min_epoch
         };
-        let need_to_request_meta = local_count.await;
-        if need_to_request_meta {
+
+        let need_to_request_meta = min_epoch.await;
+        if let Some(epoch_inner) = need_to_request_meta {
+            tracing::info!("Unpin epoch in frontend manager {:?}", epoch_inner);
             let meta_client = self.meta_client.clone();
             tokio::spawn(async move {
-                let handle = tokio::spawn(async move { meta_client.unpin_snapshot(epoch).await });
-
+                let handle =
+                    tokio::spawn(
+                        async move { meta_client.unpin_snapshot_before(epoch_inner).await },
+                    );
                 if let Err(join_error) = handle.await && join_error.is_panic() {
                     error!("Request meta to unpin snapshot panic {:?}!", join_error);
                 }
@@ -104,7 +120,7 @@ struct HummockSnapshotManagerCore {
     last_pinned: u64,
     /// Record the query ids that pin each snapshot.
     /// Send an `unpin_snapshot` RPC when a snapshot is not pinned any more.
-    epoch_to_query_ids: HashMap<u64, HashSet<QueryId>>,
+    epoch_to_query_ids: BTreeMap<u64, HashSet<QueryId>>,
 }
 
 impl HummockSnapshotManagerCore {
