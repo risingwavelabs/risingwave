@@ -321,8 +321,8 @@ impl<S: StateStore> CellBasedTable<S> {
         &self,
         epoch: u64,
         pk_descs: Vec<OrderedColumnDesc>,
-    ) -> StorageResult<CellBasedTableRowWithPkIter<S>> {
-        CellBasedTableRowWithPkIter::new(
+    ) -> StorageResult<DedupPkCellBasedTableRowIter<S>> {
+        DedupPkCellBasedTableRowIter::new(
             self.keyspace.clone(),
             self.column_descs.clone(),
             epoch,
@@ -461,13 +461,13 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
 // we can decode pk -> user_id, name,
 // and retrieve the row: | | age | |,
 // then fill in empty spots with datum decoded from pk: | user_id | age | name |
-pub struct CellBasedTableRowWithPkIter<S: StateStore> {
+pub struct DedupPkCellBasedTableRowIter<S: StateStore> {
     inner: CellBasedTableRowIter<S>,
     pk_decoder: OrderedRowDeserializer, // pk -> datum
     pk_to_row_mapping: Vec<usize>,      // pk datum positions in row.
 }
 
-impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
+impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
     pub async fn new(
         keyspace: Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
@@ -550,7 +550,7 @@ impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
 }
 
 #[async_trait::async_trait]
-impl<S: StateStore> TableIter for CellBasedTableRowWithPkIter<S> {
+impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
     async fn next(&mut self) -> StorageResult<Option<Row>> {
         let row_opt = self.inner.next_pk_and_row().await?;
         Ok(row_opt.map(|(pk_vec, mut row)| {
