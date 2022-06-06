@@ -321,7 +321,6 @@ pub struct LruCacheShard<K: LruKey, T: LruValue> {
 }
 
 unsafe impl<K: LruKey, T: LruValue> Send for LruCacheShard<K, T> {}
-unsafe impl<K: LruKey, T: LruValue> Sync for LruCacheShard<K, T> {}
 
 impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     fn new(capacity: usize, object_capacity: usize) -> Self {
