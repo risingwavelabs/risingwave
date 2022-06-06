@@ -68,7 +68,6 @@ impl ToStreamProst for StreamExchange {
                 r#type: match &self.base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,
                     Distribution::Single => DispatcherType::Simple,
-                    Distribution::Broadcast => DispatcherType::Broadcast,
                     _ => panic!("Do not allow Any or AnyShard in serialization process"),
                 } as i32,
                 column_indices: match &self.base.dist {

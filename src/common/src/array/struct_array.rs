@@ -410,13 +410,8 @@ impl Debug for StructRef<'_> {
 
 impl Display for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StructRef::Indexed { arr: _, idx: _ } => {
-                let v = self.fields_ref().iter().map(display_datum_ref).join(", ");
-                write!(f, "({})", v)
-            }
-            StructRef::ValueRef { val } => write!(f, "({})", val),
-        }
+        let values = self.fields_ref().iter().map(display_datum_ref).join(",");
+        write!(f, "({})", values)
     }
 }
 

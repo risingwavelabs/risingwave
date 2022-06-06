@@ -3559,6 +3559,7 @@ version = "0.1.7"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-recursion",
  "async-stream",
  "async-trait",
  "byteorder",
@@ -3935,6 +3936,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
+ "md5",
  "num-integer",
  "num-traits",
  "parking_lot",
@@ -3951,6 +3953,7 @@ dependencies = [
  "risingwave_sqlparser",
  "risingwave_storage",
  "serde_json",
+ "sha2",
  "smallvec",
  "tempfile",
  "thiserror",
@@ -4283,6 +4286,7 @@ dependencies = [
  "uuid 1.1.0",
  "value-encoding",
  "workspace-hack",
+ "zstd",
 ]
 
 [[package]]

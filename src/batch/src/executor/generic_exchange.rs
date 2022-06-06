@@ -97,7 +97,12 @@ pub struct GenericExchangeExecutorBuilder {}
 impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(
+            inputs.is_empty(),
+            "Exchange executor should not have children!"
+        );
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Exchange
@@ -212,11 +217,12 @@ mod tests {
             ) -> Result<Box<dyn ExchangeSource>> {
                 let mut rng = rand::thread_rng();
                 let i = rng.gen_range(1..=100000);
-                let chunk = DataChunk::builder()
-                    .columns(vec![Column::new(Arc::new(
+                let chunk = DataChunk::new(
+                    vec![Column::new(Arc::new(
                         array_nonnull! { I32Array, [i] }.into(),
-                    ))])
-                    .build();
+                    ))],
+                    1,
+                );
                 let chunks = vec![Some(chunk); 100];
 
                 Ok(Box::new(FakeExchangeSource { chunks }))

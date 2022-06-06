@@ -42,8 +42,8 @@ pub mod handler;
 pub mod observer;
 pub mod optimizer;
 pub mod planner;
-#[allow(unused)]
-mod scheduler;
+#[allow(dead_code)]
+pub mod scheduler;
 pub mod session;
 pub mod stream_fragmenter;
 pub mod utils;
@@ -54,6 +54,7 @@ extern crate core;
 extern crate risingwave_common;
 
 mod config;
+pub mod user;
 
 use std::ffi::OsString;
 use std::iter;

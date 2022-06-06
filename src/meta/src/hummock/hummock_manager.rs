@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::Future;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -25,8 +25,8 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::CompactionGroupId;
 use risingwave_hummock_sdk::{
-    get_remote_sst_id, HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId,
-    HummockVersionId,
+    get_remote_sst_id, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockRefCount,
+    HummockSSTableId, HummockVersionId,
 };
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::hummock::{
@@ -75,8 +75,28 @@ pub struct HummockManager<S: MetaStore> {
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
 
 struct Compaction {
+    // TODO: `compact_status` will be managed per `compaction_groups` soon
     compact_status: CompactStatus,
     compact_task_assignment: BTreeMap<u64, CompactTaskAssignment>,
+    /// Available compaction task ids for use
+    next_task_ids: VecDeque<HummockCompactionTaskId>,
+}
+
+impl Compaction {
+    /// Gets a new compaction task id locally. If no id is available locally, fetch some ids via
+    /// `get_more_ids` first.
+    async fn get_next_task_id<F>(&mut self, get_more_ids: F) -> Result<HummockCompactionTaskId>
+    where
+        F: Future<Output = Result<Vec<HummockCompactionTaskId>>>,
+    {
+        if self.next_task_ids.is_empty() {
+            let new_ids = get_more_ids.await?;
+            self.next_task_ids.extend(new_ids);
+        }
+        self.next_task_ids
+            .pop_front()
+            .ok_or_else(|| Error::InternalError("cannot get compaction task id".to_string()))
+    }
 }
 
 /// Commit multiple `ValTransaction`s to state store and upon success update the local in-mem state
@@ -159,6 +179,7 @@ where
             compaction: RwLock::new(Compaction {
                 compact_status: CompactStatus::new(config.clone()),
                 compact_task_assignment: Default::default(),
+                next_task_ids: Default::default(),
             }),
             metrics,
             cluster_manager,
@@ -196,7 +217,7 @@ where
             CompactTaskAssignment::list(self.env.meta_store())
                 .await?
                 .into_iter()
-                .map(|assigned| (assigned.key().unwrap().id, assigned))
+                .map(|assigned| (assigned.key().unwrap(), assigned))
                 .collect();
 
         let mut versioning_guard = self.versioning.write().await;
@@ -467,11 +488,26 @@ where
     pub async fn get_compact_task(&self) -> Result<Option<CompactTask>> {
         let start_time = Instant::now();
         let mut compaction_guard = self.compaction.write().await;
-
         let compaction = compaction_guard.deref_mut();
+        let task_id = compaction
+            .get_next_task_id(async {
+                let batch_size = 10;
+                self.env
+                    .id_gen_manager()
+                    .generate_interval::<{ IdCategory::HummockCompactionTask }>(batch_size)
+                    .await
+                    .map(|id| {
+                        (id as HummockCompactionTaskId
+                            ..(id + batch_size) as HummockCompactionTaskId)
+                            .collect_vec()
+                    })
+                    .map_err(Error::from)
+            })
+            .await?;
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
         let current_version = self.versioning.read().await.current_version();
-        let compact_task = compact_status.get_compact_task(&current_version.levels);
+        let compact_task = compact_status
+            .get_compact_task(&current_version.levels, task_id as HummockCompactionTaskId);
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
