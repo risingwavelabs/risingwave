@@ -220,6 +220,17 @@ impl DataType {
                 | DataType::Decimal
         )
     }
+
+    pub fn mem_cmp_eq_value_enc(&self) -> bool {
+        use DataType::*;
+        match self {
+            Boolean | Int16 | Int32 | Int64 => true,
+            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz
+            | Interval => false,
+            Struct { fields } => fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
+            List { datatype } => datatype.mem_cmp_eq_value_enc(),
+        }
+    }
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation

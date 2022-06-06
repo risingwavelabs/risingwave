@@ -354,16 +354,3 @@ mod tests {
         );
     }
 }
-
-// TODO: Is this the right place to put this?
-pub fn mem_cmp_eq_value_enc(data_type: &DataType) -> bool {
-    use DataType::*;
-    match data_type {
-        Boolean | Int16 | Int32 | Int64 => true,
-        Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz | Interval => {
-            false
-        }
-        Struct { fields } => fields.iter().all(mem_cmp_eq_value_enc),
-        List { datatype } => mem_cmp_eq_value_enc(datatype),
-    }
-}

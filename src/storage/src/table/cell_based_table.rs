@@ -501,7 +501,7 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         let pk_to_row_mapping = pk_descs
             .iter()
             .map(|d| {
-                if mem_cmp_eq_value_enc(&d.column_desc.data_type) {
+                if d.column_desc.data_type.mem_cmp_eq_value_enc() {
                     col_id_to_row_idx.get(&d.column_desc.column_id).copied()
                 } else {
                     None
