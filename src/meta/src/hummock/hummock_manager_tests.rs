@@ -109,6 +109,50 @@ async fn test_hummock_pin_unpin() {
 }
 
 #[tokio::test]
+async fn test_unpin_snapshot_before() {
+    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let epoch = 0;
+
+    for _ in 0..2 {
+        let pin_result = hummock_manager
+            .pin_snapshot(context_id, u64::MAX)
+            .await
+            .unwrap();
+        assert_eq!(pin_result.epoch, epoch);
+        let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
+        assert_eq!(pin_snapshots_sum(&pinned_snapshots), 1);
+        assert_eq!(pinned_snapshots[0].context_id, context_id);
+        assert_eq!(pinned_snapshots[0].snapshot_id.len(), 1);
+        assert_eq!(pinned_snapshots[0].snapshot_id[0], pin_result.epoch);
+    }
+
+    // unpin nonexistent target will not return error
+    for _ in 0..3 {
+        hummock_manager
+            .unpin_snapshot_before(context_id, HummockSnapshot { epoch })
+            .await
+            .unwrap();
+        assert_eq!(
+            pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            1
+        );
+    }
+
+    // unpin nonexistent target will not return error
+    for _ in 0..3 {
+        hummock_manager
+            .unpin_snapshot_before(context_id, HummockSnapshot { epoch: epoch + 1 })
+            .await
+            .unwrap();
+        assert_eq!(
+            pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            0
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_hummock_compaction_task() {
     let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
