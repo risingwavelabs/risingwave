@@ -464,9 +464,9 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
 pub struct DedupPkCellBasedTableRowIter<S: StateStore> {
     inner: CellBasedTableRowIter<S>,
     pk_decoder: OrderedRowDeserializer,
-    // map pk datums to their positions in row.
-    // Only maps pk fields with value == memcomparable,
-    // and occupy positions in row.
+    // Maps pk datums to their positions in row.
+    // Only maps pk fields with the same value and memcomparable encoding,
+    // and only if these fields have corresponding row positions.
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
