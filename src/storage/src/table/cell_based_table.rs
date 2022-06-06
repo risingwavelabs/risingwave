@@ -478,7 +478,13 @@ impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
         // FIXME: cleanup excess clones
         let inner =
             CellBasedTableRowIter::new(keyspace, table_descs.clone(), epoch, _stats).await?;
-        let pk_decoder = OrderedRowDeserializer::new(vec![], vec![]);
+
+        let (data_types, order_types) = pk_descs
+            .iter()
+            .map(|ordered_desc| (ordered_desc.column_desc.data_type.clone(), ordered_desc.order))
+            .unzip();
+
+        let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
         let col_id_to_row_idx: HashMap<ColumnId, usize> = table_descs
             .iter()
             .enumerate()
