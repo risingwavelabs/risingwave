@@ -549,6 +549,8 @@ impl StreamGraphBuilder {
                         let right_table_id = left_table_id + 1;
                         node.left_table_id = left_table_id;
                         node.right_table_id = right_table_id;
+                        ctx.internal_table_id_set.insert(left_table_id);
+                        ctx.internal_table_id_set.insert(right_table_id);
                     }
 
                     NodeBody::Lookup(node) => {
@@ -556,11 +558,13 @@ impl StreamGraphBuilder {
                             &mut node.arrangement_table_id
                         {
                             *table_id += table_id_offset;
+                            ctx.internal_table_id_set.insert(*table_id);
                         }
                     }
 
                     NodeBody::Arrange(node) => {
                         node.table_id += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id);
                     }
 
                     NodeBody::HashAgg(node) => {
@@ -568,11 +572,13 @@ impl StreamGraphBuilder {
                         // In-place update the table id. Convert from local to global.
                         for table_id in &mut node.table_ids {
                             *table_id += table_id_offset;
+                            ctx.internal_table_id_set.insert(*table_id);
                         }
                     }
 
                     NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
                         node.table_id += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id);
                     }
 
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
@@ -580,6 +586,7 @@ impl StreamGraphBuilder {
                         // In-place update the table id. Convert from local to global.
                         for table_id in &mut node.table_ids {
                             *table_id += table_id_offset;
+                            ctx.internal_table_id_set.insert(*table_id);
                         }
                     }
                     _ => {}
