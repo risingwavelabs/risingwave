@@ -1398,6 +1398,152 @@ async fn test_multi_cell_based_table_iter() {
 }
 
 #[tokio::test]
+async fn test_dedup_pk_multi_cell_based_table_iter() {
+    let state_store = MemoryStateStore::new();
+    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
+    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+
+    let keyspace_1 = Keyspace::executor_root(state_store.clone(), 0x1111);
+    let keyspace_2 = Keyspace::executor_root(state_store.clone(), 0x2222);
+    let epoch: u64 = 0;
+
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs_1 = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let column_descs_2 = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Varchar),
+        ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
+        ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
+    ];
+    let pk_index = vec![0_usize, 1_usize];
+    let mut state_1 = StateTable::new(
+        keyspace_1.clone(),
+        column_descs_1.clone(),
+        order_types.clone(),
+        None,
+        pk_index.clone(),
+    );
+    let mut state_2 = StateTable::new(
+        keyspace_2.clone(),
+        column_descs_2.clone(),
+        order_types.clone(),
+        None,
+        pk_index,
+    );
+
+    let table_1 =
+        CellBasedTable::new_for_test(keyspace_1.clone(), column_descs_1, order_types.clone());
+    let table_2 = CellBasedTable::new_for_test(keyspace_2.clone(), column_descs_2, order_types);
+
+    state_1
+        .insert(
+            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+            Row(vec![
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state_1
+        .insert(
+            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state_1
+        .delete(
+            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
+        )
+        .unwrap();
+
+    state_2
+        .insert(
+            &Row(vec![
+                Some("1".to_string().into()),
+                Some("11".to_string().into()),
+            ]),
+            Row(vec![
+                Some("1".to_string().into()),
+                Some("11".to_string().into()),
+                Some("111".to_string().into()),
+            ]),
+        )
+        .unwrap();
+    state_2
+        .insert(
+            &Row(vec![
+                Some("2".to_string().into()),
+                Some("22".to_string().into()),
+            ]),
+            Row(vec![
+                Some("2".to_string().into()),
+                Some("22".to_string().into()),
+                Some("222".to_string().into()),
+            ]),
+        )
+        .unwrap();
+    state_2
+        .delete(
+            &Row(vec![
+                Some("2".to_string().into()),
+                Some("22".to_string().into()),
+            ]),
+            Row(vec![
+                Some("2".to_string().into()),
+                Some("22".to_string().into()),
+                Some("222".to_string().into()),
+            ]),
+        )
+        .unwrap();
+
+    state_1.commit(epoch).await.unwrap();
+    state_2.commit(epoch).await.unwrap();
+
+    let mut iter_1 = table_1.iter(epoch).await.unwrap();
+    let mut iter_2 = table_2.iter(epoch).await.unwrap();
+
+    let res_1_1 = iter_1.next().await.unwrap();
+    assert!(res_1_1.is_some());
+    assert_eq!(
+        Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]),
+        res_1_1.unwrap()
+    );
+    let res_1_2 = iter_1.next().await.unwrap();
+    assert!(res_1_2.is_none());
+
+    let res_2_1 = iter_2.next().await.unwrap();
+    assert!(res_2_1.is_some());
+    assert_eq!(
+        Row(vec![
+            Some("1".to_string().into()),
+            Some("11".to_string().into()),
+            Some("111".to_string().into())
+        ]),
+        res_2_1.unwrap()
+    );
+    let res_2_2 = iter_2.next().await.unwrap();
+    assert!(res_2_2.is_none());
+}
+
+
+#[tokio::test]
 async fn test_cell_based_scan_empty_column_ids_cardinality() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
