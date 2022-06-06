@@ -157,9 +157,12 @@ fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
 
 /// check whether 2 SSTs may have same key by key range and vnode bitmaps in table info
 fn check_key_vnode_overlap(info: &SstableInfo, table: &SstableInfo) -> bool {
-    let text = KeyRange::from(info.key_range.as_ref().unwrap());
-    let other = KeyRange::from(table.key_range.as_ref().unwrap());
-    if !text.full_key_overlap(&other) {
+    if !info
+        .key_range
+        .as_ref()
+        .unwrap()
+        .full_key_overlap(table.key_range.as_ref().unwrap())
+    {
         return false;
     }
     let text_len = info.get_vnode_bitmaps().len();
