@@ -231,7 +231,8 @@ pub async fn handle_revoke_privilege(
         revoke_grant_option,
         cascade: _,
     } = stmt else { return Err(ErrorCode::BindError("Invalid revoke statement".to_string()).into()); };
-    // TODO: support cascade and restrict option, this requires to record granted_by in each actions.
+    // TODO: support cascade and restrict option, this requires to record granted_by in each
+    // actions.
     let users = grantees.into_iter().map(|g| g.value).collect::<Vec<_>>();
     {
         let user_reader = session.env().user_info_reader();
