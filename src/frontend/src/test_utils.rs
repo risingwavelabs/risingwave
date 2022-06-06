@@ -398,6 +398,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn unpin_snapshot(&self, _epoch: u64) -> Result<()> {
         Ok(())
     }
+
+    async fn unpin_snapshot_before(&self, _epoch: u64) -> Result<()> {
+        Ok(())
+    }
 }
 pub static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";

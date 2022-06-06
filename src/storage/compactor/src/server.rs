@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use risingwave_common::service::MetricsManager;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_object_store::object::{parse_object_store, ObjectStoreImpl};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
@@ -28,7 +29,6 @@ use risingwave_storage::hummock::SstableStore;
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
-use risingwave_storage::object::{parse_object_store, ObjectStoreImpl};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 

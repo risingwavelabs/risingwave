@@ -2,7 +2,7 @@ FROM ubuntu:22.04 as builder
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config bash lld
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld
 
 SHELL ["/bin/bash", "-c"]
 
@@ -24,12 +24,12 @@ RUN rustup self update \
 
 RUN cargo fetch
 RUN mkdir -p /risingwave/bin
-RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release && \
+RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features static-link && \
   mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
   cargo clean
 
 FROM ubuntu:22.04 as image-base
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev ca-certificates && rm -rf /var/lib/{apt,dpkg,cache,log}/
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 FROM image-base as frontend-node
 RUN mkdir -p /risingwave/bin

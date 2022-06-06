@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_frontend_test_runner"
-version = "0.1.0"
+version = "0.1.8"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -9,7 +9,6 @@ anyhow = "1"
 console = "0.15"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
-libtest-mimic = "0.4"
 madsim = "=0.2.0-alpha.3"
 risingwave_frontend = { path = ".." }
 risingwave_sqlparser = { path = "../../sqlparser" }
@@ -29,6 +28,7 @@ walkdir = "2"
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
+libtest-mimic = "0.4"
 tempfile = "3"
 
 [build-dependencies]
