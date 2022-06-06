@@ -216,7 +216,7 @@ async fn test_table_v2_materialize() -> Result<()> {
             |d| OrderedColumnDesc {
                 column_desc: d.clone(),
                 order: OrderType::Ascending,
-            }, // TODO: Is ascending the right default??
+            },
         )
         .collect();
 
@@ -434,7 +434,7 @@ async fn test_row_seq_scan() -> Result<()> {
             |d| OrderedColumnDesc {
                 column_desc: d.clone(),
                 order: OrderType::Ascending,
-            }, // TODO: Is ascending the right default??
+            },
         )
         .collect();
 
