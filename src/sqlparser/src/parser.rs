@@ -2823,6 +2823,8 @@ impl Parser {
                 self.parse_comma_separated(Parser::parse_grant_permission)?
                     .into_iter()
                     .map(|(kw, columns)| match kw {
+                        Keyword::CONNECT => Action::Connect,
+                        Keyword::CREATE => Action::Create,
                         Keyword::DELETE => Action::Delete,
                         Keyword::INSERT => Action::Insert { columns },
                         Keyword::REFERENCES => Action::References { columns },

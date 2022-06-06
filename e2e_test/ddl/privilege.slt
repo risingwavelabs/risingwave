@@ -1,0 +1,79 @@
+# Create a super user.
+statement ok
+CREATE USER user WITH SUPERUSER PASSWORD 'password';
+
+# Create a user.
+statement ok
+CREATE USER user1 WITH PASSWORD 'password1';
+
+# Create a database.
+statement ok
+CREATE DATABASE db1;
+
+# Create a schema.
+statement ok
+CREATE SCHEMA db1.schema1;
+
+# Grant privilege for user1.
+statement ok
+GRANT ALL ON DATABASE db1 TO user1 WITH GRANT OPTION GRANTED BY user;
+
+# Grant invalid privilege on database for user1.
+statement error
+GRANT INSERT ON DATABASE db1 TO user1 WITH GRANT OPTION GRANTED BY user;
+
+# Grant privilege on invalid database for user1.
+statement error
+GRANT ALL ON DATABASE db_invalid TO user1 WITH GRANT OPTION GRANTED BY user;
+
+# Grant privilege on database for invalid user.
+statement error
+GRANT ALL ON DATABASE db_invalid TO user_invalid WITH GRANT OPTION GRANTED BY user;
+
+# Grant privilege on schema for user1.
+statement ok
+GRANT CREATE ON SCHEMA db1.schema1 TO user1 WITH GRANT OPTION GRANTED BY user;
+
+# Grant privilege on all sources in schema for user1.
+statement ok
+GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA db1.schema1 TO user1 GRANTED BY user;
+
+# Grant privilege on all mviews in schema for user1.
+statement ok
+GRANT ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA db1.schema1 TO user1 GRANTED BY user;
+
+# Revoke privilege on all mviews in schema for user1.
+statement ok
+REVOKE ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA db1.schema1 FROM user1;
+
+# Revoke privilege on all sources in schema for user1.
+statement ok
+REVOKE ALL PRIVILEGES ON ALL SOURCES IN SCHEMA db1.schema1 FROM user1;
+
+# Revoke privilege on schema for user1.
+statement ok
+REVOKE CREATE ON SCHEMA db1.schema1 FROM user1;
+
+# Revoke GRANT OPTION FOR from database for user1.
+statement ok
+REVOKE GRANT OPTION FOR ALL ON DATABASE db1 from user1 GRANTED BY user;
+
+# Revoke privilege on database for user1.
+statement ok
+REVOKE ALL ON DATABASE db1 FROM user1;
+
+# Drop schema
+statement ok
+DROP SCHEMA db1.schema1;
+
+# Drop database
+statement ok
+DROP DATABASE db1;
+
+# Drop user1
+statement ok
+DROP USER user1;
+
+# Drop user
+statement ok
+DROP USER user;
