@@ -252,7 +252,7 @@ impl<S: StateStore> Executor for InnerTopNExecutor<S> {
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
     async fn apply_chunk(
-        &mut self,
+        &'a mut self,
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
@@ -374,7 +374,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     {
                         // The current element in in the range of `[offset+limit, +inf)`
                         self.managed_highest_state
-                            .delete(&ordered_pk_row, row, epoch)
+                            .delete(&ordered_pk_row, row.clone(), epoch)
                             .await
                             .map_err(StreamExecutorError::top_n_state_error)?;
                     } else if self.managed_lowest_state.total_count() == self.offset
@@ -383,7 +383,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     {
                         // The current element in in the range of `[offset, offset+limit)`
                         self.managed_middle_state
-                            .delete(&ordered_pk_row, row,epoch)
+                            .delete(&ordered_pk_row, row.clone(),epoch)
                             .await
                             .map_err(StreamExecutorError::top_n_state_error)?;
                         new_ops.push(Op::Delete);
@@ -408,7 +408,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     } else {
                         // The current element in in the range of `[0, offset)`
                         self.managed_lowest_state
-                            .delete(&ordered_pk_row, row, epoch)
+                            .delete(&ordered_pk_row, row.clone(), epoch)
                             .await
                             .map_err(StreamExecutorError::top_n_state_error)?;
                         // We need to bring one, if any, from middle to lowest.
