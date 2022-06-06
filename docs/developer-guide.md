@@ -316,18 +316,7 @@ buf lint
 
 ## Update Grafana dashboard
 
-Simply use the export functionality in Grafana, disable the config "external sharing". Then,
-manually modify the JSON.
-
-All datasource should use `risedev-prometheus` as datasource. If you found something else,
-change them.
-
-```
-"datasource": {
-  "type": "prometheus",
-  "uid": "risedev-prometheus"
-},
-```
+See [README](../grafana/README.md) for more information.
 
 ## Add new files
 
