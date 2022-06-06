@@ -487,10 +487,9 @@ impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
         let pk_to_row_mapping = pk_descs
             .iter()
             .map(|d| {
-                col_id_to_row_idx
+                *col_id_to_row_idx
                     .get(&d.column_desc.column_id)
                     .unwrap()
-                    .clone()
             })
             .collect();
         Ok(Self {
