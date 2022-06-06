@@ -172,7 +172,7 @@ impl NestedLoopJoinExecutor {
             .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
             .collect::<Result<Vec<Column>>>()?;
 
-        Ok(DataChunk::builder().columns(result_columns).build())
+        Ok(DataChunk::new(result_columns, num_tuples))
     }
 
     /// Create constant data chunk (one tuple repeat `num_tuples` times).
