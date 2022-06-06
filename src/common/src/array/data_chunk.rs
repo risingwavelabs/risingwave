@@ -49,13 +49,6 @@ impl DataChunkBuilder {
         }
     }
 
-    pub fn visibility(self, visibility: Bitmap) -> DataChunkBuilder {
-        DataChunkBuilder {
-            columns: self.columns,
-            visibility: Some(visibility),
-        }
-    }
-
     pub fn build(self) -> DataChunk {
         let vis = if let Some(bitmap) = self.visibility {
             // with visibility bitmap
