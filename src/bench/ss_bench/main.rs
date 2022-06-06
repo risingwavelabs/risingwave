@@ -142,6 +142,7 @@ async fn main() {
     preprocess_options(&mut opts);
     println!("Configurations after preprocess:\n {:?}", &opts);
 
+    // with compression enabled
     let config = Arc::new(StorageConfig {
         shared_buffer_capacity_mb: opts.shared_buffer_capacity_mb,
         bloom_false_positive: opts.bloom_false_positive,
@@ -156,6 +157,7 @@ async fn main() {
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
         share_buffer_compaction_worker_threads_number: 1,
+        enable_compression: true,
     });
 
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =

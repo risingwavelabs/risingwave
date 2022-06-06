@@ -50,6 +50,7 @@ pub fn default_config_for_test() -> StorageConfig {
         disable_remote_compactor: false,
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
+        enable_compression: true,
     }
 }
 

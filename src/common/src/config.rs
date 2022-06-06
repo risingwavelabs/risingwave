@@ -157,6 +157,10 @@ pub struct StorageConfig {
     /// Local object store root. We should call `get_local_object_store` to get the object store.
     #[serde(default = "default::local_object_store")]
     pub local_object_store: String,
+
+    /// whether enable compression when building sstable.
+    #[serde(default = "default::enable_compression")]
+    pub enable_compression: bool,
 }
 
 impl Default for StorageConfig {
@@ -264,5 +268,9 @@ mod default {
 
     pub fn checkpoint_interval_ms() -> u32 {
         100
+    }
+
+    pub fn enable_compression() -> bool {
+        true
     }
 }

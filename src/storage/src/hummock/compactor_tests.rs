@@ -30,6 +30,7 @@ mod tests {
     use crate::storage_value::StorageValue;
     use crate::StateStore;
 
+    // with compression disabled.
     async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockStorage {
@@ -40,6 +41,7 @@ mod tests {
             bloom_false_positive: 0.1,
             data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
+            enable_compression: false,
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();

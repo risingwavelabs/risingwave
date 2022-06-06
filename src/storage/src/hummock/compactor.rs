@@ -37,7 +37,10 @@ use tokio::task::JoinHandle;
 use super::group_builder::KeyValueGroupingImpl::VirtualNode;
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
-use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
+use super::{
+    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, SSTableIterator,
+    SSTableIteratorType, Sstable,
+};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::ReadOptions;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -456,7 +459,21 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let builder = SSTableBuilder::new(self.context.options.as_ref().into());
+                let builder = SSTableBuilder::new({
+                    let mut options: SSTableBuilderOptions = self.context.options.as_ref().into();
+
+                    if self.context.options.enable_compression {
+                        // support compression setting per level
+                        // L0 and L1 do not use compression algorithms
+                        // L2 - L4 use Lz4, else use Zstd
+                        options.compression_algorithm = match self.compact_task.target_level {
+                            0 | 1 => CompressionAlgorithm::None,
+                            2 | 3 | 4 => CompressionAlgorithm::Lz4,
+                            _ => CompressionAlgorithm::Zstd,
+                        }
+                    };
+                    options
+                });
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
                 Ok((table_id, builder))
             },
