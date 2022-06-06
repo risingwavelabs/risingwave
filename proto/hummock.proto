@@ -90,6 +90,15 @@ message UnpinSnapshotResponse {
   common.Status status = 1;
 }
 
+message UnpinSnapshotBeforeRequest {
+  uint32 context_id = 1;
+  HummockSnapshot min_snapshot = 3;
+}
+
+message UnpinSnapshotBeforeResponse {
+  common.Status status = 1;
+}
+
 message KeyRange {
   bytes left = 1;
   bytes right = 2;
@@ -222,6 +231,7 @@ service HummockManagerService {
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
+  rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
