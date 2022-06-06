@@ -113,12 +113,9 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
         // and put one row of each chunk into the heap
         if self.first_execution {
             for source_idx in 0..self.proto_sources.len() {
-                let new_source = CS::create_source(
-                    self.context.clone(),
-                    &self.proto_sources[source_idx],
-                    self.task_id.clone(),
-                )
-                .await?;
+                let new_source =
+                    CS::create_source(self.context.clone(), &self.proto_sources[source_idx])
+                        .await?;
                 self.sources.push(new_source);
                 self.get_source_chunk(source_idx).await?;
                 if let Some(chunk) = &self.source_inputs[source_idx] {
@@ -274,7 +271,6 @@ mod tests {
             async fn create_source(
                 _: impl BatchTaskContext,
                 _: &ProstExchangeSource,
-                _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let chunk = DataChunk::from_pretty(
                     "i

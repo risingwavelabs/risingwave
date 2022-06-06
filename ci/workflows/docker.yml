@@ -1,0 +1,48 @@
+projects:
+  - label: docker-pr
+    path: docker/
+    skip:
+      - docker-build-push-main
+      - docker-build-push-schedule
+  - label: docker-main
+    path: docker/
+    skip:
+      - docker-build-pr
+      - docker-build-push-schedule
+  - label: docker-schedule
+    path: .
+    skip:
+      - docker-build-pr
+      - docker-build-push-main
+
+steps:
+  - label: "docker-build-pr"
+    command: "ci/scripts/docker.sh"
+    if: build.source != "schedule"
+    env:
+      BUILDPIPE_SCOPE: project
+      PUSH_GHCR: flase
+
+  - label: "docker-build-push-main"
+    command: "ci/scripts/docker.sh"
+    if: build.branch == "main" && build.source != "schedule"
+    env:
+      BUILDPIPE_SCOPE: project
+      PUSH_GHCR: true
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+
+  - label: "docker-build-push-schedule"
+    command: "ci/scripts/docker.sh"
+    if: build.source == "schedule"
+    env:
+      BUILDPIPE_SCOPE: project
+      PUSH_GHCR: true
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token

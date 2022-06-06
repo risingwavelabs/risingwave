@@ -96,7 +96,7 @@ impl AggCall {
             (AggKind::Sum, _) => return invalid(),
 
             // Count
-            (AggKind::Count, _) => DataType::Int64,
+            (AggKind::Count | AggKind::ApproxCountDistinct, _) => DataType::Int64,
 
             // StringAgg
             (AggKind::StringAgg, _) => DataType::Varchar,
