@@ -504,7 +504,7 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
             .iter()
             .map(|d| {
                 if mem_cmp_eq_value_enc(&d.column_desc.data_type) {
-                    col_id_to_row_idx.get(&d.column_desc.column_id).map(|&i| i)
+                    col_id_to_row_idx.get(&d.column_desc.column_id).copied()
                 } else {
                     None
                 }

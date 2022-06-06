@@ -365,7 +365,7 @@ pub fn mem_cmp_eq_value_enc(data_type: &DataType) -> bool {
             false
         }
 
-        Struct { fields } => fields.iter().all(|f| mem_cmp_eq_value_enc(f)),
+        Struct { fields } => fields.iter().all(mem_cmp_eq_value_enc),
         List { datatype } => mem_cmp_eq_value_enc(datatype),
     }
 }
