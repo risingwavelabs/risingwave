@@ -19,7 +19,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::cell_based_table::{CellBasedTable, CellTableChunkIter};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;

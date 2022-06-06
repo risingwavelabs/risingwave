@@ -382,44 +382,6 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         Ok(iter)
     }
 
-    pub async fn collect_data_chunk(
-        &mut self,
-        schema: &Schema,
-        chunk_size: Option<usize>,
-    ) -> StorageResult<Option<DataChunk>> {
-        let mut builders = schema
-            .create_array_builders(chunk_size.unwrap_or(0))
-            .map_err(err)?;
-
-        let mut row_count = 0;
-        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
-            match self.next().await? {
-                Some(row) => {
-                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&datum).map_err(err)?;
-                    }
-                    row_count += 1;
-                }
-                None => break,
-            }
-        }
-
-        let chunk = {
-            let columns: Vec<Column> = builders
-                .into_iter()
-                .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
-                .try_collect()
-                .map_err(err)?;
-            DataChunk::new(columns, row_count)
-        };
-
-        if chunk.cardinality() == 0 {
-            Ok(None)
-        } else {
-            Ok(Some(chunk))
-        }
-    }
-
     async fn next_pk_and_row(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
         loop {
             match self.iter.next().await? {
@@ -453,6 +415,9 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
             .map(|r| r.map(|(_pk, row)| row))
     }
 }
+
+#[async_trait::async_trait]
+impl<S: StateStore> CellTableChunkIter for CellBasedTableRowIter<S> {}
 
 // Provides a layer on top of CellBasedTableRowIter
 // for decoding pk into its constituent datums in a row
@@ -517,12 +482,37 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
             pk_to_row_mapping,
         })
     }
+}
 
-    // FIXME: This is duplicated from `inner`,
-    // so we could bind to the Trait Impl for this struct,
-    // instead of the inner struct.
-    // Maybe this should be implemented as a trait method instead?
-    pub async fn collect_data_chunk(
+#[async_trait::async_trait]
+impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
+    async fn next(&mut self) -> StorageResult<Option<Row>> {
+        let row_opt = self.inner.next_pk_and_row().await?;
+        Ok(row_opt.map(|(pk_vec, mut row)| {
+            if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
+                // FIXME: cleanup clone
+                for (row_idx_opt, datum) in
+                    zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec())
+                {
+                    if let Some(row_idx) = row_idx_opt {
+                        row.0[row_idx] = datum;
+                    }
+                }
+            }
+            row
+        }))
+    }
+}
+
+#[async_trait::async_trait]
+impl<S: StateStore> CellTableChunkIter for DedupPkCellBasedTableRowIter<S> {}
+
+#[async_trait::async_trait]
+pub trait CellTableChunkIter
+where
+    Self: TableIter,
+{
+    async fn collect_data_chunk(
         &mut self,
         schema: &Schema,
         chunk_size: Option<usize>,
@@ -558,26 +548,6 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         } else {
             Ok(Some(chunk))
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
-    async fn next(&mut self) -> StorageResult<Option<Row>> {
-        let row_opt = self.inner.next_pk_and_row().await?;
-        Ok(row_opt.map(|(pk_vec, mut row)| {
-            if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
-                // FIXME: cleanup clone
-                for (row_idx_opt, datum) in
-                    zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec())
-                {
-                    if let Some(row_idx) = row_idx_opt {
-                        row.0[row_idx] = datum;
-                    }
-                }
-            }
-            row
-        }))
     }
 }
 
