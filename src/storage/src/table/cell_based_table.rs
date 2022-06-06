@@ -439,14 +439,6 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
     }
 }
 
-pub struct PkDecodingInfo {}
-// {
-//     start: usize,
-//     end: usize,
-//     row_position: usize,
-//     data_type: DataType,
-// }
-
 // Provides a layer on top of CellBasedTableRowIter
 // for decoding pk into its constituent datums.
 // For instance if pk was derived from `user_id, name`
