@@ -1016,7 +1016,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_drop_materialized_view() -> Result<()> {
-        let services = MockServices::start("127.0.0.1", 12333).await?;
+        let services = MockServices::start("127.0.0.1", 12334).await?;
 
         let table_ref_id = TableRefId {
             schema_ref_id: None,
@@ -1100,7 +1100,7 @@ mod tests {
                     .unwrap(),
                 HostAddress {
                     host: "127.0.0.1".to_string(),
-                    port: 12333,
+                    port: 12334,
                 }
             );
         }
