@@ -481,7 +481,12 @@ impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
 
         let (data_types, order_types) = pk_descs
             .iter()
-            .map(|ordered_desc| (ordered_desc.column_desc.data_type.clone(), ordered_desc.order))
+            .map(|ordered_desc| {
+                (
+                    ordered_desc.column_desc.data_type.clone(),
+                    ordered_desc.order,
+                )
+            })
             .unzip();
 
         let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
@@ -492,11 +497,7 @@ impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
             .collect();
         let pk_to_row_mapping = pk_descs
             .iter()
-            .map(|d| {
-                *col_id_to_row_idx
-                    .get(&d.column_desc.column_id)
-                    .unwrap()
-            })
+            .map(|d| *col_id_to_row_idx.get(&d.column_desc.column_id).unwrap())
             .collect();
         Ok(Self {
             inner,
