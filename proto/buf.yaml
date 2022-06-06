@@ -13,6 +13,3 @@ lint:
     - PACKAGE_DIRECTORY_MATCH
     - RPC_REQUEST_RESPONSE_UNIQUE
     - RPC_RESPONSE_STANDARD_NAME
-
-  # We currently reuse some request/response, e.g. UnpinSnapshotRequest.
-  rpc_allow_same_request_response: true

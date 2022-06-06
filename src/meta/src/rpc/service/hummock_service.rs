@@ -148,8 +148,8 @@ where
 
     async fn unpin_snapshot_before(
         &self,
-        request: Request<UnpinSnapshotRequest>,
-    ) -> Result<Response<UnpinSnapshotResponse>, Status> {
+        request: Request<UnpinSnapshotBeforeRequest>,
+    ) -> Result<Response<UnpinSnapshotBeforeResponse>, Status> {
         let req = request.into_inner();
         if let Err(e) = self
             .hummock_manager
@@ -158,7 +158,7 @@ where
         {
             return Err(tonic_err(e));
         }
-        Ok(Response::new(UnpinSnapshotResponse { status: None }))
+        Ok(Response::new(UnpinSnapshotBeforeResponse { status: None }))
     }
 
     async fn get_new_table_id(
