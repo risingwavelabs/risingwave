@@ -238,6 +238,12 @@ impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
     }
 }
 
+impl From<&ProstOrderedColumnDesc> for OrderedColumnDesc {
+    fn from(prost: &ProstOrderedColumnDesc) -> Self {
+        prost.clone().into()
+    }
+}
+
 impl From<&OrderedColumnDesc> for ProstOrderedColumnDesc {
     fn from(c: &OrderedColumnDesc) -> Self {
         Self {

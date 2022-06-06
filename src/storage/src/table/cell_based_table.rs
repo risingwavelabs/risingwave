@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::iter::zip;
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
 use risingwave_common::error::RwError;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
@@ -320,16 +320,14 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn iter_with_pk(
         &self,
         epoch: u64,
-        pk_deserializer: OrderedRowDeserializer,
-        pk_to_row_mapping: Vec<usize>,
+        pk_descs: Vec<OrderedColumnDesc>,
     ) -> StorageResult<CellBasedTableRowWithPkIter<S>> {
         CellBasedTableRowWithPkIter::new(
             self.keyspace.clone(),
             self.column_descs.clone(),
             epoch,
             self.stats.clone(),
-            OrderedRowDeserializer::new(vec![], vec![]),
-            vec![],
+            pk_descs,
         )
         .await
     }
@@ -475,10 +473,19 @@ impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
-        pk_decoder: OrderedRowDeserializer,
-        pk_to_row_mapping: Vec<usize>,
+        pk_descs: Vec<OrderedColumnDesc>,
     ) -> StorageResult<Self> {
-        let inner = CellBasedTableRowIter::new(keyspace, table_descs, epoch, _stats).await?;
+        // FIXME: cleanup excess clones
+        let inner = CellBasedTableRowIter::new(keyspace, table_descs.clone(), epoch, _stats).await?;
+        let pk_decoder = OrderedRowDeserializer::new(vec![], vec![]);
+        let col_id_to_row_idx: HashMap<ColumnId, usize> = table_descs
+            .iter()
+            .enumerate()
+            .map(|(idx, desc)| (desc.column_id, idx))
+            .collect();
+        let pk_to_row_mapping = pk_descs.iter().map(
+            |d| col_id_to_row_idx.get(&d.column_desc.column_id).unwrap().clone()
+        ).collect();
         Ok(Self {
             inner,
             pk_decoder,
@@ -533,15 +540,15 @@ impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
 impl<S: StateStore> TableIter for CellBasedTableRowWithPkIter<S> {
     async fn next(&mut self) -> StorageResult<Option<Row>> {
         let row_opt = self.inner.next_pk_and_row().await?;
-        Ok(row_opt.map(|(pk_vec, row)| {
+        Ok(row_opt.map(|(pk_vec, mut row)| {
             // FIXME: cleanup all these clones...
-            let mut new_row = row;
+            // decoded ver is not good enough... we need to know datum row positions to slot them in...
             if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
                 for (row_idx, datum) in zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec()) {
-                    new_row.0[row_idx] = datum;
+                    row.0[row_idx] = datum;
                 }
             }
-            new_row
+            row
         }))
     }
 }
