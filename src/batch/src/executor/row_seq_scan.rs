@@ -19,7 +19,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
+use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter, CellBasedTableRowWithPkIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use crate::executor::monitor::BatchMetrics;
@@ -35,13 +35,14 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     schema: Schema,
     identity: String,
     stats: Arc<BatchMetrics>,
-    row_iter: CellBasedTableRowIter<S>,
+    // row_iter: CellBasedTableRowIter<S>,
+    row_iter: CellBasedTableRowWithPkIter<S>,
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
         schema: Schema,
-        row_iter: CellBasedTableRowIter<S>,
+        row_iter: CellBasedTableRowWithPkIter<S>,
         chunk_size: usize,
         primary: bool,
         identity: String,
@@ -100,7 +101,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let storage_stats = state_store.stats();
             let batch_stats = source.context().stats();
             let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-            let iter = table.iter(source.epoch).await?;
+            let iter = table.iter_with_pk(source.epoch).await?;
             Ok(Box::new(RowSeqScanExecutor::new(
                 table.schema().clone(),
                 iter,

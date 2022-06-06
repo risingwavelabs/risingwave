@@ -319,6 +319,18 @@ impl<S: StateStore> CellBasedTable<S> {
         .await
     }
 
+    pub async fn iter_with_pk(&self, epoch: u64) -> StorageResult<CellBasedTableRowWithPkIter<S>> {
+        CellBasedTableRowWithPkIter::new(
+            self.keyspace.clone(),
+            self.column_descs.clone(),
+            epoch,
+            self.stats.clone(),
+            OrderedRowDeserializer::new(vec![], vec![]),
+            vec![],
+        )
+        .await
+    }
+
     // streaming_iter is uesed for streaming executors, which is regarded as a short-term iterator
     // and will not wait for epoch.
     pub async fn streaming_iter(
