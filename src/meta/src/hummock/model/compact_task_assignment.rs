@@ -13,16 +13,17 @@
 // limitations under the License.
 
 use prost::Message;
-use risingwave_pb::hummock::{CompactTaskAssignment, CompactTaskRefId};
+use risingwave_hummock_sdk::HummockCompactionTaskId;
+use risingwave_pb::hummock::CompactTaskAssignment;
 
 use crate::model::MetadataModel;
 
-/// `cf(compact_task_assignment)`: `CompactTaskRefId` -> `CompactTaskAssignment`
+/// `cf(compact_task_assignment)`: `CompactTaskId` -> `CompactTaskAssignment`
 const HUMMOCK_COMPACT_TASK_ASSIGNMENT: &str = "cf/compact_task_assignment";
 
 /// `AssignedCompactTasks` tracks compact tasks assigned to context id.
 impl MetadataModel for CompactTaskAssignment {
-    type KeyType = CompactTaskRefId;
+    type KeyType = HummockCompactionTaskId;
     type ProstType = CompactTaskAssignment;
 
     fn cf_name() -> String {
@@ -42,8 +43,6 @@ impl MetadataModel for CompactTaskAssignment {
     }
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(CompactTaskRefId {
-            id: self.compact_task.as_ref().unwrap().task_id,
-        })
+        Ok(self.compact_task.as_ref().unwrap().task_id)
     }
 }

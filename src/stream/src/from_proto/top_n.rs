@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::sort_util::OrderPair;
 
 use super::*;
@@ -39,7 +40,8 @@ impl ExecutorBuilder for TopNExecutorBuilder {
         };
         let cache_size = Some(1024);
         let total_count = (0, 0, 0);
-        let keyspace = Keyspace::executor_root(store, params.executor_id);
+        let table_id = TableId::new(node.get_table_id());
+        let keyspace = Keyspace::table_root(store, &table_id);
         let key_indices = node
             .get_distribution_keys()
             .iter()

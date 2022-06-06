@@ -1245,7 +1245,6 @@ checksum = "23734ec77368ec583c2e61dd3f0b0e5c98b93abe6d2a004ca06b91dd7e3e2762"
 dependencies = [
  "cc",
  "libc",
- "libnghttp2-sys",
  "libz-sys",
  "openssl-sys",
  "pkg-config",
@@ -2158,16 +2157,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libnghttp2-sys"
-version = "0.1.7+1.45.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57ed28aba195b38d5ff02b9170cbff627e336a20925e43b4945390401c5dc93f"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "libtest-mimic"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2385,7 +2374,7 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "memcomparable"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "bytes",
  "rand 0.8.5",
@@ -2721,6 +2710,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
+name = "openssl-src"
+version = "111.20.0+1.1.1o"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92892c4f87d56e376e469ace79f1128fdaded07646ddf73aa0be4706ff712dec"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "openssl-sys"
 version = "0.9.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2729,6 +2727,7 @@ dependencies = [
  "autocfg",
  "cc",
  "libc",
+ "openssl-src",
  "pkg-config",
  "vcpkg",
 ]
@@ -2934,7 +2933,7 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -3531,7 +3530,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3555,10 +3554,11 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-recursion",
  "async-stream",
  "async-trait",
  "byteorder",
@@ -3607,7 +3607,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_bench"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "bytes",
  "bytesize",
@@ -3634,7 +3634,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "clap 3.1.18",
  "log",
@@ -3649,11 +3649,12 @@ dependencies = [
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
+ "workspace-static-link",
 ]
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "clap 3.1.18",
@@ -3670,29 +3671,23 @@ dependencies = [
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
+ "workspace-static-link",
 ]
 
 [[package]]
 name = "risingwave_common"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
  "auto_enums",
- "aws-config",
- "aws-endpoint",
- "aws-sdk-s3",
- "aws-smithy-http",
- "aws-smithy-types",
- "aws-types",
  "byteorder",
  "bytes",
  "chrono",
  "comfy-table",
  "crc32fast",
  "either",
- "fail",
  "futures",
  "hyper",
  "itertools",
@@ -3714,7 +3709,6 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.3",
- "tempfile",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -3728,7 +3722,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compactor"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "clap 3.1.18",
  "madsim",
@@ -3736,6 +3730,7 @@ dependencies = [
  "madsim-tonic",
  "prometheus",
  "risingwave_common",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
@@ -3749,7 +3744,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3803,7 +3798,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3865,7 +3860,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3881,7 +3876,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3918,7 +3913,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3942,6 +3937,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
+ "md5",
  "num-integer",
  "num-traits",
  "parking_lot",
@@ -3958,6 +3954,7 @@ dependencies = [
  "risingwave_sqlparser",
  "risingwave_storage",
  "serde_json",
+ "sha2",
  "smallvec",
  "tempfile",
  "thiserror",
@@ -3968,7 +3965,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend_test_runner"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "console",
@@ -3989,7 +3986,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_sdk"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "bytes",
  "hex",
@@ -4003,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_logging"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "async-trait",
  "futures",
@@ -4023,7 +4020,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -4060,6 +4057,7 @@ dependencies = [
  "risingwave_connector",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "serde",
@@ -4078,8 +4076,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_object_store"
+version = "0.1.8"
+dependencies = [
+ "async-trait",
+ "aws-config",
+ "aws-endpoint",
+ "aws-sdk-s3",
+ "aws-smithy-http",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fail",
+ "futures",
+ "itertools",
+ "madsim-tokio",
+ "prometheus",
+ "risingwave_common",
+ "spin 0.9.3",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_pb"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "bytes",
  "madsim-tonic",
@@ -4110,7 +4133,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "async-trait",
  "futures",
@@ -4129,7 +4152,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_source"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -4184,7 +4207,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "itertools",
  "log",
@@ -4211,7 +4234,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4251,6 +4274,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_meta",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "serde",
@@ -4265,11 +4289,12 @@ dependencies = [
  "uuid 1.1.0",
  "value-encoding",
  "workspace-hack",
+ "zstd",
 ]
 
 [[package]]
 name = "risingwave_stream"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -5409,7 +5434,7 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "value-encoding"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "bytes",
  "memcomparable",
@@ -5658,7 +5683,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-hack"
-version = "0.1.0"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "axum",
@@ -5668,7 +5693,6 @@ dependencies = [
  "chrono",
  "crossbeam-deque",
  "crossbeam-utils 0.7.2",
- "crossbeam-utils 0.8.8",
  "crypto-common",
  "digest",
  "either",
@@ -5684,6 +5708,7 @@ dependencies = [
  "hashbrown 0.11.2",
  "hyper",
  "indexmap",
+ "isahc",
  "libc",
  "libz-sys",
  "lock_api",
@@ -5713,6 +5738,14 @@ dependencies = [
  "tracing-futures",
  "url",
  "uuid 1.1.0",
+]
+
+[[package]]
+name = "workspace-static-link"
+version = "0.1.8"
+dependencies = [
+ "isahc",
+ "openssl",
 ]
 
 [[package]]

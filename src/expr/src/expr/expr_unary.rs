@@ -25,6 +25,7 @@ use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
 use crate::vector_op::ascii::ascii;
+use crate::vector_op::bitwise_op::general_bitnot;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
@@ -302,6 +303,15 @@ pub fn new_unary_expr(
                 }
             }
         }
+        (ProstType::BitwiseNot, _, _) => {
+            gen_unary_impl! {
+                [ "BitwiseNot", child_expr, return_type],
+                { int16, int16, general_bitnot },
+                { int32, int32, general_bitnot },
+                { int64, int64, general_bitnot },
+
+            }
+        }
         (ProstType::Ceil, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, ceil_f64, ceil_decimal}
         }
@@ -400,7 +410,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 100);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
             is_nullable: false,
@@ -447,7 +457,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 3);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
             is_nullable: false,
@@ -500,7 +510,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 1);
         let return_type = DataType {
             type_name: TypeName::Int16 as i32,
             is_nullable: false,
@@ -559,7 +569,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
@@ -602,7 +612,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Date], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();

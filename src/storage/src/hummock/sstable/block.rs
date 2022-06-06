@@ -17,8 +17,8 @@ use std::io::{Read, Write};
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use lz4::Decoder;
 use risingwave_hummock_sdk::VersionedComparator;
+use {lz4, zstd};
 
 use super::utils::{
     bytes_diff, var_u32_len, xxhash64_verify, BufExt, BufMutExt, CompressionAlgorithm,
@@ -45,17 +45,25 @@ impl Block {
 
         // Decompress.
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
+        let compressed_data = &buf[..buf.len() - 9];
         let buf = match compression {
             CompressionAlgorithm::None => buf.slice(..buf.len() - 9),
             CompressionAlgorithm::Lz4 => {
-                let mut decoder = Decoder::new(buf.reader())
-                    .map_err(HummockError::decode_error)
-                    .unwrap();
+                let mut decoder = lz4::Decoder::new(compressed_data.reader())
+                    .map_err(HummockError::decode_error)?;
                 let mut decoded = Vec::with_capacity(DEFAULT_BLOCK_SIZE);
                 decoder
                     .read_to_end(&mut decoded)
-                    .map_err(HummockError::decode_error)
-                    .unwrap();
+                    .map_err(HummockError::decode_error)?;
+                Bytes::from(decoded)
+            }
+            CompressionAlgorithm::Zstd => {
+                let mut decoder = zstd::Decoder::new(compressed_data.reader())
+                    .map_err(HummockError::decode_error)?;
+                let mut decoded = Vec::with_capacity(DEFAULT_BLOCK_SIZE);
+                decoder
+                    .read_to_end(&mut decoded)
+                    .map_err(HummockError::decode_error)?;
                 Bytes::from(decoded)
             }
         };
@@ -298,6 +306,21 @@ impl BlockBuilder {
                 result.map_err(HummockError::encode_error).unwrap();
                 writer.into_inner()
             }
+            CompressionAlgorithm::Zstd => {
+                let mut encoder =
+                    zstd::Encoder::new(BytesMut::with_capacity(self.buf.len()).writer(), 4)
+                        .map_err(HummockError::encode_error)
+                        .unwrap();
+                encoder
+                    .write(&self.buf[..])
+                    .map_err(HummockError::encode_error)
+                    .unwrap();
+                let writer = encoder
+                    .finish()
+                    .map_err(HummockError::encode_error)
+                    .unwrap();
+                writer.into_inner()
+            }
         };
         self.compression_algorithm.encode(&mut buf);
         let checksum = xxhash64_checksum(&buf);
@@ -354,8 +377,13 @@ mod tests {
 
     #[test]
     fn test_compressed_block_enc_dec() {
+        inner_test_compressed(CompressionAlgorithm::Lz4);
+        inner_test_compressed(CompressionAlgorithm::Zstd);
+    }
+
+    fn inner_test_compressed(algo: CompressionAlgorithm) {
         let options = BlockBuilderOptions {
-            compression_algorithm: CompressionAlgorithm::Lz4,
+            compression_algorithm: algo,
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);

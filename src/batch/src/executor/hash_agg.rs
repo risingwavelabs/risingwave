@@ -117,11 +117,9 @@ impl HashAggExecutorBuilder {
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 1);
-
-        let proto_child = &source.plan_node().get_children()[0];
-        let child = source.clone_for_plan(proto_child).build().await?;
+        ensure!(inputs.len() == 1, "HashAggExecutor should have 1 child!");
 
         let hash_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -129,7 +127,12 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
         )?;
 
         let identity = source.plan_node().get_identity().clone();
-        Self::deserialize(hash_agg_node, child, source.task_id.clone(), identity)
+        Self::deserialize(
+            hash_agg_node,
+            inputs.remove(0),
+            source.task_id.clone(),
+            identity,
+        )
     }
 }
 

@@ -29,7 +29,6 @@ use tokio::task::JoinError;
 use tonic::metadata::{MetadataMap, MetadataValue};
 use tonic::Code;
 
-use crate::object::ObjectError;
 use crate::util::value_encoding::error::ValueEncodingError;
 
 /// Header used to store serialized [`RwError`] in grpc status.
@@ -97,8 +96,12 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
-    #[error(transparent)]
-    ObjectStoreError(ObjectError),
+    #[error("Object store error: {0:?}")]
+    ObjectStoreError(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
     #[error("Stream error: {0:?}")]
     StreamError(
         #[backtrace]

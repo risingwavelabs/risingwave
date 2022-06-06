@@ -16,7 +16,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -58,11 +58,7 @@ impl ProjectExecutor {
                 .iter_mut()
                 .map(|expr| expr.eval(&data_chunk).map(Column::new))
                 .collect::<Result<Vec<_>>>()?;
-            let ret = if arrays.is_empty() {
-                DataChunk::new_dummy(data_chunk.cardinality())
-            } else {
-                DataChunk::builder().columns(arrays).build()
-            };
+            let ret = DataChunk::new(arrays, data_chunk.cardinality());
             yield ret
         }
     }
@@ -72,20 +68,17 @@ impl ProjectExecutor {
 impl BoxedExecutorBuilder for ProjectExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 1);
+        ensure!(
+            inputs.len() == 1,
+            "Project executor should have only 1 child!"
+        );
 
         let project_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Project
         )?;
-
-        let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(String::from(
-                "Child interpreting error",
-            )))
-        })?;
-        let child_node = source.clone_for_plan(proto_child).build().await?;
 
         let project_exprs = project_node
             .get_select_list()
@@ -100,7 +93,7 @@ impl BoxedExecutorBuilder for ProjectExecutor {
 
         Ok(Box::new(Self {
             expr: project_exprs,
-            child: child_node,
+            child: inputs.remove(0),
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
         }))

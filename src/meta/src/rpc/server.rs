@@ -19,8 +19,8 @@ use std::time::Duration;
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::monitor::object_metrics::ObjectStoreMetrics;
-use risingwave_common::object::{parse_object_store, ObjectStoreImpl, ObjectStoreRef};
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::{parse_object_store, ObjectStoreImpl, ObjectStoreRef};
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
@@ -151,7 +151,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
-    let user_manager = UserManager::new(env.clone()).await.unwrap();
+    let user_manager = Arc::new(UserManager::new(env.clone()).await.unwrap());
 
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         env.clone(),
@@ -168,6 +168,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             cluster_manager.clone(),
             barrier_manager.clone(),
             catalog_manager.clone(),
+            fragment_manager.clone(),
         )
         .await
         .unwrap(),
@@ -210,7 +211,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         cluster_manager.clone(),
         fragment_manager.clone(),
     );
-    let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager);
+    let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(stream_manager);
     let hummock_srv = HummockServiceImpl::new(
@@ -220,7 +221,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     let notification_manager = env.notification_manager_ref();
     let notification_srv =
-        NotificationServiceImpl::new(env, catalog_manager, cluster_manager.clone());
+        NotificationServiceImpl::new(env, catalog_manager, cluster_manager.clone(), user_manager);
 
     if let Some(prometheus_addr) = prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);

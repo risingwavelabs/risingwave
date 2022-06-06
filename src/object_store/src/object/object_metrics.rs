@@ -17,8 +17,7 @@ use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
     register_int_counter_with_registry, HistogramVec, Registry,
 };
-
-use super::Print;
+use risingwave_common::monitor::Print;
 
 macro_rules! for_all_metrics {
     ($macro:ident) => {

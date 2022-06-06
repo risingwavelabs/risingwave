@@ -17,10 +17,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(any(test, feature = "test"))]
-use risingwave_common::monitor::object_metrics::ObjectStoreMetrics;
-use risingwave_common::object::ObjectStoreRef;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::ObjectStoreRef;
 #[cfg(any(test, feature = "test"))]
-use risingwave_common::object::{InMemObjectStore, ObjectStoreImpl};
+use risingwave_object_store::object::{InMemObjectStore, ObjectStoreImpl};
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use super::{HashMappingManager, HashMappingManagerRef};

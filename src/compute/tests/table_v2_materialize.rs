@@ -134,6 +134,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
     let stream_source = SourceExecutor::new(
+        0x3f3f3f,
         source_table_id,
         source_desc.clone(),
         keyspace,
@@ -290,7 +291,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         column_nonnull! { I64Array, [ col_row_ids[0]] }, // row id column
         column_nonnull! { F64Array, [1.14] },
     ];
-    let chunk = DataChunk::builder().columns(columns.clone()).build();
+    let chunk = DataChunk::new(columns.clone(), 1);
     let delete_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
     let delete = Box::new(DeleteExecutor::new(
         source_table_id,

@@ -33,7 +33,6 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
     - [End-to-end tests](#end-to-end-tests)
     - [End-to-end tests on CI](#end-to-end-tests-on-ci)
   - [Miscellaneous checks](#miscellaneous-checks)
-  - [Update CI workflow](#update-ci-workflow)
   - [Update Grafana dashboard](#update-grafana-dashboard)
   - [Add new files](#add-new-files)
   - [Add new dependencies](#add-new-dependencies)
@@ -74,7 +73,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config postgresql-client tmux lld
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -315,43 +314,9 @@ buf format -d --exit-code
 buf lint
 ```
 
-## Update CI workflow
-
-We use scripts to generate GitHub Action configurations based on templates in `.github/workflow-template`.
-
-To edit the workflow files, you will need to install `yq` >= 4.16.
-
-```shell
-> brew install yq
-> yq --version
-yq (https://github.com/mikefarah/yq/) version 4.16.1
-```
-
-Then, you may edit the files in `workflow-template`.
-
-* `template.yml` + `main-override.yml` = `main.yml`
-* `template.yml` + `pr-override.yml` = `pull-request.yml`
-
-After that, run `apply-ci-template` to update the final workflow config.
-
-```shell
-./risedev apply-ci-template
-```
-
 ## Update Grafana dashboard
 
-Simply use the export functionality in Grafana, disable the config "external sharing". Then,
-manually modify the JSON.
-
-All datasource should use `risedev-prometheus` as datasource. If you found something else,
-change them.
-
-```
-"datasource": {
-  "type": "prometheus",
-  "uid": "risedev-prometheus"
-},
-```
+See [README](../grafana/README.md) for more information.
 
 ## Add new files
 

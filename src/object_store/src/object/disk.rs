@@ -22,9 +22,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::future::try_join_all;
+use risingwave_common::cache::{CachableEntry, LruCache};
 use tokio::io::AsyncWriteExt;
 
-use crate::cache::{CachableEntry, LruCache};
 use crate::object::{
     strip_path_local, BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
 };

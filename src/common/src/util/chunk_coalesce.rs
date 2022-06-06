@@ -228,10 +228,7 @@ impl DataChunkBuilder {
                 Ok(vec)
             },
         )?;
-        match columns.is_empty() {
-            true => Ok(DataChunk::new_dummy(cardinality)),
-            false => DataChunk::try_from(columns),
-        }
+        Ok(DataChunk::new(columns, cardinality))
     }
 
     pub fn buffered_count(&self) -> usize {

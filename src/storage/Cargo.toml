@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 
 [dependencies]
@@ -36,6 +36,7 @@ prost = "0.10"
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 # rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
@@ -64,6 +65,7 @@ tracing = { version = "0.1" }
 twox-hash = "1"
 value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
+zstd = "0.11.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }

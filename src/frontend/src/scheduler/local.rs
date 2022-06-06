@@ -19,14 +19,14 @@ use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{internal_error, Result, RwError};
-use risingwave_pb::batch_plan::{PlanFragment, PlanNode as PlanNodeProst, TaskId as TaskIdProst};
+use risingwave_pb::batch_plan::{PlanFragment, PlanNode as PlanNodeProst};
 use tracing::debug;
 use uuid::Uuid;
 
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::{DataChunkStream, HummockSnapshotManagerRef};
+use crate::scheduler::HummockSnapshotManagerRef;
 
 pub struct LocalQueryExecution {
     sql: String,

@@ -21,8 +21,8 @@ use bytes::Bytes;
 use fail::fail_point;
 use futures::channel::oneshot::{channel, Sender};
 use futures::future::{try_join_all, FutureExt};
-use risingwave_common::object::{get_local_path, BlockLocation, ObjectStoreRef};
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
+use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};

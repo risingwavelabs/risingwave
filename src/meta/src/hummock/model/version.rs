@@ -13,17 +13,18 @@
 // limitations under the License.
 
 use prost::Message;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionObjectRef, HummockVersionRefId};
+use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionObjectRef};
 
 use crate::model::MetadataModel;
 
 /// Column family name for hummock version.
-/// `cf(hummock_version)`: `HummockVersionRefId` -> `HummockVersion`
+/// `cf(hummock_version)`: `HummockVersionId` -> `HummockVersion`
 const HUMMOCK_VERSION_CF_NAME: &str = "cf/hummock_version";
 
 /// `HummockVersion` tracks `SSTables` in given version.
 impl MetadataModel for HummockVersion {
-    type KeyType = HummockVersionRefId;
+    type KeyType = HummockVersionId;
     type ProstType = HummockVersion;
 
     fn cf_name() -> String {
@@ -43,7 +44,7 @@ impl MetadataModel for HummockVersion {
     }
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(HummockVersionRefId { id: self.id })
+        Ok(self.id)
     }
 }
 
@@ -51,7 +52,7 @@ const HUMMOCK_VERSION_OBJECT_REF_CF_NAME: &str = "cf/hummock_version_object_ref"
 
 /// `HummockVersion` tracks `SSTables` in given version.
 impl MetadataModel for HummockVersionObjectRef {
-    type KeyType = HummockVersionRefId;
+    type KeyType = HummockVersionId;
     type ProstType = HummockVersionObjectRef;
 
     fn cf_name() -> String {
@@ -71,6 +72,6 @@ impl MetadataModel for HummockVersionObjectRef {
     }
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(HummockVersionRefId { id: self.id })
+        Ok(self.id)
     }
 }

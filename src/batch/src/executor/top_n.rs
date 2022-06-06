@@ -20,7 +20,6 @@ use std::vec::Vec;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair};
@@ -96,8 +95,12 @@ pub struct TopNExecutor {
 impl BoxedExecutorBuilder for TopNExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 1);
+        ensure!(
+            inputs.len() == 1,
+            "TopNExecutor should have only one child!"
+        );
 
         let top_n_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::TopN)?;
@@ -107,18 +110,14 @@ impl BoxedExecutorBuilder for TopNExecutor {
             .iter()
             .map(OrderPair::from_prost)
             .collect();
-        if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build().await?;
-            return Ok(Box::new(Self::new(
-                child,
-                order_pairs,
-                top_n_node.get_limit() as usize,
-                top_n_node.get_offset() as usize,
-                source.plan_node().get_identity().clone(),
-                DEFAULT_CHUNK_BUFFER_SIZE,
-            )));
-        }
-        Err(InternalError("TopN must have one child".to_string()).into())
+        Ok(Box::new(Self::new(
+            inputs.remove(0),
+            order_pairs,
+            top_n_node.get_limit() as usize,
+            top_n_node.get_offset() as usize,
+            source.plan_node().get_identity().clone(),
+            DEFAULT_CHUNK_BUFFER_SIZE,
+        )))
     }
 }
 

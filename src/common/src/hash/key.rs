@@ -658,7 +658,6 @@ impl HashKey for SerializedKey {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::convert::TryFrom;
     use std::str::FromStr;
     use std::sync::Arc;
 
@@ -699,7 +698,7 @@ mod tests {
             )),
         ];
 
-        DataChunk::try_from(columns).expect("Failed to create data chunk")
+        DataChunk::new(columns, capacity)
     }
 
     fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
@@ -847,7 +846,7 @@ mod tests {
             .into(),
         ) as ArrayRef)];
 
-        DataChunk::try_from(columns).expect("Failed to create data chunk")
+        DataChunk::new(columns, 5)
     }
 
     #[test]

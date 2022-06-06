@@ -42,8 +42,8 @@ pub mod handler;
 pub mod observer;
 pub mod optimizer;
 pub mod planner;
-#[allow(unused)]
-mod scheduler;
+#[allow(dead_code)]
+pub mod scheduler;
 pub mod session;
 pub mod stream_fragmenter;
 pub mod utils;
@@ -54,6 +54,7 @@ extern crate core;
 extern crate risingwave_common;
 
 mod config;
+pub mod user;
 
 use std::ffi::OsString;
 use std::iter;
@@ -91,8 +92,15 @@ impl Default for FrontendOpts {
     }
 }
 
+use std::future::Future;
+use std::pin::Pin;
+
 /// Start frontend
-pub async fn start(opts: FrontendOpts) {
-    let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
-    pg_serve(&opts.host, session_mgr).await.unwrap();
+pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    // WARNING: don't change the function signature. Making it `async fn` will cause
+    // slow compile in release mode.
+    Box::pin(async move {
+        let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
+        pg_serve(&opts.host, session_mgr).await.unwrap();
+    })
 }

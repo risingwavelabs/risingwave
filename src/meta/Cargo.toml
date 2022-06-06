@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_meta"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 
 [dependencies]
@@ -36,6 +36,7 @@ rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 serde = { version = "1", features = ["derive"] }

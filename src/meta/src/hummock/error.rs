@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError, ToErrorStr};
-use risingwave_common::object::ObjectError;
+use risingwave_common::error::{BoxedError, ErrorCode, RwError, ToErrorStr};
 use risingwave_hummock_sdk::HummockContextId;
 use thiserror::Error;
 
@@ -27,8 +26,12 @@ pub enum Error {
     InvalidContext(HummockContextId),
     #[error(transparent)]
     MetaStoreError(anyhow::Error),
-    #[error(transparent)]
-    ObjectStoreError(ObjectError),
+    #[error("Object store error: {0:?}")]
+    ObjectStoreError(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
     #[error("compactor {0} is busy")]

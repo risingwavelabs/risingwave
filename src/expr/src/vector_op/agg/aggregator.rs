@@ -18,6 +18,7 @@ use risingwave_common::types::*;
 use risingwave_pb::expr::AggCall;
 
 use crate::expr::AggKind;
+use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::count_star::CountStar;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
@@ -105,7 +106,12 @@ impl AggStateFactory {
     }
 
     pub fn create_agg_state(&self) -> Result<Box<dyn Aggregator>> {
-        if let Some(input_type) = self.input_type.clone() {
+        if let AggKind::ApproxCountDistinct = self.agg_kind {
+            Ok(Box::new(ApproxCountDistinct::new(
+                self.return_type.clone(),
+                self.input_col_idx,
+            )))
+        } else if let Some(input_type) = self.input_type.clone() {
             create_agg_state_unary(
                 input_type,
                 self.input_col_idx,

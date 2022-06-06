@@ -87,8 +87,12 @@ impl OrderByExecutor {
 impl BoxedExecutorBuilder for OrderByExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 1);
+        ensure!(
+            inputs.len() == 1,
+            "OrderByExecutor should have only 1 child!"
+        );
 
         let order_by_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -100,23 +104,19 @@ impl BoxedExecutorBuilder for OrderByExecutor {
             .iter()
             .map(OrderPair::from_prost)
             .collect();
-        if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build().await?;
-            return Ok(Box::new(OrderByExecutor::new(
-                child,
-                vec![],
-                vec![],
-                vec![],
-                BinaryHeap::new(),
-                Arc::new(order_pairs),
-                vec![],
-                false,
-                false,
-                source.plan_node().get_identity().clone(),
-                DEFAULT_CHUNK_BUFFER_SIZE,
-            )));
-        }
-        Err(InternalError("OrderBy must have one child".to_string()).into())
+        Ok(Box::new(OrderByExecutor::new(
+            inputs.remove(0),
+            vec![],
+            vec![],
+            vec![],
+            BinaryHeap::new(),
+            Arc::new(order_pairs),
+            vec![],
+            false,
+            false,
+            source.plan_node().get_identity().clone(),
+            DEFAULT_CHUNK_BUFFER_SIZE,
+        )))
     }
 }
 
@@ -266,7 +266,7 @@ impl OrderByExecutor {
                 .into_iter()
                 .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
-            let chunk = DataChunk::builder().columns(columns).build();
+            let chunk = DataChunk::new(columns, chunk_size);
             yield chunk
         }
     }
