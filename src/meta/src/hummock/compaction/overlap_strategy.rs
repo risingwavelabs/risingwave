@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
@@ -108,16 +110,17 @@ impl OverlapInfo for RangeOverlapInfo {
 
 #[derive(Default)]
 pub struct HashOverlapInfo {
-    target_range: Option<KeyRange>,
+    infos: Vec<SstableInfo>,
 }
 
 impl OverlapInfo for HashOverlapInfo {
     fn check_overlap(&self, a: &SstableInfo) -> bool {
-        // TODO: We may need to handle vnode overlap as well in `check_overlap` and `update`
-        match self.target_range.as_ref() {
-            Some(range) => check_table_overlap(range, a),
-            None => false,
+        for info in &self.infos {
+            if check_key_vnode_overlap(info, a) {
+                return true;
+            }
         }
+        false
     }
 
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo> {
@@ -129,12 +132,7 @@ impl OverlapInfo for HashOverlapInfo {
     }
 
     fn update(&mut self, table: &SstableInfo) {
-        let other = table.key_range.as_ref().unwrap();
-        if let Some(range) = self.target_range.as_mut() {
-            range.full_key_extend(other);
-            return;
-        }
-        self.target_range = Some(other.clone());
+        self.infos.push(table.clone());
     }
 }
 
@@ -157,13 +155,54 @@ fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
     key_range.full_key_overlap(other)
 }
 
+/// check whether 2 SSTs may have same key by key range and vnode bitmaps in table info
+fn check_key_vnode_overlap(info: &SstableInfo, table: &SstableInfo) -> bool {
+    if !info
+        .key_range
+        .as_ref()
+        .unwrap()
+        .full_key_overlap(table.key_range.as_ref().unwrap())
+    {
+        return false;
+    }
+    let text_len = info.get_vnode_bitmaps().len();
+    let other_len = table.get_vnode_bitmaps().len();
+    if text_len == 0 || other_len == 0 {
+        return true;
+    }
+    let (mut i, mut j) = (0, 0);
+    while i < text_len && j < other_len {
+        let x = &info.get_vnode_bitmaps()[i];
+        let y = &table.get_vnode_bitmaps()[j];
+        match x.get_table_id().cmp(&y.get_table_id()) {
+            Ordering::Less => {
+                i += 1;
+            }
+            Ordering::Greater => {
+                j += 1;
+            }
+            Ordering::Equal => {
+                let maplen = x.get_bitmap().len();
+                assert_eq!(maplen, y.get_bitmap().len());
+                for bitmap_idx in 0..maplen as usize {
+                    if (x.get_bitmap()[bitmap_idx] & y.get_bitmap()[bitmap_idx]) != 0 {
+                        return true;
+                    }
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    false
+}
+
 #[derive(Default)]
 pub struct HashStrategy {}
 
 impl OverlapStrategy for HashStrategy {
     fn check_overlap(&self, a: &SstableInfo, b: &SstableInfo) -> bool {
-        let key_range = a.key_range.as_ref().unwrap();
-        check_table_overlap(key_range, b)
+        check_key_vnode_overlap(a, b)
     }
 
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {
