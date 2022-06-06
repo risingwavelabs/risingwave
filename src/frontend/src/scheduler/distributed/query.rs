@@ -25,14 +25,14 @@ use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-use super::stage::StageEvent;
+use super::{QueryResultFetcher, StageEvent};
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::query::QueryState::{Failed, Pending};
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{HummockSnapshotManagerRef, QueryResultFetcher};
+use crate::scheduler::HummockSnapshotManagerRef;
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -425,9 +425,8 @@ mod tests {
         //
         let ctx = OptimizerContext::mock().await;
 
-        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
+        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::create(
             "".to_string(),
-            vec![0, 1],
             Rc::new(TableDesc {
                 table_id: 0.into(),
                 pks: vec![],

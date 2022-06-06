@@ -20,16 +20,15 @@
 //! `LruCache` implementation port from github.com/facebook/rocksdb. The class `LruCache` is
 //! thread-safe, because every operation on cache will be protected by a spin lock.
 use std::collections::HashMap;
+use std::error::Error;
 use std::future::Future;
 use std::hash::Hash;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use futures::channel::oneshot::{channel, Receiver, Sender};
+use futures::channel::oneshot::{channel, Canceled, Receiver, Sender};
 use spin::Mutex;
-
-use crate::hummock::{HummockError, HummockResult};
 
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
@@ -520,20 +519,22 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     }
 
     // Clears the content of the cache.
-    // This method only works if no cache entries are referenced outside.
-    fn clear(&mut self) {
+    // This method is safe to use only if no cache entries are referenced outside.
+    unsafe fn clear(&mut self) {
         while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
             let handle = self.lru.next;
-            unsafe {
-                self.erase((*handle).hash, (*handle).get_key());
-            }
+            self.erase((*handle).hash, (*handle).get_key());
         }
     }
 }
 
 impl<K: LruKey, T: LruValue> Drop for LruCacheShard<K, T> {
     fn drop(&mut self) {
-        self.clear();
+        // Since the shard is being drop, there must be no cache entries referenced outside. So we
+        // are safe to call clear.
+        unsafe {
+            self.clear();
+        }
     }
 }
 
@@ -674,8 +675,10 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         hash as usize % self.shards.len()
     }
 
-    #[cfg(test)]
-    pub fn clear(&self) {
+    /// # Safety
+    ///
+    /// This method can only be called when no cache entry are referenced outside.
+    pub unsafe fn clear(&self) {
         for shard in &self.shards {
             let mut shard = shard.lock();
             shard.clear();
@@ -684,30 +687,31 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
 }
 
 impl<K: LruKey + Clone, T: LruValue> LruCache<K, T> {
-    pub async fn lookup_with_request_dedup<F, VC>(
+    pub async fn lookup_with_request_dedup<F, E, VC>(
         self: &Arc<Self>,
         hash: u64,
         key: K,
         fetch_value: F,
-    ) -> HummockResult<CachableEntry<K, T>>
+    ) -> Result<Result<CachableEntry<K, T>, E>, Canceled>
     where
         F: FnOnce() -> VC,
-        VC: Future<Output = HummockResult<(T, usize)>>,
+        E: Error,
+        VC: Future<Output = Result<(T, usize), E>>,
     {
         match self.lookup_for_request(hash, key.clone()) {
-            LookupResult::Cached(entry) => Ok(entry),
+            LookupResult::Cached(entry) => Ok(Ok(entry)),
             LookupResult::WaitPendingRequest(recv) => {
-                let entry = recv.await.map_err(HummockError::other)?;
-                Ok(entry)
+                let entry = recv.await?;
+                Ok(Ok(entry))
             }
             LookupResult::Miss => match fetch_value().await {
                 Ok((value, charge)) => {
                     let entry = self.insert(key, hash, charge, value);
-                    Ok(entry)
+                    Ok(Ok(entry))
                 }
                 Err(e) => {
                     self.clear_pending_request(&key, hash);
-                    Err(e)
+                    Ok(Err(e))
                 }
             },
         }
@@ -753,8 +757,6 @@ mod tests {
     use rand::{RngCore, SeedableRng};
 
     use super::*;
-    use crate::hummock::cache::LruHandle;
-    use crate::hummock::LruCache;
 
     pub struct Block {
         pub offset: u64,

@@ -24,11 +24,12 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_common::error::Result;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
+    CompactMetrics, CompactTask, HummockVersion, KeyRange, Level, TableSetStatistics,
 };
 
 use crate::hummock::compaction::compaction_config::CompactionConfig;
@@ -124,12 +125,9 @@ impl CompactStatus {
         let target_level_id = ret.target_level.level_idx;
 
         let splits = if ret.split_ranges.is_empty() {
-            vec![KeyRange::inf().into()]
+            vec![KeyRange::inf()]
         } else {
             ret.split_ranges
-                .iter()
-                .map(|v| v.clone().into())
-                .collect_vec()
         };
         let compact_task = CompactTask {
             input_ssts: vec![ret.select_level, ret.target_level],
@@ -232,9 +230,9 @@ impl CompactStatus {
             new_version.levels[compact_task.target_level as usize]
                 .table_infos
                 .sort_by(|sst1, sst2| {
-                    let a = KeyRange::from(sst1.key_range.as_ref().unwrap());
-                    let b = KeyRange::from(sst2.key_range.as_ref().unwrap());
-                    a.cmp(&b)
+                    let a = sst1.key_range.as_ref().unwrap();
+                    let b = sst2.key_range.as_ref().unwrap();
+                    a.compare(b)
                 });
         }
         new_version

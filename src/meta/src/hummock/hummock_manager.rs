@@ -209,7 +209,7 @@ where
             CompactTaskAssignment::list(self.env.meta_store())
                 .await?
                 .into_iter()
-                .map(|assigned| (assigned.key().unwrap().id, assigned))
+                .map(|assigned| (assigned.key().unwrap(), assigned))
                 .collect();
 
         let mut versioning_guard = self.versioning.write().await;
@@ -463,6 +463,65 @@ where
             context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
         }
         commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
+        Ok(())
+    }
+
+    /// Unpin all snapshots smaller than specified epoch for current context.
+    pub async fn unpin_snapshot_before(
+        &self,
+        context_id: HummockContextId,
+        hummock_snapshot: HummockSnapshot,
+    ) -> Result<()> {
+        let mut versioning_guard = self.versioning.write().await;
+
+        // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
+        // visible in the snapshot.
+        let version_id = versioning_guard.current_version_id.id();
+        let _max_committed_epoch = versioning_guard
+            .hummock_versions
+            .get(&version_id)
+            .unwrap()
+            .max_committed_epoch;
+        // Ensure the unpin will not clean the latest one.
+        #[cfg(not(test))]
+        {
+            assert!(hummock_snapshot.epoch <= _max_committed_epoch);
+        }
+
+        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
+        let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
+            None => {
+                return Ok(());
+            }
+            Some(context_pinned_snapshot) => context_pinned_snapshot,
+        };
+
+        let to_unpin = context_pinned_snapshot
+            .snapshot_id
+            .iter()
+            // hummock_snapshot.epoch should always <= max committed epoch.
+            .filter(|e| **e < hummock_snapshot.epoch)
+            .cloned()
+            .collect_vec();
+        // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
+        // epochs below specific watermark.
+        // let mut snapshots_change = !to_unpin.is_empty();
+        tracing::info!("Unpin epochs {:?}", to_unpin);
+
+        for epoch in &to_unpin {
+            context_pinned_snapshot.unpin_snapshot(*epoch);
+        }
+
+        if !to_unpin.is_empty() {
+            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+        }
 
         #[cfg(test)]
         {

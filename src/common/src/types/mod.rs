@@ -197,7 +197,7 @@ impl DataType {
             DataType::Int64 => DataSize::Fixed(size_of::<i64>()),
             DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
             DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
-            DataType::Decimal => DataSize::Fixed(16),
+            DataType::Decimal => DataSize::Fixed(size_of::<Decimal>()),
             DataType::Varchar => DataSize::Variable,
             DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
             DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
@@ -893,5 +893,15 @@ mod tests {
         let decoded_floats = memcomparables.into_iter().map(deserialize).collect_vec();
         assert!(decoded_floats.is_sorted());
         assert_eq!(floats, decoded_floats);
+    }
+
+    #[test]
+    fn test_size() {
+        assert_eq!(std::mem::size_of::<StructValue>(), 16);
+        assert_eq!(std::mem::size_of::<ListValue>(), 16);
+        // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
+        assert_eq!(std::mem::size_of::<Decimal>(), 20);
+        assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
+        assert_eq!(std::mem::size_of::<Datum>(), 32);
     }
 }

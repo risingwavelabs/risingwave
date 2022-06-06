@@ -18,7 +18,7 @@
 
 mod resolve_id;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -87,7 +87,7 @@ pub struct TestCase {
     pub create_source: Option<CreateSource>,
 
     /// Provide config map to frontend
-    pub with_config_map: Option<HashMap<String, String>>,
+    pub with_config_map: Option<BTreeMap<String, String>>,
 }
 
 #[serde_with::skip_serializing_none]

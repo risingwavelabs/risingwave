@@ -25,6 +25,7 @@ use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
 use crate::vector_op::ascii::ascii;
+use crate::vector_op::bitwise_op::general_bitnot;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
@@ -300,6 +301,15 @@ pub fn new_unary_expr(
                 {
                     {decimal, decimal, decimal_abs},
                 }
+            }
+        }
+        (ProstType::BitwiseNot, _, _) => {
+            gen_unary_impl! {
+                [ "BitwiseNot", child_expr, return_type],
+                { int16, int16, general_bitnot },
+                { int32, int32, general_bitnot },
+                { int64, int64, general_bitnot },
+
             }
         }
         (ProstType::Ceil, _, _) => {
