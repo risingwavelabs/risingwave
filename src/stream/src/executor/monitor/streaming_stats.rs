@@ -23,6 +23,7 @@ pub struct StreamingMetrics {
     pub actor_processing_time: GenericGaugeVec<AtomicF64>,
     pub actor_barrier_time: GenericGaugeVec<AtomicF64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
+    pub exchange_recv_size: GenericCounterVec<AtomicU64>,
 }
 
 impl StreamingMetrics {
@@ -59,12 +60,21 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let exchange_recv_size = register_int_counter_vec_with_registry!(
+            "stream_exchange_recv_size",
+            "Total size of messages that have been received from upstream Actor",
+            &["up_actor_id", "down_actor_id"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             actor_row_count,
             actor_processing_time,
             actor_barrier_time,
             source_output_row_count,
+            exchange_recv_size,
         }
     }
 

@@ -50,6 +50,10 @@ impl BatchProject {
         );
         BatchProject { base, logical }
     }
+
+    pub fn as_logical(&self) -> &LogicalProject {
+        &self.logical
+    }
 }
 
 impl fmt::Display for BatchProject {
@@ -90,7 +94,7 @@ impl ToDistributedBatch for BatchProject {
                 .rewrite_required_distribution(required_dist);
             match input_required {
                 RequiredDist::PhysicalDist(dist) => match dist {
-                    Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
+                    Distribution::Single => RequiredDist::Any,
                     _ => RequiredDist::PhysicalDist(dist),
                 },
                 _ => input_required,

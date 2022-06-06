@@ -33,9 +33,9 @@ where
     T2: TryInto<T3> + Debug,
     T3: CheckedAdd,
 {
-    general_atm(l, r, |a, b| match a.checked_add(&b) {
-        Some(c) => Ok(c),
-        None => Err(RwError::from(NumericValueOutOfRange)),
+    general_atm(l, r, |a, b| {
+        a.checked_add(&b)
+            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
     })
 }
 
@@ -46,9 +46,9 @@ where
     T2: TryInto<T3> + Debug,
     T3: CheckedSub,
 {
-    general_atm(l, r, |a, b| match a.checked_sub(&b) {
-        Some(c) => Ok(c),
-        None => Err(RwError::from(NumericValueOutOfRange)),
+    general_atm(l, r, |a, b| {
+        a.checked_sub(&b)
+            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
     })
 }
 
@@ -59,9 +59,9 @@ where
     T2: TryInto<T3> + Debug,
     T3: CheckedMul,
 {
-    general_atm(l, r, |a, b| match a.checked_mul(&b) {
-        Some(c) => Ok(c),
-        None => Err(RwError::from(NumericValueOutOfRange)),
+    general_atm(l, r, |a, b| {
+        a.checked_mul(&b)
+            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
     })
 }
 
@@ -72,9 +72,9 @@ where
     T2: TryInto<T3> + Debug,
     T3: CheckedDiv,
 {
-    general_atm(l, r, |a, b| match a.checked_div(&b) {
-        Some(c) => Ok(c),
-        None => Err(RwError::from(NumericValueOutOfRange)),
+    general_atm(l, r, |a, b| {
+        a.checked_div(&b)
+            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
     })
 }
 
@@ -85,18 +85,16 @@ where
     T2: TryInto<T3> + Debug,
     T3: CheckedRem,
 {
-    general_atm(l, r, |a, b| match a.checked_rem(&b) {
-        Some(c) => Ok(c),
-        None => Err(RwError::from(NumericValueOutOfRange)),
+    general_atm(l, r, |a, b| {
+        a.checked_rem(&b)
+            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
     })
 }
 
 #[inline(always)]
 pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
-    match expr.checked_neg() {
-        Some(expr) => Ok(expr),
-        None => Err(RwError::from(NumericValueOutOfRange)),
-    }
+    expr.checked_neg()
+        .ok_or_else(|| RwError::from(NumericValueOutOfRange))
 }
 
 #[inline(always)]

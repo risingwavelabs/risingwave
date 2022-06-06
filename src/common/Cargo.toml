@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_common"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 
 [dependencies]
@@ -10,8 +10,8 @@ async-trait = "0.1"
 auto_enums = "0.7"
 byteorder = "1"
 bytes = "1"
-chrono = "0.4"
-comfy-table = "5.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+comfy-table = "6"
 crc32fast = "1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -31,6 +31,7 @@ risingwave_pb = { path = "../prost" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
+spin = "0.9"
 thiserror = "1"
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"

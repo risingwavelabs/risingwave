@@ -184,7 +184,7 @@ where
                 .cancel_create_source_procedure(&source)
                 .await
                 .map_err(tonic_err)?;
-            return Err(e.to_grpc_status());
+            return Err(e.into());
         }
 
         let version = self
@@ -293,7 +293,7 @@ where
                 .cancel_create_table_procedure(&mview)
                 .await
                 .map_err(tonic_err)?;
-            return Err(e.to_grpc_status());
+            return Err(e.into());
         }
 
         // 4. Finally, update the catalog.
@@ -434,7 +434,8 @@ where
             &mut ctx,
         )
         .await?;
-        let table_fragments = TableFragments::new(mview_id, graph);
+        let table_fragments =
+            TableFragments::new(mview_id, graph, ctx.internal_table_id_set.clone());
 
         // Create on compute node.
         self.stream_manager

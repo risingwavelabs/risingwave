@@ -25,10 +25,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::Result;
-use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
+use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
+    CompactMetrics, CompactTask, HummockVersion, KeyRange, Level, TableSetStatistics,
 };
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
@@ -45,26 +45,24 @@ use crate::storage::{MetaStore, Transaction};
 /// Hummock `compact_status` key
 /// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
 pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
-const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 2GB
-const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024;
-const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 32;
+const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4GB
+const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
+const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
-const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 16;
+const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: usize = 16;
 
 const MAX_LEVEL: usize = 6;
 
 pub struct CompactStatus {
     pub(crate) level_handlers: Vec<LevelHandler>,
-    pub(crate) next_compact_task_id: u64,
-    compaction_selector: Box<dyn LevelSelector>,
+    compaction_selector: Arc<dyn LevelSelector>,
 }
 
 impl Debug for CompactStatus {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CompactStatus")
             .field("level_handlers", &self.level_handlers)
-            .field("next_compact_task_id", &self.next_compact_task_id)
             .field("compaction_selector", &self.compaction_selector.name())
             .finish()
     }
@@ -73,7 +71,6 @@ impl Debug for CompactStatus {
 impl PartialEq for CompactStatus {
     fn eq(&self, other: &Self) -> bool {
         self.level_handlers.eq(&other.level_handlers)
-            && self.next_compact_task_id == other.next_compact_task_id
             && self.compaction_selector.name() == other.compaction_selector.name()
     }
 }
@@ -82,8 +79,7 @@ impl Clone for CompactStatus {
     fn clone(&self) -> Self {
         Self {
             level_handlers: self.level_handlers.clone(),
-            compaction_selector: Box::new(DynamicLevelSelector::default()),
-            next_compact_task_id: self.next_compact_task_id,
+            compaction_selector: self.compaction_selector.clone(),
         }
     }
 }
@@ -106,8 +102,9 @@ pub struct CompactionConfig {
     pub max_level: usize,
     pub max_bytes_for_level_multiplier: u64,
     pub max_compaction_bytes: u64,
-    pub level0_max_file_number: usize,
-    pub level0_trigger_number: usize,
+    pub min_compaction_bytes: u64,
+    pub level0_tigger_file_numer: usize,
+    pub level0_tier_compact_file_number: usize,
     pub compaction_mode: CompactionMode,
 }
 
@@ -118,8 +115,9 @@ impl Default for CompactionConfig {
             max_bytes_for_level_multiplier: 10,
             max_level: MAX_LEVEL,
             max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
-            level0_max_file_number: DEFAULT_LEVEL0_MAX_FILE_NUMBER,
-            level0_trigger_number: DEFAULT_LEVEL0_TRIGGER_NUMBER,
+            min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
+            level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
+            level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
             compaction_mode: ConsistentHashMode,
         }
     }
@@ -137,9 +135,8 @@ impl CompactStatus {
         };
         CompactStatus {
             level_handlers,
-            next_compact_task_id: 1,
             // TODO: create selector and overlap strategy by configure.
-            compaction_selector: Box::new(DynamicLevelSelector::new(config, overlap_strategy)),
+            compaction_selector: Arc::new(DynamicLevelSelector::new(config, overlap_strategy)),
         }
     }
 
@@ -151,29 +148,35 @@ impl CompactStatus {
         HUMMOCK_COMPACT_STATUS_KEY
     }
 
-    pub async fn get<S: MetaStore>(meta_store: &S) -> Result<Option<CompactStatus>> {
+    pub async fn load<S: MetaStore>(&mut self, meta_store: &S) -> Result<()> {
         match meta_store
             .get_cf(CompactStatus::cf_name(), CompactStatus::key().as_bytes())
             .await
             .map(|v| risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(v)).unwrap())
-            .map(|s| (&s).into())
         {
-            Ok(compact_status) => Ok(Some(compact_status)),
+            Ok(compact_status) => {
+                self.level_handlers = compact_status.level_handlers.iter().map_into().collect();
+                Ok(())
+            }
             Err(err) => {
                 if !matches!(err, storage::Error::ItemNotFound(_)) {
                     return Err(err.into());
                 }
-                Ok(None)
+                Ok(())
             }
         }
     }
 
-    pub fn get_compact_task(&mut self, levels: &[Level]) -> Option<CompactTask> {
+    pub fn get_compact_task(
+        &mut self,
+        levels: &[Level],
+        task_id: HummockCompactionTaskId,
+    ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
-        let ret = match self.pick_compaction(levels) {
+        let ret = match self.pick_compaction(levels, task_id) {
             Some(ret) => ret,
             None => return None,
         };
@@ -181,16 +184,17 @@ impl CompactStatus {
         let select_level_id = ret.select_level.level_idx;
         let target_level_id = ret.target_level.level_idx;
 
+        let splits = if ret.split_ranges.is_empty() {
+            vec![KeyRange::inf()]
+        } else {
+            ret.split_ranges
+        };
         let compact_task = CompactTask {
             input_ssts: vec![ret.select_level, ret.target_level],
-            splits: ret
-                .split_ranges
-                .iter()
-                .map(|v| v.clone().into())
-                .collect_vec(),
+            splits,
             watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
-            task_id: self.next_compact_task_id,
+            task_id,
             target_level: target_level_id,
             is_target_ultimate_and_leveling: target_level_id as usize
                 == self.level_handlers.len() - 1
@@ -217,16 +221,16 @@ impl CompactStatus {
             prefix_pairs: vec![],
             vnode_mappings: vec![],
         };
-        self.next_compact_task_id += 1;
         Some(compact_task)
     }
 
-    fn pick_compaction(&mut self, levels: &[Level]) -> Option<SearchResult> {
-        self.compaction_selector.pick_compaction(
-            self.next_compact_task_id,
-            levels,
-            &mut self.level_handlers,
-        )
+    fn pick_compaction(
+        &mut self,
+        levels: &[Level],
+        task_id: HummockCompactionTaskId,
+    ) -> Option<SearchResult> {
+        self.compaction_selector
+            .pick_compaction(task_id, levels, &mut self.level_handlers)
     }
 
     /// Declares a task is either finished or canceled.
@@ -287,9 +291,9 @@ impl CompactStatus {
             new_version.levels[compact_task.target_level as usize]
                 .table_infos
                 .sort_by(|sst1, sst2| {
-                    let a = KeyRange::from(sst1.key_range.as_ref().unwrap());
-                    let b = KeyRange::from(sst2.key_range.as_ref().unwrap());
-                    a.cmp(&b)
+                    let a = sst1.key_range.as_ref().unwrap();
+                    let b = sst2.key_range.as_ref().unwrap();
+                    a.compare(b)
                 });
         }
         new_version
@@ -325,7 +329,6 @@ impl From<&CompactStatus> for risingwave_pb::hummock::CompactStatus {
     fn from(status: &CompactStatus) -> Self {
         risingwave_pb::hummock::CompactStatus {
             level_handlers: status.level_handlers.iter().map_into().collect(),
-            next_compact_task_id: status.next_compact_task_id,
         }
     }
 }
@@ -334,8 +337,7 @@ impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
     fn from(status: &risingwave_pb::hummock::CompactStatus) -> Self {
         CompactStatus {
             level_handlers: status.level_handlers.iter().map_into().collect(),
-            next_compact_task_id: status.next_compact_task_id,
-            compaction_selector: Box::new(DynamicLevelSelector::default()),
+            compaction_selector: Arc::new(DynamicLevelSelector::default()),
         }
     }
 }
@@ -347,7 +349,6 @@ mod tests {
     #[tokio::test]
     async fn test_serde() -> Result<()> {
         let origin = CompactStatus {
-            next_compact_task_id: 4,
             ..Default::default()
         };
         let ser = risingwave_pb::hummock::CompactStatus::from(&origin).encode_to_vec();

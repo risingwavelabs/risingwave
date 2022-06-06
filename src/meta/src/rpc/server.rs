@@ -25,6 +25,7 @@ use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
+use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
@@ -36,12 +37,13 @@ use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
 use crate::hummock::CompactionScheduler;
-use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv};
+use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv, UserManager};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
 use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
 
@@ -136,12 +138,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         tokio::spawn(dashboard_service.serve(ui_path));
     }
 
-    let catalog_manager_v2 = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+    let user_manager = Arc::new(UserManager::new(env.clone()).await.unwrap());
 
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
-        catalog_manager_v2.clone(),
+        catalog_manager.clone(),
         fragment_manager.clone(),
         hummock_manager.clone(),
         meta_metrics.clone(),
@@ -152,7 +155,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             env.clone(),
             cluster_manager.clone(),
             barrier_manager.clone(),
-            catalog_manager_v2.clone(),
+            catalog_manager.clone(),
+            fragment_manager.clone(),
         )
         .await
         .unwrap(),
@@ -189,12 +193,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
-        catalog_manager_v2.clone(),
+        catalog_manager.clone(),
         stream_manager.clone(),
         source_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
     );
+    let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(stream_manager);
     let hummock_srv = HummockServiceImpl::new(
@@ -204,7 +209,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     let notification_manager = env.notification_manager_ref();
     let notification_srv =
-        NotificationServiceImpl::new(env, catalog_manager_v2, cluster_manager.clone());
+        NotificationServiceImpl::new(env, catalog_manager, cluster_manager.clone(), user_manager);
 
     if let Some(prometheus_addr) = prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
@@ -239,6 +244,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(HummockManagerServiceServer::new(hummock_srv))
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
+            .add_service(UserServiceServer::new(user_srv))
             .serve_with_shutdown(addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},

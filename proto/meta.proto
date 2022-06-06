@@ -6,6 +6,7 @@ import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
 import "stream_plan.proto";
+import "user.proto";
 
 option optimize_for = SPEED;
 
@@ -53,6 +54,7 @@ message TableFragments {
   uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
   map<uint32, ActorStatus> actor_status = 3;
+  repeated uint32 internal_table_ids = 4;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -130,6 +132,7 @@ message MetaSnapshot {
   repeated catalog.Source source = 4;
   repeated catalog.Table table = 5;
   repeated catalog.VirtualTable view = 6;
+  repeated user.UserInfo users = 7;
 }
 
 message SubscribeResponse {
@@ -149,6 +152,7 @@ message SubscribeResponse {
     catalog.Schema schema = 6;
     catalog.Table table = 7;
     catalog.Source source = 8;
+    user.UserInfo user = 11;
     MetaSnapshot snapshot = 9;
     hummock.HummockSnapshot hummock_snapshot = 10;
   }

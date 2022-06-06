@@ -26,12 +26,12 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{
-    ConnectorState, SplitImpl, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
-    PULSAR_CONNECTOR,
+    ConnectorState, SplitImpl, DATAGEN_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR,
+    NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
 };
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
@@ -42,6 +42,7 @@ use super::*;
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
 pub struct SourceExecutor<S: StateStore> {
+    actor_id: ActorId,
     source_id: TableId,
     source_desc: SourceDesc,
 
@@ -74,6 +75,7 @@ pub struct SourceExecutor<S: StateStore> {
 impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        actor_id: ActorId,
         source_id: TableId,
         source_desc: SourceDesc,
         keyspace: Keyspace<S>,
@@ -89,6 +91,7 @@ impl<S: StateStore> SourceExecutor<S> {
         expected_barrier_latency_ms: u64,
     ) -> Result<Self> {
         Ok(Self {
+            actor_id,
             source_id,
             source_desc,
             column_ids,
@@ -136,7 +139,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
 struct SourceReader {
     /// The reader for stream source.
-    stream_reader: Box<dyn StreamSourceReader>,
+    stream_reader: Box<SourceStreamReaderImpl>,
     /// The reader for barrier.
     barrier_receiver: UnboundedReceiver<Barrier>,
     /// Expected barrier latency in ms. If there are no barrier within the expected barrier
@@ -150,12 +153,16 @@ impl SourceReader {
         mut stream_reader: Box<dyn StreamSourceReader>,
         notifier: Arc<Notify>,
         expected_barrier_latency_ms: u64,
+        mut inject_source_rx: UnboundedReceiver<Box<SourceStreamReaderImpl>>,
     ) {
         'outer: loop {
             let now = Instant::now();
 
             // We allow data to flow for `expected_barrier_latency_ms` milliseconds.
             while now.elapsed().as_millis() < expected_barrier_latency_ms as u128 {
+                if let Ok(reader) = inject_source_rx.try_recv() {
+                    stream_reader = reader;
+                }
                 match stream_reader.next().await {
                     Ok(chunk) => yield chunk,
                     Err(e) => {
@@ -195,6 +202,7 @@ impl SourceReader {
 
     fn into_stream(
         self,
+        inject_source: UnboundedReceiver<Box<SourceStreamReaderImpl>>,
     ) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunkWithState>>> {
         let notifier = Arc::new(Notify::new());
 
@@ -203,6 +211,7 @@ impl SourceReader {
             self.stream_reader,
             notifier,
             self.expected_barrier_latency_ms,
+            inject_source,
         );
         select_with_strategy(
             barrier_receiver.map(Either::Left),
@@ -229,6 +238,31 @@ macro_rules! impl_take_snapshot {
 }
 
 impl<S: StateStore> SourceExecutor<S> {
+    fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
+        // rhs can not be None because we do not support split number reduction
+
+        let split_change = rhs.unwrap();
+        let mut target_state: Vec<SplitImpl> = Vec::with_capacity(split_change.len());
+        let mut no_change_flag = true;
+        for sc in &split_change {
+            // SplitImpl is identified by its id, target_state always follows offsets in cache
+            // here we introduce a hypothesis that every split is polled at least once in one epoch
+            match self.state_cache.get(&sc.id()) {
+                Some(s) => target_state.push(s.clone()),
+                None => {
+                    no_change_flag = false;
+                    target_state.push(sc.clone())
+                }
+            }
+        }
+
+        if no_change_flag {
+            None
+        } else {
+            Some(target_state)
+        }
+    }
+
     async fn take_snapshot(&mut self, epoch: u64) -> Result<()> {
         let cache = self
             .state_cache
@@ -240,11 +274,30 @@ impl<S: StateStore> SourceExecutor<S> {
                 { kafka, KAFKA_CONNECTOR },
                 { kinesis, KINESIS_CONNECTOR },
                 { nexmark, NEXMARK_CONNECTOR },
-                { pulsar, PULSAR_CONNECTOR }
+                { pulsar, PULSAR_CONNECTOR },
+                { datagen, DATAGEN_CONNECTOR}
+
             );
-            self.state_cache.clear();
         }
         Ok(())
+    }
+
+    async fn build_stream_source_reader(
+        &mut self,
+        state: ConnectorState,
+    ) -> Result<Box<SourceStreamReaderImpl>> {
+        let reader = match self.source_desc.source.as_ref() {
+            SourceImpl::TableV2(t) => t
+                .stream_reader(self.column_ids.clone())
+                .await
+                .map(SourceStreamReaderImpl::TableV2),
+            SourceImpl::Connector(c) => c
+                .stream_reader(state, self.column_ids.clone())
+                .await
+                .map(SourceStreamReaderImpl::Connector),
+        }?;
+
+        Ok(Box::new(reader))
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -279,27 +332,22 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         // todo: use epoch from msg to restore state from state store
-        let stream_reader = match self.source_desc.source.as_ref() {
-            SourceImpl::TableV2(t) => t
-                .stream_reader(self.column_ids.clone())
-                .await
-                .map(SourceStreamReaderImpl::TableV2),
-            SourceImpl::Connector(c) => c
-                .stream_reader(recover_state, self.column_ids.clone())
-                .await
-                .map(SourceStreamReaderImpl::Connector),
-        }
-        .map_err(StreamExecutorError::source_error)?;
+        let stream_reader = self
+            .build_stream_source_reader(recover_state)
+            .await
+            .map_err(StreamExecutorError::source_error)?;
 
         let reader = SourceReader {
-            stream_reader: Box::new(stream_reader),
+            stream_reader,
             barrier_receiver,
             expected_barrier_latency_ms: self.expected_barrier_latency_ms,
         };
         yield Message::Barrier(barrier);
 
+        let (inject_source_tx, inject_source_rx) =
+            unbounded_channel::<Box<SourceStreamReaderImpl>>();
         #[for_await]
-        for msg in reader.into_stream() {
+        for msg in reader.into_stream(inject_source_rx) {
             match msg {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
@@ -309,6 +357,29 @@ impl<S: StateStore> SourceExecutor<S> {
                             self.take_snapshot(epoch)
                                 .await
                                 .map_err(StreamExecutorError::source_error)?;
+                            if let Some(Mutation::SourceChangeSplit(mapping)) =
+                                barrier.mutation.as_deref()
+                            {
+                                if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
+                                    match self.get_diff(target_splits) {
+                                        None => {}
+                                        Some(target_state) => {
+                                            let reader = self
+                                                .build_stream_source_reader(Some(target_state))
+                                                .await
+                                                .map_err(StreamExecutorError::source_error)?;
+                                            inject_source_tx.send(reader).to_rw_result().map_err(
+                                                |e| {
+                                                    StreamExecutorError::channel_closed(
+                                                        e.to_string(),
+                                                    )
+                                                },
+                                            )?;
+                                        }
+                                    }
+                                }
+                            }
+                            self.state_cache.clear();
                             yield Message::Barrier(barrier)
                         }
                         _ => unreachable!(),
@@ -466,6 +537,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
 
         let executor = SourceExecutor::new(
+            0x3f3f3f,
             table_id,
             source_desc,
             keyspace,
@@ -588,6 +660,7 @@ mod tests {
         let (barrier_sender, barrier_receiver) = unbounded_channel();
         let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
         let executor = SourceExecutor::new(
+            0x3f3f3f,
             table_id,
             source_desc,
             keyspace,

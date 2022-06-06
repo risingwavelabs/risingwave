@@ -67,6 +67,12 @@ impl ToStreamProst for StreamHopWindow {
             time_col: Some(self.logical.time_col.to_proto()),
             window_slide: Some(self.logical.window_slide.into()),
             window_size: Some(self.logical.window_size.into()),
+            output_indices: self
+                .logical
+                .output_indices
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
         })
     }
 }

@@ -15,14 +15,6 @@ message TaskId {
   uint32 task_id = 3;
 }
 
-// Every task will create N buffers (channels) for parent operators to fetch results from,
-// where N is the parallelism of parent stage.
-message TaskOutputId {
-  TaskId task_id = 1;
-  // The id of output channel to fetch from
-  uint32 output_id = 2;
-}
-
 message TaskInfo {
   enum TaskStatus {
     NOT_FOUND = 0;
@@ -84,11 +76,18 @@ message GetStreamRequest {
   uint32 down_fragment_id = 2;
 }
 
+message ExecuteRequest {
+  batch_plan.TaskId task_id = 1;
+  batch_plan.PlanFragment plan = 2;
+  uint64 epoch = 3;
+}
+
 service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc GetTaskInfo(GetTaskInfoRequest) returns (GetTaskInfoResponse);
   rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
   rpc RemoveTask(RemoveTaskRequest) returns (RemoveTaskResponse);
+  rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
 }
 
 message GetDataRequest {

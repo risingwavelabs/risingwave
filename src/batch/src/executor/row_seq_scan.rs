@@ -76,7 +76,12 @@ impl RowSeqScanExecutorBuilder {
 impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(
+            inputs.is_empty(),
+            "Row sequential scan should not have input executor!"
+        );
         let seq_scan_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::RowSeqScan
@@ -90,25 +95,21 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        dispatch_state_store!(
-            source.batch_task_context().try_get_state_store()?,
-            state_store,
-            {
-                let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
-                let storage_stats = state_store.stats();
-                let batch_stats = source.batch_task_context().stats();
-                let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-                let iter = table.iter(source.epoch).await?;
-                Ok(Box::new(RowSeqScanExecutor::new(
-                    table.schema().clone(),
-                    iter,
-                    RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
-                    source.task_id.task_id == 0,
-                    source.plan_node().get_identity().clone(),
-                    batch_stats,
-                )))
-            }
-        )
+        dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
+            let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
+            let storage_stats = state_store.stats();
+            let batch_stats = source.context().stats();
+            let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
+            let iter = table.iter(source.epoch).await?;
+            Ok(Box::new(RowSeqScanExecutor::new(
+                table.schema().clone(),
+                iter,
+                RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
+                source.task_id.task_id == 0,
+                source.plan_node().get_identity().clone(),
+                batch_stats,
+            )))
+        })
     }
 }
 

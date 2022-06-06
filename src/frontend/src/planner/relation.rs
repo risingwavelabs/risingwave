@@ -44,7 +44,7 @@ impl Planner {
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
-        LogicalScan::create(
+        Ok(LogicalScan::create(
             base_table.name,
             Rc::new(base_table.table_catalog.table_desc()),
             base_table
@@ -54,6 +54,7 @@ impl Planner {
                 .collect(),
             self.ctx(),
         )
+        .into())
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {

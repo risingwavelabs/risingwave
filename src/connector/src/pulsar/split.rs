@@ -20,7 +20,7 @@ use crate::base::SplitMetaData;
 use crate::pulsar::topic::Topic;
 use crate::pulsar::PulsarEnumeratorOffset;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
 pub struct PulsarSplit {
     pub(crate) topic: Topic,
     pub(crate) start_offset: PulsarEnumeratorOffset,

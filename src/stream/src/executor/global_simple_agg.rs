@@ -118,6 +118,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 // Primary key do not includes group key.
                 vec![OrderType::Descending; get_key_len(agg_call)],
                 None,
+                pk_indices.clone(),
             );
             state_tables.push(state_table);
         }

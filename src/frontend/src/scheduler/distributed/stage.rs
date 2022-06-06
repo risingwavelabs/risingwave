@@ -26,7 +26,7 @@ use risingwave_pb::batch_plan::{
     TaskId as TaskIdProst, TaskOutputId,
 };
 use risingwave_pb::common::HostAddress;
-use risingwave_rpc_client::{ComputeClient, ComputeClientPoolRef};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
@@ -229,6 +229,7 @@ impl StageExecution {
                 ExchangeSource {
                     task_output_id: Some(task_output_id),
                     host: Some(status_holder.inner.load_full().location.clone().unwrap()),
+                    local_execute_plan: None,
                 }
             })
             .collect()

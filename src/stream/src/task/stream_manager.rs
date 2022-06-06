@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
@@ -115,6 +116,9 @@ pub struct ExecutorParams {
 
     // Actor context
     pub actor_context: ActorContextRef,
+
+    // Vnodes owned by this executor. Represented in bitmap.
+    pub vnode_bitmap: Rc<Vec<u8>>,
 }
 
 impl Debug for ExecutorParams {
@@ -457,6 +461,7 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
+        vnode_bitmap: Rc<Vec<u8>>,
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -474,6 +479,7 @@ impl LocalStreamManagerCore {
                     env.clone(),
                     store.clone(),
                     actor_context,
+                    Rc::clone(&vnode_bitmap),
                 )
             })
             .try_collect()?;
@@ -499,6 +505,7 @@ impl LocalStreamManagerCore {
             actor_id,
             executor_stats: self.streaming_metrics.clone(),
             actor_context: actor_context.clone(),
+            vnode_bitmap,
         };
 
         let executor = create_executor(executor_params, self, node, store)?;
@@ -519,9 +526,19 @@ impl LocalStreamManagerCore {
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
+        vnode_bitmap: Rc<Vec<u8>>,
     ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store, actor_context)
+            self.create_nodes_inner(
+                fragment_id,
+                actor_id,
+                node,
+                0,
+                env,
+                store,
+                actor_context,
+                vnode_bitmap,
+            )
         })
     }
 
@@ -557,13 +574,14 @@ impl LocalStreamManagerCore {
                         let up_id = *up_id;
 
                         let pool = self.compute_client_pool.clone();
-
+                        let metrics = self.streaming_metrics.clone();
                         tokio::spawn(async move {
                             let init_client = async move {
                                 let remote_input = RemoteInput::create(
                                     pool.get_client_for_addr(upstream_addr).await?,
                                     (up_id, actor_id),
                                     sender,
+                                    metrics,
                                 )
                                 .await?;
                                 Ok::<_, RwError>(remote_input)
@@ -605,6 +623,7 @@ impl LocalStreamManagerCore {
                 actor.get_nodes()?,
                 env.clone(),
                 &actor_context,
+                Rc::new(actor.get_vnode_bitmap().to_owned()),
             )?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;

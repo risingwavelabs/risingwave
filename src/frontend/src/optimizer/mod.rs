@@ -128,7 +128,9 @@ impl PlanRoot {
         // Predicate Push-down
         plan = plan.predicate_pushdown(Condition::true_cond());
 
-        // Merge inner joins into multijoin
+        // Merge inner joins and intermediate filters into multijoin
+        // This rule assumes that filters have already been pushed down near to
+        // their relevant joins.
         plan = {
             let rules = vec![MultiJoinJoinRule::create(), MultiJoinFilterRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
@@ -142,7 +144,7 @@ impl PlanRoot {
             heuristic_optimizer.optimize(plan)
         };
 
-        // Apply predicate pushdown again since we pullup non eq-join
+        // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
         plan = plan.predicate_pushdown(Condition::true_cond());
 

@@ -14,14 +14,13 @@
 
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::{HummockVersionId, FIRST_VERSION_ID};
-use risingwave_pb::hummock::HummockVersionRefId;
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 
 /// Hummock current version id key.
-/// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionRefId`
+/// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionId`
 const HUMMOCK_VERSION_ID_KEY: &str = "current_version_id";
 
 /// `CurrentHummockVersionId` tracks the current version id.
@@ -32,18 +31,18 @@ pub struct CurrentHummockVersionId {
 
 impl MetadataModel for CurrentHummockVersionId {
     type KeyType = String;
-    type ProstType = HummockVersionRefId;
+    type ProstType = HummockVersionId;
 
     fn cf_name() -> String {
         HUMMOCK_DEFAULT_CF_NAME.to_string()
     }
 
     fn to_protobuf(&self) -> Self::ProstType {
-        HummockVersionRefId { id: self.id }
+        self.id
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
-        Self { id: prost.id }
+        Self { id: prost }
     }
 
     fn key(&self) -> Result<Self::KeyType> {

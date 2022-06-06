@@ -67,6 +67,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let keyspace = Keyspace::executor_root(store, params.executor_id);
 
         Ok(Box::new(SourceExecutor::new(
+            params.actor_id,
             source_id,
             source_desc,
             keyspace,

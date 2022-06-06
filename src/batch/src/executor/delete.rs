@@ -104,7 +104,7 @@ impl DeleteExecutor {
             array_builder.append(Some(rows_deleted as i64))?;
 
             let array = array_builder.finish()?;
-            let ret_chunk = DataChunk::builder().columns(vec![array.into()]).build();
+            let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk
         }
@@ -115,7 +115,9 @@ impl DeleteExecutor {
 impl BoxedExecutorBuilder for DeleteExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(inputs.len() == 1, "Delete executor should have 1 child!");
         let delete_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Delete
@@ -123,20 +125,13 @@ impl BoxedExecutorBuilder for DeleteExecutor {
 
         let table_id = TableId::from(&delete_node.table_source_ref_id);
 
-        let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(String::from(
-                "Child interpreting error",
-            )))
-        })?;
-        let child = source.clone_for_plan(proto_child).build().await?;
-
         Ok(Box::new(Self::new(
             table_id,
             source
-                .batch_task_context()
+                .context()
                 .source_manager_ref()
                 .ok_or_else(|| InternalError("Source manager not found".to_string()))?,
-            child,
+            inputs.remove(0),
         )))
     }
 }

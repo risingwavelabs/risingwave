@@ -288,17 +288,15 @@ impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
 impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         context: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(context.plan_node().get_children().len() == 2);
+        ensure!(
+            inputs.len() == 2,
+            "HashJoinExecutorBuilder should have 2 children!"
+        );
 
-        let left_child = context
-            .clone_for_plan(&context.plan_node.get_children()[0])
-            .build()
-            .await?;
-        let right_child = context
-            .clone_for_plan(&context.plan_node.get_children()[1])
-            .build()
-            .await?;
+        let left_child = inputs.remove(0);
+        let right_child = inputs.remove(0);
 
         let hash_join_node = try_match_expand!(
             context.plan_node().get_node_body().unwrap(),

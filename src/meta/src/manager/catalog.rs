@@ -18,7 +18,7 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::{CatalogVersion, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
@@ -28,7 +28,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::IdCategory;
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, NotificationVersion};
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
@@ -108,7 +108,7 @@ where
         core.get_catalog().await
     }
 
-    pub async fn create_database(&self, database: &Database) -> Result<CatalogVersion> {
+    pub async fn create_database(&self, database: &Database) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.has_database(database) {
             database.insert(self.env.meta_store()).await?;
@@ -128,7 +128,7 @@ where
         }
     }
 
-    pub async fn drop_database(&self, database_id: DatabaseId) -> Result<CatalogVersion> {
+    pub async fn drop_database(&self, database_id: DatabaseId) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let database = Database::select(self.env.meta_store(), &database_id).await?;
         if let Some(database) = database {
@@ -149,7 +149,7 @@ where
         }
     }
 
-    pub async fn create_schema(&self, schema: &Schema) -> Result<CatalogVersion> {
+    pub async fn create_schema(&self, schema: &Schema) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.has_schema(schema) {
             schema.insert(self.env.meta_store()).await?;
@@ -169,7 +169,7 @@ where
         }
     }
 
-    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<CatalogVersion> {
+    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let schema = Schema::select(self.env.meta_store(), &schema_id).await?;
         if let Some(schema) = schema {
@@ -206,7 +206,10 @@ where
         }
     }
 
-    pub async fn finish_create_table_procedure(&self, table: &Table) -> Result<CatalogVersion> {
+    pub async fn finish_create_table_procedure(
+        &self,
+        table: &Table,
+    ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
@@ -244,7 +247,7 @@ where
         }
     }
 
-    pub async fn create_table(&self, table: &Table) -> Result<CatalogVersion> {
+    pub async fn create_table(&self, table: &Table) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.has_table(table) {
             table.insert(self.env.meta_store()).await?;
@@ -267,7 +270,7 @@ where
         }
     }
 
-    pub async fn drop_table(&self, table_id: TableId) -> Result<CatalogVersion> {
+    pub async fn drop_table(&self, table_id: TableId) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let table = Table::select(self.env.meta_store(), &table_id).await?;
         if let Some(table) = table {
@@ -317,7 +320,10 @@ where
         }
     }
 
-    pub async fn finish_create_source_procedure(&self, source: &Source) -> Result<CatalogVersion> {
+    pub async fn finish_create_source_procedure(
+        &self,
+        source: &Source,
+    ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && core.has_in_progress_creation(&key) {
@@ -352,7 +358,7 @@ where
         }
     }
 
-    pub async fn create_source(&self, source: &Source) -> Result<CatalogVersion> {
+    pub async fn create_source(&self, source: &Source) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.has_source(source) {
             source.insert(self.env.meta_store()).await?;
@@ -372,7 +378,7 @@ where
         }
     }
 
-    pub async fn drop_source(&self, source_id: SourceId) -> Result<CatalogVersion> {
+    pub async fn drop_source(&self, source_id: SourceId) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let source = Source::select(self.env.meta_store(), &source_id).await?;
         if let Some(source) = source {
@@ -434,7 +440,7 @@ where
         &self,
         source: &Source,
         mview: &Table,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
@@ -498,7 +504,7 @@ where
         &self,
         source_id: SourceId,
         mview_id: TableId,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let mview = Table::select(self.env.meta_store(), &mview_id).await?;
         let source = Source::select(self.env.meta_store(), &source_id).await?;
@@ -569,6 +575,34 @@ where
                 "table or source doesn't exist".to_string(),
             ))),
         }
+    }
+
+    pub async fn list_tables(
+        &self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+    ) -> Result<Vec<TableId>> {
+        let core = self.core.lock().await;
+        let tables = Table::list(core.env.meta_store()).await?;
+        Ok(tables
+            .iter()
+            .filter(|t| t.database_id == database_id && t.schema_id == schema_id)
+            .map(|t| t.id)
+            .collect())
+    }
+
+    pub async fn list_sources(
+        &self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+    ) -> Result<Vec<SourceId>> {
+        let core = self.core.lock().await;
+        let sources = Source::list(core.env.meta_store()).await?;
+        Ok(sources
+            .iter()
+            .filter(|s| s.database_id == database_id && s.schema_id == schema_id)
+            .map(|s| s.id)
+            .collect())
     }
 }
 

@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_frontend::stream_fragmenter::StreamFragmenter;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -254,8 +253,13 @@ fn make_stream_node() -> StreamNode {
     }
 }
 
+// TODO: enable this test with madsim
+// NOTE: frontend is not yet available with madsim
+#[cfg(not(madsim))]
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
+    use risingwave_frontend::stream_fragmenter::StreamFragmenter;
+
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
@@ -270,13 +274,19 @@ async fn test_fragmenter() -> Result<()> {
         &mut ctx,
     )
     .await?;
-    let table_fragments = TableFragments::new(TableId::default(), graph);
+    let table_fragments =
+        TableFragments::new(TableId::default(), graph, ctx.internal_table_id_set.clone());
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
+    let mut internal_table_ids = table_fragments.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
+    assert_eq!(4, internal_table_ids.len());
+    internal_table_ids.sort();
+    let expected_internal_table_ids = vec![0, 1, 2, 3];
+    assert_eq!(expected_internal_table_ids, internal_table_ids);
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);

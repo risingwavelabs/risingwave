@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_meta"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 
 [dependencies]
@@ -12,7 +12,7 @@ async-trait = "0.1"
 axum = "0.5"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "3", features = ["derive"] }
 crc32fast = "1"
 derivative = "2"
@@ -63,8 +63,10 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 rand = "0.8"
-risingwave_frontend = { path = "../frontend" }
 tempfile = "3"
+
+[target.'cfg(not(madsim))'.dev-dependencies]
+risingwave_frontend = { path = "../frontend" }
 
 [features]
 test = []

@@ -105,7 +105,7 @@ impl UpdateExecutor {
                     .map(|expr| expr.eval(&data_chunk).map(Column::new))
                     .collect::<Result<Vec<_>>>()?;
 
-                DataChunk::builder().columns(columns).build()
+                DataChunk::new(columns, len)
             };
 
             // Merge two data chunks into (U-, U+) pairs.
@@ -155,7 +155,7 @@ impl UpdateExecutor {
             array_builder.append(Some(rows_updated as i64))?;
 
             let array = array_builder.finish()?;
-            let ret_chunk = DataChunk::builder().columns(vec![array.into()]).build();
+            let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk
         }
@@ -166,7 +166,9 @@ impl UpdateExecutor {
 impl BoxedExecutorBuilder for UpdateExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(inputs.len() == 1, "Update executor should have 1 child!");
         let update_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Update
@@ -180,17 +182,10 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             .map(build_from_prost)
             .collect::<Result<Vec<BoxedExpression>>>()?;
 
-        let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(String::from(
-                "Child interpreting error",
-            )))
-        })?;
-        let child = source.clone_for_plan(proto_child).build().await?;
-
         Ok(Box::new(Self::new(
             table_id,
-            source.batch_task_context().try_get_source_manager_ref()?,
-            child,
+            source.context().try_get_source_manager_ref()?,
+            inputs.remove(0),
             exprs,
         )))
     }

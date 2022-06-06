@@ -5,8 +5,12 @@ set -e
 export DOCKER_BUILDKIT=1
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
+if ! [[ "$DIR" =~ ^/ebs.* ]] ; then
+    echo "$(tput setaf 3)Warning: You're running build script in a non-persistent volume. Please refer to the guide and copy ~/risingwave to /ebs directory, and compile it in /ebs/risingwave, so that data won't be lost during EC2 re-create.$(tput sgr0)"
+fi
+
 cd "$DIR/../.."
-cargo build -p risingwave_cmd_all --release
+cargo build -p risingwave_cmd_all --release --features static-link
 objcopy --compress-debug-sections=zlib-gnu target/release/risingwave "$DIR/risingwave"
 
 cd "$DIR"

@@ -82,6 +82,8 @@ message TopNNode {
   uint64 limit = 2;
   uint64 offset = 3;
   repeated uint32 distribution_keys = 4;
+  // Used for internal table states
+  uint32 table_id = 5;
 }
 
 message HashJoinNode {
@@ -121,6 +123,7 @@ message HopWindowNode {
   expr.InputRefExpr time_col = 1;
   data.IntervalUnit window_slide = 2;
   data.IntervalUnit window_size = 3;
+  repeated uint32 output_indices = 4;
 }
 
 message MergeNode {
@@ -296,6 +299,9 @@ message StreamActor {
   repeated uint32 upstream_actor_id = 6;
   // Placement rule for actor, need to stay on the same node as upstream.
   bool same_worker_node_as_upstream = 7;
+  // Vnodes that the executors in this actor own. If this actor is the only actor in its fragment, `vnode_bitmap`
+  // will be empty.
+  bytes vnode_bitmap = 8;
 }
 
 enum FragmentType {

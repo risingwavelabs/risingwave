@@ -30,7 +30,7 @@ use crate::cluster::{ParallelUnitId, WorkerId};
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::set_table_vnode_mappings;
+use crate::stream::record_table_vnode_mappings;
 
 struct FragmentManagerCore {
     table_fragments: HashMap<TableId, TableFragments>,
@@ -104,6 +104,21 @@ where
                 "table_fragment not exist: id={}",
                 table_fragment.table_id()
             )))),
+        }
+    }
+
+    pub async fn select_table_fragments_by_table_id(
+        &self,
+        table_id: &TableId,
+    ) -> Result<TableFragments> {
+        let map = &self.core.read().await.table_fragments;
+        if let Some(table_fragments) = map.get(table_id) {
+            Ok(table_fragments.clone())
+        } else {
+            Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            ))))
         }
     }
 
@@ -442,7 +457,11 @@ where
                 // identical state table id.
                 let actor = fragment.actors.first().unwrap();
                 let stream_node = actor.get_nodes()?;
-                set_table_vnode_mappings(&hash_mapping_manager, stream_node, fragment.fragment_id)?;
+                record_table_vnode_mappings(
+                    &hash_mapping_manager,
+                    stream_node,
+                    fragment.fragment_id,
+                )?;
             }
         }
         Ok(())

@@ -6,10 +6,6 @@ import "common.proto";
 
 option optimize_for = SPEED;
 
-message SstableRefId {
-  uint64 id = 1;
-}
-
 message SstableIdInfo {
   uint64 id = 1;
   // Timestamp when the sstable id is created, in seconds.
@@ -20,17 +16,11 @@ message SstableIdInfo {
   uint64 meta_delete_timestamp = 4;
 }
 
-message VNodeBitmap {
-  uint32 table_id = 1;
-  uint32 maplen = 2;
-  bytes bitmap = 3;
-}
-
 message SstableInfo {
   uint64 id = 1;
   KeyRange key_range = 2;
   uint64 file_size = 3;
-  repeated VNodeBitmap vnode_bitmaps = 4;
+  repeated common.VNodeBitmap vnode_bitmaps = 4;
 }
 
 enum LevelType {
@@ -47,10 +37,6 @@ message Level {
 message UncommittedEpoch {
   uint64 epoch = 1;
   repeated SstableInfo tables = 2;
-}
-
-message HummockVersionRefId {
-  uint64 id = 1;
 }
 
 message HummockVersion {
@@ -101,6 +87,15 @@ message UnpinSnapshotRequest {
 }
 
 message UnpinSnapshotResponse {
+  common.Status status = 1;
+}
+
+message UnpinSnapshotBeforeRequest {
+  uint32 context_id = 1;
+  HummockSnapshot min_snapshot = 3;
+}
+
+message UnpinSnapshotBeforeResponse {
   common.Status status = 1;
 }
 
@@ -164,16 +159,11 @@ message LevelHandler {
 
 message CompactStatus {
   repeated LevelHandler level_handlers = 1;
-  uint64 next_compact_task_id = 2;
 }
 
 message CompactTaskAssignment {
   CompactTask compact_task = 1;
   uint32 context_id = 2;
-}
-
-message CompactTaskRefId {
-  uint64 id = 1;
 }
 
 message GetCompactionTasksRequest {}
@@ -189,10 +179,6 @@ message ReportCompactionTasksRequest {
 
 message ReportCompactionTasksResponse {
   common.Status status = 1;
-}
-
-message HummockContextRefId {
-  uint32 id = 1;
 }
 
 message HummockPinnedVersion {
@@ -245,6 +231,7 @@ service HummockManagerService {
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
+  rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);

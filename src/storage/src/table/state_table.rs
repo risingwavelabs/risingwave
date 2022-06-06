@@ -11,11 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::btree_map;
-use std::iter::Peekable;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
+use futures::{pin_mut, Stream, StreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::RwError;
@@ -28,7 +31,7 @@ use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
 use crate::{Keyspace, StateStore};
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
     keyspace: Keyspace<S>,
@@ -42,6 +45,8 @@ pub struct StateTable<S: StateStore> {
 
     /// Relation layer
     cell_based_table: CellBasedTable<S>,
+
+    _pk_indices: Vec<usize>,
 }
 impl<S: StateStore> StateTable<S> {
     pub fn new(
@@ -49,6 +54,7 @@ impl<S: StateStore> StateTable<S> {
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         dist_key_indices: Option<Vec<usize>>,
+        _pk_indices: Vec<usize>,
     ) -> Self {
         let cell_based_keyspace = keyspace.clone();
         let cell_based_column_descs = column_descs.clone();
@@ -64,12 +70,15 @@ impl<S: StateStore> StateTable<S> {
                 Arc::new(StateStoreMetrics::unused()),
                 dist_key_indices,
             ),
+            _pk_indices,
         }
     }
 
     /// read methods
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        let mem_table_res = self.mem_table.get_row(pk).map_err(err)?;
+        let pk_bytes =
+            serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()).map_err(err)?;
+        let mem_table_res = self.mem_table.get_row(&pk_bytes).map_err(err)?;
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row) => Ok(Some(row.clone())),
@@ -81,15 +90,19 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: Row, value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        self.mem_table.insert(pk, value)?;
+        let pk_bytes =
+            serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()).map_err(err)?;
+        self.mem_table.insert(pk_bytes, value)?;
         Ok(())
     }
 
-    pub fn delete(&mut self, pk: Row, old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        self.mem_table.delete(pk, old_value)?;
+        let pk_bytes =
+            serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()).map_err(err)?;
+        self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }
 
@@ -113,166 +126,111 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    pub async fn iter(&self, epoch: u64) -> StorageResult<StateTableRowIter<'_, S>> {
-        let mem_table_iter = self.mem_table.buffer.iter().peekable();
-        StateTableRowIter::new(
+    pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
+        let mem_table_iter = self.mem_table.buffer.iter();
+        Ok(StateTableRowIter::into_stream(
             &self.keyspace,
             self.column_descs.clone(),
             mem_table_iter,
-            &self.order_types,
             epoch,
-        )
-        .await
+        ))
     }
+}
+
+pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>> + 'a;
+
+type MemTableIter<'a> = btree_map::Iter<'a, Vec<u8>, RowOp>;
+
+struct StateTableRowIter<S: StateStore> {
+    _phantom: PhantomData<S>,
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommited data).
-/// It will merge the result of `mem_table_iter` and `cell_based_streaming_iter`
-pub struct StateTableRowIter<'a, S: StateStore> {
-    mem_table_iter: Peekable<MemTableIter<'a>>,
-    cell_based_streaming_iter: CellBasedTableStreamingIter<S>,
-
-    /// The result of the last cell_based_streaming_iter next is saved, which can avoid being
-    /// discarded.
-    cell_based_item: Option<(Vec<u8>, Row)>,
-    pk_serializer: OrderedRowSerializer,
-}
-type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
-
-enum NextOutcome {
-    MemTable,
-    Storage,
-    Both,
-    End,
-}
-impl<'a, S: StateStore> StateTableRowIter<'a, S> {
-    async fn new(
-        keyspace: &Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
-        mem_table_iter: Peekable<MemTableIter<'a>>,
-        order_types_vec: &[OrderType],
-        epoch: u64,
-    ) -> StorageResult<StateTableRowIter<'a, S>> {
-        let mut cell_based_streaming_iter =
-            CellBasedTableStreamingIter::new(keyspace, table_descs, epoch).await?;
-        let pk_serializer = OrderedRowSerializer::new(order_types_vec.to_vec());
-        let cell_based_item = cell_based_streaming_iter.next().await.map_err(err)?;
-        let state_table_iter = Self {
-            mem_table_iter,
-            cell_based_streaming_iter,
-            cell_based_item,
-            pk_serializer,
-        };
-
-        Ok(state_table_iter)
-    }
-
+/// It will merge the result of `mem_table_iter` and `cell_based_streaming_iter`.
+impl<S: StateStore> StateTableRowIter<S> {
     /// This function scans kv pairs from the `shared_storage`(`cell_based_table`) and
-    /// memory(`mem_table`). If a record exist in both `cell_based_table` and `mem_table`, result in
-    /// `mem_table` is returned according to the operation(RowOp) on it. This is because the data in
-    /// memory is fresher.
-    pub async fn next(&mut self) -> StorageResult<Option<Row>> {
+    /// memory(`mem_table`). If a record exist in both `cell_based_table` and `mem_table`, result
+    /// `mem_table` is returned according to the operation(RowOp) on it.
+    #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
+    async fn into_stream<'a>(
+        keyspace: &'a Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        mem_table_iter: MemTableIter<'a>,
+        epoch: u64,
+    ) {
+        let cell_based_table_iter: futures::stream::Peekable<_> =
+            CellBasedTableStreamingIter::new(keyspace, table_descs, epoch)
+                .await?
+                .into_stream()
+                .peekable();
+        pin_mut!(cell_based_table_iter);
+
+        let mut mem_table_iter = mem_table_iter
+            .map(|(k, v)| Ok::<_, StorageError>((k, v)))
+            .peekable();
+
         loop {
-            let next_flag;
-            let res;
-            let cell_based_item = self.cell_based_item.take();
-            match (cell_based_item, self.mem_table_iter.peek()) {
-                (None, None) => {
-                    next_flag = NextOutcome::End;
-                    res = None;
+            match (
+                cell_based_table_iter.as_mut().peek().await,
+                mem_table_iter.peek(),
+            ) {
+                (None, None) => break,
+                (Some(_), None) => {
+                    let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+                    yield Cow::Owned(row);
                 }
-                (Some((_, row)), None) => {
-                    next_flag = NextOutcome::Storage;
-                    res = Some(row);
-                }
-                (None, Some((_, row_op))) => {
-                    next_flag = NextOutcome::MemTable;
+                (None, Some(_)) => {
+                    let row_op = mem_table_iter.next().unwrap()?.1;
                     match row_op {
-                        RowOp::Insert(row) => {
-                            res = Some(row.clone());
+                        RowOp::Insert(row) | RowOp::Update((_, row)) => {
+                            yield Cow::Borrowed(row);
                         }
-                        RowOp::Delete(_) => {
-                            res = None;
-                        }
-                        RowOp::Update((_, new_row)) => {
-                            res = Some(new_row.clone());
-                        }
+                        _ => {}
                     }
                 }
-                (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
-                    let mem_table_pk_bytes =
-                        serialize_pk(mem_table_pk, &self.pk_serializer).map_err(err)?;
-                    match cell_based_pk.cmp(&mem_table_pk_bytes) {
+
+                (
+                    Some(Ok((cell_based_pk, cell_based_row))),
+                    Some(Ok((mem_table_pk, _mem_table_row_op))),
+                ) => {
+                    match cell_based_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
                             // cell_based_table_item will be return
-                            next_flag = NextOutcome::Storage;
-                            res = Some(cell_based_row);
+                            let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+                            yield Cow::Owned(row);
                         }
                         Ordering::Equal => {
                             // mem_table_item will be return, while both cell_based_streaming_iter
                             // and mem_table_iter need to execute next()
                             // once.
-                            next_flag = NextOutcome::Both;
-                            match mem_table_row_op {
-                                RowOp::Insert(row) => {
-                                    res = Some(row.clone());
-                                }
-                                RowOp::Delete(_) => {
-                                    res = None;
-                                }
+                            let row_op = mem_table_iter.next().unwrap()?.1;
+                            match row_op {
+                                RowOp::Insert(row) => yield Cow::Borrowed(row),
+                                RowOp::Delete(_) => {}
                                 RowOp::Update((old_row, new_row)) => {
-                                    debug_assert!(old_row == &cell_based_row);
-                                    res = Some(new_row.clone());
+                                    debug_assert!(old_row == cell_based_row);
+                                    yield Cow::Borrowed(new_row);
                                 }
                             }
+                            cell_based_table_iter.next().await.unwrap()?;
                         }
                         Ordering::Greater => {
                             // mem_table_item will be return
-                            next_flag = NextOutcome::MemTable;
-                            match mem_table_row_op {
-                                RowOp::Insert(row) => {
-                                    res = Some(row.clone());
-                                }
-                                RowOp::Delete(_) => {
-                                    res = None;
-                                }
-                                RowOp::Update(_) => {
-                                    unreachable!();
-                                }
+                            let row_op = mem_table_iter.next().unwrap()?.1;
+                            match row_op {
+                                RowOp::Insert(row) => yield Cow::Borrowed(row),
+                                RowOp::Delete(_) => {}
+                                RowOp::Update(_) => unreachable!(),
                             }
-                            self.cell_based_item = Some((cell_based_pk, cell_based_row));
                         }
                     }
                 }
-            }
+                (Some(_), Some(_)) => {
+                    // Throw the error.
+                    cell_based_table_iter.next().await.unwrap()?;
+                    mem_table_iter.next().unwrap()?;
 
-            // If a pk exist in both shared storage(cell_based_table) and memory(mem_table), and
-            // mem_table stores a delete record, state table iter need to next again.
-            match next_flag {
-                NextOutcome::MemTable => {
-                    self.mem_table_iter.next();
-                    if res.is_some() {
-                        return Ok(res);
-                    }
-                }
-                NextOutcome::Storage => {
-                    self.cell_based_item =
-                        self.cell_based_streaming_iter.next().await.map_err(err)?;
-
-                    if res.is_some() {
-                        return Ok(res);
-                    }
-                }
-                NextOutcome::Both => {
-                    self.mem_table_iter.next();
-                    self.cell_based_item =
-                        self.cell_based_streaming_iter.next().await.map_err(err)?;
-                    if res.is_some() {
-                        return Ok(res);
-                    }
-                }
-                NextOutcome::End => {
-                    return Ok(res);
+                    unreachable!()
                 }
             }
         }

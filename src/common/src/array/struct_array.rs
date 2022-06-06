@@ -273,7 +273,7 @@ impl StructArray {
 
 #[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
 pub struct StructValue {
-    fields: Vec<Datum>,
+    fields: Box<[Datum]>,
 }
 
 impl fmt::Display for StructValue {
@@ -308,7 +308,9 @@ impl Ord for StructValue {
 
 impl StructValue {
     pub fn new(fields: Vec<Datum>) -> Self {
-        Self { fields }
+        Self {
+            fields: fields.into_boxed_slice(),
+        }
     }
 
     pub fn fields(&self) -> &[Datum] {
@@ -410,13 +412,8 @@ impl Debug for StructRef<'_> {
 
 impl Display for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StructRef::Indexed { arr: _, idx: _ } => {
-                let v = self.fields_ref().iter().map(display_datum_ref).join(", ");
-                write!(f, "({})", v)
-            }
-            StructRef::ValueRef { val } => write!(f, "({})", val),
-        }
+        let values = self.fields_ref().iter().map(display_datum_ref).join(",");
+        write!(f, "({})", values)
     }
 }
 

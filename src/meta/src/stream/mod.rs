@@ -33,8 +33,8 @@ pub use stream_manager::*;
 use crate::manager::HashMappingManagerRef;
 use crate::model::FragmentId;
 
-/// Set vnode mapping for stateful operators.
-pub fn set_table_vnode_mappings(
+/// Record vnode mapping for stateful operators in meta.
+pub fn record_table_vnode_mappings(
     hash_mapping_manager: &HashMappingManagerRef,
     stream_node: &StreamNode,
     fragment_id: FragmentId,
@@ -64,7 +64,7 @@ pub fn set_table_vnode_mappings(
     }
     let input_nodes = stream_node.get_input();
     for input_node in input_nodes {
-        set_table_vnode_mappings(hash_mapping_manager, input_node, fragment_id)?;
+        record_table_vnode_mappings(hash_mapping_manager, input_node, fragment_id)?;
     }
     Ok(())
 }
