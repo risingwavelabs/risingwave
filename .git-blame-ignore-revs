@@ -1,2 +1,20 @@
 # chore: split plan.proto and rename projection to project #2083
 d57c97d4393733a4d3016e35b737f5cd6681aa05
+
+# chore: remove v2 naming related to legacy frontend #2572
+59a023ef55880c67c29c0d6d18f1d40370faa544
+
+# refactor(stream): remove executor v1 #2240
+2d30fda2459e223507a5ec3aa39c1c0b2e30fff9
+
+# refactor(batch): rename executor2 to executor #2842
+9ff2f46867cbcd743c3ebc49eac2a7a9a80993d4
+
+# style(proto): unify StreamPlanNode and BatchPlanNode style #2255
+56d2f5635bc5a3d2bb3403c59e175fefede45afa
+
+# refactor(stream): rename executor_v2 back to executor #2292
+f2c5758789ddd22ba6edbfeb6d7f5279ac919f9c
+
+# chore: rename rust -> src #1551
+0f2d391c420276bf8ae36f7c619ba32a64be5bb6
