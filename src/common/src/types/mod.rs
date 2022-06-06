@@ -221,6 +221,7 @@ impl DataType {
         )
     }
 
+    /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
     pub fn mem_cmp_eq_value_enc(&self) -> bool {
         use DataType::*;
         match self {

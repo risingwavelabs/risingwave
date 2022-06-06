@@ -456,6 +456,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
 
 // Provides a layer on top of CellBasedTableRowIter
 // for decoding pk into its constituent datums in a row
+//
 // Given the following row: | user_id | age | name |
 // if pk was derived from `user_id, name`
 // we can decode pk -> user_id, name,
@@ -479,7 +480,6 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         _stats: Arc<StateStoreMetrics>,
         pk_descs: Vec<OrderedColumnDesc>,
     ) -> StorageResult<Self> {
-        // FIXME: cleanup excess clones
         let inner =
             CellBasedTableRowIter::new(keyspace, table_descs.clone(), epoch, _stats).await?;
 
@@ -492,8 +492,8 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
                 )
             })
             .unzip();
-
         let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
+
         let col_id_to_row_idx: HashMap<ColumnId, usize> = table_descs
             .iter()
             .enumerate()
@@ -502,13 +502,15 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         let pk_to_row_mapping = pk_descs
             .iter()
             .map(|d| {
-                if d.column_desc.data_type.mem_cmp_eq_value_enc() {
-                    col_id_to_row_idx.get(&d.column_desc.column_id).copied()
+                let column_desc = &d.column_desc;
+                if column_desc.data_type.mem_cmp_eq_value_enc() {
+                    col_id_to_row_idx.get(&column_desc.column_id).copied()
                 } else {
                     None
                 }
             })
             .collect();
+
         Ok(Self {
             inner,
             pk_decoder,
