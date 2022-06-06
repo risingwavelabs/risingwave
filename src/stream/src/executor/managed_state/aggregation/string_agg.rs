@@ -248,21 +248,20 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
             return Ok(());
         }
 
-        // let mut local = write_batch.prefixify(&self.keyspace);
+        let mut local = write_batch.prefixify(&self.keyspace);
 
         for (key, value) in std::mem::take(&mut self.cache) {
             let value = value.into_option();
             match value {
                 Some(val) => {
                     // TODO(Yuanxin): Implement value meta
-                    // local.put(
-                    //     key,
-                    //     StorageValue::new_default_put(serialize_cell(&Some(val))?),
-                    // );
+                    local.put(
+                        key,
+                        StorageValue::new_default_put(serialize_cell(&Some(val))?),
+                    );
                 }
                 None => {
-                    // local.delete(key);
-                    // state_table.delete()
+                    local.delete(key);
                 }
             }
         }
