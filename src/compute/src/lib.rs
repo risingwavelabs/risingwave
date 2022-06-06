@@ -72,24 +72,31 @@ pub struct ComputeNodeOpts {
     pub enable_jaeger_tracing: bool,
 }
 
+use std::future::Future;
+use std::pin::Pin;
+
 use crate::server::compute_node_serve;
 
 /// Start compute node
-pub async fn start(opts: ComputeNodeOpts) {
-    tracing::info!("meta address: {}", opts.meta_address.clone());
+pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    // WARNING: don't change the function signature. Making it `async fn` will cause
+    // slow compile in release mode.
+    Box::pin(async move {
+        tracing::info!("meta address: {}", opts.meta_address.clone());
 
-    let listen_address = opts.host.parse().unwrap();
-    tracing::info!("Server Listening at {}", listen_address);
+        let listen_address = opts.host.parse().unwrap();
+        tracing::info!("Server Listening at {}", listen_address);
 
-    let client_address = opts
-        .client_address
-        .as_ref()
-        .unwrap_or(&opts.host)
-        .parse()
-        .unwrap();
-    tracing::info!("Client address is {}", client_address);
+        let client_address = opts
+            .client_address
+            .as_ref()
+            .unwrap_or(&opts.host)
+            .parse()
+            .unwrap();
+        tracing::info!("Client address is {}", client_address);
 
-    let (join_handle, _shutdown_send) =
-        compute_node_serve(listen_address, client_address, opts).await;
-    join_handle.await.unwrap();
+        let (join_handle, _shutdown_send) =
+            compute_node_serve(listen_address, client_address, opts).await;
+        join_handle.await.unwrap();
+    })
 }

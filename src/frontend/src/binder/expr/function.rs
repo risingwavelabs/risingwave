@@ -42,6 +42,7 @@ impl Binder {
                 "avg" => Some(AggKind::Avg),
                 "string_agg" => Some(AggKind::StringAgg),
                 "single_value" => Some(AggKind::SingleValue),
+                "approx_count_distinct" => Some(AggKind::ApproxCountDistinct),
                 _ => None,
             };
             if let Some(kind) = agg_kind {

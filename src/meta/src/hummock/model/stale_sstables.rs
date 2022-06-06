@@ -13,17 +13,18 @@
 // limitations under the License.
 
 use prost::Message;
-use risingwave_pb::hummock::{HummockStaleSstables, HummockVersionRefId};
+use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_pb::hummock::HummockStaleSstables;
 
 use crate::model::MetadataModel;
 
 /// Column family name for stale hummock sstables.
-/// `cf(hummock_stale_sstables)`: `HummockVersionRefId` -> `HummockStaleSstables`
+/// `cf(hummock_stale_sstables)`: `HummockVersionId` -> `HummockStaleSstables`
 const HUMMOCK_STALE_SSTABLES_CF_NAME: &str = "cf/hummock_stale_sstables";
 
 /// `HummockStaleSstables` tracks `SSTables` no longer needed after the given version.
 impl MetadataModel for HummockStaleSstables {
-    type KeyType = HummockVersionRefId;
+    type KeyType = HummockVersionId;
     type ProstType = HummockStaleSstables;
 
     fn cf_name() -> String {
@@ -43,8 +44,6 @@ impl MetadataModel for HummockStaleSstables {
     }
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(HummockVersionRefId {
-            id: self.version_id,
-        })
+        Ok(self.version_id)
     }
 }

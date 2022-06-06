@@ -1,0 +1,19 @@
+# Create a user.
+statement ok
+CREATE USER ddl_user WITH NOSUPERUSER CREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b';
+
+# Create another user with duplicate name.
+statement error
+CREATE USER ddl_user;
+
+# Drop the user if exists.
+statement ok
+DROP USER IF EXISTS ddl_user;
+
+# Drop it again.
+statement error
+DROP USER ddl_user;
+
+# Drop it again with if exists.
+statement ok
+DROP USER IF EXISTS ddl_user;

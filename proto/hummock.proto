@@ -6,10 +6,6 @@ import "common.proto";
 
 option optimize_for = SPEED;
 
-message SstableRefId {
-  uint64 id = 1;
-}
-
 message SstableIdInfo {
   uint64 id = 1;
   // Timestamp when the sstable id is created, in seconds.
@@ -42,10 +38,6 @@ message Level {
 message UncommittedEpoch {
   uint64 epoch = 1;
   repeated SstableInfo tables = 2;
-}
-
-message HummockVersionRefId {
-  uint64 id = 1;
 }
 
 message HummockVersion {
@@ -96,6 +88,15 @@ message UnpinSnapshotRequest {
 }
 
 message UnpinSnapshotResponse {
+  common.Status status = 1;
+}
+
+message UnpinSnapshotBeforeRequest {
+  uint32 context_id = 1;
+  HummockSnapshot min_snapshot = 3;
+}
+
+message UnpinSnapshotBeforeResponse {
   common.Status status = 1;
 }
 
@@ -167,10 +168,6 @@ message CompactTaskAssignment {
   uint32 context_id = 2;
 }
 
-message CompactTaskRefId {
-  uint64 id = 1;
-}
-
 message GetCompactionTasksRequest {}
 
 message GetCompactionTasksResponse {
@@ -184,10 +181,6 @@ message ReportCompactionTasksRequest {
 
 message ReportCompactionTasksResponse {
   common.Status status = 1;
-}
-
-message HummockContextRefId {
-  uint32 id = 1;
 }
 
 message HummockPinnedVersion {
@@ -240,6 +233,7 @@ service HummockManagerService {
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
+  rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);

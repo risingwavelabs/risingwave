@@ -58,6 +58,8 @@ pub struct CreateMaterializedViewContext {
     pub affiliated_source: Option<Source>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
+    /// Internal TableID for MaterializedView.
+    pub internal_table_id_set: HashSet<u32>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -136,11 +138,11 @@ where
                 same_worker_node_as_upstream: bool,
             ) -> Result<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
-                        // If node is not chain node, recursively deal with input nodes
-                        for input in &mut stream_node.input {
-                            self.resolve_chain_node_inner(input, actor_id, same_worker_node_as_upstream)?;
-                        }
-                        return Ok(());
+                    // If node is not chain node, recursively deal with input nodes
+                    for input in &mut stream_node.input {
+                        self.resolve_chain_node_inner(input, actor_id, same_worker_node_as_upstream)?;
+                    }
+                    return Ok(());
                 };
                 // If node is chain node, we insert upstream ids into chain's input (merge)
 
@@ -293,6 +295,7 @@ where
             dependent_table_ids,
             affiliated_source,
             table_id_offset: _,
+            internal_table_id_set: _,
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
         let nodes = self
@@ -653,7 +656,6 @@ where
         self.barrier_manager
             .run_command(Command::DropMaterializedView(*table_id))
             .await?;
-
         Ok(())
     }
 
@@ -671,8 +673,6 @@ where
 
         Ok(())
     }
-
-    // fn
 }
 
 #[cfg(test)]
@@ -774,7 +774,7 @@ mod tests {
             &self,
             _request: Request<DropActorsRequest>,
         ) -> std::result::Result<Response<DropActorsResponse>, Status> {
-            panic!("not implemented")
+            Ok(Response::new(DropActorsResponse::default()))
         }
 
         async fn inject_barrier(
@@ -878,6 +878,7 @@ mod tests {
                     cluster_manager.clone(),
                     barrier_manager.clone(),
                     catalog_manager.clone(),
+                    fragment_manager.clone(),
                 )
                 .await?,
             );
@@ -953,7 +954,7 @@ mod tests {
                 vnode_mapping: None,
             },
         );
-        let table_fragments = TableFragments::new(table_id, fragments);
+        let table_fragments = TableFragments::new(table_id, fragments, HashSet::default());
 
         let ctx = CreateMaterializedViewContext::default();
 
@@ -1007,6 +1008,136 @@ mod tests {
             .await?;
         assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
         assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
+
+        services.stop().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_drop_materialized_view() -> Result<()> {
+        let services = MockServices::start("127.0.0.1", 12334).await?;
+
+        let table_ref_id = TableRefId {
+            schema_ref_id: None,
+            table_id: 0,
+        };
+        let table_id = TableId::from(&Some(table_ref_id.clone()));
+
+        let actors = (0..5)
+            .map(|i| StreamActor {
+                actor_id: i,
+                // A dummy node to avoid panic.
+                nodes: Some(risingwave_pb::stream_plan::StreamNode {
+                    node_body: Some(
+                        risingwave_pb::stream_plan::stream_node::NodeBody::Materialize(
+                            risingwave_pb::stream_plan::MaterializeNode {
+                                table_ref_id: Some(table_ref_id.clone()),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                    operator_id: 1,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+
+        let mut fragments = BTreeMap::default();
+        fragments.insert(
+            0,
+            Fragment {
+                fragment_id: 0,
+                fragment_type: FragmentType::Sink as i32,
+                distribution_type: FragmentDistributionType::Hash as i32,
+                actors: actors.clone(),
+                vnode_mapping: None,
+            },
+        );
+        let internal_table_id = HashSet::from([2, 3, 5, 7]);
+
+        let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
+
+        let ctx = CreateMaterializedViewContext::default();
+
+        services
+            .global_stream_manager
+            .create_materialized_view(table_fragments, ctx)
+            .await?;
+
+        for actor in actors {
+            let mut scheduled_actor = services
+                .state
+                .actor_streams
+                .lock()
+                .unwrap()
+                .get(&actor.get_actor_id())
+                .cloned()
+                .unwrap();
+            assert!(!scheduled_actor.vnode_bitmap.is_empty());
+            scheduled_actor.vnode_bitmap.clear();
+            assert_eq!(scheduled_actor, actor);
+            assert!(services
+                .state
+                .actor_ids
+                .lock()
+                .unwrap()
+                .contains(&actor.get_actor_id()));
+            assert_eq!(
+                services
+                    .state
+                    .actor_infos
+                    .lock()
+                    .unwrap()
+                    .get(&actor.get_actor_id())
+                    .cloned()
+                    .unwrap(),
+                HostAddress {
+                    host: "127.0.0.1".to_string(),
+                    port: 12334,
+                }
+            );
+        }
+
+        let sink_actor_ids = services
+            .fragment_manager
+            .get_table_sink_actor_ids(&table_id)
+            .await?;
+        let actor_ids = services
+            .fragment_manager
+            .get_table_actor_ids(&table_id)
+            .await?;
+        assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
+
+        let table_fragments = services
+            .global_stream_manager
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id)
+            .await?;
+        assert_eq!(4, table_fragments.internal_table_ids().len());
+
+        // test drop materialized_view
+        // the table_fragments will be deleted when barrier_manager run_command DropMaterializedView
+        // via drop_table_fragments
+        services
+            .global_stream_manager
+            .drop_materialized_view(&table_fragments.table_id())
+            .await?;
+
+        // test get table_fragment;
+        let select_err_1 = services
+            .global_stream_manager
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_fragments.table_id())
+            .await
+            .unwrap_err();
+
+        // TODO: check memory and metastore consistent
+        assert_eq!(
+            select_err_1.to_string(),
+            "internal error: table_fragment not exist: id=0"
+        );
 
         services.stop().await;
         Ok(())

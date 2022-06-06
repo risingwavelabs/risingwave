@@ -15,11 +15,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
-use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::{Level, LevelType, SstableInfo};
+use risingwave_pb::hummock::{KeyRange, Level, LevelType, SstableInfo};
 
 use super::SearchResult;
 use crate::hummock::compaction::compaction_picker::CompactionPicker;
@@ -183,17 +182,16 @@ impl CompactionPicker for LevelCompactionPicker {
         level_handlers[target_level].add_pending_task(next_task_id, &target_level_inputs);
         // Here, we have known that `select_level_input` is valid
         let mut splits = Vec::with_capacity(target_level_inputs.len());
-        splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
+        splits.push(KeyRange::new(vec![], vec![]));
         if target_level_inputs.len() > 1 {
             for table in &target_level_inputs[1..] {
-                let key_before_last: Bytes = FullKey::from_user_key_slice(
+                let key_before_last = FullKey::from_user_key_slice(
                     user_key(&table.key_range.as_ref().unwrap().left),
                     HummockEpoch::MAX,
                 )
-                .into_inner()
-                .into();
+                .into_inner();
                 splits.last_mut().unwrap().right = key_before_last.clone();
-                splits.push(KeyRange::new(key_before_last, Bytes::new()));
+                splits.push(KeyRange::new(key_before_last, vec![]));
             }
         }
 
@@ -345,9 +343,9 @@ impl LevelCompactionPicker {
             }
 
             target_level_ssts.tables.sort_by(|a, b| {
-                let r1 = KeyRange::from(a.key_range.as_ref().unwrap());
-                let r2 = KeyRange::from(b.key_range.as_ref().unwrap());
-                r1.cmp(&r2)
+                let r1 = a.key_range.as_ref().unwrap();
+                let r2 = b.key_range.as_ref().unwrap();
+                r1.compare(r2)
             });
             return (select_level_ssts, target_level_ssts.tables);
         }
@@ -358,10 +356,11 @@ impl LevelCompactionPicker {
 #[cfg(test)]
 pub mod tests {
     use itertools::Itertools;
-    use risingwave_pb::hummock::KeyRange as RawKeyRange;
+    use risingwave_pb::hummock::KeyRange;
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+    use crate::hummock::compaction::CompactionMode;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     pub fn generate_table(
@@ -373,7 +372,7 @@ pub mod tests {
     ) -> SstableInfo {
         SstableInfo {
             id,
-            key_range: Some(RawKeyRange {
+            key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch),
                 inf: false,
@@ -497,6 +496,7 @@ pub mod tests {
         let config = Arc::new(CompactionConfig {
             level0_tier_compact_file_number: 2,
             min_compaction_bytes: 0,
+            compaction_mode: CompactionMode::RangeMode,
             ..Default::default()
         });
         let picker =

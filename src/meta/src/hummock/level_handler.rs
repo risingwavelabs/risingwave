@@ -15,47 +15,9 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::level_handler::SstTask;
 use risingwave_pb::hummock::SstableInfo;
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SSTableInfo {
-    pub key_range: KeyRange,
-    pub table_id: HummockSSTableId,
-    pub file_size: u64,
-    pub vnode_bitmaps: Vec<VNodeBitmap>,
-}
-
-impl From<&SstableInfo> for SSTableInfo {
-    fn from(sst: &SstableInfo) -> Self {
-        Self {
-            key_range: sst.key_range.as_ref().unwrap().into(),
-            table_id: sst.id,
-            file_size: sst.file_size,
-            vnode_bitmaps: sst.vnode_bitmaps.clone(),
-        }
-    }
-}
-
-impl From<SSTableInfo> for SstableInfo {
-    fn from(info: SSTableInfo) -> Self {
-        SstableInfo {
-            key_range: Some(info.key_range.into()),
-            id: info.table_id,
-            file_size: info.file_size,
-            vnode_bitmaps: info.vnode_bitmaps,
-        }
-    }
-}
-
-impl From<&SSTableInfo> for SstableInfo {
-    fn from(info: &SSTableInfo) -> Self {
-        SstableInfo::from(info.clone())
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
