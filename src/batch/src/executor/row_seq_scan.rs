@@ -100,19 +100,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let storage_stats = state_store.stats();
             let batch_stats = source.context().stats();
             let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-            let iter = table
-                .iter_with_pk(
-                    source.epoch,
-                    seq_scan_node
-                        .table_desc
-                        .as_ref()
-                        .unwrap()
-                        .pk
-                        .iter()
-                        .map(|d| d.into())
-                        .collect(),
-                )
-                .await?;
+
+            let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().pk;
+            let pk_descs = pk_descs_proto.iter().map(|d| d.into()).collect();
+            let iter = table.iter_with_pk(source.epoch, pk_descs).await?;
+
             Ok(Box::new(RowSeqScanExecutor::new(
                 table.schema().clone(),
                 iter,

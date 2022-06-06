@@ -212,12 +212,10 @@ async fn test_table_v2_materialize() -> Result<()> {
     let ordered_column_descs: Vec<OrderedColumnDesc> = column_descs
         .iter()
         .take(1)
-        .map(
-            |d| OrderedColumnDesc {
-                column_desc: d.clone(),
-                order: OrderType::Ascending,
-            },
-        )
+        .map(|d| OrderedColumnDesc {
+            column_desc: d.clone(),
+            order: OrderType::Ascending,
+        })
         .collect();
 
     let scan = Box::new(RowSeqScanExecutor::new(
@@ -430,12 +428,10 @@ async fn test_row_seq_scan() -> Result<()> {
     let pk_descs: Vec<OrderedColumnDesc> = column_descs
         .iter()
         .take(1)
-        .map(
-            |d| OrderedColumnDesc {
-                column_desc: d.clone(),
-                order: OrderType::Ascending,
-            },
-        )
+        .map(|d| OrderedColumnDesc {
+            column_desc: d.clone(),
+            order: OrderType::Ascending,
+        })
         .collect();
 
     let executor = Box::new(RowSeqScanExecutor::new(
