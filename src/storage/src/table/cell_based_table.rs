@@ -557,10 +557,8 @@ impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
     async fn next(&mut self) -> StorageResult<Option<Row>> {
         let row_opt = self.inner.next_pk_and_row().await?;
         Ok(row_opt.map(|(pk_vec, mut row)| {
-            // FIXME: cleanup all these clones...
-            // decoded ver is not good enough... we need to know datum row positions to slot them
-            // in...
             if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
+                // FIXME: cleanup clone
                 for (row_idx_opt, datum) in zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec()) {
                     if let Some(row_idx) = row_idx_opt {
                         row.0[row_idx] = datum;

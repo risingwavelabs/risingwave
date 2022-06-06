@@ -1398,6 +1398,7 @@ async fn test_multi_cell_based_table_iter() {
 }
 
 #[tokio::test]
+// TODO: serialize pk, store with dedup.
 async fn test_dedup_pk_multi_cell_based_table_iter() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
