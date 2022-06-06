@@ -110,6 +110,8 @@ where
             FeMessage::Startup(msg) => {
                 if let Err(e) = self.process_startup_msg(msg) {
                     tracing::error!("failed to set up pg session: {}", e);
+                    self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(e)))?;
+                    self.flush().await?;
                     return Ok(true);
                 }
                 self.state = PgProtocolState::Regular;
