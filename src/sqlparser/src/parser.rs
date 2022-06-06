@@ -2857,13 +2857,41 @@ impl Parser {
             GrantObjects::AllSequencesInSchema {
                 schemas: self.parse_comma_separated(Parser::parse_object_name)?,
             }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::SOURCES,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllSourcesInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::MATERIALIZED,
+            Keyword::VIEWS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllMviewsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+            GrantObjects::Mviews(self.parse_comma_separated(Parser::parse_object_name)?)
         } else {
-            let object_type =
-                self.parse_one_of_keywords(&[Keyword::SEQUENCE, Keyword::SCHEMA, Keyword::TABLE]);
+            let object_type = self.parse_one_of_keywords(&[
+                Keyword::SEQUENCE,
+                Keyword::DATABASE,
+                Keyword::SCHEMA,
+                Keyword::TABLE,
+                Keyword::SOURCE,
+            ]);
             let objects = self.parse_comma_separated(Parser::parse_object_name);
             match object_type {
+                Some(Keyword::DATABASE) => GrantObjects::Databases(objects?),
                 Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
                 Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
+                Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
                 Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
                 _ => unreachable!(),
             }
@@ -2906,6 +2934,8 @@ impl Parser {
 
     /// Parse a REVOKE statement
     pub fn parse_revoke(&mut self) -> Result<Statement, ParserError> {
+        let revoke_grant_option =
+            self.parse_keywords(&[Keyword::GRANT, Keyword::OPTION, Keyword::FOR]);
         let (privileges, objects) = self.parse_grant_revoke_privileges_objects()?;
 
         self.expect_keyword(Keyword::FROM)?;
@@ -2926,6 +2956,7 @@ impl Parser {
             objects,
             grantees,
             granted_by,
+            revoke_grant_option,
             cascade,
         })
     }

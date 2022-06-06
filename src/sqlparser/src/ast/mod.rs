@@ -828,6 +828,7 @@ pub enum Statement {
         objects: GrantObjects,
         grantees: Vec<Ident>,
         granted_by: Option<Ident>,
+        revoke_grant_option: bool,
         cascade: bool,
     },
     /// `DEALLOCATE [ PREPARE ] { name | ALL }`
@@ -1183,9 +1184,19 @@ impl fmt::Display for Statement {
                 objects,
                 grantees,
                 granted_by,
+                revoke_grant_option,
                 cascade,
             } => {
-                write!(f, "REVOKE {} ", privileges)?;
+                write!(
+                    f,
+                    "REVOKE {}{} ",
+                    if *revoke_grant_option {
+                        "GRANT OPTION FOR "
+                    } else {
+                        ""
+                    },
+                    privileges
+                )?;
                 write!(f, "ON {} ", objects)?;
                 write!(f, "FROM {}", display_comma_separated(grantees))?;
                 if let Some(grantor) = granted_by {

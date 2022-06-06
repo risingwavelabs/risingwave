@@ -358,6 +358,8 @@ impl UserInfoWriter for MockUserInfoWriter {
                         }
                     }
                 });
+                u.grant_privileges
+                    .retain(|p| !p.action_with_opts.is_empty());
             }
         }
         Ok(())
