@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::ordered::OrderedRowDeserializer;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowWithPkIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
@@ -101,7 +102,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let storage_stats = state_store.stats();
             let batch_stats = source.context().stats();
             let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-            let iter = table.iter_with_pk(source.epoch).await?;
+            let iter = table.iter_with_pk(
+                source.epoch,
+                OrderedRowDeserializer::new(vec![], vec![]),
+                vec![],
+            ).await?;
             Ok(Box::new(RowSeqScanExecutor::new(
                 table.schema().clone(),
                 iter,

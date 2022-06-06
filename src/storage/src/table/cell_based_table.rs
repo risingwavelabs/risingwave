@@ -99,7 +99,6 @@ impl<S: StateStore> CellBasedTable<S> {
             keyspace,
             schema,
             column_descs,
-
             pk_serializer: ordered_row_serializer,
             cell_based_row_serializer: CellBasedRowSerializer::new(),
             column_ids,
@@ -318,7 +317,7 @@ impl<S: StateStore> CellBasedTable<S> {
         .await
     }
 
-    pub async fn iter_with_pk(&self, epoch: u64) -> StorageResult<CellBasedTableRowWithPkIter<S>> {
+    pub async fn iter_with_pk(&self, epoch: u64, pk_deserializer: OrderedRowDeserializer, pk_to_row_mapping: Vec<usize>) -> StorageResult<CellBasedTableRowWithPkIter<S>> {
         CellBasedTableRowWithPkIter::new(
             self.keyspace.clone(),
             self.column_descs.clone(),

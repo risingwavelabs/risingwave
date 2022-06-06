@@ -85,7 +85,7 @@ impl ToBatchProst for BatchSeqScan {
         NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(CellBasedTableDesc {
                 table_id: self.logical.table_desc().table_id.into(),
-                pk: vec![], // TODO:
+                pk: self.logical.table_desc().order_desc.iter().map(|v| v.into()).collect(),
             }),
             column_descs,
         })
