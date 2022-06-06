@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::iter::zip;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -487,18 +486,19 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
 #[async_trait::async_trait]
 impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
     async fn next(&mut self) -> StorageResult<Option<Row>> {
-        let row_opt = self.inner.next_pk_and_row().await?;
-        Ok(row_opt.map(|(pk_vec, mut row)| {
-            if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
-                zip(self.pk_to_row_mapping.iter(), pk_decoded.into_vec())
-                    .for_each(|(row_idx_opt, datum)| {
-                        if let Some(row_idx) = row_idx_opt {
-                            row.0[*row_idx] = datum;
-                        }
-                    })
+        if let Some((pk_vec, mut row)) = self.inner.next_pk_and_row().await? {
+            let row_inner = &mut row.0;
+            let pk_decoded = self.pk_decoder.deserialize(&pk_vec).map_err(err)?;
+            for (pk_idx, datum) in pk_decoded.into_vec().into_iter().enumerate() {
+                if let Some(row_idx) = self.pk_to_row_mapping[pk_idx] {
+                    row_inner[row_idx] = datum;
+                }
             }
-            row
-        }))
+            Ok(Some(row))
+        } else {
+            Ok(None)
+        }
+
     }
 }
 
