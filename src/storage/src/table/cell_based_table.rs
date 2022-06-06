@@ -440,13 +440,16 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
 }
 
 // Provides a layer on top of CellBasedTableRowIter
-// for decoding pk into its constituent datums.
+// for decoding pk into its constituent datums in a row
+// Given the following row: | user_id | age | name |
 // For instance if pk was derived from `user_id, name`
-// we can decode pk -> user_id, name.
+// we can decode pk -> user_id, name,
+// and retrieve the row: | | age | |,
+// then fill in empty spots with datum decoded from pk: | user_id | age | name |
 pub struct CellBasedTableRowWithPkIter<S: StateStore> {
     inner: CellBasedTableRowIter<S>,
-    pk_decoder: OrderedRowDeserializer,
-    pk_to_row_mapping: Vec<usize>,
+    pk_decoder: OrderedRowDeserializer, // pk -> datum
+    pk_to_row_mapping: Vec<usize>, // pk datum positions in row.
 }
 
 impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
