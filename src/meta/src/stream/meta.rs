@@ -107,6 +107,33 @@ where
         }
     }
 
+    pub async fn select_table_fragments_remote(
+        &self,
+        table_id: &TableId,
+    ) -> Result<TableFragments> {
+        // select from remote
+        let result = TableFragments::select(&*self.meta_store, &table_id.table_id()).await?;
+        match result {
+            Some(table_fragments) => Ok(table_fragments),
+            None => Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            )))),
+        }
+    }
+
+    pub async fn select_table_fragments_by_table_id(
+        &self,
+        table_id: &TableId,
+    ) -> Result<TableFragments> {
+        let map = &self.core.read().await.table_fragments;
+        if let Some(table_fragments) = map.get(table_id) {
+            Ok(table_fragments.clone())
+        } else {
+            return self.select_table_fragments_remote(table_id).await;
+        }
+    }
+
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
     /// state is `ActorState::Inactive`.
     pub async fn start_create_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
