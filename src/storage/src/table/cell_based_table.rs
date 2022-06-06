@@ -457,16 +457,17 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
 // Provides a layer on top of CellBasedTableRowIter
 // for decoding pk into its constituent datums in a row
 // Given the following row: | user_id | age | name |
-// For instance if pk was derived from `user_id, name`
+// if pk was derived from `user_id, name`
 // we can decode pk -> user_id, name,
-// and retrieve the row: | | age | |,
+// and retrieve the row: |_| age |_|,
 // then fill in empty spots with datum decoded from pk: | user_id | age | name |
 pub struct DedupPkCellBasedTableRowIter<S: StateStore> {
     inner: CellBasedTableRowIter<S>,
     pk_decoder: OrderedRowDeserializer,
-    // Maps pk datums to their positions in row.
-    // Only maps pk fields with the same value and memcomparable encoding,
-    // and only if these fields have corresponding row positions.
+
+    // Maps pk fields with:
+    // 1. same value and memcomparable encoding,
+    // 2. corresponding row positions. e.g. _row_id is unlikely to be part of selected row.
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
