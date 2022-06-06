@@ -49,6 +49,7 @@ pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
+    barrier_manager: BarrierManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
 
@@ -115,7 +116,7 @@ pub struct SourceManagerCore<S: MetaStore> {
     pub fragment_manager: FragmentManagerRef<S>,
     pub managed_sources: HashMap<SourceId, SharedSplitMapRef>,
     pub source_fragments: HashMap<SourceId, Vec<FragmentId>>,
-    pub actor_splits: HashMap<ActorId, Vec<String>>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 impl<S> SourceManagerCore<S>
@@ -131,10 +132,10 @@ where
         }
     }
 
-    #[allow(dead_code)]
-    async fn tick(&mut self) -> Result<()> {
+    async fn diff(&mut self) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
+        // first, list all fragment, so that we can get `FragmentId` -> `Vec<ActorId>` map
         let table_frags = self.fragment_manager.list_table_fragments().await?;
-        let mut frag_actors = HashMap::new();
+        let mut frag_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
         for table_frag in table_frags {
             for (frag_id, mut frag) in table_frag.fragments {
                 let mut actors = frag.actors.iter_mut().map(|x| x.actor_id).collect_vec();
@@ -145,63 +146,96 @@ where
             }
         }
 
-        let mut changed_actors = HashMap::new();
+        // then we diff the splits
+        let mut changed_actors: HashMap<ActorId, Vec<SplitImpl>> = HashMap::new();
 
         for (source_id, splits) in &self.managed_sources {
             let frag_ids = match self.source_fragments.get(source_id) {
                 Some(frags) if !frags.is_empty() => frags,
-                _ => continue,
+                _ => {
+                    // TODO, no fragment is bound with such source_id, should drop that source
+                    continue;
+                }
             };
 
             let splits_guard = splits.lock().await;
-            let current_splits = match &*splits_guard {
+            let discovered_splits = match &*splits_guard {
                 None => continue,
                 Some(splits) => splits,
             };
 
             for frag_id in frag_ids {
-                let actors = match frag_actors.remove(frag_id) {
-                    None => continue,
+                let actor_ids = match frag_actors.remove(frag_id) {
+                    None => {
+                        // target fragment has gone?
+                        continue;
+                    }
                     Some(actors) => actors,
                 };
 
-                let actor_len = actors.len();
-                let mut allocated_split_ids = HashSet::new();
-                for actor_id in &actors {
-                    if let Some(splits) = self.actor_splits.get(actor_id) {
-                        for split in splits {
-                            allocated_split_ids.insert(split.clone());
-                        }
+                let mut prev_splits = HashMap::new();
+                for actor_id in actor_ids {
+                    prev_splits.insert(
+                        actor_id,
+                        self.actor_splits
+                            .get(&actor_id)
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
+                }
+
+                let diff = Self::diff_splits(prev_splits, discovered_splits)?;
+                if let Some(change) = diff {
+                    for (actor_id, splits) in change {
+                        changed_actors.insert(actor_id, splits);
                     }
-                }
-
-                let mut new_splits = vec![];
-                for (split_id, split) in current_splits {
-                    if allocated_split_ids.contains(split_id) {
-                        continue;
-                    }
-                    new_splits.push(split)
-                }
-
-                let mut assigned = HashMap::new();
-                for (index, split) in new_splits.iter().enumerate() {
-                    let actor = actors[index % actor_len];
-                    assigned.entry(actor).or_insert(vec![]).push(split.id())
-                }
-
-                for (actor_id, mut splits) in assigned {
-                    let mut prev_splits = self
-                        .actor_splits
-                        .get(&actor_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    prev_splits.append(&mut splits);
-                    changed_actors.insert(actor_id, prev_splits);
                 }
             }
         }
 
-        Ok(())
+        Ok(changed_actors)
+    }
+
+    fn diff_splits(
+        mut prev_actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+        discovered_splits: &BTreeMap<String, SplitImpl>,
+    ) -> Result<Option<HashMap<ActorId, Vec<SplitImpl>>>> {
+        let prev_split_ids: HashSet<_> = prev_actor_splits
+            .values()
+            .flat_map(|splits| splits.iter().map(SplitImpl::id))
+            .collect();
+
+        if discovered_splits
+            .keys()
+            .all(|split_id| prev_split_ids.contains(split_id))
+        {
+            return Ok(None);
+        }
+
+        let mut new_discovered_splits = HashSet::new();
+        for (split_id, split) in discovered_splits {
+            if !prev_split_ids.contains(split_id) {
+                new_discovered_splits.insert(split.id());
+            }
+        }
+
+        let mut result = HashMap::new();
+
+        let actors = prev_actor_splits.keys().cloned().collect_vec();
+        let actor_len = actors.len();
+
+        for (index, split_id) in new_discovered_splits.into_iter().enumerate() {
+            let target_actor_id = actors[index % actor_len];
+            let split = discovered_splits.get(&split_id).unwrap().clone();
+
+            result.entry(target_actor_id).or_insert_with(|| {
+                prev_actor_splits.remove(&target_actor_id).unwrap()
+            });
+
+            result.get_mut(&target_actor_id).unwrap().push(split);
+        }
+
+        Ok(Some(result))
     }
 }
 
@@ -212,18 +246,13 @@ where
     pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
-        _barrier_manager: BarrierManagerRef<S>,
+        barrier_manager: BarrierManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Result<Self> {
         let core = Arc::new(Mutex::new(SourceManagerCore::new(fragment_manager)));
 
-        Ok(Self {
-            env,
-            cluster_manager,
-            catalog_manager,
-            core,
-        })
+        Ok(Self { env, cluster_manager, catalog_manager, barrier_manager, core })
     }
 
     pub async fn register_source(
@@ -389,8 +418,24 @@ where
         Ok(())
     }
 
+    async fn tick(&self) -> Result<()> {
+        let x = {
+            let mut core_guard = self.core.lock().await;
+            core_guard.diff().await
+        };
+
+        println!("{:?}", x);
+
+        Ok(())
+    }
+
     pub async fn run(&self) -> Result<()> {
-        // todo: in the future, split change will be pushed as a long running service
+        // todo: uncomment me when stable
+        // let mut ticker = time::interval(Duration::from_secs(1));
+        // loop {
+        //     ticker.tick().await;
+        //     self.tick().await?;
+        // }
         Ok(())
     }
 }

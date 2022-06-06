@@ -37,7 +37,7 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
-use crate::model::{ActorId, DispatcherId, TableFragments};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
@@ -435,6 +435,24 @@ where
 
         table_fragments.set_actor_status(actor_info);
         let mut actor_map = table_fragments.actor_map();
+
+        let mut source_fragments = HashMap::new();
+        for fragment in table_fragments.fragments() {
+            for actor in &fragment.actors {
+                if let Some(source_id) =
+                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+                {
+                    source_fragments
+                        .entry(source_id)
+                        .or_insert(vec![])
+                        .push(fragment.fragment_id as FragmentId);
+                }
+            }
+        }
+
+        self.source_manager
+            .register_source(source_fragments, affiliated_source.clone())
+            .await?;
 
         let mut source_actors_group_by_fragment = HashMap::new();
         for fragment in table_fragments.fragments() {
