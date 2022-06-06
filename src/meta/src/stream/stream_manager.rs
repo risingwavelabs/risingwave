@@ -774,7 +774,6 @@ mod tests {
             &self,
             _request: Request<DropActorsRequest>,
         ) -> std::result::Result<Response<DropActorsResponse>, Status> {
-            // panic!("not implemented")
             Ok(Response::new(DropActorsResponse::default()))
         }
 
@@ -1055,11 +1054,7 @@ mod tests {
                 vnode_mapping: None,
             },
         );
-        let mut internal_table_id = HashSet::with_capacity(4);
-        internal_table_id.insert(2);
-        internal_table_id.insert(3);
-        internal_table_id.insert(5);
-        internal_table_id.insert(7);
+        let internal_table_id = HashSet::from([2, 3, 5, 7]);
 
         let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
 
@@ -1078,8 +1073,7 @@ mod tests {
                 .unwrap()
                 .get(&actor.get_actor_id())
                 .cloned()
-                .unwrap()
-                .clone();
+                .unwrap();
             assert!(!scheduled_actor.vnode_bitmap.is_empty());
             scheduled_actor.vnode_bitmap.clear();
             assert_eq!(scheduled_actor, actor);
@@ -1139,15 +1133,11 @@ mod tests {
             .await
             .unwrap_err();
 
-        let select_err_2 = services
-            .global_stream_manager
-            .fragment_manager
-            .select_table_fragments_remote(&table_fragments.table_id())
-            .await
-            .unwrap_err();
-
-        // println!("select_err_1.to_string() {}", select_err_1.to_string());
-        assert_eq!(select_err_1.to_string(), select_err_2.to_string());
+        // TODO: check memory and metastore consistent
+        assert_eq!(
+            select_err_1.to_string(),
+            "internal error: table_fragment not exist: id=0"
+        );
 
         services.stop().await;
         Ok(())
