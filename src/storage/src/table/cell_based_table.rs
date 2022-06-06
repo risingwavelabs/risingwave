@@ -498,7 +498,6 @@ impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
         } else {
             Ok(None)
         }
-
     }
 }
 
