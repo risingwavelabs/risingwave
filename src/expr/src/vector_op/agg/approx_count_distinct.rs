@@ -69,17 +69,10 @@ impl ApproxCountDistinct {
 
     /// Counts the number of trailing zeroes plus 1 in the non-index bits of the hash
     fn count_hash(&self, mut hash: u64) -> u8 {
-        let mut count = 1;
-
         hash >>= INDEX_BITS; // Ignore bits used as index for the hash
         hash |= 1 << COUNT_BITS; // To allow hash to terminate if it is all 0s
 
-        while hash & 1 == 0 {
-            count += 1;
-            hash >>= 1;
-        }
-
-        count
+        (hash.trailing_zeros() + 1) as u8
     }
 
     /// Calculates the bias-corrected harmonic mean of the registers to get the approximate count
@@ -230,8 +223,8 @@ mod tests {
 
         for i in 0..3 {
             let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
-            let _ = agg.update(&data_chunk);
-            let _ = agg.output(&mut builder);
+            agg.update(&data_chunk).unwrap();
+            agg.output(&mut builder).unwrap();
         }
 
         let array = builder.finish().unwrap();
