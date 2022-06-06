@@ -498,8 +498,6 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
             .enumerate()
             .map(|(idx, desc)| (desc.column_id, idx))
             .collect();
-        println!("pk_descs: {:#?}", pk_descs);
-        println!("table_descs: {:#?}", table_descs);
         let pk_to_row_mapping = pk_descs
             .iter()
             .map(|d| {
