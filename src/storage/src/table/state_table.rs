@@ -15,6 +15,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::btree_map;
 use std::marker::PhantomData;
+use std::ops::Range;
 use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
@@ -135,6 +136,22 @@ impl<S: StateStore> StateTable<S> {
             epoch,
         ))
     }
+
+    pub async fn iter_with_bounds(
+        &self,
+        pk_bounds: Range<Row>,
+        epoch: u64,
+    ) -> StorageResult<impl RowStream<'_>> {
+        let mem_table_iter = self.mem_table.buffer.iter();
+        Ok(StateTableRowIter::into_stream_with_bounds(
+            &self.keyspace,
+            self.column_descs.clone(),
+            mem_table_iter,
+            pk_bounds,
+            self.cell_based_table.pk_serializer.clone(),
+            epoch,
+        ))
+    }
 }
 
 pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>> + 'a;
@@ -163,6 +180,99 @@ impl<S: StateStore> StateTableRowIter<S> {
                 .await?
                 .into_stream()
                 .peekable();
+        pin_mut!(cell_based_table_iter);
+
+        let mut mem_table_iter = mem_table_iter
+            .map(|(k, v)| Ok::<_, StorageError>((k, v)))
+            .peekable();
+
+        loop {
+            match (
+                cell_based_table_iter.as_mut().peek().await,
+                mem_table_iter.peek(),
+            ) {
+                (None, None) => break,
+                (Some(_), None) => {
+                    let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+                    yield Cow::Owned(row);
+                }
+                (None, Some(_)) => {
+                    let row_op = mem_table_iter.next().unwrap()?.1;
+                    match row_op {
+                        RowOp::Insert(row) | RowOp::Update((_, row)) => {
+                            yield Cow::Borrowed(row);
+                        }
+                        _ => {}
+                    }
+                }
+
+                (
+                    Some(Ok((cell_based_pk, cell_based_row))),
+                    Some(Ok((mem_table_pk, _mem_table_row_op))),
+                ) => {
+                    match cell_based_pk.cmp(mem_table_pk) {
+                        Ordering::Less => {
+                            // cell_based_table_item will be return
+                            let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+                            yield Cow::Owned(row);
+                        }
+                        Ordering::Equal => {
+                            // mem_table_item will be return, while both cell_based_streaming_iter
+                            // and mem_table_iter need to execute next()
+                            // once.
+                            let row_op = mem_table_iter.next().unwrap()?.1;
+                            match row_op {
+                                RowOp::Insert(row) => yield Cow::Borrowed(row),
+                                RowOp::Delete(_) => {}
+                                RowOp::Update((old_row, new_row)) => {
+                                    debug_assert!(old_row == cell_based_row);
+                                    yield Cow::Borrowed(new_row);
+                                }
+                            }
+                            cell_based_table_iter.next().await.unwrap()?;
+                        }
+                        Ordering::Greater => {
+                            // mem_table_item will be return
+                            let row_op = mem_table_iter.next().unwrap()?.1;
+                            match row_op {
+                                RowOp::Insert(row) => yield Cow::Borrowed(row),
+                                RowOp::Delete(_) => {}
+                                RowOp::Update(_) => unreachable!(),
+                            }
+                        }
+                    }
+                }
+                (Some(_), Some(_)) => {
+                    // Throw the error.
+                    cell_based_table_iter.next().await.unwrap()?;
+                    mem_table_iter.next().unwrap()?;
+
+                    unreachable!()
+                }
+            }
+        }
+    }
+
+    #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
+    async fn into_stream_with_bounds<'a>(
+        keyspace: &'a Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        mem_table_iter: MemTableIter<'a>,
+        pk_bounds: Range<Row>,
+        pk_serializer: Option<OrderedRowSerializer>,
+        epoch: u64,
+    ) {
+        let cell_based_table_iter: futures::stream::Peekable<_> =
+            CellBasedTableStreamingIter::new_with_bounds(
+                keyspace,
+                table_descs,
+                pk_bounds,
+                pk_serializer,
+                epoch,
+            )
+            .await?
+            .into_stream()
+            .peekable();
         pin_mut!(cell_based_table_iter);
 
         let mut mem_table_iter = mem_table_iter

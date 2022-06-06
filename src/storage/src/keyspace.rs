@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::ops::Range;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
@@ -158,6 +159,19 @@ impl<S: StateStore> Keyspace<S> {
 
     pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
         let iter = self.iter_inner(epoch).await?;
+        let strip_prefix_iterator = StripPrefixIterator {
+            iter,
+            prefix_len: self.prefix.len(),
+        };
+        Ok(strip_prefix_iterator)
+    }
+
+    pub async fn iter_with_range(
+        &self,
+        pk_bounds: Range<Vec<u8>>,
+        epoch: u64,
+    ) -> StorageResult<StripPrefixIterator<S::Iter>> {
+        let iter = self.store.iter(pk_bounds, epoch).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -326,6 +327,21 @@ impl<S: StateStore> CellBasedTable<S> {
         CellBasedTableStreamingIter::new(&self.keyspace, self.column_descs.clone(), epoch).await
     }
 
+    pub async fn streaming_iter_with_bounds(
+        &self,
+        pk_bounds: Range<Row>,
+        epoch: u64,
+    ) -> StorageResult<CellBasedTableStreamingIter<S>> {
+        CellBasedTableStreamingIter::new_with_bounds(
+            &self.keyspace,
+            self.column_descs.clone(),
+            pk_bounds,
+            self.pk_serializer.clone(),
+            epoch,
+        )
+        .await
+    }
+
     pub fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -452,6 +468,28 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
     ) -> StorageResult<Self> {
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
         let iter = keyspace.iter(epoch).await?;
+        let iter = Self {
+            iter,
+            cell_based_row_deserializer,
+        };
+        Ok(iter)
+    }
+
+    pub async fn new_with_bounds(
+        keyspace: &Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        pk_bounds: Range<Row>,
+        pk_serializer: Option<OrderedRowSerializer>,
+        epoch: u64,
+    ) -> StorageResult<Self> {
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
+        let pk_serializer = pk_serializer.as_ref().expect("pk_serializer is None");
+        let start_key =
+            keyspace.prefixed_key(&serialize_pk(&pk_bounds.start, pk_serializer).map_err(err)?);
+        let end_key =
+            keyspace.prefixed_key(&serialize_pk(&pk_bounds.end, pk_serializer).map_err(err)?);
+
+        let iter = keyspace.iter_with_range(start_key..end_key, epoch).await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,
