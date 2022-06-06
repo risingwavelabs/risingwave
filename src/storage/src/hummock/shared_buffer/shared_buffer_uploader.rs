@@ -28,7 +28,9 @@ use tracing::error;
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::restricted_builder::ResourceLimiter;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::sst_writer::SstWriter;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
@@ -72,6 +74,9 @@ pub struct SharedBufferUploader {
     next_local_sstable_id: Arc<AtomicU64>,
     stats: Arc<StateStoreMetrics>,
     compaction_executor: Option<Arc<CompactionExecutor>>,
+
+    sst_writer: Arc<SstWriter>,
+    sst_builder_limiter: Arc<ResourceLimiter>,
 }
 
 impl SharedBufferUploader {
@@ -95,11 +100,14 @@ impl SharedBufferUploader {
             options,
             write_conflict_detector,
             uploader_rx,
-            sstable_store,
+            sstable_store: sstable_store.clone(),
             hummock_meta_client,
             next_local_sstable_id: Arc::new(AtomicU64::new(0)),
             stats,
             compaction_executor,
+            sst_writer: Arc::new(SstWriter::new(sstable_store)),
+            // TODO: load from config
+            sst_builder_limiter: Arc::new(ResourceLimiter::new(1024 * 1024 * 1024)),
         }
     }
 
@@ -179,6 +187,8 @@ impl SharedBufferUploader {
                 get_remote_sstable_id_generator(self.hummock_meta_client.clone())
             },
             compaction_executor: self.compaction_executor.as_ref().cloned(),
+            sst_writer: self.sst_writer.clone(),
+            sst_builder_limiter: self.sst_builder_limiter.clone(),
         };
 
         let tables = Compactor::compact_shared_buffer(

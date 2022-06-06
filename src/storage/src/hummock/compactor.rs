@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use futures::future::{try_join_all, BoxFuture};
+use futures::future::BoxFuture;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
@@ -40,11 +40,13 @@ use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator
 use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::ReadOptions;
+use crate::hummock::restricted_builder::ResourceLimiter;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
+use crate::hummock::sst_writer::SstWriter;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::{CachePolicy, HummockError};
+use crate::hummock::HummockError;
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
@@ -86,6 +88,10 @@ pub struct CompactorContext {
     pub sstable_id_generator: SstableIdGenerator,
 
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
+
+    pub sst_writer: Arc<SstWriter>,
+
+    pub sst_builder_limiter: Arc<ResourceLimiter>,
 }
 
 #[derive(Clone)]
@@ -451,6 +457,8 @@ impl Compactor {
         let get_id_time = Arc::new(AtomicU64::new(0));
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
+        // TODO: refine resource size
+        let resource_size = (self.context.options.sstable_size_mb * 1024 * 1024) as u64;
         let mut builder = GroupedSstableBuilder::new(
             || async {
                 let timer = Instant::now();
@@ -461,6 +469,9 @@ impl Compactor {
                 Ok((table_id, builder))
             },
             VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
+            self.context.sst_writer.clone(),
+            self.context.sst_builder_limiter.clone(),
+            resource_size,
         );
 
         // Monitor time cost building shared buffer to SSTs.
@@ -481,48 +492,7 @@ impl Compactor {
         // Seal.
         builder.seal_current();
 
-        let mut ssts = Vec::new();
-        ssts.reserve(builder.len());
-        // TODO: decide upload concurrency. Maybe we shall create a upload task channel for multiple
-        // compaction tasks.
-        let mut pending_requests = vec![];
-        let files = builder.finish();
-        let file_count = files.len();
-        for (table_id, data, meta, vnode_bitmaps) in files {
-            let sst = Sstable { id: table_id, meta };
-            let len = data.len();
-            ssts.push((sst.clone(), vnode_bitmaps));
-            if file_count > 1 {
-                let sstable_store = self.context.sstable_store.clone();
-                let ret =
-                    tokio::spawn(
-                        async move { sstable_store.put(sst, data, CachePolicy::Fill).await },
-                    );
-                pending_requests.push(ret);
-            } else {
-                self.context
-                    .sstable_store
-                    .put(sst, data, CachePolicy::Fill)
-                    .await?;
-            }
-
-            if self.context.is_share_buffer_compact {
-                self.context
-                    .stats
-                    .shared_buffer_to_sstable_size
-                    .observe(len as _);
-            } else {
-                self.context.stats.compaction_upload_sst_counts.inc();
-            }
-        }
-        if !pending_requests.is_empty() {
-            for ret in try_join_all(pending_requests)
-                .await
-                .map_err(HummockError::other)?
-            {
-                ret?;
-            }
-        }
+        let ssts = builder.finish().await?;
         self.context
             .stats
             .get_table_id_total_time_duration
@@ -620,6 +590,9 @@ impl Compactor {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor,
+            sst_writer: Arc::new(SstWriter::new(sstable_store.clone())),
+            // TODO: load from config
+            sst_builder_limiter: Arc::new(ResourceLimiter::new(1024 * 1024 * 1024)),
         });
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);

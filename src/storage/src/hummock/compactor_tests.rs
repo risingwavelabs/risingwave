@@ -25,6 +25,8 @@ mod tests {
 
     use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::restricted_builder::ResourceLimiter;
+    use crate::hummock::sst_writer::SstWriter;
     use crate::hummock::HummockStorage;
     use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use crate::storage_value::StorageValue;
@@ -77,6 +79,8 @@ mod tests {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
+            sst_writer: Arc::new(SstWriter::new(storage.sstable_store.clone())),
+            sst_builder_limiter: Arc::new(ResourceLimiter::new(1024 * 1024 * 256)),
         };
 
         // 1. add sstables

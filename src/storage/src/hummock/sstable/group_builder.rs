@@ -16,16 +16,16 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::{CompactionGroupId, Prefix};
 use risingwave_hummock_sdk::key::{get_table_id, FullKey};
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::common::VNodeBitmap;
 
-use crate::hummock::multi_builder::CapacitySplitTableBuilder;
+use crate::hummock::sstable::restricted_builder::{ResourceLimiter, RestrictedBuilder};
+use crate::hummock::sstable::sst_writer::SstWriter;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableBuilder, SstableMeta};
+use crate::hummock::{HummockResult, SSTableBuilder, Sstable};
 
 pub type KeyValueGroupId = u64;
 const DEFAULT_KEY_VALUE_GROUP_ID: KeyValueGroupId = KeyValueGroupId::MAX;
@@ -109,13 +109,15 @@ impl KeyValueGrouping for VirtualNodeGrouping {
     }
 }
 
-/// A wrapper for [`CapacitySplitTableBuilder`] which automatically split key-value pairs into
+/// A wrapper builder which automatically split key-value pairs into
 /// multiple `SSTables`, based on [`KeyValueGroupingImpl`].
 pub struct GroupedSstableBuilder<B> {
-    /// See [`CapacitySplitTableBuilder`]
     get_id_and_builder: B,
     grouping: KeyValueGroupingImpl,
-    builders: HashMap<KeyValueGroupId, CapacitySplitTableBuilder<B>>,
+    builders: HashMap<KeyValueGroupId, RestrictedBuilder<B>>,
+    sst_writer: Arc<SstWriter>,
+    limiter: Arc<ResourceLimiter>,
+    resource_size: u64,
 }
 
 impl<B, F> GroupedSstableBuilder<B>
@@ -123,14 +125,26 @@ where
     B: Clone + Fn() -> F,
     F: Future<Output = HummockResult<(HummockSSTableId, SSTableBuilder)>>,
 {
-    pub fn new(get_id_and_builder: B, grouping: KeyValueGroupingImpl) -> Self {
+    pub fn new(
+        get_id_and_builder: B,
+        grouping: KeyValueGroupingImpl,
+        sst_writer: Arc<SstWriter>,
+        limiter: Arc<ResourceLimiter>,
+        resource_size: u64,
+    ) -> Self {
+        let inner_builder = RestrictedBuilder::new(
+            get_id_and_builder.clone(),
+            sst_writer.clone(),
+            limiter.clone(),
+            resource_size,
+        );
         Self {
-            get_id_and_builder: get_id_and_builder.clone(),
+            get_id_and_builder,
             grouping,
-            builders: HashMap::from([(
-                DEFAULT_KEY_VALUE_GROUP_ID,
-                CapacitySplitTableBuilder::new(get_id_and_builder),
-            )]),
+            builders: HashMap::from([(DEFAULT_KEY_VALUE_GROUP_ID, inner_builder)]),
+            sst_writer,
+            limiter,
+            resource_size,
         }
     }
 
@@ -153,10 +167,14 @@ where
             .grouping
             .group(&full_key, &value)
             .unwrap_or(DEFAULT_KEY_VALUE_GROUP_ID);
-        let entry = self
-            .builders
-            .entry(group_id)
-            .or_insert_with(|| CapacitySplitTableBuilder::new(self.get_id_and_builder.clone()));
+        let entry = self.builders.entry(group_id).or_insert_with(|| {
+            RestrictedBuilder::new(
+                self.get_id_and_builder.clone(),
+                self.sst_writer.clone(),
+                self.limiter.clone(),
+                self.resource_size,
+            )
+        });
         entry.add_full_key(full_key, value, allow_split).await
     }
 
@@ -166,11 +184,17 @@ where
             .for_each(|(_k, v)| v.seal_current());
     }
 
-    pub fn finish(self) -> Vec<(u64, Bytes, SstableMeta, Vec<VNodeBitmap>)> {
-        self.builders
-            .into_iter()
-            .flat_map(|(_k, v)| v.finish())
-            .collect_vec()
+    pub async fn finish(self) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
+        let mut ssts = vec![];
+        let mut vnode_bitmaps = vec![];
+        for (_, builder) in self.builders {
+            for (sst, vnode_bitmap) in builder.finish().await? {
+                ssts.push(sst);
+                vnode_bitmaps.push(vnode_bitmap);
+            }
+        }
+        let result = ssts.into_iter().zip_eq(vnode_bitmaps).collect_vec();
+        Ok(result)
     }
 }
 
@@ -182,6 +206,7 @@ mod tests {
     use bytes::Buf;
 
     use super::*;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::{SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
@@ -207,7 +232,14 @@ mod tests {
         let grouping = KeyValueGroupingImpl::CompactionGroup(CompactionGroupGrouping::new(
             HashMap::from([(prefix.into(), 1.into())]),
         ));
-        let mut builder = GroupedSstableBuilder::new(get_id_and_builder, grouping);
+        let sstable_store = mock_sstable_store();
+        let mut builder = GroupedSstableBuilder::new(
+            get_id_and_builder,
+            grouping,
+            Arc::new(SstWriter::new(sstable_store)),
+            Arc::new(ResourceLimiter::new(1024 * 1024 * 1024)),
+            1024 * 1024 * 256,
+        );
         for i in 0..10 {
             // key value belongs to no compaction group
             builder
@@ -237,7 +269,7 @@ mod tests {
                 .unwrap();
         }
         builder.seal_current();
-        let results = builder.finish();
+        let results = builder.finish().await.unwrap();
         assert_eq!(results.len(), 2);
     }
 }

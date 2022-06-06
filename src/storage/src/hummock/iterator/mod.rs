@@ -31,7 +31,7 @@ mod merge_inner;
 pub use forward_user::*;
 
 #[cfg(test)]
-pub(crate) mod test_utils;
+pub mod test_utils;
 
 use async_trait::async_trait;
 

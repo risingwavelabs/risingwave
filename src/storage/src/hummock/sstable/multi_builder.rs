@@ -22,10 +22,10 @@ use super::SstableMeta;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableBuilder};
 
-struct SSTableBuilderWrapper {
-    id: HummockSSTableId,
-    builder: SSTableBuilder,
-    sealed: bool,
+pub struct SSTableBuilderWrapper {
+    pub id: HummockSSTableId,
+    pub builder: SSTableBuilder,
+    pub sealed: bool,
 }
 
 /// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
