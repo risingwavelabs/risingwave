@@ -476,16 +476,23 @@ impl<S: StateStore> CellBasedTableRowWithPkIter<S> {
         pk_descs: Vec<OrderedColumnDesc>,
     ) -> StorageResult<Self> {
         // FIXME: cleanup excess clones
-        let inner = CellBasedTableRowIter::new(keyspace, table_descs.clone(), epoch, _stats).await?;
+        let inner =
+            CellBasedTableRowIter::new(keyspace, table_descs.clone(), epoch, _stats).await?;
         let pk_decoder = OrderedRowDeserializer::new(vec![], vec![]);
         let col_id_to_row_idx: HashMap<ColumnId, usize> = table_descs
             .iter()
             .enumerate()
             .map(|(idx, desc)| (desc.column_id, idx))
             .collect();
-        let pk_to_row_mapping = pk_descs.iter().map(
-            |d| col_id_to_row_idx.get(&d.column_desc.column_id).unwrap().clone()
-        ).collect();
+        let pk_to_row_mapping = pk_descs
+            .iter()
+            .map(|d| {
+                col_id_to_row_idx
+                    .get(&d.column_desc.column_id)
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
         Ok(Self {
             inner,
             pk_decoder,
@@ -542,7 +549,8 @@ impl<S: StateStore> TableIter for CellBasedTableRowWithPkIter<S> {
         let row_opt = self.inner.next_pk_and_row().await?;
         Ok(row_opt.map(|(pk_vec, mut row)| {
             // FIXME: cleanup all these clones...
-            // decoded ver is not good enough... we need to know datum row positions to slot them in...
+            // decoded ver is not good enough... we need to know datum row positions to slot them
+            // in...
             if let Ok(pk_decoded) = self.pk_decoder.deserialize(&pk_vec) {
                 for (row_idx, datum) in zip(self.pk_to_row_mapping.clone(), pk_decoded.into_vec()) {
                     row.0[row_idx] = datum;

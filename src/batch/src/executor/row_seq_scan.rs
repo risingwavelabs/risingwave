@@ -35,7 +35,6 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     schema: Schema,
     identity: String,
     stats: Arc<BatchMetrics>,
-    // row_iter: CellBasedTableRowIter<S>,
     row_iter: CellBasedTableRowWithPkIter<S>,
 }
 
@@ -104,7 +103,14 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let iter = table
                 .iter_with_pk(
                     source.epoch,
-                    seq_scan_node.table_desc.as_ref().unwrap().pk.iter().map(|d| d.into()).collect(),
+                    seq_scan_node
+                        .table_desc
+                        .as_ref()
+                        .unwrap()
+                        .pk
+                        .iter()
+                        .map(|d| d.into())
+                        .collect(),
                 )
                 .await?;
             Ok(Box::new(RowSeqScanExecutor::new(
