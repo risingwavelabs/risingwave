@@ -399,7 +399,7 @@ async fn test_row_seq_scan() -> Result<()> {
     );
     let table = CellBasedTable::new_adhoc(
         keyspace,
-        column_descs,
+        column_descs.clone(),
         Arc::new(StateStoreMetrics::unused()),
     );
 
@@ -427,9 +427,20 @@ async fn test_row_seq_scan() -> Result<()> {
         .unwrap();
     state.commit(epoch).await.unwrap();
 
+    let pk_descs: Vec<OrderedColumnDesc> = column_descs
+        .iter()
+        .take(1)
+        .map(
+            |d| OrderedColumnDesc {
+                column_desc: d.clone(),
+                order: OrderType::Ascending,
+            }, // TODO: Is ascending the right default??
+        )
+        .collect();
+
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table.iter(u64::MAX).await.unwrap(),
+        table.iter_with_pk(u64::MAX, pk_descs).await.unwrap(),
         1,
         true,
         "RowSeqScanExecutor2".to_string(),
