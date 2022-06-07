@@ -20,12 +20,12 @@ use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::BatchSeries;
+use crate::optimizer::plan_node::BatchTableFunction;
 use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 /// `LogicalGenerateSeries` implements Hop Table Function.
 #[derive(Debug, Clone)]
-pub struct LogicalSeries {
+pub struct LogicalTableFunction {
     pub base: PlanBase,
     pub(super) args: Vec<ExprImpl>,
     pub series_type: SeriesType,
@@ -38,8 +38,8 @@ pub enum SeriesType {
     Unnest,
 }
 
-impl LogicalSeries {
-    /// Create a [`LogicalSeries`] node. Used internally by optimizer.
+impl LogicalTableFunction {
+    /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
     pub fn new(
         args: Vec<ExprImpl>,
         schema: Schema,
@@ -57,7 +57,7 @@ impl LogicalSeries {
         }
     }
 
-    /// Create a [`LogicalSeries`] node. Used by planner.
+    /// Create a [`LogicalTableFunction`] node. Used by planner.
     pub fn create_generate_series(
         start: ExprImpl,
         stop: ExprImpl,
@@ -99,35 +99,35 @@ impl LogicalSeries {
     }
 }
 
-impl_plan_tree_node_for_leaf! { LogicalSeries }
+impl_plan_tree_node_for_leaf! { LogicalTableFunction }
 
-impl fmt::Display for LogicalSeries {
+impl fmt::Display for LogicalTableFunction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.fmt_with_name(f, "LogicalSeries")
     }
 }
 
 // the leaf node don't need colprunable
-impl ColPrunable for LogicalSeries {
+impl ColPrunable for LogicalTableFunction {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let _ = required_cols;
         self.clone().into()
     }
 }
 
-impl PredicatePushdown for LogicalSeries {
+impl PredicatePushdown for LogicalTableFunction {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 
-impl ToBatch for LogicalSeries {
+impl ToBatch for LogicalTableFunction {
     fn to_batch(&self) -> Result<PlanRef> {
-        Ok(BatchSeries::new(self.clone()).into())
+        Ok(BatchTableFunction::new(self.clone()).into())
     }
 }
 
-impl ToStream for LogicalSeries {
+impl ToStream for LogicalTableFunction {
     fn to_stream(&self) -> Result<PlanRef> {
         Err(
             ErrorCode::NotImplemented("LogicalGenerateSeries::to_stream".to_string(), None.into())

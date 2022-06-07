@@ -21,49 +21,49 @@ use risingwave_pb::batch_plan::GenerateSeriesNode;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::Expr;
-use crate::optimizer::plan_node::logical_generate_series::LogicalSeries;
+use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
-pub struct BatchSeries {
+pub struct BatchTableFunction {
     pub base: PlanBase,
-    logical: LogicalSeries,
+    logical: LogicalTableFunction,
 }
 
-impl PlanTreeNodeLeaf for BatchSeries {}
-impl_plan_tree_node_for_leaf!(BatchSeries);
+impl PlanTreeNodeLeaf for BatchTableFunction {}
+impl_plan_tree_node_for_leaf!(BatchTableFunction);
 
-impl BatchSeries {
-    pub fn new(logical: LogicalSeries) -> Self {
+impl BatchTableFunction {
+    pub fn new(logical: LogicalTableFunction) -> Self {
         Self::with_dist(logical, Distribution::Single)
     }
 
-    pub fn with_dist(logical: LogicalSeries, dist: Distribution) -> Self {
+    pub fn with_dist(logical: LogicalTableFunction, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
-        BatchSeries { base, logical }
+        BatchTableFunction { base, logical }
     }
 
     #[must_use]
-    pub fn logical(&self) -> &LogicalSeries {
+    pub fn logical(&self) -> &LogicalTableFunction {
         &self.logical
     }
 }
 
-impl fmt::Display for BatchSeries {
+impl fmt::Display for BatchTableFunction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchGenerateSeries")
     }
 }
 
-impl ToDistributedBatch for BatchSeries {
+impl ToDistributedBatch for BatchTableFunction {
     fn to_distributed(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
     }
 }
 
-impl ToBatchProst for BatchSeries {
+impl ToBatchProst for BatchTableFunction {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::GenerateSeries(GenerateSeriesNode {
             series_type: self.logical.series_type.clone() as i32,
@@ -78,7 +78,7 @@ impl ToBatchProst for BatchSeries {
     }
 }
 
-impl ToLocalBatch for BatchSeries {
+impl ToLocalBatch for BatchTableFunction {
     fn to_local(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
     }

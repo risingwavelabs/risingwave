@@ -14,7 +14,6 @@
 
 mod delete;
 mod filter;
-mod generate_series;
 mod generic_exchange;
 mod hash_agg;
 mod hop_window;
@@ -27,6 +26,7 @@ mod order_by;
 mod project;
 mod row_seq_scan;
 mod sort_agg;
+mod table_function;
 #[cfg(test)]
 pub mod test_utils;
 mod top_n;
@@ -38,7 +38,6 @@ use async_recursion::async_recursion;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
-pub use generate_series::*;
 pub use generic_exchange::*;
 pub use hash_agg::*;
 pub use hop_window::*;
@@ -57,6 +56,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
+pub use table_function::*;
 pub use top_n::*;
 pub use trace::*;
 pub use update::*;

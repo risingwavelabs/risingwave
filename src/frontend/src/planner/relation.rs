@@ -20,13 +20,13 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundSeriesFunction, BoundSource, BoundWindowTableFunction,
+    BoundBaseTable, BoundJoin, BoundTableFunction, BoundSource, BoundWindowTableFunction,
     Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSeries, LogicalSource,
-    PlanRef,
+    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSource,
+    LogicalTableFunction, PlanRef,
 };
 use crate::planner::Planner;
 
@@ -91,7 +91,7 @@ impl Planner {
 
     pub(super) fn plan_generate_series_function(
         &mut self,
-        table_function: BoundSeriesFunction,
+        table_function: BoundTableFunction,
     ) -> Result<PlanRef> {
         let schema = Schema::new(vec![Field::with_name(
             table_function.data_type,
@@ -104,7 +104,7 @@ impl Planner {
             return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
         };
 
-        Ok(LogicalSeries::create_generate_series(
+        Ok(LogicalTableFunction::create_generate_series(
             start,
             stop,
             step,
@@ -115,11 +115,11 @@ impl Planner {
 
     pub(super) fn plan_unnest_series_function(
         &mut self,
-        table_function: BoundSeriesFunction,
+        table_function: BoundTableFunction,
     ) -> Result<PlanRef> {
         let schema = Schema::new(vec![Field::with_name(table_function.data_type, "unnest")]);
 
-        Ok(LogicalSeries::create_unnest(
+        Ok(LogicalTableFunction::create_unnest(
             table_function.args,
             schema,
             self.ctx(),

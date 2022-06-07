@@ -32,6 +32,21 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{BoxedDataChunkStream, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
+trait TableFunction {
+    fn eval() -> Result<DataChunk>;
+}
+
+pub struct GenerateSeries {}
+
+pub struct Unnest {}
+
+pub struct TableFunctionExecutor {
+    array_refs: Vec<ArrayRef>,
+    return_type: DataType,
+    schema: Schema,
+    identity: String,
+}
+
 pub struct GenerateSeriesExecutor<T: Array, S: Array> {
     start: T::OwnedItem,
     stop: T::OwnedItem,

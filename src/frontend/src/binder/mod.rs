@@ -35,7 +35,7 @@ pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSeriesFunction, BoundSource, BoundTableSource,
+    BoundBaseTable, BoundJoin, BoundTableFunction, BoundSource, BoundTableSource,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 pub use select::BoundSelect;

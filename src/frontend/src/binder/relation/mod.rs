@@ -28,7 +28,7 @@ mod subquery;
 mod table_or_source;
 mod window_table_function;
 
-pub use generate_series::BoundSeriesFunction;
+pub use generate_series::BoundTableFunction;
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundTableSource};
@@ -43,8 +43,8 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    GenerateSeriesFunction(Box<BoundSeriesFunction>),
-    UnnestFunction(Box<BoundSeriesFunction>),
+    GenerateSeriesFunction(Box<BoundTableFunction>),
+    UnnestFunction(Box<BoundTableFunction>),
 }
 
 impl Binder {
