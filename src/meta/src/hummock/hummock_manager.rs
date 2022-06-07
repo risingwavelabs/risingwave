@@ -581,6 +581,7 @@ where
             &current_version.levels,
             task_id as HummockCompactionTaskId,
             compaction_group_id,
+            Some(self.env.hash_mapping_manager()),
         );
         let existing_table_ids_from_meta = self.fragment_manager.existing_table_ids().await?;
         let ret = match compact_task {

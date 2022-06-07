@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_common::consistent_hash::{VirtualNode, VIRTUAL_NODE_COUNT};
-use risingwave_pb::common::ParallelUnit;
+use risingwave_pb::common::{ParallelUnit, VNodeBitmap};
 
 use super::TableId;
 use crate::cluster::ParallelUnitId;
@@ -99,6 +99,59 @@ impl HashMappingManager {
     pub fn get_need_consolidation(&self) -> bool {
         let core = self.core.lock();
         core.need_sst_consolidation
+    }
+
+    pub fn check_sst_deprecated(&self, vnode_bitmaps: &[VNodeBitmap]) -> bool {
+        let core = self.core.lock();
+        let mut unit: Option<u64> = None;
+        for vnode_bitmap in vnode_bitmaps {
+            let mut is_dummy = false;
+            if let Some(fragment_id) = core
+                .state_table_fragment_mapping
+                .get(&vnode_bitmap.get_table_id())
+            {
+                if let Some(HashMappingInfo { vnode_mapping, .. }) =
+                    core.hash_mapping_infos.get(fragment_id)
+                {
+                    let len = vnode_bitmap.get_bitmap().len();
+                    for i in 0..len {
+                        for j in 0..u8::BITS {
+                            if vnode_bitmap.get_bitmap()[i] & (1 << j) != 0 {
+                                let cur = vnode_mapping[i * u8::BITS as usize + j as usize] as u64;
+                                match unit {
+                                    Some(pre) => {
+                                        if cur != pre {
+                                            return true;
+                                        }
+                                    }
+                                    None => {
+                                        unit = Some(cur);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    is_dummy = true;
+                }
+            } else {
+                is_dummy = true;
+            }
+            if is_dummy {
+                let cur = u64::MAX;
+                match unit {
+                    Some(pre) => {
+                        if cur != pre {
+                            return true;
+                        }
+                    }
+                    None => {
+                        unit = Some(cur);
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// For test.

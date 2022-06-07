@@ -36,6 +36,7 @@ use crate::hummock::compaction::overlap_strategy::{
     HashStrategy, OverlapStrategy, RangeOverlapStrategy,
 };
 use crate::hummock::level_handler::LevelHandler;
+use crate::manager::HashMappingManager;
 
 pub struct CompactStatus {
     compaction_group_id: CompactionGroupId,
@@ -109,12 +110,13 @@ impl CompactStatus {
         levels: &[Level],
         task_id: HummockCompactionTaskId,
         compaction_group_id: CompactionGroupId,
+        hash_mapping_manager: Option<&HashMappingManager>,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
-        let ret = match self.pick_compaction(levels, task_id) {
+        let ret = match self.pick_compaction(levels, task_id, hash_mapping_manager) {
             Some(ret) => ret,
             None => return None,
         };
@@ -167,9 +169,14 @@ impl CompactStatus {
         &mut self,
         levels: &[Level],
         task_id: HummockCompactionTaskId,
+        hash_mapping_manager: Option<&HashMappingManager>,
     ) -> Option<SearchResult> {
-        self.compaction_selector
-            .pick_compaction(task_id, levels, &mut self.level_handlers)
+        self.compaction_selector.pick_compaction(
+            task_id,
+            levels,
+            &mut self.level_handlers,
+            hash_mapping_manager,
+        )
     }
 
     /// Declares a task is either finished or canceled.
