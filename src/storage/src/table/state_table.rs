@@ -15,7 +15,8 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::btree_map;
 use std::marker::PhantomData;
-use std::ops::Range;
+use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
@@ -137,11 +138,15 @@ impl<S: StateStore> StateTable<S> {
         ))
     }
 
-    pub async fn iter_with_bounds(
+    pub async fn iter_with_bounds<R, B>(
         &self,
-        pk_bounds: Range<Row>,
+        pk_bounds: R,
         epoch: u64,
-    ) -> StorageResult<impl RowStream<'_>> {
+    ) -> StorageResult<impl RowStream<'_>>
+    where
+        R: RangeBounds<B> + Send + Clone + 'static,
+        B: AsRef<Row> + Send + Clone + 'static,
+    {
         let mem_table_iter = self.mem_table.buffer.iter();
         Ok(StateTableRowIter::into_stream_with_bounds(
             &self.keyspace,
@@ -271,14 +276,17 @@ impl<S: StateStore> StateTableRowIter<S> {
     }
 
     #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
-    async fn into_stream_with_bounds<'a>(
+    async fn into_stream_with_bounds<'a, R, B>(
         keyspace: &'a Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         mem_table_iter: MemTableIter<'a>,
-        pk_bounds: Range<Row>,
+        pk_bounds: R,
         pk_serializer: Option<OrderedRowSerializer>,
         epoch: u64,
-    ) {
+    ) where
+        R: RangeBounds<B> + Send + Clone + 'static,
+        B: AsRef<Row> + Send + Clone + 'static,
+    {
         let cell_based_table_iter: futures::stream::Peekable<_> =
             CellBasedTableStreamingIter::new_with_bounds(
                 keyspace,
@@ -296,8 +304,7 @@ impl<S: StateStore> StateTableRowIter<S> {
             .map(|(k, v)| Ok::<_, StorageError>((k, v)))
             .peekable();
         let pk_serializer = pk_serializer.as_ref().expect("pk_serializer is None");
-        let start_pk_bytes = serialize_pk(&pk_bounds.start, pk_serializer).map_err(err)?;
-        let end_pk_bytes = serialize_pk(&pk_bounds.end, pk_serializer).map_err(err)?;
+
         loop {
             match (
                 cell_based_table_iter.as_mut().peek().await,
@@ -310,7 +317,26 @@ impl<S: StateStore> StateTableRowIter<S> {
                 }
                 (None, Some(_)) => {
                     let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
-                    if mem_table_pk > &start_pk_bytes && mem_table_pk < &end_pk_bytes {
+                    let start_key = match pk_bounds.start_bound() {
+                        Included(k) => {
+                            Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
+                        }
+                        Excluded(k) => {
+                            Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
+                        }
+                        Unbounded => Unbounded,
+                    };
+                    let end_key = match pk_bounds.end_bound() {
+                        Included(k) => {
+                            Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
+                        }
+                        Excluded(k) => {
+                            Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
+                        }
+                        Unbounded => Unbounded,
+                    };
+
+                    if (start_key, end_key).contains(mem_table_pk) {
                         match row_op {
                             RowOp::Insert(row) | RowOp::Update((_, row)) => {
                                 yield Cow::Borrowed(row);
@@ -324,6 +350,25 @@ impl<S: StateStore> StateTableRowIter<S> {
                     Some(Ok((cell_based_pk, cell_based_row))),
                     Some(Ok((mem_table_pk, _mem_table_row_op))),
                 ) => {
+                    let start_key = match pk_bounds.start_bound() {
+                        Included(k) => {
+                            Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
+                        }
+                        Excluded(k) => {
+                            Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
+                        }
+                        Unbounded => Unbounded,
+                    };
+                    let end_key = match pk_bounds.end_bound() {
+                        Included(k) => {
+                            Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
+                        }
+                        Excluded(k) => {
+                            Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
+                        }
+                        Unbounded => Unbounded,
+                    };
+                    // let in_range = (start_key, end_key).contains(&(*mem_table_pk).clone());
                     match cell_based_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
                             // cell_based_table_item will be return
@@ -335,7 +380,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                             // and mem_table_iter need to execute next()
                             // once.
                             let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
-                            if mem_table_pk > &start_pk_bytes && mem_table_pk < &end_pk_bytes {
+                            if (start_key, end_key).contains(mem_table_pk) {
                                 match row_op {
                                     RowOp::Insert(row) => yield Cow::Borrowed(row),
                                     RowOp::Delete(_) => {}
@@ -350,7 +395,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                         Ordering::Greater => {
                             // mem_table_item will be return
                             let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
-                            if mem_table_pk > &start_pk_bytes && mem_table_pk < &end_pk_bytes {
+                            if (start_key, end_key).contains(mem_table_pk) {
                                 match row_op {
                                     RowOp::Insert(row) => yield Cow::Borrowed(row),
                                     RowOp::Delete(_) => {}

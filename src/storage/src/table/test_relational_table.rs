@@ -1608,6 +1608,171 @@ async fn test_state_table_iter_with_bounds() {
 }
 
 #[tokio::test]
+async fn test_state_table_iter_with_unbounded_range() {
+    let state_store = MemoryStateStore::new();
+    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
+    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let pk_index = vec![0_usize, 1_usize];
+    let mut state = StateTable::new(
+        keyspace.clone(),
+        column_descs.clone(),
+        order_types.clone(),
+        None,
+        pk_index,
+    );
+    let epoch: u64 = 0;
+
+    state
+        .insert(
+            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+            Row(vec![
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            &Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
+            Row(vec![
+                Some(3_i32.into()),
+                Some(33_i32.into()),
+                Some(333_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            &Row(vec![Some(5_i32.into()), Some(55_i32.into())]),
+            Row(vec![
+                Some(5_i32.into()),
+                Some(55_i32.into()),
+                Some(555_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            &Row(vec![Some(7_i32.into()), Some(77_i32.into())]),
+            Row(vec![
+                Some(7_i32.into()),
+                Some(77_i32.into()),
+                Some(777_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state.commit(epoch).await.unwrap();
+    state
+        .insert(
+            &Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
+            Row(vec![
+                Some(4_i32.into()),
+                Some(44_i32.into()),
+                Some(444_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            &Row(vec![Some(5_i32.into()), Some(55_i32.into())]),
+            Row(vec![
+                Some(5555_i32.into()),
+                Some(5555_i32.into()),
+                Some(5555_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            &Row(vec![Some(6_i32.into()), Some(66_i32.into())]),
+            Row(vec![
+                Some(6_i32.into()),
+                Some(66_i32.into()),
+                Some(666_i32.into()),
+            ]),
+        )
+        .unwrap();
+    let epoch = u64::MAX;
+    let pk_bounds = Row(vec![Some(3_i32.into()), Some(33_i32.into())])..;
+    let iter = state.iter_with_bounds(pk_bounds, epoch).await.unwrap();
+    pin_mut!(iter);
+
+    // this row exists in cell_based_table
+    let res = iter.next().await.unwrap().unwrap();
+    assert_eq!(
+        &Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into())
+        ]),
+        res.as_ref()
+    );
+    // this row exists in mem_table
+    let res = iter.next().await.unwrap().unwrap();
+    assert_eq!(
+        &Row(vec![
+            Some(4_i32.into()),
+            Some(44_i32.into()),
+            Some(444_i32.into())
+        ]),
+        res.as_ref()
+    );
+    // this row exists in both mem_table and cell_based_table
+    let res = iter.next().await.unwrap().unwrap();
+    assert_eq!(
+        &Row(vec![
+            Some(5555_i32.into()),
+            Some(5555_i32.into()),
+            Some(5555_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    // this row exists in mem_table
+    let res = iter.next().await.unwrap().unwrap();
+    assert_eq!(
+        &Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    // this row exists in cell_based_table
+    let res = iter.next().await.unwrap().unwrap();
+    assert_eq!(
+        &Row(vec![
+            Some(7_i32.into()),
+            Some(77_i32.into()),
+            Some(777_i32.into())
+        ]),
+        res.as_ref()
+    );
+    // pk outside the range will not be scan
+    let res = iter.next().await;
+    assert!(res.is_none());
+}
+
+#[tokio::test]
 async fn test_state_table_iter_with_prefix() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
