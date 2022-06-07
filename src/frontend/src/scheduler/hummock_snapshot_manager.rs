@@ -72,19 +72,17 @@ impl HummockSnapshotManager {
                 }
             }
 
-            // Iterate for all query and calculate the min epoch.
             let mut min_epoch = None;
-            for (epoch, query_ids) in &core_guard.epoch_to_query_ids {
-                if query_ids.is_empty() {
-                    min_epoch = Some(*epoch);
-                    break;
+            if let Some((epoch, query_ids)) = core_guard.epoch_to_query_ids.first_key_value() {
+                if !query_ids.is_empty() {
+                    min_epoch = Some(*epoch)
                 }
             }
 
-            if let Some(epoch_inner) = min_epoch {
-                core_guard.epoch_to_query_ids.remove(&epoch_inner);
-                assert!(epoch_inner <= core_guard.last_pinned);
+            if let Some(min_epoch_inner) = min_epoch.as_ref() {
+                core_guard.epoch_to_query_ids.remove(min_epoch_inner);
             }
+
             min_epoch
         };
 
