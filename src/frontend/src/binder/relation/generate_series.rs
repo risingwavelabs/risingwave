@@ -22,7 +22,7 @@ use super::{Binder, Result};
 use crate::expr::{align_types, Expr as _, ExprImpl};
 
 #[derive(Debug, Clone)]
-pub struct BoundGenerateSeriesFunction {
+pub struct BoundSeriesFunction {
     pub(crate) args: Vec<ExprImpl>,
     pub(crate) data_type: DataType,
 }
@@ -31,7 +31,7 @@ impl Binder {
     pub(super) fn bind_unnest_function(
         &mut self,
         args: Vec<FunctionArg>,
-    ) -> Result<BoundGenerateSeriesFunction> {
+    ) -> Result<BoundSeriesFunction> {
         if args.len() != 1 {
             return Err(ErrorCode::BindError(
                 "the length of args of unnest function should be 1".to_string(),
@@ -57,7 +57,7 @@ impl Binder {
 
                 self.bind_context(columns, "unnest".to_string(), None)?;
 
-                Ok(BoundGenerateSeriesFunction {
+                Ok(BoundSeriesFunction {
                     args: exprs,
                     data_type,
                 })
@@ -75,7 +75,7 @@ impl Binder {
     pub(super) fn bind_generate_series_function(
         &mut self,
         args: Vec<FunctionArg>,
-    ) -> Result<BoundGenerateSeriesFunction> {
+    ) -> Result<BoundSeriesFunction> {
         let args = args.into_iter();
 
         // generate_series ( start timestamp, stop timestamp, step interval ) or
@@ -107,7 +107,7 @@ impl Binder {
 
         self.bind_context(columns, "generate_series".to_string(), None)?;
 
-        Ok(BoundGenerateSeriesFunction {
+        Ok(BoundSeriesFunction {
             args: exprs,
             data_type,
         })

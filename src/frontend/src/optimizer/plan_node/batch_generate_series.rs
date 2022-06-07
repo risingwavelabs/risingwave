@@ -26,15 +26,15 @@ use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
-pub struct BatchGenerateSeries {
+pub struct BatchSeries {
     pub base: PlanBase,
     logical: LogicalSeries,
 }
 
-impl PlanTreeNodeLeaf for BatchGenerateSeries {}
-impl_plan_tree_node_for_leaf!(BatchGenerateSeries);
+impl PlanTreeNodeLeaf for BatchSeries {}
+impl_plan_tree_node_for_leaf!(BatchSeries);
 
-impl BatchGenerateSeries {
+impl BatchSeries {
     pub fn new(logical: LogicalSeries) -> Self {
         Self::with_dist(logical, Distribution::Single)
     }
@@ -42,7 +42,7 @@ impl BatchGenerateSeries {
     pub fn with_dist(logical: LogicalSeries, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
-        BatchGenerateSeries { base, logical }
+        BatchSeries { base, logical }
     }
 
     #[must_use]
@@ -51,19 +51,19 @@ impl BatchGenerateSeries {
     }
 }
 
-impl fmt::Display for BatchGenerateSeries {
+impl fmt::Display for BatchSeries {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchGenerateSeries")
     }
 }
 
-impl ToDistributedBatch for BatchGenerateSeries {
+impl ToDistributedBatch for BatchSeries {
     fn to_distributed(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
     }
 }
 
-impl ToBatchProst for BatchGenerateSeries {
+impl ToBatchProst for BatchSeries {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::GenerateSeries(GenerateSeriesNode {
             series_type: self.logical.series_type.clone() as i32,
@@ -78,7 +78,7 @@ impl ToBatchProst for BatchGenerateSeries {
     }
 }
 
-impl ToLocalBatch for BatchGenerateSeries {
+impl ToLocalBatch for BatchSeries {
     fn to_local(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
     }

@@ -255,7 +255,7 @@ mod stream_topn;
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
-pub use batch_generate_series::BatchGenerateSeries;
+pub use batch_generate_series::BatchSeries;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
@@ -351,7 +351,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Limit }
             , { Batch, TopN }
             , { Batch, HopWindow }
-            , { Batch, GenerateSeries }
+            , { Batch, Series }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -419,7 +419,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Delete }
             , { Batch, Update }
             , { Batch, HopWindow }
-            , { Batch, GenerateSeries }
+            , { Batch, Series }
         }
     };
 }

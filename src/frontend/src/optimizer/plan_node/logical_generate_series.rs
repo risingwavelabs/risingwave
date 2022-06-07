@@ -20,7 +20,7 @@ use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::BatchGenerateSeries;
+use crate::optimizer::plan_node::BatchSeries;
 use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 /// `LogicalGenerateSeries` implements Hop Table Function.
@@ -39,7 +39,7 @@ pub enum SeriesType {
 }
 
 impl LogicalSeries {
-    /// Create a [`LogicalGenerateSeries`] node. Used internally by optimizer.
+    /// Create a [`LogicalSeries`] node. Used internally by optimizer.
     pub fn new(
         args: Vec<ExprImpl>,
         schema: Schema,
@@ -57,7 +57,7 @@ impl LogicalSeries {
         }
     }
 
-    /// Create a [`LogicalGenerateSeries`] node. Used by planner.
+    /// Create a [`LogicalSeries`] node. Used by planner.
     pub fn create_generate_series(
         start: ExprImpl,
         stop: ExprImpl,
@@ -123,7 +123,7 @@ impl PredicatePushdown for LogicalSeries {
 
 impl ToBatch for LogicalSeries {
     fn to_batch(&self) -> Result<PlanRef> {
-        Ok(BatchGenerateSeries::new(self.clone()).into())
+        Ok(BatchSeries::new(self.clone()).into())
     }
 }
 

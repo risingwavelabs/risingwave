@@ -20,7 +20,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundWindowTableFunction,
+    BoundBaseTable, BoundJoin, BoundSeriesFunction, BoundSource, BoundWindowTableFunction,
     Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
@@ -91,7 +91,7 @@ impl Planner {
 
     pub(super) fn plan_generate_series_function(
         &mut self,
-        table_function: BoundGenerateSeriesFunction,
+        table_function: BoundSeriesFunction,
     ) -> Result<PlanRef> {
         let schema = Schema::new(vec![Field::with_name(
             table_function.data_type,
@@ -115,7 +115,7 @@ impl Planner {
 
     pub(super) fn plan_unnest_series_function(
         &mut self,
-        table_function: BoundGenerateSeriesFunction,
+        table_function: BoundSeriesFunction,
     ) -> Result<PlanRef> {
         let schema = Schema::new(vec![Field::with_name(table_function.data_type, "unnest")]);
 
