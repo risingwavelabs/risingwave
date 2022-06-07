@@ -18,12 +18,11 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::{KeyRange, Level, LevelType, SstableInfo};
+use risingwave_pb::hummock::{CompactionConfig, KeyRange, Level, LevelType, SstableInfo};
 
 use super::SearchResult;
 use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::level_handler::LevelHandler;
 
 const MIN_COMPACTION_BYTES: u64 = 2 * 1024 * 1024; // 1MB
@@ -82,7 +81,8 @@ impl CompactionPicker for TierCompactionPicker {
             // files.
             while let Some(first) = select_level_inputs.first() {
                 if first.file_size * 2 > compaction_bytes
-                    && select_level_inputs.len() >= self.config.level0_tier_compact_file_number
+                    && select_level_inputs.len()
+                        >= self.config.level0_tier_compact_file_number as usize
                     && compaction_bytes > MIN_COMPACTION_BYTES
                 {
                     compaction_bytes -= first.file_size;
@@ -92,7 +92,7 @@ impl CompactionPicker for TierCompactionPicker {
                 }
             }
 
-            if select_level_inputs.len() < self.config.level0_tier_compact_file_number {
+            if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize {
                 idx = next_offset;
                 continue;
             }
@@ -104,11 +104,13 @@ impl CompactionPicker for TierCompactionPicker {
                     level_idx: 0,
                     level_type: LevelType::Overlapping as i32,
                     table_infos: select_level_inputs,
+                    total_file_size: 0,
                 },
                 target_level: Level {
                     level_idx: 0,
                     level_type: LevelType::Overlapping as i32,
                     table_infos: vec![],
+                    total_file_size: 0,
                 },
                 split_ranges: vec![],
             });
@@ -198,11 +200,14 @@ impl CompactionPicker for LevelCompactionPicker {
                 level_idx: select_level as u32,
                 level_type: LevelType::Overlapping as i32,
                 table_infos: select_level_inputs,
+                // no use
+                total_file_size: 0,
             },
             target_level: Level {
                 level_idx: target_level as u32,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: target_level_inputs,
+                total_file_size: 0,
             },
             split_ranges: splits,
         })
@@ -354,6 +359,7 @@ pub mod tests {
     use risingwave_pb::hummock::KeyRange;
 
     use super::*;
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::CompactionMode;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
@@ -378,11 +384,12 @@ pub mod tests {
     }
 
     fn create_compaction_picker_for_test() -> LevelCompactionPicker {
-        let config = Arc::new(CompactionConfig {
-            level0_tier_compact_file_number: 2,
-            min_compaction_bytes: 0,
-            ..Default::default()
-        });
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .min_compaction_bytes(0)
+                .build(),
+        );
         LevelCompactionPicker::new(0, 1, config, Arc::new(RangeOverlapStrategy::default()))
     }
 
@@ -397,6 +404,7 @@ pub mod tests {
                     generate_table(5, 1, 201, 300, 2),
                     generate_table(4, 1, 112, 200, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
@@ -407,6 +415,7 @@ pub mod tests {
                     generate_table(1, 1, 222, 300, 1),
                     generate_table(0, 1, 301, 400, 1),
                 ],
+                total_file_size: 0,
             },
         ];
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -440,7 +449,7 @@ pub mod tests {
         let picker = LevelCompactionPicker::new(
             1,
             1,
-            Arc::new(CompactionConfig::default()),
+            Arc::new(CompactionConfigBuilder::new().build()),
             Arc::new(RangeOverlapStrategy::default()),
         );
         levels[0]
@@ -450,10 +459,9 @@ pub mod tests {
         assert!(ret.is_none());
 
         // compact L0 to L0
-        let config = CompactionConfig {
-            level0_tier_compact_file_number: 2,
-            ..Default::default()
-        };
+        let config = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(2)
+            .build();
         let picker = TierCompactionPicker::new(2, Arc::new(config));
         levels[0]
             .table_infos
@@ -485,13 +493,13 @@ pub mod tests {
     #[test]
     fn test_selecting_key_range_overlap() {
         // When picking L0->L1, all L1 files overlapped with selecting_key_range should be picked.
-
-        let config = Arc::new(CompactionConfig {
-            level0_tier_compact_file_number: 2,
-            min_compaction_bytes: 0,
-            compaction_mode: CompactionMode::RangeMode,
-            ..Default::default()
-        });
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .min_compaction_bytes(0)
+                .compaction_mode(CompactionMode::Range as i32)
+                .build(),
+        );
         let picker =
             LevelCompactionPicker::new(0, 1, config, Arc::new(RangeOverlapStrategy::default()));
 
@@ -503,6 +511,7 @@ pub mod tests {
                     generate_table(1, 1, 100, 200, 2),
                     generate_table(2, 1, 400, 500, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
@@ -515,6 +524,7 @@ pub mod tests {
                     generate_table(5, 1, 250, 300, 1),
                     generate_table(6, 1, 1000, 2000, 1),
                 ],
+                total_file_size: 0,
             },
         ];
 
@@ -561,11 +571,13 @@ pub mod tests {
                     generate_table(1, 1, 100, 200, 2),
                     generate_table(2, 1, 450, 500, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![],
+                total_file_size: 0,
             },
         ];
 
@@ -597,11 +609,13 @@ pub mod tests {
                 level_idx: 0,
                 level_type: LevelType::Overlapping as i32,
                 table_infos: vec![generate_table(1, 1, 200, 250, 2)],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(2, 1, 150, 300, 2)],
+                total_file_size: 0,
             },
         ];
 
@@ -653,11 +667,13 @@ pub mod tests {
                     generate_table(1, 1, 100, 160, 2),
                     generate_table(2, 1, 190, 250, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(3, 1, 200, 300, 2)],
+                total_file_size: 0,
             },
         ];
 
@@ -691,6 +707,7 @@ pub mod tests {
                     generate_table(2, 1, 190, 250, 2),
                     generate_table(3, 1, 200, 300, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
@@ -700,6 +717,7 @@ pub mod tests {
                     generate_table(5, 1, 200, 260, 2),
                     generate_table(6, 1, 300, 600, 2),
                 ],
+                total_file_size: 0,
             },
         ];
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];

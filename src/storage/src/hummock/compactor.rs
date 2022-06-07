@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
@@ -41,7 +42,9 @@ use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType,
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::ReadOptions;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
+use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{CachePolicy, HummockError};
@@ -115,9 +118,11 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         payload: &UploadTaskPayload,
-        stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
-        let mut start_user_keys = payload.iter().map(|m| m.start_user_key()).collect_vec();
+        let mut start_user_keys = payload
+            .iter()
+            .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
+            .collect_vec();
         start_user_keys.sort();
         start_user_keys.dedup();
         let mut splits = Vec::with_capacity(start_user_keys.len());
@@ -152,11 +157,13 @@ impl Compactor {
             is_target_ultimate_and_leveling: false,
             metrics: None,
             task_status: false,
-            // TODO: get compaction group info from meta
-            prefix_pairs: vec![],
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
+            compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
         };
+
+        let sstable_store = context.sstable_store.clone();
+        let stats = context.stats.clone();
 
         let parallelism = compact_task.splits.len();
         let mut compact_success = true;
@@ -166,14 +173,17 @@ impl Compactor {
 
         let vnode2unit: Arc<HashMap<u32, Vec<u32>>> = Arc::new(HashMap::new());
 
+        let mut local_stats = StoreLocalStatistic::default();
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
-            let iter = {
-                let iters = payload.iter().map(|m| {
-                    Box::new(m.clone().into_forward_iter()) as BoxedForwardHummockIterator
-                });
-                Box::new(MergeIterator::new(iters, stats.clone()))
-            };
+            let iter = build_ordered_merge_iter::<ForwardIter>(
+                payload,
+                sstable_store.clone(),
+                stats.clone(),
+                &mut local_stats,
+                Arc::new(ReadOptions::default()),
+            )
+            .await? as BoxedForwardHummockIterator;
             let vnode2unit = vnode2unit.clone();
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
             let split_task = async move {
@@ -184,6 +194,7 @@ impl Compactor {
             let rx = Compactor::request_execution(compaction_executor, split_task)?;
             compaction_futures.push(rx);
         }
+        local_stats.report(stats.as_ref());
 
         let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
         let mut err = None;
