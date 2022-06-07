@@ -470,7 +470,9 @@ pub async fn generate_managed_agg_state<S: StateStore>(
 
         if idx == ROW_COUNT_COLUMN {
             // For the rowcount state, we should record the rowcount.
-            let output = managed_state.get_output(epoch).await?;
+            let output = managed_state
+                .get_output(epoch, &state_tables[idx])
+                .await?;
             row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
         }
 

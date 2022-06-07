@@ -81,10 +81,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(&mut self, epoch: u64) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(&mut self, epoch: u64, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output().await,
-            Self::Table(state) => state.get_output(epoch).await,
+            Self::Table(state) => state.get_output(epoch, state_table).await,
         }
     }
 
@@ -99,12 +99,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
     /// Flush the internal state to a write batch.
     pub async fn flush(
         &mut self,
-        // write_batch: &mut WriteBatch<S>,
+        write_batch: &mut WriteBatch<S>,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.flush(state_table).await,
-            Self::Table(state) => state.flush(state_table),
+            Self::Table(state) => state.flush(write_batch, state_table),
         }
     }
 

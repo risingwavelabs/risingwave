@@ -214,6 +214,10 @@ impl<S: StateStore> StateTable<S> {
         self.iter_with_encoded_key_range(encoded_key_range, epoch)
             .await
     }
+
+    pub fn pk_indices(&self) -> &[usize] {
+        &self._pk_indices
+    }
 }
 
 pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;

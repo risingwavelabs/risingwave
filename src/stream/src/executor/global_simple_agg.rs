@@ -181,7 +181,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         let states = states.as_mut().unwrap();
 
         // 2. Mark the state as dirty by filling prev states
-        states.may_mark_as_dirty(epoch).await?;
+        states
+            .may_mark_as_dirty(epoch, state_tables)
+            .await?;
 
         // 3. Apply batch to each of the state (per agg_call)
         for ((agg_state, data), state_table) in states
@@ -223,7 +225,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             .zip_eq(state_tables.iter_mut())
         {
             state
-                .flush(state_table)
+                .flush(&mut write_batch, state_table)
                 .await?;
         }
         write_batch.ingest(epoch).await?;
@@ -241,7 +243,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         // --- Retrieve modified states and put the changes into the builders ---
         states
-            .build_changes(&mut builders, &mut new_ops, epoch)
+            .build_changes(&mut builders, &mut new_ops, epoch, &state_tables)
             .await?;
 
         let columns: Vec<Column> = builders

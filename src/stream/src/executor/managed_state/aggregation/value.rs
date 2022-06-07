@@ -17,7 +17,7 @@ use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::write_batch::WriteBatch;
+
 use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
@@ -92,7 +92,7 @@ impl ManagedValueState {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    pub async fn get_output(&mut self) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(&self) -> StreamExecutorResult<Datum> {
         debug_assert!(!self.is_dirty());
         self.state.get_output()
     }

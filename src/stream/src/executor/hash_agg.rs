@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
+
 use std::marker::PhantomData;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+
+use std::sync::{Arc};
 
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
 use madsim::collections::HashMap;
-use tokio::sync::RwLock;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
@@ -33,6 +32,7 @@ use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
+use tokio::sync::RwLock;
 
 use super::{
     expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
@@ -290,7 +290,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 };
 
                 // 2. Mark the state as dirty by filling prev states
-                states.may_mark_as_dirty(epoch).await?;
+                states
+                    .may_mark_as_dirty(epoch, &*state_tables.read().await)
+                    .await?;
 
                 let mut state_tables = state_tables.write().await;
                 // 3. Apply batch to each of the state (per agg_call)
@@ -323,7 +325,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     async fn flush_data<'a>(
         &mut HashAggExecutorExtra::<S> {
             ref key_indices,
-            // ref keyspace,
+            ref keyspace,
             ref schema,
             ref mut state_tables,
             ..
@@ -332,12 +334,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         epoch: u64,
     ) {
         // The state store of each keyspace is the same so just need the first.
-        // let store = keyspace[0].state_store();
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been
         // fully flushed.
         let (write_batch, dirty_cnt) = {
-            // let mut write_batch = store.start_write_batch();
+            let mut write_batch = keyspace[0].state_store().start_write_batch();
             let mut dirty_cnt = 0;
             let mut state_tables = state_tables.write().await;
             for states in state_map.values_mut() {
@@ -351,7 +352,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .zip_eq(state_tables.iter_mut())
                     {
                         state
-                            .flush(state_table)
+                            .flush(&mut write_batch, state_table)
                             .await?;
                     }
                 }
@@ -378,7 +379,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             // for state_table in state_tables.iter_mut() {
             //     state_table.commit(epoch).await?;
             // }
-
+            let state_tables = state_tables.read().await;
             // --- Produce the stream chunk ---
             let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
             while let Some(batch) = batches.next() {
@@ -395,7 +396,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     let appended = states
                         .as_mut()
                         .unwrap()
-                        .build_changes(&mut builders[key_indices.len()..], &mut new_ops, epoch)
+                        .build_changes(
+                            &mut builders[key_indices.len()..],
+                            &mut new_ops,
+                            epoch,
+                            &state_tables,
+                        )
                         .await?;
 
                     for _ in 0..appended {

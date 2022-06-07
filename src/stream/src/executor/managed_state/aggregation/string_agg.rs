@@ -20,7 +20,7 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::ordered::{OrderedArraysSerializer, OrderedRowSerializer};
+use risingwave_common::util::ordered::{OrderedArraysSerializer};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::table::state_table::StateTable;
@@ -162,7 +162,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut StateTable<S>
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
         for sort_key_index in &self.sort_key_indices {
@@ -209,7 +209,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         Ok(())
     }
 
-    async fn get_output(&mut self, epoch: u64) -> StreamExecutorResult<Datum> {
+    async fn get_output(&mut self, epoch: u64, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
         // We allow people to get output when the data is dirty.
         // As this is easier compared to `ManagedMinState` as we have a all-or-nothing cache policy
         // here.
@@ -243,7 +243,11 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         self.dirty
     }
 
-    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+    fn flush(
+        &mut self,
+        write_batch: &mut WriteBatch<S>,
+        state_table: &mut StateTable<S>,
+    ) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             return Ok(());
         }
