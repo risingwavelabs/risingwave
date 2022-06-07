@@ -220,19 +220,14 @@ impl DataChunk {
     }
 
     pub fn from_protobuf(proto: &ProstDataChunk) -> Result<Self> {
-        if proto.columns.is_empty() {
-            // Dummy chunk, we should deserialize cardinality
-            Ok(DataChunk::new_dummy(proto.cardinality as usize))
-        } else {
-            let mut columns = vec![];
-            for any_col in proto.get_columns() {
-                let cardinality = proto.get_cardinality() as usize;
-                columns.push(Column::from_protobuf(any_col, cardinality)?);
-            }
-
-            let chunk = DataChunk::new(columns, proto.cardinality as usize);
-            Ok(chunk)
+        let mut columns = vec![];
+        for any_col in proto.get_columns() {
+            let cardinality = proto.get_cardinality() as usize;
+            columns.push(Column::from_protobuf(any_col, cardinality)?);
         }
+
+        let chunk = DataChunk::new(columns, proto.cardinality as usize);
+        Ok(chunk)
     }
 
     /// `rechunk` creates a new vector of data chunk whose size is `each_size_limit`.
