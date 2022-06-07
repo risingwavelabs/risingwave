@@ -17,9 +17,8 @@ use futures::stream::StreamExt;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
 use risingwave_common::types::DataType;
+use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::ordered::OrderedRowSerializer;
-use risingwave_common::util::ordered::serialize_pk;
 
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::StorageResult;
@@ -1431,14 +1430,15 @@ async fn test_dedup_pk_multi_cell_based_table_iter() {
         ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
     ];
 
-    let partial_row_descs = vec![
-        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
-    ];
-    let partial_row_col_ids = partial_row_descs.iter().map(|d| d.column_id).collect::<Vec<_>>();
+    let partial_row_descs = vec![ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32)];
+    let partial_row_col_ids = partial_row_descs
+        .iter()
+        .map(|d| d.column_id)
+        .collect::<Vec<_>>();
 
     // ---------- Init storage
     let state_store = MemoryStateStore::new();
-    let keyspace = Keyspace::executor_root(state_store.clone(), 0x1111);
+    let keyspace = Keyspace::table_root(state_store.clone(), &TableId::from(0x1111));
     let epoch: u64 = 0;
 
     let mut batch = keyspace.state_store().start_write_batch();
@@ -1467,13 +1467,9 @@ async fn test_dedup_pk_multi_cell_based_table_iter() {
     batch.ingest(epoch).await.unwrap();
 
     // ---------- Init reader
-    let table =
-        CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types);
+    let table = CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types);
 
-    let mut iter = table
-        .iter_with_pk(epoch, pk_descs)
-        .await
-        .unwrap();
+    let mut iter = table.iter_with_pk(epoch, pk_descs).await.unwrap();
 
     // ---------- Read + Deserialize from storage
     let res = iter.next().await.unwrap();

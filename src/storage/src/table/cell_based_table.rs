@@ -384,14 +384,8 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
     async fn next_pk_and_row(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
         loop {
             match self.iter.next().await? {
-                // This seems to short circuit??
-                None => {
-                    println!("encountered none...");
-                    return Ok(self.cell_based_row_deserializer.take())
-                },
+                None => return Ok(self.cell_based_row_deserializer.take()),
                 Some((key, value)) => {
-                    println!("encountered key: {:#?}", &key);
-                    println!("encountered value: {:#?}", &value);
                     tracing::trace!(
                         target: "events::storage::CellBasedTable::scan",
                         "CellBasedTable scanned key = {:?}, value = {:?}",
