@@ -1442,9 +1442,8 @@ async fn test_dedup_pk_multi_cell_based_table_iter_with(
     let mut cell_based_row_serializer = CellBasedRowSerializer::new();
     let ordered_row_serializer = OrderedRowSerializer::new(order_types.clone());
 
-    // ---------- Init reader
+    // ---------- Init table for writes
     let table = CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types);
-    let mut iter = table.iter_with_pk(epoch, pk_ordered_descs).await.unwrap();
 
     for Row(row) in rows.clone() {
         // ---------- Serialize to cell repr
@@ -1452,6 +1451,7 @@ async fn test_dedup_pk_multi_cell_based_table_iter_with(
             .iter()
             .map(|row_idx| row[*row_idx].clone())
             .collect_vec());
+        println!("{:#?}", pk);
         let pk_bytes = serialize_pk(&pk, &ordered_row_serializer).unwrap();
 
         let partial_row = Row(row
@@ -1460,6 +1460,8 @@ async fn test_dedup_pk_multi_cell_based_table_iter_with(
             .filter(|(i, _)| !pk_indices_set.contains(i))
             .map(|(_, row_datum)| row_datum.clone())
             .collect_vec());
+        println!("{:#?}", partial_row);
+        println!("{:#?}", partial_row_col_ids);
 
         let bytes = cell_based_row_serializer
             .serialize(&pk_bytes, partial_row, &partial_row_col_ids)
@@ -1474,6 +1476,8 @@ async fn test_dedup_pk_multi_cell_based_table_iter_with(
     // commit batch
     batch.ingest(epoch).await.unwrap();
 
+    // ---------- Init reader
+    let mut iter = table.iter_with_pk(epoch, pk_ordered_descs).await.unwrap();
     for expected in rows {
         // ---------- Read + Deserialize from storage
         let actual = iter.next().await.unwrap();
