@@ -24,7 +24,7 @@ use super::{BoxedExecutor, Executor, Message};
 pub struct SinkExecutor<S: Sink> {
     child: BoxedExecutor,
     external_sink: S,
-    identity: String
+    identity: String,
 }
 
 impl<S: Sink> SinkExecutor<S> {
@@ -32,7 +32,7 @@ impl<S: Sink> SinkExecutor<S> {
         Self {
             child: materialize_executor,
             external_sink,
-            identity: "SinkExecutor".to_string()
+            identity: "SinkExecutor".to_string(),
         }
     }
 
@@ -43,7 +43,7 @@ impl<S: Sink> SinkExecutor<S> {
         for msg in input {
             let msg = msg?;
 
-                self.external_sink.write_batch();
+            self.external_sink.write_batch();
         }
     }
 }
@@ -69,33 +69,25 @@ impl<S: Sink + 'static + Send> Executor for SinkExecutor<S> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::{Row, StreamChunk};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::types::DataType;
-
-    use super::SinkExecutor;
-    use crate::executor::{Barrier, Message, PkIndices};
-    use crate::task::LocalBarrierManager;
-
-    use risingwave_common::array::Row;
-    use risingwave_common::catalog::TableId;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::cell_based_table::CellBasedTable;
     use risingwave_storage::Keyspace;
 
+    use super::{SinkExecutor, *};
     use crate::executor::test_utils::*;
-    use crate::executor::*;
+    use crate::executor::{Barrier, Message, PkIndices, *};
+    use crate::task::LocalBarrierManager;
 
     // TODO: This basic test for the most part is a copy-paste from the `MaterializeExecutor`
     // fn test_materialize_executor(). Should be replaced by a better test eventually
     #[tokio::test]
     async fn test_basic() {
-        
         // Prepare storage and memtable.
         let memory_state_store = MemoryStateStore::new();
         let table_id = TableId::new(1);
@@ -152,6 +144,5 @@ mod test {
         let sink = Box::new(SinkExecutor::new(materialize_executor, mysqlsink));
 
         sink.execute();
-
     }
 }
