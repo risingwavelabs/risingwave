@@ -2226,6 +2226,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.7.6"
+source = "git+https://github.com/singularity-data/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
+dependencies = [
+ "hashbrown 0.11.2",
+]
+
+[[package]]
 name = "lz4"
 version = "1.23.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2486,6 +2494,12 @@ name = "more-asserts"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7843ec2de400bcbc6a6328c958dc38e5359da6e93e72e37bc5246bf1ae776389"
+
+[[package]]
+name = "moveit"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "815d5988a1dd22f08bad572a83ee654563bb422ece5d5bce41f31ec49399dcb5"
 
 [[package]]
 name = "multimap"
@@ -3692,7 +3706,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "lru",
+ "lru 0.7.6 (git+https://github.com/singularity-data/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30)",
  "madsim",
  "madsim-tokio",
  "madsim-tonic",
@@ -3889,7 +3903,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "lru",
+ "lru 0.7.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "madsim",
  "madsim-tokio",
  "madsim-tonic",
@@ -4316,9 +4330,11 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "moveit",
  "num-traits",
  "parking_lot",
  "paste",
+ "pin-project",
  "prometheus",
  "prost",
  "rdkafka",
@@ -4334,6 +4350,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "stats_alloc",
  "thiserror",
  "tokio-stream",
  "tower",
@@ -4739,6 +4756,13 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "stats_alloc"
+version = "0.1.8"
+dependencies = [
+ "workspace-hack",
+]
 
 [[package]]
 name = "stringprep"
