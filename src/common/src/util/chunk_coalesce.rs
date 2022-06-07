@@ -62,12 +62,14 @@ impl DataChunkBuilder {
     }
 
     fn ensure_builders(&mut self) -> Result<()> {
-        if self.buffered_count == 0 && self.array_builders.is_empty() {
+        if self.array_builders.len() != self.data_types.len() {
             self.array_builders = self
                 .data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(self.batch_size))
                 .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+
+            ensure!(self.buffered_count == 0);
         }
 
         Ok(())
