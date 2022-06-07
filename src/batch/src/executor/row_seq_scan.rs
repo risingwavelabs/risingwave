@@ -16,8 +16,9 @@ use futures_async_stream::try_stream;
 // limitations under the License.
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_storage::table::cell_based_table::{
@@ -104,7 +105,10 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
         let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().pk;
-        let pk_descs = pk_descs_proto.iter().map(|d| d.into()).collect();
+        let pk_descs: Vec<OrderedColumnDesc> = pk_descs_proto.iter().map(|d| d.into()).collect();
+        let ordered_row_serializer =
+            OrderedRowSerializer::new(pk_descs.iter().map(|desc| desc.order).collect());
+
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
         let pk_prefix_value = Row(scan_range
             .eq_conds
@@ -116,7 +120,13 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
             let storage_stats = state_store.stats();
             let batch_stats = source.context().stats();
-            let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
+            let table = CellBasedTable::new(
+                keyspace,
+                column_descs,
+                Some(ordered_row_serializer),
+                storage_stats,
+                None,
+            );
 
             let scan_type = if pk_prefix_value.size() == 0 && scan_range.range.is_none() {
                 let iter = table.iter_with_pk(source.epoch, pk_descs).await?;
