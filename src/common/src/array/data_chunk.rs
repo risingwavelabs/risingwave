@@ -299,7 +299,6 @@ impl DataChunk {
         if chunks.is_empty() {
             return Ok(Vec::new());
         }
-        assert!(!chunks[0].columns.is_empty());
 
         let mut total_capacity = chunks
             .iter()
@@ -319,6 +318,7 @@ impl DataChunk {
             .iter()
             .map(|col| col.array_ref().create_builder(new_chunk_require))
             .try_collect()?;
+        let mut array_len = new_chunk_require;
         let mut new_chunks = Vec::with_capacity(num_chunks);
         while chunk_idx < chunks.len() {
             let capacity = chunks[chunk_idx].capacity();
@@ -361,10 +361,11 @@ impl DataChunk {
                     .map(|col_type| col_type.array_ref().create_builder(new_chunk_require))
                     .try_collect()?;
 
-                let data_chunk = DataChunk::builder().columns(new_columns).build();
+                let data_chunk = DataChunk::new(new_columns, array_len);
                 new_chunks.push(data_chunk);
 
                 new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
+                array_len = new_chunk_require;
             }
         }
 
