@@ -49,5 +49,5 @@ pub struct KinesisProperties {
     #[serde(rename = "kinesis.assumerole.arn")]
     pub assume_role_arn: Option<String>,
     #[serde(rename = "kinesis.assumerole.external_id")]
-    pub assume_role_externeal_id: Option<String>,
+    pub assume_role_external_id: Option<String>,
 }

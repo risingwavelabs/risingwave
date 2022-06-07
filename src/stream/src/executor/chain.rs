@@ -134,6 +134,7 @@ impl Executor for ChainExecutor {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use futures::StreamExt;
@@ -144,7 +145,7 @@ mod test {
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Barrier, Executor, Message, PkIndices};
+    use crate::executor::{ActorInfo, Barrier, Executor, Message, Mutation, PkIndices};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
@@ -166,7 +167,19 @@ mod test {
             schema.clone(),
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(
+                    Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput({
+                        let mut actors = HashMap::default();
+                        actors.insert(
+                            (0, 233),
+                            vec![ActorInfo {
+                                actor_id: 0,
+                                host: None,
+                            }],
+                        );
+                        actors
+                    })),
+                ),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
             ],
@@ -179,11 +192,13 @@ mod test {
         let chain = ChainExecutor::new(first, second, vec![0], progress, schema);
 
         let mut chain = Box::new(chain).execute();
+        chain.next().await;
 
         let mut count = 0;
         while let Some(Message::Chunk(ck)) = chain.next().await.transpose().unwrap() {
             count += 1;
             assert_eq!(ck, StreamChunk::from_pretty(&format!("I\n + {count}")));
         }
+        assert_eq!(count, 4);
     }
 }
