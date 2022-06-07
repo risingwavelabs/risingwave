@@ -497,6 +497,27 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         Ok(iter)
     }
 
+    pub async fn new_with_prefix(
+        keyspace: &Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        pk_prefix: Row,
+        prefix_serializer: OrderedRowSerializer,
+        epoch: u64,
+    ) -> StorageResult<Self> {
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
+
+        let start_key_with_prefix =
+            keyspace.prefixed_key(&serialize_pk(&pk_prefix, &prefix_serializer).map_err(err)?);
+        let range = start_key_with_prefix.clone()..next_key(start_key_with_prefix.as_slice());
+
+        let iter = keyspace.iter_with_range(range, epoch).await?;
+        let iter = Self {
+            iter,
+            cell_based_row_deserializer,
+        };
+        Ok(iter)
+    }
+
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     pub async fn into_stream(mut self) {
