@@ -108,10 +108,12 @@ where
                     })?;
             }
             FeMessage::Startup(msg) => {
-                self.process_startup_msg(msg).map_err(|e| {
+                if let Err(e) = self.process_startup_msg(msg) {
                     tracing::error!("failed to set up pg session: {}", e);
-                    e
-                })?;
+                    self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(e)))?;
+                    self.flush().await?;
+                    return Ok(true);
+                }
                 self.state = PgProtocolState::Regular;
             }
             FeMessage::Query(query_msg) => {
@@ -163,9 +165,14 @@ where
         }
     }
 
-    fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
-        // TODO: Replace `DEFAULT_DATABASE_NAME` with true database name in `FeStartupMessage`.
-        self.session = Some(self.session_mgr.connect("dev").map_err(IoError::other)?);
+    fn process_startup_msg(&mut self, msg: FeStartupMessage) -> Result<()> {
+        let db_name = {
+            match msg.config.get("database") {
+                None => "dev".to_string(),
+                Some(v) => v.to_string(),
+            }
+        };
+        self.session = Some(self.session_mgr.connect(&db_name).map_err(IoError::other)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ClientEncoding("utf8"),

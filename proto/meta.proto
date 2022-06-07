@@ -54,6 +54,7 @@ message TableFragments {
   uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
   map<uint32, ActorStatus> actor_status = 3;
+  repeated uint32 internal_table_ids = 4;
 }
 
 // TODO: remove this when dashboard refactored.
