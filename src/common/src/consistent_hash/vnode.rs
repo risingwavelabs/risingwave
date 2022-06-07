@@ -46,3 +46,67 @@ impl VNodeBitmap {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use itertools::Itertools;
+    use risingwave_pb::common::VNodeBitmap as ProstBitmap;
+
+    use super::*;
+
+    #[test]
+    fn test_check_overlap() {
+        // The bitmap is for table with id 3, and owns vnodes from 64 to 128.
+        let table_id = 3;
+        let mut bitmap = [0; VNODE_BITMAP_LEN].to_vec();
+        for byte in bitmap.iter_mut().take(16).skip(8) {
+            *byte = 0b11111111;
+        }
+        let vnode_bitmap = VNodeBitmap::new(table_id, bitmap);
+
+        // Test overlap.
+        let bitmaps_1 = (2..4)
+            .map(|table_id| {
+                let mut test_bitmap = [0; VNODE_BITMAP_LEN].to_vec();
+                test_bitmap[10] = 0b1;
+                ProstBitmap {
+                    table_id,
+                    bitmap: test_bitmap,
+                }
+            })
+            .collect_vec();
+        assert!(vnode_bitmap.check_overlap(&bitmaps_1));
+
+        // Test non-overlap with same table id.
+        let bitmaps_2 = (2..4)
+            .map(|table_id| {
+                let mut test_bitmap = [0; VNODE_BITMAP_LEN].to_vec();
+                test_bitmap[20] = 0b1;
+                ProstBitmap {
+                    table_id,
+                    bitmap: test_bitmap,
+                }
+            })
+            .collect_vec();
+        assert!(!vnode_bitmap.check_overlap(&bitmaps_2));
+
+        // Test non-overlap with different table ids and same vnodes.
+        let bitmaps_3 = (4..6)
+            .map(|table_id| {
+                let mut test_bitmap = [0; VNODE_BITMAP_LEN].to_vec();
+                for byte in test_bitmap.iter_mut().take(16).skip(8) {
+                    *byte = 0b11111111;
+                }
+                ProstBitmap {
+                    table_id,
+                    bitmap: test_bitmap,
+                }
+            })
+            .collect_vec();
+        assert!(!vnode_bitmap.check_overlap(&bitmaps_3));
+
+        // Test empty
+        assert!(vnode_bitmap.check_overlap(&[]));
+    }
+}
