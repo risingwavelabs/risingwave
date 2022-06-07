@@ -66,6 +66,10 @@ REVOKE ALL ON DATABASE db1 FROM user1;
 statement ok
 DROP SCHEMA db1.schema1;
 
+# Drop schema
+statement ok
+DROP SCHEMA db1.dev;
+
 # Drop database
 statement ok
 DROP DATABASE db1;
