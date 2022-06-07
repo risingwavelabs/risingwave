@@ -117,7 +117,10 @@ impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
     /// Otherwise, only `keyspace` key is pushed.
     fn do_push(&mut self, key: Option<&[u8]>, value: StorageValue) {
         let key = match key {
-            Some(key) => self.keyspace.prefixed_key(key),
+            Some(key) => {
+                println!("key is valid and being pushed");
+                self.keyspace.prefixed_key(key)
+            }
             None => self.keyspace.key().to_vec(),
         }
         .into();

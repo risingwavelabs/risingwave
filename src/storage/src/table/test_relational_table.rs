@@ -1406,6 +1406,11 @@ async fn test_multi_cell_based_table_iter() {
 // TODO: serialize pk, store with dedup.
 // Test backwards compat: can decode with normal input,
 // but can also decode with new representation.
+// Test pk fields not in sequence in original row.
+// e.g.
+// pk          := | name | age  |
+// row         := | name | addr | age |
+// partial row := | addr |
 async fn test_dedup_pk_multi_cell_based_table_iter() {
     // ---------- Declare meta
     let pk_descs = vec![
@@ -1419,6 +1424,12 @@ async fn test_dedup_pk_multi_cell_based_table_iter() {
         },
     ];
     let order_types = pk_descs.iter().map(|d| d.order).collect::<Vec<_>>();
+
+    let row_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
+    ];
 
     let partial_row_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
@@ -1437,7 +1448,7 @@ async fn test_dedup_pk_multi_cell_based_table_iter() {
     let mut cell_based_row_serializer = CellBasedRowSerializer::new();
     let ordered_row_serializer = OrderedRowSerializer::new(order_types.clone());
 
-    // ---------- Serialize + Write to storage
+    // ---------- Serialize to cell repr
     let pk = Row(vec![Some(1_i32.into()), Some(11_i32.into())]);
     let pk_bytes = serialize_pk(&pk, &ordered_row_serializer).unwrap();
 
@@ -1447,13 +1458,17 @@ async fn test_dedup_pk_multi_cell_based_table_iter() {
         .serialize(&pk_bytes, row, &partial_row_col_ids)
         .unwrap();
 
+    // ---------- Write to storage
+    // write into batch
     for (key, value) in bytes {
         local.put(key, StorageValue::new_put(ValueMeta::default(), value))
     }
+    // commit batch
+    batch.ingest(epoch).await.unwrap();
 
     // ---------- Init reader
     let table =
-        CellBasedTable::new_for_test(keyspace.clone(), partial_row_descs, order_types);
+        CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types);
 
     let mut iter = table
         .iter_with_pk(epoch, pk_descs)
