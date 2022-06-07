@@ -140,6 +140,9 @@ message CompactTask {
   repeated common.ParallelUnitMapping vnode_mappings = 11;
   // compaction group the task belongs to
   uint64 compaction_group_id = 12;
+  
+  // exist_table_id for compaction drop key
+  repeated uint32 exist_table_id = 13;
 }
 
 message LevelHandler {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -26,7 +26,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
+use risingwave_hummock_sdk::key::{get_epoch, get_table_id, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
 use risingwave_pb::common::VNodeBitmap;
@@ -161,6 +161,7 @@ impl Compactor {
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
+            exist_table_id: vec![],
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -482,12 +483,15 @@ impl Compactor {
         } else {
             self.context.stats.compact_sst_duration.start_timer()
         };
+
+        let exist_table_id_set = HashSet::from_iter(self.compact_task.exist_table_id.clone());
         Compactor::compact_and_build_sst(
             &mut builder,
             kr,
             iter,
             !self.compact_task.is_target_ultimate_and_leveling,
             self.compact_task.watermark,
+            exist_table_id_set,
         )
         .await?;
         let builder_len = builder.len();
@@ -722,6 +726,7 @@ impl Compactor {
         mut iter: BoxedForwardHummockIterator,
         has_user_key_overlap: bool,
         watermark: Epoch,
+        exist_table_id: HashSet<u32>,
     ) -> HummockResult<()>
     where
         B: Clone + Fn() -> F,
@@ -764,15 +769,27 @@ impl Compactor {
             }
 
             let epoch = get_epoch(iter_key);
+            let table_id_option = get_table_id(iter_key);
 
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
             // and the latest key which satisfies `epoch` < `watermark`
+            let mut drop = false;
             if epoch < watermark {
                 skip_key = BytesMut::from(iter_key);
                 if iter.value().is_delete() && !has_user_key_overlap {
-                    iter.next().await?;
-                    continue;
+                    // iter.next().await?;
+                    // continue;
+                    drop = true;
                 }
+            } else if let Some(table_id) = table_id_option {
+                if !exist_table_id.contains(&table_id) {
+                    drop = true;
+                }
+            }
+
+            if drop {
+                iter.next().await?;
+                continue;
             }
 
             // Don't allow two SSTs to share same user key
