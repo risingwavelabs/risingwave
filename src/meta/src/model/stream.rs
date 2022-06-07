@@ -37,6 +37,9 @@ const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 /// `table_id` => `TableFragments`.
 #[derive(Debug, Clone)]
 pub struct TableFragments {
+    /// Sequence number
+    pub(crate) seq: u64,
+
     /// The table id.
     table_id: TableId,
 
@@ -60,6 +63,7 @@ impl MetadataModel for TableFragments {
 
     fn to_protobuf(&self) -> Self::ProstType {
         Self::ProstType {
+            seq: self.seq,
             table_id: self.table_id.table_id(),
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
@@ -69,6 +73,7 @@ impl MetadataModel for TableFragments {
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
         Self {
+            seq: prost.seq,
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
@@ -88,6 +93,7 @@ impl TableFragments {
         internal_table_id_set: HashSet<u32>,
     ) -> Self {
         Self {
+            seq: 0,
             table_id,
             fragments,
             actor_status: BTreeMap::default(),

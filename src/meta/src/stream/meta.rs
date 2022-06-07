@@ -90,11 +90,12 @@ where
         Ok(map.values().cloned().collect())
     }
 
-    pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+    pub async fn update_table_fragments(&self, mut table_fragment: TableFragments) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
         match map.entry(table_fragment.table_id()) {
             Entry::Occupied(mut entry) => {
+                table_fragment.seq = entry.get().seq + 1;
                 table_fragment.insert(&*self.meta_store).await?;
                 entry.insert(table_fragment);
 
@@ -124,7 +125,10 @@ where
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
     /// state is `ActorState::Inactive`.
-    pub async fn start_create_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+    pub async fn start_create_table_fragments(
+        &self,
+        mut table_fragment: TableFragments,
+    ) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
         match map.entry(table_fragment.table_id()) {
@@ -133,6 +137,7 @@ where
                 table_fragment.table_id()
             )))),
             Entry::Vacant(v) => {
+                table_fragment.seq = 1;
                 table_fragment.insert(&*self.meta_store).await?;
                 v.insert(table_fragment);
                 Ok(())
