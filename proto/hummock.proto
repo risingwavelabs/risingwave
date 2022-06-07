@@ -32,6 +32,7 @@ message Level {
   uint32 level_idx = 1;
   LevelType level_type = 2;
   repeated SstableInfo table_infos = 3;
+  uint64 total_file_size = 4;
 }
 
 message UncommittedEpoch {
@@ -145,6 +146,7 @@ message LevelHandler {
   message SstTask {
     uint64 task_id = 1;
     repeated uint64 ssts = 2;
+    uint64 total_file_size = 3;
   }
   uint32 level = 1;
   repeated SstTask tasks = 3;

@@ -577,30 +577,22 @@ where
         }
     }
 
-    pub async fn list_tables(
-        &self,
-        database_id: DatabaseId,
-        schema_id: SchemaId,
-    ) -> Result<Vec<TableId>> {
+    pub async fn list_tables(&self, schema_id: SchemaId) -> Result<Vec<TableId>> {
         let core = self.core.lock().await;
         let tables = Table::list(core.env.meta_store()).await?;
         Ok(tables
             .iter()
-            .filter(|t| t.database_id == database_id && t.schema_id == schema_id)
+            .filter(|t| t.schema_id == schema_id)
             .map(|t| t.id)
             .collect())
     }
 
-    pub async fn list_sources(
-        &self,
-        database_id: DatabaseId,
-        schema_id: SchemaId,
-    ) -> Result<Vec<SourceId>> {
+    pub async fn list_sources(&self, schema_id: SchemaId) -> Result<Vec<SourceId>> {
         let core = self.core.lock().await;
         let sources = Source::list(core.env.meta_store()).await?;
         Ok(sources
             .iter()
-            .filter(|s| s.database_id == database_id && s.schema_id == schema_id)
+            .filter(|s| s.schema_id == schema_id)
             .map(|s| s.id)
             .collect())
     }

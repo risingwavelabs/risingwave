@@ -230,6 +230,7 @@ where
                     level_idx: 0,
                     level_type: LevelType::Overlapping as i32,
                     table_infos: vec![],
+                    total_file_size: 0,
                 }],
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
@@ -239,6 +240,7 @@ where
                     level_idx: (l + 1) as u32,
                     level_type: LevelType::Nonoverlapping as i32,
                     table_infos: vec![],
+                    total_file_size: 0,
                 });
             }
             init_version.insert(self.env.meta_store()).await?;
@@ -820,28 +822,30 @@ where
         // the meta store transaction. To avoid etcd errors if the aforementioned case
         // happens, we temporarily set a large value for etcd's max-txn-ops. But we need to
         // formally fix this because the performance degradation is not acceptable anyway.
-        for sst_id in sstables.iter().map(|s| s.id) {
-            match sstable_id_infos.get_mut(&sst_id) {
+        let mut total_files_size = 0;
+        for sst in &sstables {
+            match sstable_id_infos.get_mut(&sst.id) {
                 None => {
                     return Err(Error::InternalError(format!(
                         "Invalid SST id {}, may have been vacuumed",
-                        sst_id
+                        sst.id
                     )));
                 }
                 Some(sst_id_info) => {
                     if sst_id_info.meta_delete_timestamp != INVALID_TIMESTAMP {
                         return Err(Error::InternalError(format!(
                             "SST id {} has been marked for vacuum",
-                            sst_id
+                            sst.id
                         )));
                     }
                     if sst_id_info.meta_create_timestamp != INVALID_TIMESTAMP {
                         return Err(Error::InternalError(format!(
                             "SST id {} has been committed",
-                            sst_id
+                            sst.id
                         )));
                     }
                     sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
+                    total_files_size += sst.file_size;
                 }
             }
         }
@@ -857,6 +861,7 @@ where
             LevelType::Overlapping as i32
         );
         version_first_level.table_infos.extend(sstables);
+        version_first_level.total_file_size += total_files_size;
         new_hummock_version.max_committed_epoch = epoch;
         commit_multi_var!(
             self,

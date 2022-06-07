@@ -104,11 +104,13 @@ impl CompactionPicker for TierCompactionPicker {
                     level_idx: 0,
                     level_type: LevelType::Overlapping as i32,
                     table_infos: select_level_inputs,
+                    total_file_size: 0,
                 },
                 target_level: Level {
                     level_idx: 0,
                     level_type: LevelType::Overlapping as i32,
                     table_infos: vec![],
+                    total_file_size: 0,
                 },
                 split_ranges: vec![],
             });
@@ -198,11 +200,14 @@ impl CompactionPicker for LevelCompactionPicker {
                 level_idx: select_level as u32,
                 level_type: LevelType::Overlapping as i32,
                 table_infos: select_level_inputs,
+                // no use
+                total_file_size: 0,
             },
             target_level: Level {
                 level_idx: target_level as u32,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: target_level_inputs,
+                total_file_size: 0,
             },
             split_ranges: splits,
         })
@@ -399,6 +404,7 @@ pub mod tests {
                     generate_table(5, 1, 201, 300, 2),
                     generate_table(4, 1, 112, 200, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
@@ -409,6 +415,7 @@ pub mod tests {
                     generate_table(1, 1, 222, 300, 1),
                     generate_table(0, 1, 301, 400, 1),
                 ],
+                total_file_size: 0,
             },
         ];
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -504,6 +511,7 @@ pub mod tests {
                     generate_table(1, 1, 100, 200, 2),
                     generate_table(2, 1, 400, 500, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
@@ -516,6 +524,7 @@ pub mod tests {
                     generate_table(5, 1, 250, 300, 1),
                     generate_table(6, 1, 1000, 2000, 1),
                 ],
+                total_file_size: 0,
             },
         ];
 
@@ -562,11 +571,13 @@ pub mod tests {
                     generate_table(1, 1, 100, 200, 2),
                     generate_table(2, 1, 450, 500, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![],
+                total_file_size: 0,
             },
         ];
 
@@ -598,11 +609,13 @@ pub mod tests {
                 level_idx: 0,
                 level_type: LevelType::Overlapping as i32,
                 table_infos: vec![generate_table(1, 1, 200, 250, 2)],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(2, 1, 150, 300, 2)],
+                total_file_size: 0,
             },
         ];
 
@@ -654,11 +667,13 @@ pub mod tests {
                     generate_table(1, 1, 100, 160, 2),
                     generate_table(2, 1, 190, 250, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(3, 1, 200, 300, 2)],
+                total_file_size: 0,
             },
         ];
 
@@ -692,6 +707,7 @@ pub mod tests {
                     generate_table(2, 1, 190, 250, 2),
                     generate_table(3, 1, 200, 300, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
@@ -701,6 +717,7 @@ pub mod tests {
                     generate_table(5, 1, 200, 260, 2),
                     generate_table(6, 1, 300, 600, 2),
                 ],
+                total_file_size: 0,
             },
         ];
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
