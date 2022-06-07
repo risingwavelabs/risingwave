@@ -51,7 +51,8 @@ where
     T::OwnedItem: PartialOrd<T::OwnedItem>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
 {
-    fn eval(self) -> Result<DataChunk> {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn eval(self) {
         let Self {
             start, stop, step, ..
         } = self;
@@ -60,17 +61,25 @@ where
         let mut cur = start;
 
         // Simulate a do-while loop.
-        let chunk_size = DEFAULT_CHUNK_BUFFER_SIZE;
-        let mut builder = T::Builder::new(chunk_size)?;
         while cur <= stop {
-            builder.append(Some(cur.as_scalar_ref())).unwrap();
-            cur = cur.checked_add(step.as_scalar_ref())?;
+            let chunk_size = DEFAULT_CHUNK_BUFFER_SIZE;
+            let mut builder = T::Builder::new(chunk_size)?;
+
+            for _ in 0..chunk_size {
+                if cur > stop {
+                    break;
+                }
+                builder.append(Some(cur.as_scalar_ref())).unwrap();
+                cur = cur.checked_add(step.as_scalar_ref())?;
+            }
+
+            let arr = builder.finish()?;
+            let len = arr.len();
+            let columns = vec![Column::new(Arc::new(arr.into()))];
+            let chunk: DataChunk = DataChunk::new(columns, len);
+
+            yield chunk;
         }
-        let arr = builder.finish()?;
-        let len = arr.len();
-        let columns = vec![Column::new(Arc::new(arr.into()))];
-        let chunk: DataChunk = DataChunk::new(columns, len);
-        Ok(chunk)
     }
 }
 
@@ -80,7 +89,8 @@ pub struct Unnest {
 }
 
 impl Unnest {
-    fn eval(self) -> Result<DataChunk> {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn eval(self) {
         let mut builder = self
             .return_type
             .create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE)?;
@@ -92,7 +102,7 @@ impl Unnest {
         let columns = vec![Column::new(Arc::new(arr))];
         let chunk: DataChunk = DataChunk::new(columns, len);
 
-        Ok(chunk)
+        yield chunk;
     }
 }
 
@@ -114,17 +124,10 @@ impl Executor for TableFunctionExecutor {
     }
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute()
-    }
-}
-
-impl TableFunctionExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(self: Box<Self>) {
         match self.table_function {
-            TableFunction::GenerateSeriesTime(gs) => yield gs.eval()?,
-            TableFunction::GenerateSeriesInt(gs) => yield gs.eval()?,
-            TableFunction::Unnest(us) => yield us.eval()?,
+            TableFunction::GenerateSeriesTime(gs) => gs.eval(),
+            TableFunction::GenerateSeriesInt(gs) => gs.eval(),
+            TableFunction::Unnest(us) => us.eval(),
         }
     }
 }
