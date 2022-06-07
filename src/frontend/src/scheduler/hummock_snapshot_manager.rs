@@ -76,7 +76,7 @@ impl HummockSnapshotManager {
             // epoch to be unpin.
             let mut min_epoch = None;
             if let Some((epoch, query_ids)) = core_guard.epoch_to_query_ids.first_key_value() {
-                if !query_ids.is_empty() {
+                if query_ids.is_empty() {
                     min_epoch = Some(*epoch)
                 }
             }
@@ -93,6 +93,7 @@ impl HummockSnapshotManager {
         if let Some(epoch_inner) = need_to_request_meta {
             let meta_client = self.meta_client.clone();
             tokio::spawn(async move {
+                tracing::info!("Unpin epoch {:?} with RPC", epoch_inner);
                 let handle =
                     tokio::spawn(
                         async move { meta_client.unpin_snapshot_before(epoch_inner).await },
