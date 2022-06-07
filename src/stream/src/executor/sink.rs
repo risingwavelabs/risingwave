@@ -16,6 +16,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_connector::sink::{MySQLSink, Sink};
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, Message};
@@ -24,34 +25,6 @@ pub struct SinkExecutor<S: Sink> {
     child: BoxedExecutor,
     external_sink: S,
     identity: String
-}
-
-pub trait Sink {
-    fn write_batch(&mut self);
-}
-
-// Primitive design of MySQLSink
-#[allow(dead_code)]
-pub struct MySQLSink {
-    endpoint: String,
-    table: String,
-    database: String,
-    user: String,
-    password: String,
-}
-
-impl Sink for MySQLSink {
-    fn write_batch(&mut self) {
-        todo!();
-    }
-}
-
-pub struct RedisSink;
-
-impl Sink for RedisSink {
-    fn write_batch(&mut self) {
-        todo!();
-    }
 }
 
 impl<S: Sink> SinkExecutor<S> {
