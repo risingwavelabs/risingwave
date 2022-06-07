@@ -122,6 +122,7 @@ impl<S: StateStore> SourceStateHandler<S> {
 mod tests {
     use itertools::Itertools;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_common::catalog::TableId;
 
     use super::*;
 
@@ -173,7 +174,7 @@ mod tests {
 
     fn new_test_keyspace() -> Keyspace<MemoryStateStore> {
         let test_mem_state_store = MemoryStateStore::new();
-        Keyspace::executor_root(test_mem_state_store, 1)
+        Keyspace::table_root(test_mem_state_store, &TableId::from(1))
     }
 
     fn test_state_store_vec() -> Vec<TestSourceState> {
