@@ -17,19 +17,24 @@ use anyhow::Result;
 use super::{ExecuteContext, Task};
 
 pub struct ConfigureGrpcNodeTask {
+    advertise_address: String,
     port: u16,
     user_managed: bool,
 }
 
 impl ConfigureGrpcNodeTask {
-    pub fn new(port: u16, user_managed: bool) -> Result<Self> {
-        Ok(Self { port, user_managed })
+    pub fn new(advertise_address: String, port: u16, user_managed: bool) -> Result<Self> {
+        Ok(Self {
+            advertise_address,
+            port,
+            user_managed,
+        })
     }
 }
 
 impl Task for ConfigureGrpcNodeTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
-        let address = format!("127.0.0.1:{}", self.port);
+        let address = format!("{}:{}", self.advertise_address, self.port);
 
         if self.user_managed {
             ctx.pb.set_message(
