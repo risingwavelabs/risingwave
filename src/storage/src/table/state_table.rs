@@ -19,6 +19,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
@@ -26,6 +27,7 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_hummock_sdk::key::next_key;
 
 use super::cell_based_table::{CellBasedTable, CellBasedTableStreamingIter};
 use super::mem_table::{MemTable, RowOp};
@@ -160,8 +162,8 @@ impl<S: StateStore> StateTable<S> {
 
     pub async fn iter_with_prefix(
         &self,
-        pk_prifix: Row,
-        prifix_serializer: OrderedRowSerializer,
+        pk_prefix: Row,
+        prefix_serializer: OrderedRowSerializer,
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
         let mem_table_iter = self.mem_table.buffer.iter();
@@ -169,8 +171,8 @@ impl<S: StateStore> StateTable<S> {
             &self.keyspace,
             self.column_descs.clone(),
             mem_table_iter,
-            pk_prifix,
-            prifix_serializer,
+            pk_prefix,
+            prefix_serializer,
             epoch,
         ))
     }
@@ -287,12 +289,30 @@ impl<S: StateStore> StateTableRowIter<S> {
         R: RangeBounds<B> + Send + Clone + 'static,
         B: AsRef<Row> + Send + Clone + 'static,
     {
+        let pk_serializer = pk_serializer.as_ref().expect("pk_serializer is None");
+        let cell_based_start_key = match pk_bounds.start_bound() {
+            Included(k) => Included(Bytes::copy_from_slice(
+                &keyspace.prefixed_key(&serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
+            )),
+            Excluded(k) => Excluded(Bytes::copy_from_slice(
+                &keyspace.prefixed_key(&serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
+            )),
+            Unbounded => Unbounded,
+        };
+        let cell_based_end_key = match pk_bounds.end_bound() {
+            Included(k) => Included(Bytes::copy_from_slice(
+                &keyspace.prefixed_key(&serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
+            )),
+            Excluded(k) => Excluded(Bytes::copy_from_slice(
+                &keyspace.prefixed_key(&serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
+            )),
+            Unbounded => Unbounded,
+        };
         let cell_based_table_iter: futures::stream::Peekable<_> =
             CellBasedTableStreamingIter::new_with_bounds(
                 keyspace,
                 table_descs,
-                pk_bounds.clone(),
-                pk_serializer.clone(),
+                (cell_based_start_key, cell_based_end_key),
                 epoch,
             )
             .await?
@@ -303,8 +323,6 @@ impl<S: StateStore> StateTableRowIter<S> {
         let mut mem_table_iter = mem_table_iter
             .map(|(k, v)| Ok::<_, StorageError>((k, v)))
             .peekable();
-        let pk_serializer = pk_serializer.as_ref().expect("pk_serializer is None");
-
         loop {
             let start_key = match pk_bounds.start_bound() {
                 Included(k) => Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
@@ -398,12 +416,16 @@ impl<S: StateStore> StateTableRowIter<S> {
         prefix_serializer: OrderedRowSerializer,
         epoch: u64,
     ) {
+        let start_key_with_prefix =
+            keyspace.prefixed_key(&serialize_pk(&pk_prefix, &prefix_serializer).map_err(err)?);
+        let cell_based_range =
+            start_key_with_prefix.clone()..next_key(start_key_with_prefix.as_slice());
+
         let cell_based_table_iter: futures::stream::Peekable<_> =
-            CellBasedTableStreamingIter::new_with_prefix(
+            CellBasedTableStreamingIter::new_with_bounds(
                 keyspace,
                 table_descs,
-                pk_prefix.clone(),
-                prefix_serializer.clone(),
+                cell_based_range,
                 epoch,
             )
             .await?
@@ -418,6 +440,10 @@ impl<S: StateStore> StateTableRowIter<S> {
         prefix_serializer.serialize(&pk_prefix, &mut pk_prefix_bytes);
 
         loop {
+            let start_key_with_prefix =
+                serialize_pk(&pk_prefix, &prefix_serializer).map_err(err)?;
+            let mem_table_range =
+                start_key_with_prefix.clone()..next_key(start_key_with_prefix.as_slice());
             match (
                 cell_based_table_iter.as_mut().peek().await,
                 mem_table_iter.peek(),
@@ -429,7 +455,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                 }
                 (None, Some(_)) => {
                     let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
-                    if mem_table_pk.starts_with(&pk_prefix_bytes) {
+                    if mem_table_range.contains(mem_table_pk) {
                         match row_op {
                             RowOp::Insert(row) | RowOp::Update((_, row)) => {
                                 yield Cow::Borrowed(row);
@@ -454,7 +480,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                             // and mem_table_iter need to execute next()
                             // once.
                             let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
-                            if mem_table_pk.starts_with(&pk_prefix_bytes) {
+                            if mem_table_range.contains(mem_table_pk) {
                                 match row_op {
                                     RowOp::Insert(row) => yield Cow::Borrowed(row),
                                     RowOp::Delete(_) => {}
@@ -469,7 +495,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                         Ordering::Greater => {
                             // mem_table_item will be return
                             let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
-                            if mem_table_pk.starts_with(&pk_prefix_bytes) {
+                            if mem_table_range.contains(mem_table_pk) {
                                 match row_op {
                                     RowOp::Insert(row) => yield Cow::Borrowed(row),
                                     RowOp::Delete(_) => {}

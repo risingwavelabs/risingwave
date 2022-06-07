@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -465,58 +464,15 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         keyspace: &Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         pk_bounds: R,
-        pk_serializer: Option<OrderedRowSerializer>,
         epoch: u64,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<Row> + Send,
+        B: AsRef<[u8]> + Send,
     {
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
-        let pk_serializer = pk_serializer.as_ref().expect("pk_serializer is None");
-        let start_key = match pk_bounds.start_bound() {
-            Included(k) => Included(Bytes::copy_from_slice(
-                &keyspace.prefixed_key(&serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
-            )),
-            Excluded(k) => Excluded(Bytes::copy_from_slice(
-                &keyspace.prefixed_key(&serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
-            )),
-            Unbounded => Unbounded,
-        };
-        let end_key = match pk_bounds.end_bound() {
-            Included(k) => Included(Bytes::copy_from_slice(
-                &keyspace.prefixed_key(&serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
-            )),
-            Excluded(k) => Excluded(Bytes::copy_from_slice(
-                &keyspace.prefixed_key(&serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
-            )),
-            Unbounded => Unbounded,
-        };
 
-        let iter = keyspace
-            .iter_with_range((start_key, end_key), epoch)
-            .await?;
-        let iter = Self {
-            iter,
-            cell_based_row_deserializer,
-        };
-        Ok(iter)
-    }
-
-    pub async fn new_with_prefix(
-        keyspace: &Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
-        pk_prefix: Row,
-        prefix_serializer: OrderedRowSerializer,
-        epoch: u64,
-    ) -> StorageResult<Self> {
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
-
-        let start_key_with_prefix =
-            keyspace.prefixed_key(&serialize_pk(&pk_prefix, &prefix_serializer).map_err(err)?);
-        let range = start_key_with_prefix.clone()..next_key(start_key_with_prefix.as_slice());
-
-        let iter = keyspace.iter_with_range(range, epoch).await?;
+        let iter = keyspace.iter_with_range(pk_bounds, epoch).await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,
