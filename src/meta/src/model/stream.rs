@@ -93,7 +93,7 @@ impl TableFragments {
         internal_table_id_set: HashSet<u32>,
     ) -> Self {
         Self {
-            seq: 0,
+            seq: 1,
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
