@@ -121,8 +121,8 @@ impl<S: StateStore> SourceStateHandler<S> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_common::catalog::TableId;
+    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
 
