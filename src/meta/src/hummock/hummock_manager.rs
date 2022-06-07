@@ -23,6 +23,7 @@ use prost::Message;
 use risingwave_common::util::compress::compress_data;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
     HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -537,6 +538,11 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
+        // TODO: remove this line after split levels by compaction group.
+        // All SSTs belongs to `StateDefault` currently.
+        if compaction_group_id != u64::from(StaticCompactionGroupId::StateDefault) {
+            return Ok(None);
+        }
         let start_time = Instant::now();
         let mut compaction_guard = self.compaction.write().await;
         let compaction = compaction_guard.deref_mut();
