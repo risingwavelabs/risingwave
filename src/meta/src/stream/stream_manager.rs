@@ -26,7 +26,7 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{ActorMapping, DispatcherType, StreamNode, StreamSourceState};
+use risingwave_pb::stream_plan::{ActorMapping, DispatcherType, StreamNode};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -293,7 +293,7 @@ where
             mut upstream_node_actors,
             table_sink_map,
             dependent_table_ids,
-            affiliated_source,
+            affiliated_source: _,
             table_id_offset: _,
             internal_table_id_set: _,
         }: CreateMaterializedViewContext,
@@ -434,80 +434,7 @@ where
             .collect();
 
         table_fragments.set_actor_status(actor_info);
-        let mut actor_map = table_fragments.actor_map();
-
-        let mut source_fragments = HashMap::new();
-        for fragment in table_fragments.fragments() {
-            for actor in &fragment.actors {
-                if let Some(source_id) =
-                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
-                {
-                    source_fragments
-                        .entry(source_id)
-                        .or_insert(vec![])
-                        .push(fragment.fragment_id as FragmentId);
-                }
-            }
-        }
-
-        self.source_manager
-            .register_source(source_fragments, affiliated_source.clone())
-            .await?;
-
-        let mut source_actors_group_by_fragment = HashMap::new();
-        for fragment in table_fragments.fragments() {
-            let mut source_actors = HashMap::new();
-            for actor in &fragment.actors {
-                if let Some(source_id) =
-                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
-                {
-                    source_actors
-                        .entry(source_id)
-                        .or_insert(vec![])
-                        .push(actor.actor_id as ActorId)
-                }
-            }
-
-            for (source_id, actors) in source_actors {
-                source_actors_group_by_fragment
-                    .entry(source_id)
-                    .or_insert(vec![])
-                    .push(actors)
-            }
-        }
-
-        let split_assignment = self
-            .source_manager
-            .schedule_split_for_actors(source_actors_group_by_fragment, affiliated_source)
-            .await?;
-
-        // patch source actors with splits
-        for (actor_id, actor) in &mut actor_map {
-            if let Some(splits) = split_assignment.get(actor_id) {
-                let mut node = actor.nodes.as_mut().unwrap();
-                while !node.input.is_empty() {
-                    node = node.input.first_mut().unwrap();
-                }
-
-                if let Some(NodeBody::Source(s)) = node.node_body.as_mut() {
-                    log::debug!(
-                        "patching source node #{} with splits {:?}",
-                        actor_id,
-                        splits
-                    );
-
-                    if !splits.is_empty() {
-                        s.stream_source_state = Some(StreamSourceState {
-                            split_type: splits.first().unwrap().get_type(),
-                            stream_source_splits: splits
-                                .iter()
-                                .map(|split| split.to_json_bytes().to_vec())
-                                .collect(),
-                        });
-                    }
-                }
-            }
-        }
+        let actor_map = table_fragments.actor_map();
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
         // includes such information. It contains: 1. actors in the current create
@@ -645,11 +572,30 @@ where
                 .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
+        let mut source_fragments = HashMap::new();
+        for fragment in table_fragments.fragments() {
+            for actor in &fragment.actors {
+                if let Some(source_id) =
+                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+                {
+                    source_fragments
+                        .entry(source_id)
+                        .or_insert(vec![])
+                        .push(fragment.fragment_id as FragmentId);
+                }
+            }
+        }
+
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
             .await?;
+
         let table_id = table_fragments.table_id();
+        let result = self.source_manager.pre_allocate_splits(&table_id, source_fragments).await?;
+
+        println!("result {:?}", result);
+
         if let Err(err) = self
             .barrier_manager
             .run_command(Command::CreateMaterializedView {
