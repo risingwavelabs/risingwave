@@ -67,8 +67,9 @@ where
             cur = cur.checked_add(step.as_scalar_ref())?;
         }
         let arr = builder.finish()?;
+        let len = arr.len();
         let columns = vec![Column::new(Arc::new(arr.into()))];
-        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+        let chunk: DataChunk = DataChunk::new(columns, len);
         Ok(chunk)
     }
 }
@@ -87,8 +88,9 @@ impl Unnest {
             .iter()
             .try_for_each(|a| builder.append_array(a))?;
         let arr = builder.finish()?;
+        let len = arr.len();
         let columns = vec![Column::new(Arc::new(arr))];
-        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+        let chunk: DataChunk = DataChunk::new(columns, len);
 
         Ok(chunk)
     }
