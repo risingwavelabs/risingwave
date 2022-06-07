@@ -51,6 +51,7 @@ message TableFragments {
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
     common.ParallelUnitMapping vnode_mapping = 5;
   }
+  // Sequence number to let compact scheduler check whether mapping of the fragment that certain SST belongs to is outdated
   uint64 seq = 1;
   uint32 table_id = 2;
   map<uint32, Fragment> fragments = 3;
