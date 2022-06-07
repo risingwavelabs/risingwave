@@ -19,8 +19,8 @@ pub const VNODE_BITS: usize = 11;
 pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
 pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
 
-// `VNodeBitmap` is a bitmap of vnodes for a state table, which indicates the vnodes that the state
-// table owns.
+/// `VNodeBitmap` is a bitmap of vnodes for a state table, which indicates the vnodes that the state
+/// table owns.
 #[derive(Clone, Default)]
 pub struct VNodeBitmap {
     /// Id of state table that the bitmap belongs to.
