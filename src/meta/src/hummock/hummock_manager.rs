@@ -29,15 +29,14 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
-    SstableInfo,
+    CompactTask, CompactTaskAssignment, CompactionConfig, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
+    SstableIdInfo, SstableInfo,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
-use crate::hummock::compaction::compaction_config::CompactionConfig;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
@@ -235,7 +234,7 @@ where
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
-            for l in 0..self.config.inner().max_level {
+            for l in 0..self.config.max_level {
                 init_version.levels.push(Level {
                     level_idx: (l + 1) as u32,
                     level_type: LevelType::Nonoverlapping as i32,

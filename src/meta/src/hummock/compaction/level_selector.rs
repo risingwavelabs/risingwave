@@ -20,9 +20,9 @@
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
-use risingwave_pb::hummock::Level;
+use risingwave_pb::hummock::{CompactionConfig, Level};
 
-use crate::hummock::compaction::compaction_config::CompactionConfig;
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::compaction_picker::{CompactionPicker, MinOverlappingPicker};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::tier_compaction_picker::{
@@ -66,8 +66,8 @@ pub struct DynamicLevelSelector {
 
 impl Default for DynamicLevelSelector {
     fn default() -> Self {
-        let config = Arc::new(CompactionConfig::default());
-        let overlap_strategy = create_overlap_strategy(config.inner().compaction_mode());
+        let config = Arc::new(CompactionConfigBuilder::new().build());
+        let overlap_strategy = create_overlap_strategy(config.compaction_mode());
         DynamicLevelSelector::new(config, overlap_strategy)
     }
 }
@@ -132,20 +132,20 @@ impl DynamicLevelSelector {
         }
 
         ctx.level_max_bytes
-            .resize(self.config.inner().max_level as usize + 1, u64::MAX);
+            .resize(self.config.max_level as usize + 1, u64::MAX);
 
         if max_level_size == 0 {
             // Use the bottommost level.
-            ctx.base_level = self.config.inner().max_level as usize;
+            ctx.base_level = self.config.max_level as usize;
             return ctx;
         }
 
-        let base_bytes_max = std::cmp::max(self.config.inner().max_bytes_for_level_base, l0_size);
-        let base_bytes_min = base_bytes_max / self.config.inner().max_bytes_for_level_multiplier;
+        let base_bytes_max = std::cmp::max(self.config.max_bytes_for_level_base, l0_size);
+        let base_bytes_min = base_bytes_max / self.config.max_bytes_for_level_multiplier;
 
         let mut cur_level_size = max_level_size;
-        for _ in first_non_empty_level..self.config.inner().max_level as usize {
-            cur_level_size /= self.config.inner().max_bytes_for_level_multiplier;
+        for _ in first_non_empty_level..self.config.max_level as usize {
+            cur_level_size /= self.config.max_bytes_for_level_multiplier;
         }
 
         let base_level_size = if cur_level_size <= base_bytes_min {
@@ -158,14 +158,14 @@ impl DynamicLevelSelector {
             ctx.base_level = first_non_empty_level;
             while ctx.base_level > 1 && cur_level_size > base_bytes_max {
                 ctx.base_level -= 1;
-                cur_level_size /= self.config.inner().max_bytes_for_level_multiplier;
+                cur_level_size /= self.config.max_bytes_for_level_multiplier;
             }
             std::cmp::min(base_bytes_max, cur_level_size)
         };
 
-        let level_multiplier = self.config.inner().max_bytes_for_level_multiplier as f64;
+        let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
         let mut level_size = base_level_size;
-        for i in ctx.base_level..=self.config.inner().max_level as usize {
+        for i in ctx.base_level..=self.config.max_level as usize {
             // Don't set any level below base_bytes_max. Otherwise, the LSM can
             // assume an hourglass shape where L1+ sizes are smaller than L0. This
             // causes compaction scoring, which depends on level sizes, to favor L1+
@@ -184,7 +184,7 @@ impl DynamicLevelSelector {
         let mut ctx = self.calculate_level_base_size(levels);
 
         // The bottommost level can not be input level.
-        for level in &levels[..self.config.inner().max_level as usize] {
+        for level in &levels[..self.config.max_level as usize] {
             let level_idx = level.level_idx as usize;
             let mut total_size = 0;
             let mut idle_file_count = 0;
@@ -200,12 +200,10 @@ impl DynamicLevelSelector {
             if level_idx == 0 {
                 // trigger intra-l0 compaction at first when the number of files is too large.
                 let score = idle_file_count * SCORE_BASE
-                    / self.config.inner().level0_tier_compact_file_number as u64;
+                    / self.config.level0_tier_compact_file_number as u64;
                 ctx.score_levels.push((score, 0, 0));
-                let score = 2 * total_size * SCORE_BASE
-                    / self.config.inner().max_bytes_for_level_base
-                    + idle_file_count * SCORE_BASE
-                        / self.config.inner().level0_tigger_file_numer as u64;
+                let score = 2 * total_size * SCORE_BASE / self.config.max_bytes_for_level_base
+                    + idle_file_count * SCORE_BASE / self.config.level0_tigger_file_numer as u64;
                 ctx.score_levels.push((score, 0, ctx.base_level));
             } else {
                 ctx.score_levels.push((

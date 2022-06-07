@@ -27,10 +27,10 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, HummockVersion, KeyRange, Level, TableSetStatistics,
+    CompactMetrics, CompactTask, CompactionConfig, HummockVersion, KeyRange, Level,
+    TableSetStatistics,
 };
 
-use crate::hummock::compaction::compaction_config::CompactionConfig;
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
     HashStrategy, OverlapStrategy, RangeOverlapStrategy,
@@ -92,10 +92,10 @@ impl CompactStatus {
         config: Arc<CompactionConfig>,
     ) -> CompactStatus {
         let mut level_handlers = vec![];
-        for level in 0..=config.inner().max_level {
+        for level in 0..=config.max_level {
             level_handlers.push(LevelHandler::new(level as u32));
         }
-        let overlap_strategy = create_overlap_strategy(config.inner().compaction_mode());
+        let overlap_strategy = create_overlap_strategy(config.compaction_mode());
         CompactStatus {
             compaction_group_id,
             level_handlers,

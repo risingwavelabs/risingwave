@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::CompactionConfig as ProstCompactionConfig;
+use risingwave_pb::hummock::CompactionConfig;
 
 const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4GB
 const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
@@ -23,25 +23,14 @@ const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
 const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 16;
 const MAX_LEVEL: u64 = 6;
 
-#[derive(PartialEq, Clone, Debug)]
-pub struct CompactionConfig {
-    inner: ProstCompactionConfig,
+pub struct CompactionConfigBuilder {
+    config: CompactionConfig,
 }
 
-impl CompactionConfig {
-    pub fn new(inner: ProstCompactionConfig) -> Self {
-        Self { inner }
-    }
-
-    pub fn inner(&self) -> &ProstCompactionConfig {
-        &self.inner
-    }
-}
-
-impl Default for CompactionConfig {
-    fn default() -> Self {
+impl CompactionConfigBuilder {
+    pub fn new() -> Self {
         Self {
-            inner: ProstCompactionConfig {
+            config: CompactionConfig {
                 max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE,
                 max_bytes_for_level_multiplier: 10,
                 max_level: MAX_LEVEL,
@@ -53,27 +42,13 @@ impl Default for CompactionConfig {
             },
         }
     }
-}
-
-pub struct CompactionConfigBuilder {
-    config: ProstCompactionConfig,
-}
-
-impl CompactionConfigBuilder {
-    pub fn new() -> Self {
-        Self {
-            config: CompactionConfig::default().inner,
-        }
-    }
 
     pub fn new_with(config: CompactionConfig) -> Self {
-        Self {
-            config: config.inner,
-        }
+        Self { config }
     }
 
     pub fn build(self) -> CompactionConfig {
-        CompactionConfig::new(self.config)
+        self.config
     }
 }
 
@@ -89,7 +64,7 @@ macro_rules! builder_field {
             $(
                 pub fn $name(&self, v:$type) -> Self {
                     Self {
-                        config: ProstCompactionConfig {
+                        config: CompactionConfig {
                             $name: v,
                             ..self.config
                         },

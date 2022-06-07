@@ -19,9 +19,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::CompactionConfig;
 use tokio::sync::RwLock;
 
-use crate::hummock::compaction::compaction_config::CompactionConfig;
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::Result;
 use crate::manager::MetaSrvEnv;
@@ -38,7 +39,7 @@ pub struct CompactionGroupManager<S: MetaStore> {
 
 impl<S: MetaStore> CompactionGroupManager<S> {
     pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
-        let config = CompactionConfig::default();
+        let config = CompactionConfigBuilder::new().build();
         Self::new_with_config(env, config).await
     }
 

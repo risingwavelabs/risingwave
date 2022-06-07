@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::CompactionGroupId;
 
-use crate::hummock::compaction::compaction_config::CompactionConfig;
 use crate::hummock::compaction::level_selector::DynamicLevelSelector;
 use crate::hummock::compaction::{create_overlap_strategy, CompactStatus};
 use crate::model::MetadataModel;
@@ -52,7 +51,7 @@ impl From<&CompactStatus> for risingwave_pb::hummock::CompactStatus {
         risingwave_pb::hummock::CompactStatus {
             compaction_group_id: status.compaction_group_id,
             level_handlers: status.level_handlers.iter().map_into().collect(),
-            compaction_config: Some(status.compaction_config.inner().clone()),
+            compaction_config: Some(status.compaction_config.clone()),
         }
     }
 }
@@ -65,9 +64,8 @@ impl From<CompactStatus> for risingwave_pb::hummock::CompactStatus {
 
 impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
     fn from(status: &risingwave_pb::hummock::CompactStatus) -> Self {
-        let compaction_config =
-            CompactionConfig::new(status.compaction_config.as_ref().cloned().unwrap());
-        let overlap_strategy = create_overlap_strategy(compaction_config.inner().compaction_mode());
+        let compaction_config = status.compaction_config.as_ref().cloned().unwrap();
+        let overlap_strategy = create_overlap_strategy(compaction_config.compaction_mode());
         // Currently we only support DynamicLevelSelector. If we add more LevelSelector in the
         // future, make sure to persist its type as well.
         let compaction_selector =

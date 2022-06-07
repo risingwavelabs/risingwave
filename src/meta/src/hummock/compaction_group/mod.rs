@@ -19,8 +19,8 @@ use std::borrow::Borrow;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::CompactionConfig;
 
-use crate::hummock::compaction::compaction_config::CompactionConfig;
 use crate::model::MetadataModel;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,13 +64,11 @@ impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
                     u.into()
                 })
                 .collect(),
-            compaction_config: CompactionConfig::new(
-                compaction_group
-                    .compaction_config
-                    .as_ref()
-                    .cloned()
-                    .unwrap(),
-            ),
+            compaction_config: compaction_group
+                .compaction_config
+                .as_ref()
+                .cloned()
+                .unwrap(),
         }
     }
 }
@@ -80,7 +78,7 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
         Self {
             id: compaction_group.group_id,
             member_prefixes: compaction_group.member_prefixes.iter().map_into().collect(),
-            compaction_config: Some(compaction_group.compaction_config.inner().clone()),
+            compaction_config: Some(compaction_group.compaction_config.clone()),
         }
     }
 }

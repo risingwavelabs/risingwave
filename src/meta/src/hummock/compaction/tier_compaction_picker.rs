@@ -18,10 +18,9 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::{KeyRange, Level, LevelType, SstableInfo};
+use risingwave_pb::hummock::{CompactionConfig, KeyRange, Level, LevelType, SstableInfo};
 
 use super::SearchResult;
-use crate::hummock::compaction::compaction_config::CompactionConfig;
 use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
@@ -57,7 +56,7 @@ impl CompactionPicker for TierCompactionPicker {
             }
             let mut compaction_bytes = table.file_size;
             let mut select_level_inputs = vec![table.clone()];
-            if table.file_size > self.config.inner().min_compaction_bytes {
+            if table.file_size > self.config.min_compaction_bytes {
                 // only merge small file until we support sub-level.
                 idx += 1;
                 continue;
@@ -70,7 +69,7 @@ impl CompactionPicker for TierCompactionPicker {
                     break;
                 }
                 // no need to trigger a bigger compaction
-                if compaction_bytes >= self.config.inner().min_compaction_bytes {
+                if compaction_bytes >= self.config.min_compaction_bytes {
                     break;
                 }
                 compaction_bytes += other.file_size;
@@ -83,7 +82,7 @@ impl CompactionPicker for TierCompactionPicker {
             while let Some(first) = select_level_inputs.first() {
                 if first.file_size * 2 > compaction_bytes
                     && select_level_inputs.len()
-                        >= self.config.inner().level0_tier_compact_file_number as usize
+                        >= self.config.level0_tier_compact_file_number as usize
                     && compaction_bytes > MIN_COMPACTION_BYTES
                 {
                     compaction_bytes -= first.file_size;
@@ -93,9 +92,7 @@ impl CompactionPicker for TierCompactionPicker {
                 }
             }
 
-            if select_level_inputs.len()
-                < self.config.inner().level0_tier_compact_file_number as usize
-            {
+            if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize {
                 idx = next_offset;
                 continue;
             }
@@ -288,7 +285,7 @@ impl LevelCompactionPicker {
                 if select_level_handler.is_pending_compact(&other.id) {
                     break;
                 }
-                if select_compaction_bytes >= self.config.inner().max_compaction_bytes {
+                if select_compaction_bytes >= self.config.max_compaction_bytes {
                     break;
                 }
 
@@ -334,7 +331,7 @@ impl LevelCompactionPicker {
             }
 
             // do not schedule tasks with big write-amplification
-            if select_compaction_bytes < self.config.inner().min_compaction_bytes
+            if select_compaction_bytes < self.config.min_compaction_bytes
                 && select_compaction_bytes * 4 < target_level_ssts.compaction_bytes
             {
                 continue;
