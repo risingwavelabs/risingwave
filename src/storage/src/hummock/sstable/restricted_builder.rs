@@ -16,6 +16,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::Arc;
 
+use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::key::FullKey;
@@ -197,11 +198,11 @@ where
     pub async fn finish(mut self) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
         self.finish_current_builder();
         let mut ssts = Vec::with_capacity(self.write_results.len());
-        for write_result in self.write_results {
-            let sst = write_result
-                .await
-                .map_err(|_| HummockError::other("Unable to get write result"))??;
-            ssts.push(sst);
+        let results = try_join_all(self.write_results)
+            .await
+            .map_err(|_| HummockError::other(format!("Unable to get write result")))?;
+        for write_result in results {
+            ssts.push(write_result?);
         }
         Ok(ssts.into_iter().zip_eq(self.vnode_bitmaps).collect_vec())
     }
