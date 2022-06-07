@@ -29,48 +29,6 @@ use crate::hash::HashCode;
 use crate::types::{DataType, NaiveDateTimeWrapper};
 use crate::util::hash_util::finalize_hashers;
 
-pub struct DataChunkBuilder {
-    columns: Vec<Column>,
-    visibility: Option<Bitmap>,
-}
-
-impl DataChunkBuilder {
-    fn new() -> Self {
-        DataChunkBuilder {
-            columns: vec![],
-            visibility: None,
-        }
-    }
-
-    pub fn columns(self, columns: Vec<Column>) -> DataChunkBuilder {
-        DataChunkBuilder {
-            columns,
-            visibility: self.visibility,
-        }
-    }
-
-    pub fn build(self) -> DataChunk {
-        let vis = if let Some(bitmap) = self.visibility {
-            // with visibility bitmap
-            for column in &self.columns {
-                assert_eq!(bitmap.len(), column.array_ref().len())
-            }
-            Vis::Bitmap(bitmap)
-        } else if !self.columns.is_empty() {
-            // without visibility bitmap
-            let card = self.columns.first().unwrap().array_ref().len();
-            for column in self.columns.iter().skip(1) {
-                assert_eq!(card, column.array_ref().len())
-            }
-            Vis::Compact(card)
-        } else {
-            // no data (dummy)
-            Vis::Compact(0)
-        };
-        DataChunk::new(self.columns, vis)
-    }
-}
-
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
 pub struct DataChunk {
@@ -159,10 +117,6 @@ impl DataChunk {
                 }
             }
         }
-    }
-
-    pub fn builder() -> DataChunkBuilder {
-        DataChunkBuilder::new()
     }
 
     pub fn into_parts(self) -> (Vec<Column>, Vis) {
