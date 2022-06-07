@@ -3716,6 +3716,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "twox-hash",
+ "url",
  "value-encoding",
  "workspace-hack",
 ]
