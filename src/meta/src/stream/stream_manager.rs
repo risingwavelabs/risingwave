@@ -704,6 +704,7 @@ mod tests {
     use super::*;
     use crate::barrier::GlobalBarrierManager;
     use crate::cluster::ClusterManager;
+    use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::HummockManager;
     use crate::manager::{CatalogManager, MetaSrvEnv};
     use crate::model::ActorId;
@@ -859,9 +860,16 @@ mod tests {
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
+            let compaction_group_manager =
+                Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
             let hummock_manager = Arc::new(
-                HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
-                    .await?,
+                HummockManager::new(
+                    env.clone(),
+                    cluster_manager.clone(),
+                    meta_metrics.clone(),
+                    compaction_group_manager.clone(),
+                )
+                .await?,
             );
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),

@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::{CompactionGroupId, Prefix};
+use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::key::{get_table_id, FullKey};
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId};
 use risingwave_pb::common::VNodeBitmap;
 
 use crate::hummock::multi_builder::CapacitySplitTableBuilder;
@@ -75,7 +75,7 @@ impl KeyValueGrouping for CompactionGroupGrouping {
         _value: &HummockValue<&[u8]>,
     ) -> Option<KeyValueGroupId> {
         let prefix = get_table_id(full_key.inner()).unwrap();
-        self.prefixes.get(&prefix.into()).cloned().map(|v| v.into())
+        self.prefixes.get(&prefix.into()).cloned()
     }
 }
 
@@ -205,7 +205,7 @@ mod tests {
         let prefix = b"\x01\x02\x03\x04".as_slice().get_u32();
         // one compaction group defined
         let grouping = KeyValueGroupingImpl::CompactionGroup(CompactionGroupGrouping::new(
-            HashMap::from([(prefix.into(), 1.into())]),
+            HashMap::from([(prefix.into(), 1 as CompactionGroupId)]),
         ));
         let mut builder = GroupedSstableBuilder::new(get_id_and_builder, grouping);
         for i in 0..10 {

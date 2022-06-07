@@ -19,6 +19,7 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_common::config::StorageConfig;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_rpc_client::HummockMetaClient;
@@ -107,7 +108,7 @@ mod tests {
 
         // 2. get compact task
         let compact_task = hummock_manager_ref
-            .get_compact_task()
+            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
             .await
             .unwrap()
             .unwrap();
@@ -156,7 +157,10 @@ mod tests {
         assert_eq!(get_val, val);
 
         // 6. get compact task and there should be none
-        let compact_task = hummock_manager_ref.get_compact_task().await.unwrap();
+        let compact_task = hummock_manager_ref
+            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .await
+            .unwrap();
 
         assert!(compact_task.is_none());
     }
