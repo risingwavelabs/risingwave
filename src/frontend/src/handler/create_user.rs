@@ -24,10 +24,7 @@ use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 use crate::user::{encrypt_default, try_extract};
 
-pub(crate) fn make_prost_user_info(
-    name: ObjectName,
-    options: &CreateUserWithOptions,
-) -> Result<UserInfo> {
+fn make_prost_user_info(name: ObjectName, options: &CreateUserWithOptions) -> Result<UserInfo> {
     let mut user_info = UserInfo {
         name: Binder::resolve_user_name(name)?,
         // the LOGIN option is implied if it is not explicitly specified.

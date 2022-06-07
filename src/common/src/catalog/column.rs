@@ -238,6 +238,21 @@ impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
     }
 }
 
+impl From<&ProstOrderedColumnDesc> for OrderedColumnDesc {
+    fn from(prost: &ProstOrderedColumnDesc) -> Self {
+        prost.clone().into()
+    }
+}
+
+impl From<&OrderedColumnDesc> for ProstOrderedColumnDesc {
+    fn from(c: &OrderedColumnDesc) -> Self {
+        Self {
+            column_desc: Some((&c.column_desc).into()),
+            order: c.order.to_prost().into(),
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;

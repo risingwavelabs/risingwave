@@ -146,6 +146,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                         .create_array_builder(K_PROCESSING_WINDOW_SIZE)
                 })
                 .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+            let mut array_len = 0;
             while want_to_produce > 0 && !self.min_heap.is_empty() {
                 let top_elem = self.min_heap.pop().unwrap();
                 let child_idx = top_elem.chunk_idx;
@@ -158,6 +159,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                     builder.append_datum(&datum)?;
                 }
                 want_to_produce -= 1;
+                array_len += 1;
                 // check whether we have another row from the same chunk being popped
                 let possible_next_row_idx = cur_chunk.next_visible_row_idx(row_idx + 1);
                 match possible_next_row_idx {
@@ -178,7 +180,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                 .into_iter()
                 .map(|builder| Ok(Column::new(Arc::new(builder.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
-            let chunk = DataChunk::builder().columns(columns).build();
+            let chunk = DataChunk::new(columns, array_len);
             yield chunk
         }
     }

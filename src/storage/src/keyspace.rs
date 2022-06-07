@@ -34,31 +34,8 @@ impl<S: StateStore> Keyspace<S> {
     /// Creates a shared root [`Keyspace`] for all executors of the same operator.
     ///
     /// By design, all executors of the same operator should share the same keyspace in order to
-    /// support scaling out, and ensure not to overlap with each other. So we use `operator_id`
+    /// support scaling out, and ensure not to overlap with each other. So we use `table_id`
     /// here.
-    ///
-    /// Note: when using shared keyspace, be caution to scan the keyspace since states of other
-    /// executors might be scanned as well.
-    pub fn shared_executor_root(store: S, operator_id: u64) -> Self {
-        let prefix = {
-            let mut buf = BytesMut::with_capacity(9);
-            buf.put_u8(b's');
-            buf.put_u64(operator_id);
-            buf.to_vec()
-        };
-        Self { store, prefix }
-    }
-
-    /// Creates a root [`Keyspace`] for an executor.
-    pub fn executor_root(store: S, executor_id: u64) -> Self {
-        let prefix = {
-            let mut buf = BytesMut::with_capacity(9);
-            buf.put_u8(b'e');
-            buf.put_u64(executor_id);
-            buf.to_vec()
-        };
-        Self { store, prefix }
-    }
 
     /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
