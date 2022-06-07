@@ -141,7 +141,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
 }
 
 impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
-    // /// Create a [`JoinHashMap`] with the given LRU capacity.
+    /// Create a [`JoinHashMap`] with the given LRU capacity.
     pub fn new(
         target_cap: usize,
         pk_indices: Vec<usize>,
