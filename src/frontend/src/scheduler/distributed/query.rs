@@ -425,9 +425,8 @@ mod tests {
         //
         let ctx = OptimizerContext::mock().await;
 
-        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
+        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::create(
             "".to_string(),
-            vec![0, 1],
             Rc::new(TableDesc {
                 table_id: 0.into(),
                 pks: vec![],

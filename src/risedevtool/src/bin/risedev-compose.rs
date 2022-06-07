@@ -158,15 +158,16 @@ fn main() -> Result<()> {
             }
             ServiceConfig::FrontendV2(c) => {
                 if opts.deploy {
+                    let arg = format!("--frontend {} --frontend-port {}", c.address, c.port);
                     writeln!(
                         log_buffer,
                         "-- Frontend --\nAccess inside cluster: {}\ntpch-bench args: {}\n",
                         style(format!("psql -d dev -h {} -p {}", c.address, c.port)).green(),
-                        style(format!(
-                            "--frontend {} --frontend-port {}",
-                            c.address, c.port
-                        ))
-                        .green()
+                        style(&arg).green()
+                    )?;
+                    fs::write(
+                        Path::new(&opts.directory).join("tpch-bench-args-frontend"),
+                        arg,
                     )?;
                 }
                 (c.address.clone(), c.compose(&compose_config)?)
@@ -203,10 +204,15 @@ fn main() -> Result<()> {
             ServiceConfig::AwsS3(_) => continue,
             ServiceConfig::RedPanda(c) => {
                 if opts.deploy {
+                    let arg = format!("--kafka-addr {}:{}", c.address, c.internal_port);
                     writeln!(
                         log_buffer,
                         "-- Redpanda --\ntpch-bench: {}\n",
-                        style(format!("--kafka-addr {}:{}", c.address, c.internal_port)).green()
+                        style(&arg).green()
+                    )?;
+                    fs::write(
+                        Path::new(&opts.directory).join("tpch-bench-args-kafka"),
+                        arg,
                     )?;
                 }
                 volumes.insert(c.id.clone(), ComposeVolume::default());
