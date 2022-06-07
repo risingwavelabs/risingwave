@@ -132,7 +132,7 @@ impl Executor for MockSource {
 }
 
 pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
-    Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
+    Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333))
 }
 
 /// `row_nonnull` builds a `Row` with concrete values.
