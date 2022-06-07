@@ -2485,12 +2485,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7843ec2de400bcbc6a6328c958dc38e5359da6e93e72e37bc5246bf1ae776389"
 
 [[package]]
-name = "moveit"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "815d5988a1dd22f08bad572a83ee654563bb422ece5d5bce41f31ec49399dcb5"
-
-[[package]]
 name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4332,7 +4326,6 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
- "moveit",
  "num-traits",
  "parking_lot",
  "paste",
