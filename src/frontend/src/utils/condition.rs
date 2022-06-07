@@ -229,22 +229,22 @@ impl Condition {
     }
 
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
-    pub fn split_to_scan_range(self, pk_idces: &[usize], num_cols: usize) -> (ScanRange, Self) {
+    pub fn split_to_scan_range(self, order_column_ids: &[usize], num_cols: usize) -> (ScanRange, Self) {
         let mut col_idx_to_pk_idx = vec![None; num_cols];
-        pk_idces.iter().enumerate().for_each(|(idx, pk_idx)| {
+        order_column_ids.iter().enumerate().for_each(|(idx, pk_idx)| {
             col_idx_to_pk_idx[*pk_idx] = Some(idx);
         });
 
         // The i-th group only has exprs that reference the i-th PK column.
         // The last group contains all the other exprs.
-        let mut groups = vec![vec![]; pk_idces.len() + 1];
+        let mut groups = vec![vec![]; order_column_ids.len() + 1];
         for (key, group) in &self.conjunctions.into_iter().group_by(|expr| {
             let input_bits = expr.collect_input_refs(num_cols);
             if input_bits.count_ones(..) == 1 {
                 let col_idx = input_bits.ones().next().unwrap();
-                col_idx_to_pk_idx[col_idx].unwrap_or(pk_idces.len())
+                col_idx_to_pk_idx[col_idx].unwrap_or(order_column_ids.len())
             } else {
-                pk_idces.len()
+                order_column_ids.len()
             }
         }) {
             groups[key].extend(group);
@@ -253,7 +253,7 @@ impl Condition {
         let mut scan_range = ScanRange::full_table_scan();
         let mut other_conds = groups.pop().unwrap();
 
-        for i in 0..pk_idces.len() {
+        for i in 0..order_column_ids.len() {
             let group = std::mem::take(&mut groups[i]);
             if group.is_empty() {
                 groups.push(other_conds);
@@ -269,7 +269,7 @@ impl Condition {
             let mut eq_cond = None;
             for expr in group {
                 if let Some((input_ref, lit)) = expr.as_eq_const() {
-                    assert_eq!(input_ref.index, pk_idces[i]);
+                    assert_eq!(input_ref.index, order_column_ids[i]);
                     if let Some(l) = eq_cond && l != lit {
                         // Always false
                         return (
@@ -279,7 +279,7 @@ impl Condition {
                     }
                     eq_cond = Some(lit);
                 } else if let Some((input_ref, op, lit)) = expr.as_comparison_const() {
-                    assert_eq!(input_ref.index, pk_idces[i]);
+                    assert_eq!(input_ref.index, order_column_ids[i]);
                     match op {
                         ExprType::LessThan | ExprType::LessThanOrEqual => {
                             ub.push((lit, op == ExprType::LessThanOrEqual, expr));

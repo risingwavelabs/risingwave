@@ -132,9 +132,9 @@ impl LogicalScan {
             .collect()
     }
 
-    pub(super) fn pk_names(&self) -> Vec<String> {
+    pub(super) fn order_names(&self) -> Vec<String> {
         self.table_desc
-            .pks
+            .order_column_ids()
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
             .collect()
@@ -142,14 +142,6 @@ impl LogicalScan {
 
     pub fn table_name(&self) -> &str {
         &self.table_name
-    }
-
-    pub fn pk_descs(&self) -> Vec<ColumnDesc> {
-        self.table_desc
-            .pks
-            .iter()
-            .map(|i| self.table_desc.columns[*i].clone())
-            .collect()
     }
 
     /// Get a reference to the logical scan's table desc.
@@ -338,11 +330,10 @@ impl ToBatch for LogicalScan {
         if self.predicate.always_true() {
             Ok(BatchSeqScan::new(self.clone(), ScanRange::full_table_scan()).into())
         } else {
-            let (scan_range, predicate) = self
-                .predicate
-                .clone()
-                .split_to_scan_range(&self.table_desc.pks, self.table_desc.columns.len());
-
+            let (scan_range, predicate) = self.predicate.clone().split_to_scan_range(
+                &self.table_desc.order_column_ids(),
+                self.table_desc.columns.len(),
+            );
             let mut scan = self.clone();
             scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
             let (scan, predicate, project_expr) = scan.predicate_pull_up();

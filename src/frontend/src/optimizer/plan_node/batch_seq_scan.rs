@@ -99,18 +99,18 @@ impl fmt::Display for BatchSeqScan {
                 self.logical.column_names().join(", ")
             )
         } else {
-            let pk_names = self.logical.pk_names();
+            let order_names = self.logical.order_names();
             #[allow(clippy::disallowed_methods)]
             let mut range_str = self
                 .scan_range
                 .eq_conds
                 .iter()
-                .zip(pk_names.iter())
+                .zip(order_names.iter())
                 .map(|(v, name)| format!("{} = {:?}", name, v))
                 .collect_vec();
             if let Some(range) = &self.scan_range.range {
                 let i = self.scan_range.eq_conds.len();
-                range_str.push(range_to_string(&pk_names[i], range))
+                range_str.push(range_to_string(&order_names[i], range))
             }
 
             write!(
