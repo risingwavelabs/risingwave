@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use futures::pin_mut;
 use futures::stream::StreamExt;
+use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
 use risingwave_common::types::DataType;
@@ -1401,40 +1404,31 @@ async fn test_multi_cell_based_table_iter() {
     assert!(res_2_2.is_none());
 }
 
-#[tokio::test]
-// TODO: serialize pk, store with dedup.
-// Test backwards compat: can decode with normal input,
-// but can also decode with new representation.
-// Test pk fields not in sequence in original row.
-// e.g.
-// pk          := | name | age  |
-// row         := | name | addr | age |
-// partial row := | addr |
-async fn test_dedup_pk_multi_cell_based_table_iter() {
+async fn test_dedup_pk_multi_cell_based_table_iter_with(
+    row_ordered_descs: Vec<OrderedColumnDesc>,
+    pk_indices: Vec<usize>,
+    rows: Vec<Row>,
+) {
     // ---------- Declare meta
-    let pk_descs = vec![
-        OrderedColumnDesc {
-            column_desc: ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
-            order: OrderType::Ascending,
-        },
-        OrderedColumnDesc {
-            column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
-            order: OrderType::Descending,
-        },
-    ];
-    let order_types = pk_descs.iter().map(|d| d.order).collect::<Vec<_>>();
-
-    let row_descs = vec![
-        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
-        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
-        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
-    ];
-
-    let partial_row_descs = vec![ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32)];
-    let partial_row_col_ids = partial_row_descs
+    let pk_ordered_descs = pk_indices
         .iter()
-        .map(|d| d.column_id)
-        .collect::<Vec<_>>();
+        .map(|row_idx| row_ordered_descs[*row_idx].clone())
+        .collect_vec();
+    let pk_indices_set = pk_indices.iter().collect::<HashSet<_>>();
+    let order_types = pk_ordered_descs.iter().map(|d| d.order).collect::<Vec<_>>();
+
+    let row_descs = row_ordered_descs
+        .into_iter()
+        .map(|od| od.column_desc)
+        .collect_vec();
+
+    let partial_row_descs = row_descs
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !pk_indices_set.contains(i))
+        .map(|(_, d)| d)
+        .collect_vec();
+    let partial_row_col_ids = partial_row_descs.iter().map(|d| d.column_id).collect_vec();
 
     // ---------- Init storage
     let state_store = MemoryStateStore::new();
@@ -1448,42 +1442,80 @@ async fn test_dedup_pk_multi_cell_based_table_iter() {
     let mut cell_based_row_serializer = CellBasedRowSerializer::new();
     let ordered_row_serializer = OrderedRowSerializer::new(order_types.clone());
 
-    // ---------- Serialize to cell repr
-    let pk = Row(vec![Some(1_i32.into()), Some(11_i32.into())]);
-    let pk_bytes = serialize_pk(&pk, &ordered_row_serializer).unwrap();
+    // ---------- Init reader
+    let table = CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types);
+    let mut iter = table.iter_with_pk(epoch, pk_ordered_descs).await.unwrap();
 
-    let row = Row(vec![Some(111_i32.into())]);
+    for Row(row) in rows.clone() {
+        // ---------- Serialize to cell repr
+        let pk = Row(pk_indices
+            .iter()
+            .map(|row_idx| row[*row_idx].clone())
+            .collect_vec());
+        let pk_bytes = serialize_pk(&pk, &ordered_row_serializer).unwrap();
 
-    let bytes = cell_based_row_serializer
-        .serialize(&pk_bytes, row, &partial_row_col_ids)
-        .unwrap();
+        let partial_row = Row(row
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !pk_indices_set.contains(i))
+            .map(|(_, row_datum)| row_datum.clone())
+            .collect_vec());
 
-    // ---------- Write to storage
-    // write into batch
-    for (key, value) in bytes {
-        local.put(key, StorageValue::new_put(ValueMeta::default(), value))
+        let bytes = cell_based_row_serializer
+            .serialize(&pk_bytes, partial_row, &partial_row_col_ids)
+            .unwrap();
+
+        // ---------- Batch-write
+        for (key, value) in bytes {
+            local.put(key, StorageValue::new_put(ValueMeta::default(), value))
+        }
     }
+
     // commit batch
     batch.ingest(epoch).await.unwrap();
 
-    // ---------- Init reader
-    let table = CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types);
+    for expected in rows {
+        // ---------- Read + Deserialize from storage
+        let actual = iter.next().await.unwrap();
 
-    let mut iter = table.iter_with_pk(epoch, pk_descs).await.unwrap();
+        // ---------- Verify
+        assert!(actual.is_some());
+        assert_eq!(actual.unwrap(), expected);
+    }
+}
 
-    // ---------- Read + Deserialize from storage
-    let res = iter.next().await.unwrap();
+#[tokio::test]
+// TODO: serialize pk, store with dedup.
+// Test backwards compat: can decode with normal input,
+// but can also decode with new representation.
+// Test pk fields not in sequence in original row.
+// e.g.
+// pk          := | name | age  |
+// row         := | name | addr | age |
+// partial row := | addr |
+async fn test_dedup_pk_multi_cell_based_table_iter() {
+    let row_ordered_descs = vec![
+        OrderedColumnDesc {
+            column_desc: ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+            order: OrderType::Ascending,
+        },
+        OrderedColumnDesc {
+            column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+            order: OrderType::Descending,
+        },
+        OrderedColumnDesc {
+            column_desc: ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
+            order: OrderType::Descending,
+        },
+    ];
+    let pk_indices = vec![0, 1];
+    let rows = vec![Row(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ])];
 
-    // ---------- Verify
-    assert!(res.is_some());
-    assert_eq!(
-        Row(vec![
-            Some(1_i32.into()),
-            Some(11_i32.into()),
-            Some(111_i32.into()),
-        ]),
-        res.unwrap()
-    );
+    test_dedup_pk_multi_cell_based_table_iter_with(row_ordered_descs, pk_indices, rows).await
 }
 
 #[tokio::test]
