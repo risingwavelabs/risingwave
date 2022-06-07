@@ -306,6 +306,16 @@ impl<S: StateStore> StateTableRowIter<S> {
         let pk_serializer = pk_serializer.as_ref().expect("pk_serializer is None");
 
         loop {
+            let start_key = match pk_bounds.start_bound() {
+                Included(k) => Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
+                Excluded(k) => Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
+                Unbounded => Unbounded,
+            };
+            let end_key = match pk_bounds.end_bound() {
+                Included(k) => Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
+                Excluded(k) => Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?),
+                Unbounded => Unbounded,
+            };
             match (
                 cell_based_table_iter.as_mut().peek().await,
                 mem_table_iter.peek(),
@@ -317,24 +327,6 @@ impl<S: StateStore> StateTableRowIter<S> {
                 }
                 (None, Some(_)) => {
                     let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
-                    let start_key = match pk_bounds.start_bound() {
-                        Included(k) => {
-                            Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
-                        }
-                        Excluded(k) => {
-                            Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
-                        }
-                        Unbounded => Unbounded,
-                    };
-                    let end_key = match pk_bounds.end_bound() {
-                        Included(k) => {
-                            Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
-                        }
-                        Excluded(k) => {
-                            Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
-                        }
-                        Unbounded => Unbounded,
-                    };
 
                     if (start_key, end_key).contains(mem_table_pk) {
                         match row_op {
@@ -350,25 +342,6 @@ impl<S: StateStore> StateTableRowIter<S> {
                     Some(Ok((cell_based_pk, cell_based_row))),
                     Some(Ok((mem_table_pk, _mem_table_row_op))),
                 ) => {
-                    let start_key = match pk_bounds.start_bound() {
-                        Included(k) => {
-                            Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
-                        }
-                        Excluded(k) => {
-                            Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
-                        }
-                        Unbounded => Unbounded,
-                    };
-                    let end_key = match pk_bounds.end_bound() {
-                        Included(k) => {
-                            Included(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
-                        }
-                        Excluded(k) => {
-                            Excluded(serialize_pk(k.as_ref(), pk_serializer).map_err(err)?)
-                        }
-                        Unbounded => Unbounded,
-                    };
-                    // let in_range = (start_key, end_key).contains(&(*mem_table_pk).clone());
                     match cell_based_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
                             // cell_based_table_item will be return
