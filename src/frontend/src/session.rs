@@ -377,7 +377,7 @@ impl SessionImpl {
         let mut map = HashMap::new();
         // FIXME: May need better init way + default config.
         map.insert(
-            IMPLICIT_FLUSH.to_string(),
+            IMPLICIT_FLUSH.to_string().to_ascii_lowercase(),
             ConfigEntry::new("false".to_string()),
         );
         RwLock::new(map)
