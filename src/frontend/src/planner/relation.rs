@@ -20,8 +20,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundTableFunction, BoundSource, BoundWindowTableFunction,
-    Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundTableFunction, BoundWindowTableFunction, Relation,
+    WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{

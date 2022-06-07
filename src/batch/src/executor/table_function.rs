@@ -32,19 +32,99 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{BoxedDataChunkStream, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
-trait TableFunction {
-    fn eval() -> Result<DataChunk>;
+pub enum TableFunction {
+    GenerateSeriesTime(GenerateSeries<NaiveDateTimeArray, IntervalArray>),
+    GenerateSeriesInt(GenerateSeries<I32Array, I32Array>),
+    Unnest(Unnest),
 }
 
-pub struct GenerateSeries {}
+pub struct GenerateSeries<T: Array, S: Array> {
+    start: T::OwnedItem,
+    stop: T::OwnedItem,
+    step: S::OwnedItem,
+}
 
-pub struct Unnest {}
+impl<T: Array, S: Array> GenerateSeries<T, S>
+where
+    T: Array,
+    S: Array,
+    T::OwnedItem: PartialOrd<T::OwnedItem>,
+    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
+{
+    fn eval(self) -> Result<DataChunk> {
+        let Self {
+            start, stop, step, ..
+        } = self;
+
+        // let mut rest_rows = ((stop - start) / step + 1) as usize;
+        let mut cur = start;
+
+        // Simulate a do-while loop.
+        let chunk_size = DEFAULT_CHUNK_BUFFER_SIZE;
+        let mut builder = T::Builder::new(chunk_size)?;
+        while cur <= stop {
+            builder.append(Some(cur.as_scalar_ref())).unwrap();
+            cur = cur.checked_add(step.as_scalar_ref())?;
+        }
+        let arr = builder.finish()?;
+        let columns = vec![Column::new(Arc::new(arr.into()))];
+        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+        Ok(chunk)
+    }
+}
+
+pub struct Unnest {
+    array_refs: Vec<ArrayRef>,
+    return_type: DataType,
+}
+
+impl Unnest {
+    fn eval(self) -> Result<DataChunk> {
+        let mut builder = self
+            .return_type
+            .create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE)?;
+        self.array_refs
+            .iter()
+            .try_for_each(|a| builder.append_array(a))?;
+        let arr = builder.finish()?;
+        let columns = vec![Column::new(Arc::new(arr))];
+        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+
+        Ok(chunk)
+    }
+}
 
 pub struct TableFunctionExecutor {
     array_refs: Vec<ArrayRef>,
     return_type: DataType,
     schema: Schema,
     identity: String,
+    table_function: TableFunction,
+}
+
+impl Executor for TableFunctionExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl TableFunctionExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        match self.table_function {
+            TableFunction::GenerateSeriesTime(gs) => yield gs.eval()?,
+            TableFunction::GenerateSeriesInt(gs) => yield gs.eval()?,
+            TableFunction::Unnest(us) => yield us.eval()?,
+        }
+    }
 }
 
 pub struct GenerateSeriesExecutor<T: Array, S: Array> {
@@ -54,119 +134,6 @@ pub struct GenerateSeriesExecutor<T: Array, S: Array> {
 
     schema: Schema,
     identity: String,
-}
-
-pub struct UnnestExecutor {
-    array_refs: Vec<ArrayRef>,
-    return_type: DataType,
-    schema: Schema,
-    identity: String,
-}
-
-impl Executor for UnnestExecutor {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute()
-    }
-}
-
-impl UnnestExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(self: Box<Self>) {
-        let mut builder = self
-            .return_type
-            .create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE)?;
-        self.array_refs.iter().try_for_each(|a| {
-            tracing::error!("{:?}", a);
-            builder.append_array(a)
-        })?;
-        let arr = builder.finish()?;
-        let columns = vec![Column::new(Arc::new(arr))];
-        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
-
-        yield chunk;
-    }
-}
-
-impl<T: Array, S: Array> GenerateSeriesExecutor<T, S> {
-    pub fn new(
-        start: T::OwnedItem,
-        stop: T::OwnedItem,
-        step: S::OwnedItem,
-        schema: Schema,
-        identity: String,
-    ) -> Self {
-        Self {
-            start,
-            stop,
-            step,
-            schema,
-            identity,
-        }
-    }
-}
-
-impl<T: Array, S: Array> Executor for GenerateSeriesExecutor<T, S>
-where
-    T::OwnedItem: PartialOrd<T::OwnedItem>,
-    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
-{
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute()
-    }
-}
-
-impl<T, S> GenerateSeriesExecutor<T, S>
-where
-    T: Array,
-    S: Array,
-    T::OwnedItem: PartialOrd<T::OwnedItem>,
-    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
-{
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(self: Box<Self>) {
-        let Self {
-            start, stop, step, ..
-        } = *self;
-
-        // let mut rest_rows = ((stop - start) / step + 1) as usize;
-        let mut cur = start;
-
-        // Simulate a do-while loop.
-        while cur <= stop {
-            let chunk_size = DEFAULT_CHUNK_BUFFER_SIZE;
-            let mut builder = T::Builder::new(chunk_size)?;
-
-            for _ in 0..chunk_size {
-                if cur > stop {
-                    break;
-                }
-                builder.append(Some(cur.as_scalar_ref())).unwrap();
-                cur = cur.checked_add(step.as_scalar_ref())?;
-            }
-
-            let arr = builder.finish()?;
-            let columns = vec![Column::new(Arc::new(arr.into()))];
-            let chunk: DataChunk = DataChunk::builder().columns(columns).build();
-
-            yield chunk;
-        }
-    }
 }
 
 pub struct SeriesExecutorBuilder {}
@@ -199,7 +166,6 @@ impl BoxedExecutorBuilder for SeriesExecutorBuilder {
             })
             .collect::<Result<Vec<_>>>()?;
         let return_type = DataType::from(node.data_type.as_ref().unwrap());
-        tracing::error!("{:?}", node.get_series_type()?);
         match node.get_series_type()? {
             Generate => {
                 let start = array_refs[0].clone();
@@ -214,12 +180,17 @@ impl BoxedExecutorBuilder for SeriesExecutorBuilder {
                         if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
                             let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
 
-                            Ok(Box::new(GenerateSeriesExecutor::<
-                                NaiveDateTimeArray,
-                                IntervalArray,
-                            >::new(
-                                start, stop, step, schema, identity
-                            )))
+                            Ok(Box::new(TableFunctionExecutor {
+                                array_refs,
+                                return_type,
+                                schema,
+                                identity,
+                                table_function: TableFunction::GenerateSeriesTime(GenerateSeries {
+                                    start,
+                                    stop,
+                                    step,
+                                }),
+                            }))
                         } else {
                             Err(ErrorCode::InternalError(
                                 "the parameters of Generate SeriesFunction are incorrect"
@@ -236,9 +207,17 @@ impl BoxedExecutorBuilder for SeriesExecutorBuilder {
                         if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
                             let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
 
-                            Ok(Box::new(GenerateSeriesExecutor::<I32Array, I32Array>::new(
-                                start, stop, step, schema, identity,
-                            )))
+                            Ok(Box::new(TableFunctionExecutor {
+                                array_refs,
+                                return_type,
+                                schema,
+                                identity,
+                                table_function: TableFunction::GenerateSeriesInt(GenerateSeries {
+                                    start,
+                                    stop,
+                                    step,
+                                }),
+                            }))
                         } else {
                             Err(ErrorCode::InternalError(
                                 "the parameters of Generate Series Function are incorrect"
@@ -255,11 +234,15 @@ impl BoxedExecutorBuilder for SeriesExecutorBuilder {
             }
             Unnest => {
                 let schema = Schema::new(vec![Field::unnamed(return_type.clone())]);
-                Ok(Box::new(UnnestExecutor {
-                    array_refs,
-                    return_type,
+                Ok(Box::new(TableFunctionExecutor {
+                    array_refs: array_refs.clone(),
+                    return_type: return_type.clone(),
                     schema,
                     identity,
+                    table_function: TableFunction::Unnest(Unnest {
+                        array_refs,
+                        return_type,
+                    }),
                 }))
             }
         }
@@ -269,7 +252,7 @@ impl BoxedExecutorBuilder for SeriesExecutorBuilder {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
-    use risingwave_common::array::{Array, ArrayImpl, I32Array};
+    use risingwave_common::array::{Array, ArrayImpl};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::try_match_expand;
     use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper};
@@ -285,12 +268,12 @@ mod tests {
     }
 
     async fn generate_series_test_case(start: i32, stop: i32, step: i32) {
-        let executor = Box::new(GenerateSeriesExecutor::<I32Array, I32Array> {
-            start,
-            stop,
-            step,
+        let executor = Box::new(TableFunctionExecutor {
+            array_refs: vec![],
+            return_type: DataType::Int32,
             schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
             identity: "GenerateSeriesI32Executor2".to_string(),
+            table_function: TableFunction::GenerateSeriesInt(GenerateSeries { start, stop, step }),
         });
         let mut remained_values = ((stop - start) / step + 1) as usize;
         let mut stream = executor.execute();
@@ -328,15 +311,13 @@ mod tests {
         step: IntervalUnit,
         expected_rows_count: usize,
     ) {
-        let executor = Box::new(
-            GenerateSeriesExecutor::<NaiveDateTimeArray, IntervalArray>::new(
-                start,
-                stop,
-                step,
-                Schema::new(vec![Field::unnamed(DataType::Int32)]),
-                "GenerateSeriesTimestampExecutor2".to_string(),
-            ),
-        );
+        let executor = Box::new(TableFunctionExecutor {
+            array_refs: vec![],
+            return_type: DataType::Timestamp,
+            schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
+            identity: "GenerateSeriesTimestampExecutor2".to_string(),
+            table_function: TableFunction::GenerateSeriesTime(GenerateSeries { start, stop, step }),
+        });
 
         let mut result_count = 0;
         let mut stream = executor.execute();

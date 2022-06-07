@@ -103,7 +103,7 @@ impl_plan_tree_node_for_leaf! { LogicalTableFunction }
 
 impl fmt::Display for LogicalTableFunction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalSeries")
+        self.fmt_with_name(f, "LogicalTableFunction")
     }
 }
 
@@ -130,14 +130,14 @@ impl ToBatch for LogicalTableFunction {
 impl ToStream for LogicalTableFunction {
     fn to_stream(&self) -> Result<PlanRef> {
         Err(
-            ErrorCode::NotImplemented("LogicalGenerateSeries::to_stream".to_string(), None.into())
+            ErrorCode::NotImplemented("LogicalTableFunction::to_stream".to_string(), None.into())
                 .into(),
         )
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
         Err(ErrorCode::NotImplemented(
-            "LogicalGenerateSeries::logical_rewrite_for_stream".to_string(),
+            "LogicalTableFunction::logical_rewrite_for_stream".to_string(),
             None.into(),
         )
         .into())

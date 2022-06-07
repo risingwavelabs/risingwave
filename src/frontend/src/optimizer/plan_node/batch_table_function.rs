@@ -53,7 +53,7 @@ impl BatchTableFunction {
 
 impl fmt::Display for BatchTableFunction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchGenerateSeries")
+        self.logical.fmt_with_name(f, "BatchTableFunction")
     }
 }
 
