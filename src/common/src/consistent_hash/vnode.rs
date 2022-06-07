@@ -23,7 +23,9 @@ pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
 // table owns.
 #[derive(Clone, Default)]
 pub struct VNodeBitmap {
+    /// Id of state table that the bitmap belongs to.
     table_id: u32,
+    /// Bitmap that indicates vnodes that the state tables owns.
     bitmap: Vec<u8>,
 }
 
@@ -41,6 +43,9 @@ impl VNodeBitmap {
         Self { table_id, bitmap }
     }
 
+    /// Checks whether the bitmap overlaps with the given bitmaps. Two bitmaps overlap only when
+    /// they belong to the same state table and have at least one common "1" bit. The given
+    /// bitmaps are always from `SstableInfo`, which are in the form of protobuf.
     pub fn check_overlap(&self, bitmaps: &[risingwave_pb::common::VNodeBitmap]) -> bool {
         if bitmaps.is_empty() {
             return true;
@@ -48,11 +53,11 @@ impl VNodeBitmap {
         if let Ok(pos) =
             bitmaps.binary_search_by_key(&self.table_id, |bitmap| bitmap.get_table_id())
         {
-            let text = &bitmaps[pos];
+            let candidate_bitmap = &bitmaps[pos];
             assert_eq!(self.bitmap.len(), VNODE_BITMAP_LEN);
-            assert_eq!(text.bitmap.len(), VNODE_BITMAP_LEN);
+            assert_eq!(candidate_bitmap.bitmap.len(), VNODE_BITMAP_LEN);
             for i in 0..VNODE_BITMAP_LEN as usize {
-                if (self.bitmap[i] & text.get_bitmap()[i]) != 0 {
+                if (self.bitmap[i] & candidate_bitmap.get_bitmap()[i]) != 0 {
                     return true;
                 }
             }
