@@ -107,8 +107,6 @@ impl Unnest {
 }
 
 pub struct TableFunctionExecutor {
-    array_refs: Vec<ArrayRef>,
-    return_type: DataType,
     schema: Schema,
     identity: String,
     table_function: TableFunction,
@@ -186,8 +184,6 @@ impl BoxedExecutorBuilder for SeriesExecutorBuilder {
                             let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
 
                             Ok(Box::new(TableFunctionExecutor {
-                                array_refs,
-                                return_type,
                                 schema,
                                 identity,
                                 table_function: TableFunction::GenerateSeriesTime(GenerateSeries {
@@ -213,8 +209,6 @@ impl BoxedExecutorBuilder for SeriesExecutorBuilder {
                             let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
 
                             Ok(Box::new(TableFunctionExecutor {
-                                array_refs,
-                                return_type,
                                 schema,
                                 identity,
                                 table_function: TableFunction::GenerateSeriesInt(GenerateSeries {
@@ -240,8 +234,6 @@ impl BoxedExecutorBuilder for SeriesExecutorBuilder {
             Unnest => {
                 let schema = Schema::new(vec![Field::unnamed(return_type.clone())]);
                 Ok(Box::new(TableFunctionExecutor {
-                    array_refs: array_refs.clone(),
-                    return_type: return_type.clone(),
                     schema,
                     identity,
                     table_function: TableFunction::Unnest(Unnest {
@@ -274,8 +266,6 @@ mod tests {
 
     async fn generate_series_test_case(start: i32, stop: i32, step: i32) {
         let executor = Box::new(TableFunctionExecutor {
-            array_refs: vec![],
-            return_type: DataType::Int32,
             schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
             identity: "GenerateSeriesI32Executor2".to_string(),
             table_function: TableFunction::GenerateSeriesInt(GenerateSeries { start, stop, step }),
@@ -317,8 +307,6 @@ mod tests {
         expected_rows_count: usize,
     ) {
         let executor = Box::new(TableFunctionExecutor {
-            array_refs: vec![],
-            return_type: DataType::Timestamp,
             schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
             identity: "GenerateSeriesTimestampExecutor2".to_string(),
             table_function: TableFunction::GenerateSeriesTime(GenerateSeries { start, stop, step }),
