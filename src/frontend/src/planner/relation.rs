@@ -25,8 +25,8 @@ use crate::binder::{
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    LogicalGenerateSeries, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
-    LogicalSource, PlanRef,
+    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSeries, LogicalSource,
+    PlanRef,
 };
 use crate::planner::Planner;
 
@@ -40,6 +40,7 @@ impl Planner {
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
             Relation::GenerateSeriesFunction(gs) => self.plan_generate_series_function(*gs),
+            Relation::UnnestFunction(gs) => self.plan_unnest_series_function(*gs),
         }
     }
 
@@ -102,10 +103,23 @@ impl Planner {
             return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
         };
 
-        Ok(LogicalGenerateSeries::create(
+        Ok(LogicalSeries::create_generate_series(
             start,
             stop,
             step,
+            schema,
+            self.ctx(),
+        ))
+    }
+
+    pub(super) fn plan_unnest_series_function(
+        &mut self,
+        table_function: BoundGenerateSeriesFunction,
+    ) -> Result<PlanRef> {
+        let schema = Schema::new(vec![Field::with_name(table_function.data_type, "unnest")]);
+
+        Ok(LogicalSeries::create_unnest(
+            table_function.args,
             schema,
             self.ctx(),
         ))

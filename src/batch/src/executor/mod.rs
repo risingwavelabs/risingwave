@@ -183,7 +183,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::HashAgg => HashAggExecutorBuilder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
-            NodeBody::GenerateSeries => GenerateSeriesExecutorBuilder,
+            NodeBody::GenerateSeries => SeriesExecutorBuilder,
             NodeBody::HopWindow => HopWindowExecutor,
         }
         .await?;

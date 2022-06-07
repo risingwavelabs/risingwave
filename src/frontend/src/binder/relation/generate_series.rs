@@ -16,10 +16,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::FunctionArg;
+use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr};
 
 use super::{Binder, Result};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{align_types, Expr as _, ExprImpl};
 
 #[derive(Debug, Clone)]
 pub struct BoundGenerateSeriesFunction {
@@ -28,6 +28,50 @@ pub struct BoundGenerateSeriesFunction {
 }
 
 impl Binder {
+    pub(super) fn bind_unnest_function(
+        &mut self,
+        args: Vec<FunctionArg>,
+    ) -> Result<BoundGenerateSeriesFunction> {
+        if args.len() != 1 {
+            return Err(ErrorCode::BindError(
+                "the length of args of unnest function should be 1".to_string(),
+            )
+            .into());
+        }
+
+        let arg = args[0].get_expr();
+        if let FunctionArgExpr::Expr(expr) = arg {
+            if let Expr::Array(_) = expr {
+                let mut exprs = self.array_flatten(expr)?;
+                let data_type = align_types(exprs.iter_mut())?;
+                let columns = [(
+                    false,
+                    Field {
+                        data_type: data_type.clone(),
+                        name: "unnest".to_string(),
+                        sub_fields: vec![],
+                        type_name: "".to_string(),
+                    },
+                )]
+                .into_iter();
+
+                self.bind_context(columns, "unnest".to_string(), None)?;
+
+                Ok(BoundGenerateSeriesFunction {
+                    args: exprs,
+                    data_type,
+                })
+            } else {
+                Err(
+                    ErrorCode::BindError("the arg of unnest function should be array".to_string())
+                        .into(),
+                )
+            }
+        } else {
+            unimplemented!()
+        }
+    }
+
     pub(super) fn bind_generate_series_function(
         &mut self,
         args: Vec<FunctionArg>,
@@ -67,6 +111,19 @@ impl Binder {
             args: exprs,
             data_type,
         })
+    }
+
+    fn array_flatten(&mut self, expr: Expr) -> Result<Vec<ExprImpl>> {
+        if let Expr::Array(exprs) = expr {
+            let exprs: Vec<Expr> = exprs;
+            let mut result = vec![];
+            for e in exprs {
+                result.append(&mut self.array_flatten(e)?);
+            }
+            Ok(result)
+        } else {
+            Ok(vec![self.bind_expr(expr)?])
+        }
     }
 }
 

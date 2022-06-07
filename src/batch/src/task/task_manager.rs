@@ -175,8 +175,10 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
+    use risingwave_pb::batch_plan::generate_series_node::Type;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
         ExchangeInfo, GenerateSeriesNode, PlanFragment, PlanNode, TaskId as ProstTaskId,
@@ -259,11 +261,15 @@ mod tests {
                 children: vec![],
                 identity: "".to_string(),
                 node_body: Some(NodeBody::GenerateSeries(GenerateSeriesNode {
-                    start: Some(make_i32_literal(1)),
+                    series_type: Type::Generate as i32,
+                    args: vec![
+                        make_i32_literal(1),
+                        make_i32_literal(i32::MAX),
+                        make_i32_literal(1),
+                    ],
                     // This is a bit hacky as we want to make sure the task lasts long enough
                     // for us to abort it.
-                    stop: Some(make_i32_literal(i32::MAX)),
-                    step: Some(make_i32_literal(1)),
+                    data_type: Some(DataType::Int32.to_protobuf()),
                 })),
             }),
             exchange_info: Some(ExchangeInfo {

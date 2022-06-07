@@ -27,6 +27,7 @@ mod join;
 mod subquery;
 mod table_or_source;
 mod window_table_function;
+
 pub use generate_series::BoundGenerateSeriesFunction;
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
@@ -43,6 +44,7 @@ pub enum Relation {
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
     GenerateSeriesFunction(Box<BoundGenerateSeriesFunction>),
+    UnnestFunction(Box<BoundGenerateSeriesFunction>),
 }
 
 impl Binder {
@@ -191,6 +193,10 @@ impl Binder {
                     if func_name.eq_ignore_ascii_case("generate_series") {
                         return Ok(Relation::GenerateSeriesFunction(Box::new(
                             self.bind_generate_series_function(args)?,
+                        )));
+                    } else if func_name.eq_ignore_ascii_case("unnest") {
+                        return Ok(Relation::UnnestFunction(Box::new(
+                            self.bind_unnest_function(args)?,
                         )));
                     }
                     let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {

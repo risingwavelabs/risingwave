@@ -108,9 +108,13 @@ message HopWindowNode {
 }
 
 message GenerateSeriesNode {
-  expr.ExprNode start = 1;
-  expr.ExprNode stop = 2;
-  expr.ExprNode step = 3;
+  enum Type {
+    GENERATE = 0;
+    UNNEST = 1;
+  }
+  Type series_type = 1;
+  repeated expr.ExprNode args = 2;
+  data.DataType data_type = 3;
 }
 
 // Task is a running instance of Stage.

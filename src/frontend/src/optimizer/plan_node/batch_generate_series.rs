@@ -14,39 +14,39 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::GenerateSeriesNode;
 
-use super::{
-    LogicalGenerateSeries, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
-};
+use super::{PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::Expr;
+use crate::optimizer::plan_node::logical_generate_series::LogicalSeries;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
 pub struct BatchGenerateSeries {
     pub base: PlanBase,
-    logical: LogicalGenerateSeries,
+    logical: LogicalSeries,
 }
 
 impl PlanTreeNodeLeaf for BatchGenerateSeries {}
 impl_plan_tree_node_for_leaf!(BatchGenerateSeries);
 
 impl BatchGenerateSeries {
-    pub fn new(logical: LogicalGenerateSeries) -> Self {
+    pub fn new(logical: LogicalSeries) -> Self {
         Self::with_dist(logical, Distribution::Single)
     }
 
-    pub fn with_dist(logical: LogicalGenerateSeries, dist: Distribution) -> Self {
+    pub fn with_dist(logical: LogicalSeries, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
         BatchGenerateSeries { base, logical }
     }
 
     #[must_use]
-    pub fn logical(&self) -> &LogicalGenerateSeries {
+    pub fn logical(&self) -> &LogicalSeries {
         &self.logical
     }
 }
@@ -66,9 +66,14 @@ impl ToDistributedBatch for BatchGenerateSeries {
 impl ToBatchProst for BatchGenerateSeries {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::GenerateSeries(GenerateSeriesNode {
-            start: Some(self.logical.start.to_expr_proto()),
-            stop: Some(self.logical.stop.to_expr_proto()),
-            step: Some(self.logical.step.to_expr_proto()),
+            series_type: self.logical.series_type.clone() as i32,
+            args: self
+                .logical
+                .args
+                .iter()
+                .map(|c| c.to_expr_proto())
+                .collect_vec(),
+            data_type: Some(self.logical.data_type.to_protobuf()),
         })
     }
 }

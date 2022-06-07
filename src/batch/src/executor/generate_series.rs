@@ -17,14 +17,16 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    Array, ArrayBuilder, DataChunk, I32Array, IntervalArray, NaiveDateTimeArray,
+    Array, ArrayBuilder, ArrayRef, DataChunk, I32Array, IntervalArray, NaiveDateTimeArray,
 };
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{CheckedAdd, DataType, Scalar};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::build_from_prost;
+use risingwave_pb::batch_plan::generate_series_node::Type::*;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{BoxedDataChunkStream, Executor, ExecutorBuilder};
@@ -37,6 +39,45 @@ pub struct GenerateSeriesExecutor<T: Array, S: Array> {
 
     schema: Schema,
     identity: String,
+}
+
+pub struct UnnestExecutor {
+    array_refs: Vec<ArrayRef>,
+    return_type: DataType,
+    schema: Schema,
+    identity: String,
+}
+
+impl Executor for UnnestExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl UnnestExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        let mut builder = self
+            .return_type
+            .create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE)?;
+        self.array_refs.iter().try_for_each(|a| {
+            tracing::error!("{:?}", a);
+            builder.append_array(a)
+        })?;
+        let arr = builder.finish()?;
+        let columns = vec![Column::new(Arc::new(arr))];
+        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+
+        yield chunk;
+    }
 }
 
 impl<T: Array, S: Array> GenerateSeriesExecutor<T, S> {
@@ -113,10 +154,10 @@ where
     }
 }
 
-pub struct GenerateSeriesExecutorBuilder {}
+pub struct SeriesExecutorBuilder {}
 
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for GenerateSeriesExecutorBuilder {
+impl BoxedExecutorBuilder for SeriesExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
         inputs: Vec<BoxedExecutor>,
@@ -133,58 +174,79 @@ impl BoxedExecutorBuilder for GenerateSeriesExecutorBuilder {
         let identity = source.plan_node().get_identity().clone();
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let start_expr = build_from_prost(node.get_start()?)?;
-        let stop_expr = build_from_prost(node.get_stop()?)?;
-        let step_expr = build_from_prost(node.get_step()?)?;
+        let args: &Vec<ExprNode> = node.get_args();
 
-        let start = start_expr.eval(&dummy_chunk)?;
-        let stop = stop_expr.eval(&dummy_chunk)?;
-        let step = step_expr.eval(&dummy_chunk)?;
+        let array_refs = args
+            .iter()
+            .map(|a| {
+                let expr = build_from_prost(a)?;
+                expr.eval(&dummy_chunk)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let return_type = DataType::from(node.data_type.as_ref().unwrap());
+        tracing::error!("{:?}", node.get_series_type()?);
+        match node.get_series_type()? {
+            Generate => {
+                let start = array_refs[0].clone();
+                let stop = array_refs[1].clone();
+                let step = array_refs[2].clone();
+                match return_type {
+                    DataType::Timestamp => {
+                        let start = start.as_naivedatetime().value_at(0);
+                        let stop = stop.as_naivedatetime().value_at(0);
+                        let step = step.as_interval().value_at(0);
 
-        match start_expr.return_type() {
-            DataType::Timestamp => {
-                let start = start.as_naivedatetime().value_at(0);
-                let stop = stop.as_naivedatetime().value_at(0);
-                let step = step.as_interval().value_at(0);
+                        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+                            let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
 
-                if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                    let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
+                            Ok(Box::new(GenerateSeriesExecutor::<
+                                NaiveDateTimeArray,
+                                IntervalArray,
+                            >::new(
+                                start, stop, step, schema, identity
+                            )))
+                        } else {
+                            Err(ErrorCode::InternalError(
+                                "the parameters of Generate SeriesFunction are incorrect"
+                                    .to_string(),
+                            )
+                            .into())
+                        }
+                    }
+                    DataType::Int32 => {
+                        let start = start.as_int32().value_at(0);
+                        let stop = stop.as_int32().value_at(0);
+                        let step = step.as_int32().value_at(0);
 
-                    Ok(Box::new(GenerateSeriesExecutor::<
-                        NaiveDateTimeArray,
-                        IntervalArray,
-                    >::new(
-                        start, stop, step, schema, identity
-                    )))
-                } else {
-                    Err(ErrorCode::InternalError(
-                        "the parameters of Generate SeriesFunction are incorrect".to_string(),
-                    )
-                    .into())
-                }
-            }
-            DataType::Int32 => {
-                let start = start.as_int32().value_at(0);
-                let stop = stop.as_int32().value_at(0);
-                let step = step.as_int32().value_at(0);
+                        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+                            let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
 
-                if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                    let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
-
-                    Ok(Box::new(GenerateSeriesExecutor::<I32Array, I32Array>::new(
-                        start, stop, step, schema, identity,
-                    )))
-                } else {
-                    Err(ErrorCode::InternalError(
+                            Ok(Box::new(GenerateSeriesExecutor::<I32Array, I32Array>::new(
+                                start, stop, step, schema, identity,
+                            )))
+                        } else {
+                            Err(ErrorCode::InternalError(
+                                "the parameters of Generate Series Function are incorrect"
+                                    .to_string(),
+                            )
+                            .into())
+                        }
+                    }
+                    _ => Err(ErrorCode::InternalError(
                         "the parameters of Generate Series Function are incorrect".to_string(),
                     )
-                    .into())
+                    .into()),
                 }
             }
-            _ => Err(ErrorCode::InternalError(
-                "the parameters of Generate Series Function are incorrect".to_string(),
-            )
-            .into()),
+            Unnest => {
+                let schema = Schema::new(vec![Field::unnamed(return_type.clone())]);
+                Ok(Box::new(UnnestExecutor {
+                    array_refs,
+                    return_type,
+                    schema,
+                    identity,
+                }))
+            }
         }
     }
 }
