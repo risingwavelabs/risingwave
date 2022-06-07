@@ -24,8 +24,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{CheckedAdd, DataType, Scalar};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::build_from_prost;
-use risingwave_pb::batch_plan::generate_series_node::Type::*;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::table_function_node::Type::*;
 use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -91,9 +91,8 @@ pub struct Unnest {
 impl Unnest {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn eval(self) {
-        let mut builder = self
-            .return_type
-            .create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE)?;
+        let sum = self.array_refs.iter().map(|a| a.len()).sum();
+        let mut builder = self.return_type.create_array_builder(sum)?;
         self.array_refs
             .iter()
             .try_for_each(|a| builder.append_array(a))?;
@@ -130,19 +129,10 @@ impl Executor for TableFunctionExecutor {
     }
 }
 
-pub struct GenerateSeriesExecutor<T: Array, S: Array> {
-    start: T::OwnedItem,
-    stop: T::OwnedItem,
-    step: S::OwnedItem,
-
-    schema: Schema,
-    identity: String,
-}
-
-pub struct SeriesExecutorBuilder {}
+pub struct TableFunctionExecutorBuilder {}
 
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for SeriesExecutorBuilder {
+impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
         inputs: Vec<BoxedExecutor>,
@@ -153,7 +143,7 @@ impl BoxedExecutorBuilder for SeriesExecutorBuilder {
         );
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
-            NodeBody::GenerateSeries
+            NodeBody::TableFunction
         )?;
 
         let identity = source.plan_node().get_identity().clone();

@@ -17,7 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::GenerateSeriesNode;
+use risingwave_pb::batch_plan::TableFunctionNode;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::Expr;
@@ -65,7 +65,7 @@ impl ToDistributedBatch for BatchTableFunction {
 
 impl ToBatchProst for BatchTableFunction {
     fn to_batch_prost_body(&self) -> NodeBody {
-        NodeBody::GenerateSeries(GenerateSeriesNode {
+        NodeBody::TableFunction(TableFunctionNode {
             series_type: self.logical.series_type.clone() as i32,
             args: self
                 .logical

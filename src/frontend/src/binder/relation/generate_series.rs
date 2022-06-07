@@ -32,6 +32,7 @@ impl Binder {
         &mut self,
         args: Vec<FunctionArg>,
     ) -> Result<BoundTableFunction> {
+        // unnest ( Array[...] )
         if args.len() != 1 {
             return Err(ErrorCode::BindError(
                 "the length of args of unnest function should be 1".to_string(),
@@ -41,7 +42,9 @@ impl Binder {
 
         let arg = args[0].get_expr();
         if let FunctionArgExpr::Expr(expr) = arg {
+            // Only accept Array as unnest input
             if let Expr::Array(_) = expr {
+                // flatten array expr in recursive way
                 let mut exprs = self.array_flatten(expr)?;
                 let data_type = align_types(exprs.iter_mut())?;
                 let columns = [(

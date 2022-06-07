@@ -178,10 +178,10 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
-    use risingwave_pb::batch_plan::generate_series_node::Type;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
+    use risingwave_pb::batch_plan::table_function_node::Type;
     use risingwave_pb::batch_plan::{
-        ExchangeInfo, GenerateSeriesNode, PlanFragment, PlanNode, TaskId as ProstTaskId,
+        ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, TaskId as ProstTaskId,
         TaskOutputId as ProstTaskOutputId, ValuesNode,
     };
     use tonic::Code;
@@ -260,7 +260,7 @@ mod tests {
             root: Some(PlanNode {
                 children: vec![],
                 identity: "".to_string(),
-                node_body: Some(NodeBody::GenerateSeries(GenerateSeriesNode {
+                node_body: Some(NodeBody::TableFunction(TableFunctionNode {
                     series_type: Type::Generate as i32,
                     args: vec![
                         make_i32_literal(1),

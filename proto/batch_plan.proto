@@ -107,7 +107,7 @@ message HopWindowNode {
   repeated uint32 output_indices = 4;
 }
 
-message GenerateSeriesNode {
+message TableFunctionNode {
   enum Type {
     GENERATE = 0;
     UNNEST = 1;
@@ -177,7 +177,7 @@ message PlanNode {
     MergeSortExchangeNode merge_sort_exchange = 21;
     SortMergeJoinNode sort_merge_join = 22;
     HopWindowNode hop_window = 25;
-    GenerateSeriesNode generate_series = 26;
+    TableFunctionNode table_function = 26;
   }
   string identity = 24;
 }
