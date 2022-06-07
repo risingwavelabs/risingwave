@@ -18,7 +18,9 @@ pub mod shared_buffer_batch;
 pub mod shared_buffer_uploader;
 
 use std::collections::{BTreeMap, HashMap};
-use std::ops::RangeBounds;
+use std::mem::swap;
+use std::ops::{Bound, RangeBounds};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::consistent_hash::VNodeBitmap;
@@ -27,8 +29,14 @@ use risingwave_hummock_sdk::key::user_key;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use self::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::shared_buffer_uploader::{UploadTaskId, UploadTaskPayload};
+use crate::hummock::iterator::{
+    BoxedHummockIterator, OrderedMergeIteratorInner, ReadOptions, UnorderedMergeIteratorInner,
+};
+use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
+use crate::hummock::state_store::HummockIteratorType;
 use crate::hummock::utils::{filter_single_sst, range_overlap};
+use crate::hummock::{HummockResult, SSTableIteratorType, SstableStore};
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UncommittedData {
@@ -71,29 +79,100 @@ impl UncommittedData {
     }
 }
 
-/// `{ (end key) -> batch }`
-pub(crate) type KeyIndexedUncommittedData = BTreeMap<Vec<u8>, UncommittedData>;
+pub(crate) type OrderIndex = usize;
+/// `{ (end key, order_id) -> batch }`
+pub(crate) type KeyIndexedUncommittedData = BTreeMap<(Vec<u8>, OrderIndex), UncommittedData>;
+/// uncommitted data sorted by order index in descending order. Data in the same inner list share
+/// the same order index, which means their keys don't overlap.
+pub(crate) type OrderSortedUncommittedData = Vec<Vec<UncommittedData>>;
+
+pub(crate) fn to_order_sorted(
+    key_indexed_data: &KeyIndexedUncommittedData,
+) -> OrderSortedUncommittedData {
+    let mut order_indexed_data = BTreeMap::new();
+    for ((_, order_id), data) in key_indexed_data {
+        order_indexed_data
+            .entry(*order_id)
+            .or_insert_with(Vec::new)
+            .push(data.clone());
+    }
+    // Take rev here to ensure order index sorted in descending order.
+    order_indexed_data.into_values().rev().collect()
+}
+
+pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
+    uncommitted_data: &OrderSortedUncommittedData,
+    sstable_store: Arc<SstableStore>,
+    stats: Arc<StateStoreMetrics>,
+    local_stats: &mut StoreLocalStatistic,
+    read_options: Arc<ReadOptions>,
+) -> HummockResult<BoxedHummockIterator<T::Direction>> {
+    let mut ordered_iters = Vec::with_capacity(uncommitted_data.len());
+    for data_list in uncommitted_data {
+        let mut data_iters = Vec::new();
+        for data in data_list {
+            match data {
+                UncommittedData::Batch(batch) => {
+                    data_iters.push(Box::new(batch.clone().into_directed_iter::<T::Direction>())
+                        as BoxedHummockIterator<T::Direction>);
+                }
+                UncommittedData::Sst(table_info) => {
+                    let table = sstable_store.sstable(table_info.id, local_stats).await?;
+                    data_iters.push(Box::new(T::SstableIteratorType::create(
+                        table,
+                        sstable_store.clone(),
+                        read_options.clone(),
+                    )));
+                }
+            }
+        }
+        if data_iters.is_empty() {
+            continue;
+        } else if data_iters.len() == 1 {
+            ordered_iters.push(data_iters.pop().unwrap());
+        } else {
+            ordered_iters.push(Box::new(UnorderedMergeIteratorInner::<T::Direction>::new(
+                data_iters,
+                stats.clone(),
+            )) as BoxedHummockIterator<T::Direction>);
+        }
+    }
+    Ok(Box::new(OrderedMergeIteratorInner::<T::Direction>::new(
+        ordered_iters,
+        stats.clone(),
+    )))
+}
 
 #[derive(Default, Debug)]
 pub struct SharedBuffer {
     uncommitted_data: KeyIndexedUncommittedData,
     replicate_batches: BTreeMap<Vec<u8>, SharedBufferBatch>,
-    uploading_tasks: HashMap<UploadTaskId, KeyIndexedUncommittedData>,
+    uploading_tasks: HashMap<OrderIndex, KeyIndexedUncommittedData>,
     upload_batches_size: usize,
     replicate_batches_size: usize,
 
-    next_upload_task_id: UploadTaskId,
+    next_order_index: usize,
+}
+
+pub enum UploadTaskType {
+    FlushWriteBatch,
+    SyncEpoch,
 }
 
 impl SharedBuffer {
     pub fn write_batch(&mut self, batch: SharedBufferBatch) {
         self.upload_batches_size += batch.size();
-        let insert_result = self
-            .uncommitted_data
-            .insert(batch.end_user_key().to_vec(), UncommittedData::Batch(batch));
+        let order_index = self.get_next_order_index();
+
+        let insert_result = self.uncommitted_data.insert(
+            (batch.end_user_key().to_vec(), order_index),
+            UncommittedData::Batch(batch),
+        );
         assert!(
             insert_result.is_none(),
-            "duplicate end key and order index when inserting a write batch. Previous data: {:?}",
+            "duplicate end key and order index when inserting a write batch. \
+            Order index: {}, previous data: {:?}",
+            order_index,
             insert_result
         );
     }
@@ -110,7 +189,7 @@ impl SharedBuffer {
         &self,
         key_range: &R,
         vnode_set: Option<&VNodeBitmap>,
-    ) -> (Vec<SharedBufferBatch>, Vec<UncommittedData>)
+    ) -> (Vec<SharedBufferBatch>, OrderSortedUncommittedData)
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
@@ -128,11 +207,15 @@ impl SharedBuffer {
             .collect_vec();
 
         let range = (
-            key_range.start_bound().map(|b| b.as_ref().to_vec()),
+            match key_range.start_bound() {
+                Bound::Included(key) => Bound::Included((key.as_ref().to_vec(), OrderIndex::MIN)),
+                Bound::Excluded(key) => Bound::Excluded((key.as_ref().to_vec(), OrderIndex::MAX)),
+                Bound::Unbounded => Bound::Unbounded,
+            },
             std::ops::Bound::Unbounded,
         );
 
-        let uncommitted_data = self
+        let local_data_iter = self
             .uncommitted_data
             .range(range.clone())
             .chain(
@@ -146,10 +229,20 @@ impl SharedBuffer {
                 }
                 UncommittedData::Sst(info) => filter_single_sst(info, key_range, vnode_set),
             })
-            .map(|(_, data)| data.clone())
-            .collect_vec();
+            .map(|((_, order_index), data)| (*order_index, data.clone()));
 
-        (replicated_batches, uncommitted_data)
+        let mut uncommitted_data = BTreeMap::new();
+        for (order_index, data) in local_data_iter {
+            uncommitted_data
+                .entry(order_index)
+                .or_insert_with(Vec::new)
+                .push(data);
+        }
+
+        (
+            replicated_batches,
+            uncommitted_data.into_values().rev().collect(),
+        )
     }
 
     pub fn clear_replicate_batch(&mut self) {
@@ -157,73 +250,145 @@ impl SharedBuffer {
         self.replicate_batches_size = 0;
     }
 
-    pub fn new_upload_task(&mut self) -> Option<(UploadTaskId, UploadTaskPayload)> {
-        // TODO: use drain_filter when it's stable.
-        let task_keys = self
-            .uncommitted_data
-            .iter()
-            .filter_map(|(key, data)| match data {
-                UncommittedData::Batch(_) => Some(key.clone()),
-                UncommittedData::Sst(_) => None,
-            })
-            .collect_vec();
-        let mut keyed_payload = BTreeMap::new();
-        for key in task_keys {
-            let payload = self.uncommitted_data.remove(&key).unwrap();
-            keyed_payload.insert(key, payload);
+    pub fn new_upload_task(
+        &mut self,
+        task_type: UploadTaskType,
+    ) -> Option<(OrderIndex, UploadTaskPayload)> {
+        let keyed_payload = match task_type {
+            UploadTaskType::FlushWriteBatch => {
+                // For flush write batch, currently we only flush the write batches. We first pick
+                // the write batch with the smallest order index, and then start
+                // from this order index, we iterate over all order indexes in
+                // ascending order. We add the write batches to the task payload and
+                // stop when we meet a sst.
+
+                // Keep track of whether the data of an order index is non uploaded local batches.
+                // The key is the order index. The value for sst and uploading tasks are `None`. For
+                // write batches, their value is `Some((end_user_key, order index))`, which is the
+                // key stored in `uncommitted_data`. We store the key in `uncommitted_data` so that
+                // after we generate the upload task, we can remove the key from
+                // `uncommitted_data`.
+                let mut order_index_is_non_upload_batch = BTreeMap::new();
+                for ((end_key, order_index), data) in &self.uncommitted_data {
+                    if matches!(data, UncommittedData::Batch(_)) {
+                        // Here we assume that for a write batch, no other uncommitted data will
+                        // share the same order index with it, and therefore it's safe to insert
+                        // into the map directly.
+                        order_index_is_non_upload_batch
+                            .insert(*order_index, Some((end_key, order_index)));
+                    } else {
+                        order_index_is_non_upload_batch.insert(*order_index, None);
+                    }
+                }
+                for order_index in self.uploading_tasks.keys() {
+                    order_index_is_non_upload_batch.insert(*order_index, None);
+                }
+
+                let mut payload_keys = Vec::new();
+                // This will iterate over all order indexes in ascending order.
+                for payload_keys_opt in order_index_is_non_upload_batch.values() {
+                    match payload_keys_opt {
+                        Some((end_key, order_index)) => {
+                            payload_keys.push(((*end_key).clone(), **order_index));
+                        }
+                        None => {
+                            if !payload_keys.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                let mut keyed_payload = KeyIndexedUncommittedData::new();
+                for key in payload_keys {
+                    let data = self.uncommitted_data.remove(&key).expect(
+                        "the key to remote in the original non uploaded batches should exist",
+                    );
+                    keyed_payload.insert(key, data);
+                }
+
+                keyed_payload
+            }
+            UploadTaskType::SyncEpoch => {
+                assert!(
+                    self.uploading_tasks.is_empty(),
+                    "when sync an epoch, there should not be any uploading task"
+                );
+                let mut keyed_payload = KeyIndexedUncommittedData::new();
+                swap(&mut self.uncommitted_data, &mut keyed_payload);
+                keyed_payload
+            }
+        };
+
+        // The min order index in the task payload will be the order index of the payload.
+        let min_order_index = keyed_payload
+            .keys()
+            .map(|(_, order_index)| order_index)
+            .min()
+            .cloned();
+
+        if let Some(min_order_index) = min_order_index {
+            let ret = Some((min_order_index, to_order_sorted(&keyed_payload)));
+            self.uploading_tasks.insert(min_order_index, keyed_payload);
+            ret
+        } else {
+            None
         }
-        if keyed_payload.is_empty() {
-            return None;
-        }
-        let task_payload = keyed_payload
-            .values()
-            .map(|data| match data {
-                UncommittedData::Batch(batch) => batch.clone(),
-                UncommittedData::Sst(_) => unreachable!("SST should not be in task payload"),
-            })
-            .collect_vec();
-        let task_id = self.next_upload_task_id;
-        self.next_upload_task_id += 1;
-        self.uploading_tasks.insert(task_id, keyed_payload);
-        Some((task_id, task_payload))
     }
 
-    pub fn fail_upload_task(&mut self, upload_task_id: UploadTaskId) {
-        debug_assert!(
-            self.uploading_tasks.contains_key(&upload_task_id),
-            "the task id should exist {} when fail an upload task",
-            upload_task_id
-        );
-        let payload = self.uploading_tasks.remove(&upload_task_id).unwrap();
+    pub fn fail_upload_task(&mut self, order_index: OrderIndex) {
+        let payload = self
+            .uploading_tasks
+            .remove(&order_index)
+            .unwrap_or_else(|| {
+                panic!(
+                    "the order index should exist {} when fail an upload task",
+                    order_index
+                )
+            });
         self.uncommitted_data.extend(payload);
     }
 
-    pub fn succeed_upload_task(&mut self, upload_task_id: UploadTaskId, new_sst: Vec<SstableInfo>) {
-        debug_assert!(
-            self.uploading_tasks.contains_key(&upload_task_id),
-            "the task_id should exist {} when succeed an upload task",
-            upload_task_id
-        );
-        let payload = self.uploading_tasks.remove(&upload_task_id).unwrap();
+    pub fn succeed_upload_task(
+        &mut self,
+        order_index: OrderIndex,
+        new_sst: Vec<SstableInfo>,
+    ) -> Vec<SstableInfo> {
+        let payload = self
+            .uploading_tasks
+            .remove(&order_index)
+            .unwrap_or_else(|| {
+                panic!(
+                    "the order index should exist {} when succeed an upload task",
+                    order_index
+                )
+            });
         for sst in new_sst {
             let data = UncommittedData::Sst(sst);
             let insert_result = self
                 .uncommitted_data
-                .insert(data.end_user_key().to_vec(), data);
+                .insert((data.end_user_key().to_vec(), order_index), data);
             assert!(
                 insert_result.is_none(),
-                "duplicate data end key when inserting an SST. Previous data: {:?}",
+                "duplicate data end key and order index when inserting an SST. \
+                Order index: {}. Previous data: {:?}",
+                order_index,
                 insert_result,
             );
         }
+        let mut previous_sst = Vec::new();
         for data in payload.into_values() {
             match data {
                 UncommittedData::Batch(batch) => {
                     self.upload_batches_size -= batch.size();
                 }
-                UncommittedData::Sst(_) => unreachable!("SST should not be in task payload"),
+                UncommittedData::Sst(sst) => {
+                    previous_sst.push(sst);
+                }
             }
         }
+        // TODO: may want to delete the sst
+        previous_sst
     }
 
     pub fn get_ssts_to_commit(&self) -> Vec<SstableInfo> {
@@ -252,18 +417,29 @@ impl SharedBuffer {
     pub fn size(&self) -> usize {
         self.upload_batches_size + self.replicate_batches_size
     }
+
+    fn get_next_order_index(&mut self) -> OrderIndex {
+        let ret = self.next_order_index;
+        self.next_order_index += 1;
+        ret
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::ops::DerefMut;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use futures::executor::block_on;
     use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
+    use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
+    use crate::hummock::test_utils::gen_dummy_sst_info;
     use crate::hummock::HummockValue;
 
     async fn generate_and_write_batch(
@@ -336,7 +512,7 @@ mod tests {
             assert_eq!(overlap_data.len(), 1);
             assert_eq!(
                 overlap_data[0],
-                UncommittedData::Batch(shared_buffer_batch1.clone())
+                vec![UncommittedData::Batch(shared_buffer_batch1.clone())],
             );
             assert_eq!(replicate_batches.len(), 1);
             assert_eq!(replicate_batches[0], shared_buffer_batch2);
@@ -347,7 +523,7 @@ mod tests {
             assert_eq!(overlap_data.len(), 1);
             assert_eq!(
                 overlap_data[0],
-                UncommittedData::Batch(shared_buffer_batch1.clone()),
+                vec![UncommittedData::Batch(shared_buffer_batch1.clone())],
             );
             assert_eq!(replicate_batches.len(), 1);
             assert_eq!(replicate_batches[0], shared_buffer_batch2);
@@ -363,5 +539,79 @@ mod tests {
             shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key.clone()), None);
         assert!(replicate_batches.is_empty());
         assert!(overlap_data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_new_upload_task() {
+        let shared_buffer = RefCell::new(SharedBuffer::default());
+        let mut idx = 0;
+        let mut generate_test_data = |key: &str| {
+            block_on(generate_and_write_batch(
+                &[key.as_bytes().to_vec()],
+                &[],
+                1,
+                &mut idx,
+                shared_buffer.borrow_mut().deref_mut(),
+                false,
+            ))
+        };
+
+        let batch1 = generate_test_data("aa");
+        let batch2 = generate_test_data("bb");
+
+        let (order_index1, payload1) = shared_buffer
+            .borrow_mut()
+            .new_upload_task(FlushWriteBatch)
+            .unwrap();
+        assert_eq!(order_index1, 0);
+        assert_eq!(2, payload1.len());
+        assert_eq!(payload1[0].len(), 1);
+        assert_eq!(payload1[0], vec![UncommittedData::Batch(batch2.clone())]);
+        assert_eq!(payload1[1].len(), 1);
+        assert_eq!(payload1[1], vec![UncommittedData::Batch(batch1.clone())]);
+
+        let batch3 = generate_test_data("cc");
+        let batch4 = generate_test_data("dd");
+
+        let (order_index2, payload2) = shared_buffer
+            .borrow_mut()
+            .new_upload_task(FlushWriteBatch)
+            .unwrap();
+        assert_eq!(order_index2, 2);
+        assert_eq!(2, payload2.len());
+        assert_eq!(payload2[0].len(), 1);
+        assert_eq!(payload2[0], vec![UncommittedData::Batch(batch4.clone())]);
+        assert_eq!(payload2[1].len(), 1);
+        assert_eq!(payload2[1], vec![UncommittedData::Batch(batch3.clone())]);
+
+        shared_buffer.borrow_mut().fail_upload_task(order_index1);
+        let (order_index1, payload1) = shared_buffer
+            .borrow_mut()
+            .new_upload_task(FlushWriteBatch)
+            .unwrap();
+        assert_eq!(order_index1, 0);
+        assert_eq!(2, payload1.len());
+        assert_eq!(payload1[0].len(), 1);
+        assert_eq!(payload1[0], vec![UncommittedData::Batch(batch2.clone())]);
+        assert_eq!(payload1[1].len(), 1);
+        assert_eq!(payload1[1], vec![UncommittedData::Batch(batch1.clone())]);
+
+        let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2]);
+        shared_buffer
+            .borrow_mut()
+            .succeed_upload_task(order_index1, vec![sst1.clone()]);
+
+        shared_buffer.borrow_mut().fail_upload_task(order_index2);
+
+        let (order_index3, payload3) = shared_buffer
+            .borrow_mut()
+            .new_upload_task(SyncEpoch)
+            .unwrap();
+
+        assert_eq!(order_index3, 0);
+        assert_eq!(3, payload3.len());
+        assert_eq!(vec![UncommittedData::Batch(batch4)], payload3[0]);
+        assert_eq!(vec![UncommittedData::Batch(batch3)], payload3[1]);
+        assert_eq!(vec![UncommittedData::Sst(sst1)], payload3[2]);
     }
 }
