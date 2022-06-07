@@ -22,7 +22,7 @@ use parking_lot::RwLock;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::common::VNodeBitmap;
-use tokio::sync::oneshot::Sender;
+use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
 use crate::hummock::multi_builder::SSTableBuilderWrapper;
@@ -55,17 +55,19 @@ impl ResourceLimiter {
         }
     }
 
-    pub fn request_resource(&self, request_size: u64, notifier: Sender<()>) {
+    pub fn request_resource(&self, request_size: u64) -> Receiver<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let mut guard = self.inner.write();
         if guard.current_size != 0 && guard.current_size + request_size > guard.max_size {
-            guard.notifiers.push_back((request_size, notifier));
-            return;
+            guard.notifiers.push_back((request_size, tx));
+            return rx;
         }
-        if notifier.send(()).is_err() {
+        if tx.send(()).is_err() {
             tracing::warn!("receiver has already been deallocated");
-            return;
+            return rx;
         }
         guard.current_size += request_size;
+        rx
     }
 
     pub fn free_resource(&self, free_size: u64) {
@@ -79,7 +81,7 @@ impl ResourceLimiter {
             }
             if notifier.send(()).is_err() {
                 tracing::warn!("receiver has already been deallocated");
-                return;
+                continue;
             }
             guard.current_size += request_size;
         }
@@ -155,9 +157,8 @@ where
                 builder,
                 sealed: false,
             });
-            let (rx, tx) = tokio::sync::oneshot::channel();
-            self.limiter.request_resource(self.resource_size, rx);
-            if let Err(e) = tx.await {
+            let rx = self.limiter.request_resource(self.resource_size);
+            if let Err(e) = rx.await {
                 return Err(HummockError::other(format!(
                     "Cannot request resource.\n{:#?}",
                     e
