@@ -380,7 +380,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::ColumnDesc;
+    use risingwave_common::catalog::{ColumnDesc, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
@@ -409,7 +409,7 @@ mod tests {
         ManagedTopNState::<S, TOP_N_TYPE>::new(
             Some(2),
             row_count,
-            Keyspace::executor_root(store.clone(), 0x2333),
+            Keyspace::table_root(store.clone(), &TableId::from(0x2333)),
             data_types,
             ordered_row_deserializer,
             cell_based_row_deserializer,

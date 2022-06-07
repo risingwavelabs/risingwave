@@ -486,6 +486,7 @@ mod tests {
     use madsim::collections::{BTreeSet, HashSet};
     use madsim::rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
+    use risingwave_common::catalog::TableId;
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
     use smallvec::smallvec;
@@ -495,7 +496,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
             DataType::Int64,
@@ -638,7 +639,7 @@ mod tests {
         let row_count = managed_state.total_count;
 
         // test recovery
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace,
             DataType::Int64,
@@ -679,7 +680,7 @@ mod tests {
 
     async fn test_replicated_value_not_null<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
@@ -765,7 +766,7 @@ mod tests {
 
     async fn test_replicated_value_with_null<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
@@ -868,7 +869,7 @@ mod tests {
     #[tokio::test]
     async fn test_same_group_of_value() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
             DataType::Int64,
@@ -948,7 +949,7 @@ mod tests {
         let mut remaining_values = &values_to_insert[..];
 
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
             DataType::Int64,
@@ -1046,7 +1047,7 @@ mod tests {
         // The 6 should be deleted from the state store.
 
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
             DataType::Int64,
