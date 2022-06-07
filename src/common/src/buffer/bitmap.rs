@@ -100,7 +100,7 @@ impl BitmapBuilder {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Bitmap {
     pub bits: Bytes,
 
