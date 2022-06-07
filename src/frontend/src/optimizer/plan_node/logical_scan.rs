@@ -144,6 +144,14 @@ impl LogicalScan {
         &self.table_name
     }
 
+    pub fn pk_descs(&self) -> Vec<ColumnDesc> {
+        self.table_desc
+            .pks
+            .iter()
+            .map(|i| self.table_desc.columns[*i].clone())
+            .collect()
+    }
+
     /// Get a reference to the logical scan's table desc.
     #[must_use]
     pub fn table_desc(&self) -> &TableDesc {

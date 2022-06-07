@@ -18,7 +18,9 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::RowSeqScanNode;
-use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc};
+use risingwave_pb::plan_common::{
+    CellBasedTableDesc, ColumnDesc as ProstColumnDesc, OrderType, OrderedColumnDesc,
+};
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::expr::Literal;
@@ -142,7 +144,16 @@ impl ToBatchProst for BatchSeqScan {
         NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(CellBasedTableDesc {
                 table_id: self.logical.table_desc().table_id.into(),
-                pk: vec![], // TODO:
+                pk: self
+                    .logical
+                    .pk_descs()
+                    .iter()
+                    .map(|column_desc| OrderedColumnDesc {
+                        column_desc: Some(column_desc.to_protobuf()),
+                        // FIXME: what's the order?
+                        order: OrderType::Ascending.into(),
+                    })
+                    .collect(),
             }),
             column_descs,
             scan_range: Some(self.scan_range.to_protobuf()),

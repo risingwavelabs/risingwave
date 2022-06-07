@@ -17,6 +17,13 @@
 - before:
     - create_table_and_mv
   sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id < 43
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_range: [user_id < 43:Int32] }
+- before:
+    - create_table_and_mv
+  sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date = 1111
   batch_plan: |
     BatchExchange { order: [], dist: Single }
