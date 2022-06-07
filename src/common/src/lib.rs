@@ -51,6 +51,7 @@ pub mod config;
 pub mod hash;
 pub mod monitor;
 pub mod service;
+pub mod session_config;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;
