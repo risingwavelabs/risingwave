@@ -47,6 +47,7 @@ pub mod cache;
 pub mod catalog;
 pub mod collection;
 pub mod config;
+pub mod consistent_hash;
 pub mod hash;
 pub mod monitor;
 pub mod service;
