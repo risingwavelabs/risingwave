@@ -335,9 +335,9 @@ def section_streaming_actors(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed("Streaming Actors", [
-            panels.timeseries_rowsps("Actor Throughput", [
+            panels.timeseries_rowsps("Executor Throughput", [
                 panels.target(
-                    "rate(stream_actor_row_count[15s]) > 0", "{{actor_id}}"
+                    "rate(stream_executor_row_count[15s]) > 0", "{{actor_id}}->{{executor_id}}"
                 ),
             ]),
             panels.timeseries_latency("Actor Barrier Latency", [
