@@ -192,7 +192,7 @@ fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
     Ok(())
 }
 
-pub fn parse_interval(s: &String) -> Result<Vec<TimeStrToken>> {
+pub fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
     let s = s.trim();
     let mut tokens = Vec::new();
     let mut num_buf = "".to_string();
@@ -202,7 +202,7 @@ pub fn parse_interval(s: &String) -> Result<Vec<TimeStrToken>> {
             '-' => {
                 num_buf.push(c);
             }
-            c if c.is_digit(10) => {
+            c if c.is_ascii_digit() => {
                 convert_unit(&mut char_buf, &mut tokens)?;
                 num_buf.push(c);
             }
