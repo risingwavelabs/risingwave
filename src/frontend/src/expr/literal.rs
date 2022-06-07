@@ -14,7 +14,6 @@
 
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::ConstantValue;
 
 use super::Expr;
 use crate::expr::ExprType;

@@ -20,7 +20,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::error::Result;
-use risingwave_pb::batch_plan::ScanRange;
 
 use super::{
     BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
@@ -29,7 +28,7 @@ use super::{
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
 use crate::session::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, ScanRange};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -326,35 +325,27 @@ impl PredicatePushdown for LogicalScan {
     }
 }
 
-fn full_table_scan() -> ScanRange {
-    ScanRange {
-        eq_conds: vec![],
-        range: None,
-    }
-}
-
 impl ToBatch for LogicalScan {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.predicate.always_true() {
-            Ok(BatchSeqScan::new(self.clone(), full_table_scan()).into())
+            Ok(BatchSeqScan::new(self.clone(), ScanRange::full_table_scan()).into())
         } else {
             let (scan_range, predicate) = self
                 .predicate
                 .clone()
                 .split_to_scan_range(&self.table_desc.pks, self.table_desc.columns.len());
-            println!("before: {}\nafter: {}, {:?}\n", self.predicate, predicate, scan_range);
 
             let mut scan = self.clone();
             scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-            let batch_scan = BatchSeqScan::new(scan, scan_range);
-            let batch_filter = BatchFilter::new(LogicalFilter::new(batch_scan.into(), predicate));
-            let plan: PlanRef = if let Some(exprs) = project_expr {
-                BatchProject::new(LogicalProject::new(batch_filter.into(), exprs)).into()
-            } else {
-                batch_filter.into()
-            };
+            let mut plan: PlanRef = BatchSeqScan::new(scan, scan_range).into();
+            if !predicate.always_true() {
+                plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
+            }
+            if let Some(exprs) = project_expr {
+                plan = BatchProject::new(LogicalProject::new(plan, exprs)).into()
+            }
             assert_eq!(plan.schema(), self.schema());
             Ok(plan)
         }
