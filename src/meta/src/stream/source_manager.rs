@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::BorrowMut;
+use std::borrow::{BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -145,8 +145,8 @@ pub struct SourceManagerCore<S: MetaStore> {
 }
 
 impl<S> SourceManagerCore<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
         Self {
@@ -157,69 +157,94 @@ where
         }
     }
 
-    // async fn diff(&mut self) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
-    //     // first, list all fragment, so that we can get `FragmentId` -> `Vec<ActorId>` map
-    //     let table_frags = self.fragment_manager.list_table_fragments().await?;
-    //     let mut frag_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
-    //     for table_frag in table_frags {
-    //         for (frag_id, mut frag) in table_frag.fragments {
-    //             let mut actors = frag.actors.iter_mut().map(|x| x.actor_id).collect_vec();
-    //             frag_actors
-    //                 .entry(frag_id)
-    //                 .or_insert(vec![])
-    //                 .append(&mut actors);
-    //         }
-    //     }
-    //
-    //     // then we diff the splits
-    //     let mut changed_actors: HashMap<ActorId, Vec<SplitImpl>> = HashMap::new();
-    //
-    //     for (source_id, (splits, _)) in &self.managed_sources {
-    //         let frag_ids = match self.source_fragments.get(source_id) {
-    //             Some(frags) if !frags.is_empty() => frags,
-    //             _ => {
-    //                 // TODO, no fragment is bound with such source_id, should drop that source
-    //                 continue;
-    //             }
-    //         };
-    //
-    //         let splits_guard = splits.lock().await;
-    //         let discovered_splits = match &*splits_guard {
-    //             None => continue,
-    //             Some(splits) => splits,
-    //         };
-    //
-    //         for frag_id in frag_ids {
-    //             let actor_ids = match frag_actors.remove(frag_id) {
-    //                 None => {
-    //                     // target fragment has gone?
-    //                     continue;
-    //                 }
-    //                 Some(actors) => actors,
-    //             };
-    //
-    //             let mut prev_splits = HashMap::new();
-    //             for actor_id in actor_ids {
-    //                 prev_splits.insert(
-    //                     actor_id,
-    //                     self.actor_splits
-    //                         .get(&actor_id)
-    //                         .cloned()
-    //                         .unwrap_or_default(),
-    //                 );
-    //             }
-    //
-    //             let diff = Self::diff_splits(prev_splits, discovered_splits)?;
-    //             if let Some(change) = diff {
-    //                 for (actor_id, splits) in change {
-    //                     changed_actors.insert(actor_id, splits);
-    //                 }
-    //             }
-    //         }
-    //     }
-    //
-    //     Ok(changed_actors)
-    // }
+    async fn diff(&mut self) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
+        // first, list all fragment, so that we can get `FragmentId` -> `Vec<ActorId>` map
+        let table_frags = self.fragment_manager.list_table_fragments().await?;
+        let mut frag_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
+        for table_frag in table_frags {
+            for (frag_id, mut frag) in table_frag.fragments {
+                let mut actors = frag.actors.iter_mut().map(|x| x.actor_id).collect_vec();
+                frag_actors
+                    .entry(frag_id)
+                    .or_insert(vec![])
+                    .append(&mut actors);
+            }
+        }
+
+        // then we diff the splits
+        let mut changed_actors: HashMap<ActorId, Vec<SplitImpl>> = HashMap::new();
+
+        for (source_id, ConnectorSourceWorkerHandle { splits, .. }) in &self.managed_sources {
+            let frag_ids = match self.source_fragments.get(source_id) {
+                Some(fragment_ids) if !fragment_ids.is_empty() => fragment_ids,
+                _ => {
+                    continue;
+                }
+            };
+
+            let discovered_splits = {
+                let splits_guard = splits.lock().await;
+                match splits_guard.splits.clone() {
+                    None => continue,
+                    Some(splits) => splits,
+                }
+            };
+
+            for frag_id in frag_ids {
+                let actor_ids = match frag_actors.remove(frag_id) {
+                    None => {
+                        // target fragment has gone?
+                        continue;
+                    }
+                    Some(actors) => actors,
+                };
+
+                let mut prev_splits = HashMap::new();
+                for actor_id in actor_ids {
+                    prev_splits.insert(
+                        actor_id,
+                        self.actor_splits
+                            .get(&actor_id)
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
+                }
+
+                let diff = diff_splits(prev_splits, &discovered_splits);
+                if let Some(change) = diff {
+                    for (actor_id, splits) in change {
+                        changed_actors.insert(actor_id, splits);
+                    }
+                }
+            }
+        }
+
+        Ok(changed_actors)
+    }
+
+    pub async fn patch_diff(&mut self, source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
+                            actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>) -> Result<()> {
+        if let Some(source_fragments) = source_fragments {
+            for (source_id, mut fragment_ids) in source_fragments {
+                self.source_fragments
+                    .entry(source_id)
+                    .or_insert(vec![])
+                    .append(&mut fragment_ids);
+            }
+        }
+
+        if let Some(actor_splits) = actor_splits {
+            for (actor_id, splits) in actor_splits {
+                self.actor_splits.insert(actor_id, splits);
+                // .entry(actor_id)
+                // .or_insert(vec![])
+                // .append(&mut splits);
+                // TODO store state
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn diff_splits(
@@ -247,7 +272,11 @@ fn diff_splits(
 
     let mut result = HashMap::new();
 
-    let actors = prev_actor_splits.keys().cloned().collect_vec();
+    let mut actors = prev_actor_splits.keys().cloned().collect_vec();
+
+    // sort actors
+    actors.sort();
+
     let actor_len = actors.len();
 
     for (index, split_id) in new_discovered_splits.into_iter().enumerate() {
@@ -265,8 +294,8 @@ fn diff_splits(
 }
 
 impl<S> SourceManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -292,24 +321,7 @@ where
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
     ) {
         let mut core = self.core.lock().await;
-        if let Some(source_fragments) = source_fragments {
-            for (source_id, mut fragment_ids) in source_fragments {
-                core.source_fragments
-                    .entry(source_id)
-                    .or_insert(vec![])
-                    .append(&mut fragment_ids);
-            }
-        }
-
-        if let Some(actor_splits) = actor_splits {
-            for (actor_id, mut splits) in actor_splits {
-                core.actor_splits
-                    .entry(actor_id)
-                    .or_insert(vec![])
-                    .append(&mut splits);
-                // TODO store state
-            }
-        }
+        let _ = core.patch_diff(source_fragments, actor_splits).await;
     }
 
     pub async fn pre_allocate_splits(
@@ -361,7 +373,7 @@ where
         Ok(assigned)
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -376,8 +388,8 @@ where
                 .iter()
                 .map(|worker| self.env.stream_client_pool().get(worker)),
         )
-        .await?
-        .into_iter();
+            .await?
+            .into_iter();
 
         Ok(all_stream_clients)
     }
@@ -443,26 +455,39 @@ where
     }
 
     async fn tick(&self) -> Result<()> {
-        let core_guard = self.core.lock().await;
+        let mut core_guard = self.core.lock().await;
 
-        for (id, x) in &core_guard.managed_sources {
-            let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-            let source = catalog_guard.get_source(*id).await?.ok_or_else(|| {
-                RwError::from(InternalError(format!(
-                    "could not find source catalog for {}",
-                    id
-                )))
-            })?;
+        let diff = core_guard.diff().await?;
 
-            let guard = x.splits.lock().await;
-            println!("source: {}", source.name);
-
-            if let Some(splits) = &guard.splits {
-                for (k, v) in splits {
-                    println!("\tid: {}, split {:?}", k, v);
-                }
-            }
+        for (actor_id, splits) in diff.iter() {
+            println!("actor #{} -> {:?}", actor_id, splits);
         }
+
+        println!("---------------");
+
+        core_guard.patch_diff(None, Some(diff)).await.unwrap();
+
+
+        // for (id, x) in &core_guard.managed_sources {
+        //     let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        //     let source = catalog_guard.get_source(*id).await?.ok_or_else(|| {
+        //         RwError::from(InternalError(format!(
+        //             "could not find source catalog for {}",
+        //             id
+        //         )))
+        //     })?;
+        //
+        //     let guard = x.splits.lock().await;
+        //     println!("source: {}", source.name);
+        //
+        //     if let Some(splits) = &guard.splits {
+        //         for (k, v) in splits {
+        //             println!("\tid: {}, split {:?}", k, v);
+        //         }
+        //     }
+
+
+        // }
 
         // let x = {
         //     let mut core_guard = self.core.lock().await;
@@ -483,6 +508,5 @@ where
             ticker.tick().await;
             self.tick().await?;
         }
-        Ok(())
     }
 }
