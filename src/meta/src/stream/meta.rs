@@ -90,12 +90,11 @@ where
         Ok(map.values().cloned().collect())
     }
 
-    pub async fn update_table_fragments(&self, mut table_fragment: TableFragments) -> Result<()> {
+    pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
         match map.entry(table_fragment.table_id()) {
             Entry::Occupied(mut entry) => {
-                table_fragment.seq = entry.get().seq + 1;
                 table_fragment.insert(&*self.meta_store).await?;
                 entry.insert(table_fragment);
 
