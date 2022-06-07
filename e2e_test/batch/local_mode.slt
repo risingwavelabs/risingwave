@@ -1,4 +1,7 @@
 statement ok
 SET QUERY_MODE TO local;
 
-include ./boolean.slt.part
+#include ./boolean.slt.part
+
+statement ok
+SET QUERY_MODE TO distributed;

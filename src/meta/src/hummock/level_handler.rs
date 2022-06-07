@@ -23,7 +23,7 @@ use risingwave_pb::hummock::SstableInfo;
 pub struct LevelHandler {
     level: u32,
     compacting_files: HashMap<HummockSSTableId, u64>,
-    pending_tasks: Vec<(u64, Vec<HummockSSTableId>)>,
+    pending_tasks: Vec<(u64, u64, Vec<HummockSSTableId>)>,
 }
 
 impl LevelHandler {
@@ -40,7 +40,7 @@ impl LevelHandler {
     }
 
     pub fn remove_task(&mut self, target_task_id: u64) {
-        for (task_id, ssts) in &self.pending_tasks {
+        for (task_id, _, ssts) in &self.pending_tasks {
             if *task_id == target_task_id {
                 for sst in ssts {
                     self.compacting_files.remove(sst);
@@ -48,7 +48,7 @@ impl LevelHandler {
             }
         }
         self.pending_tasks
-            .retain(|(task_id, _)| *task_id != target_task_id);
+            .retain(|(task_id, _, _)| *task_id != target_task_id);
     }
 
     pub fn is_pending_compact(&self, sst_id: &HummockSSTableId) -> bool {
@@ -57,21 +57,31 @@ impl LevelHandler {
 
     pub fn add_pending_task(&mut self, task_id: u64, ssts: &[SstableInfo]) {
         let mut table_ids = vec![];
+        let mut total_file_size = 0;
         for sst in ssts {
             self.compacting_files.insert(sst.id, task_id);
+            total_file_size += sst.file_size;
             table_ids.push(sst.id);
         }
-        self.pending_tasks.push((task_id, table_ids));
+        self.pending_tasks
+            .push((task_id, total_file_size, table_ids));
     }
 
     pub fn get_pending_file_count(&self) -> usize {
         self.compacting_files.len()
     }
 
+    pub fn get_pending_file_size(&self) -> u64 {
+        self.pending_tasks
+            .iter()
+            .map(|(_, total_file_size, _)| *total_file_size)
+            .sum::<u64>()
+    }
+
     pub fn pending_tasks_ids(&self) -> Vec<u64> {
         self.pending_tasks
             .iter()
-            .map(|(task_id, _)| *task_id)
+            .map(|(task_id, _, _)| *task_id)
             .collect_vec()
     }
 }
@@ -83,9 +93,10 @@ impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {
             tasks: lh
                 .pending_tasks
                 .iter()
-                .map(|(task_id, ssts)| SstTask {
+                .map(|(task_id, total_file_size, ssts)| SstTask {
                     task_id: *task_id,
                     ssts: ssts.clone(),
+                    total_file_size: *total_file_size,
                 })
                 .collect_vec(),
         }
@@ -97,7 +108,7 @@ impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
         let mut pending_tasks = vec![];
         let mut compacting_files = HashMap::new();
         for task in &lh.tasks {
-            pending_tasks.push((task.task_id, task.ssts.clone()));
+            pending_tasks.push((task.task_id, task.total_file_size, task.ssts.clone()));
             for s in &task.ssts {
                 compacting_files.insert(*s, task.task_id);
             }
