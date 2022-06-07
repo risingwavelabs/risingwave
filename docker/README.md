@@ -21,7 +21,7 @@ To start a RisingWave playground, run
 
 ```
 # Start playground
-docker run -it --pull=always --network host ghcr.io/singularity-data/risingwave:latest playground
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/singularity-data/risingwave:latest playground
 ```
 
 To start a RisingWave cluster, run

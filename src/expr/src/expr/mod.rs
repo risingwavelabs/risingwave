@@ -79,13 +79,18 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
     match prost.get_expr_type()? {
-        Cast | Upper | Lower | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round => build_unary_expr_prost(prost),
+        Cast | Upper | Lower | Md5 | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
+        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot => {
+            build_unary_expr_prost(prost)
+        }
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
-        | Position => build_binary_expr_prost(prost),
-        And | Or | IsDistinctFrom => build_nullable_binary_expr_prost(prost),
-        Coalesce => CoalesceExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
+        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor => {
+            build_binary_expr_prost(prost)
+        }
+        And | Or | IsDistinctFrom | ArrayAccess => build_nullable_binary_expr_prost(prost),
+        ToChar => build_to_char_expr(prost),
+        Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),
         Replace => build_replace_expr(prost),
@@ -93,15 +98,15 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
-        ConcatWs => ConcatWsExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
+        ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
         SplitPart => build_split_part_expr(prost),
-        ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
-        InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
+        ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),
+        InputRef => InputRefExpression::try_from(prost).map(Expression::boxed),
         Case => build_case_expr(prost),
         Translate => build_translate_expr(prost),
         In => build_in_expr(prost),
-        Field => FieldExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
-        Array => ArrayExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
+        Field => FieldExpression::try_from(prost).map(Expression::boxed),
+        Array => ArrayExpression::try_from(prost).map(Expression::boxed),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()

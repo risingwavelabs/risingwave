@@ -28,6 +28,8 @@ use risingwave_stream::task::LocalStreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
+use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
+
 /// Buffer size of the receiver of the remote channel.
 const EXCHANGE_BUFFER_SIZE: usize = 1024;
 
@@ -35,6 +37,7 @@ const EXCHANGE_BUFFER_SIZE: usize = 1024;
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
     stream_mgr: Arc<LocalStreamManager>,
+    metrics: Arc<ExchangeServiceMetrics>,
 }
 
 type ExchangeDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
@@ -59,7 +62,7 @@ impl ExchangeService for ExchangeServiceImpl {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
         if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
             error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
-            return Err(e.to_grpc_status());
+            return Err(e.into());
         }
 
         Ok(Response::new(ReceiverStream::new(rx)))
@@ -74,28 +77,30 @@ impl ExchangeService for ExchangeServiceImpl {
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
         let req = request.into_inner();
         let up_down_ids = (req.up_fragment_id, req.down_fragment_id);
-        let receiver = self
-            .stream_mgr
-            .take_receiver(up_down_ids)
-            .map_err(|e| e.to_grpc_status())?;
-        match self.get_stream_impl(peer_addr, receiver).await {
+        let receiver = self.stream_mgr.take_receiver(up_down_ids)?;
+        match self.get_stream_impl(peer_addr, receiver, up_down_ids).await {
             Ok(resp) => Ok(resp),
             Err(e) => {
                 error!(
                     "Failed to server stream exchange RPC from {}: {}",
                     peer_addr, e
                 );
-                Err(e.to_grpc_status())
+                Err(e.into())
             }
         }
     }
 }
 
 impl ExchangeServiceImpl {
-    pub fn new(mgr: Arc<BatchManager>, stream_mgr: Arc<LocalStreamManager>) -> Self {
+    pub fn new(
+        mgr: Arc<BatchManager>,
+        stream_mgr: Arc<LocalStreamManager>,
+        metrics: Arc<ExchangeServiceMetrics>,
+    ) -> Self {
         ExchangeServiceImpl {
             batch_mgr: mgr,
             stream_mgr,
+            metrics,
         }
     }
 
@@ -103,10 +108,14 @@ impl ExchangeServiceImpl {
         &self,
         peer_addr: SocketAddr,
         mut receiver: Receiver<Message>,
+        up_down_ids: (u32, u32),
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
+        let metrics = self.metrics.clone();
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         tokio::spawn(async move {
+            let up_actor_id = up_down_ids.0.to_string();
+            let down_actor_id = up_down_ids.1.to_string();
             loop {
                 let msg = receiver.next().await;
                 match msg {
@@ -117,16 +126,28 @@ impl ExchangeServiceImpl {
                             Ok(stream_msg) => Ok(GetStreamResponse {
                                 message: Some(stream_msg),
                             }),
-                            Err(e) => Err(e.to_grpc_status()),
+                            Err(e) => Err(e.into()),
                         };
+
+                        let bytes = match res.as_ref() {
+                            Ok(msg) => Message::get_encoded_len(msg),
+                            Err(_) => 0,
+                        };
+
                         let _ = match tx.send(res).await.map_err(|e| {
                             RwError::from(ErrorCode::InternalError(format!(
                                 "failed to send stream data: {}",
                                 e
                             )))
                         }) {
-                            Ok(_) => Ok(()),
-                            Err(e) => tx.send(Err(e.to_grpc_status())).await,
+                            Ok(_) => {
+                                metrics
+                                    .stream_exchange_bytes
+                                    .with_label_values(&[&up_actor_id, &down_actor_id])
+                                    .inc_by(bytes as u64);
+                                Ok(())
+                            }
+                            Err(e) => tx.send(Err(e.into())).await,
                         };
                     }
                 }

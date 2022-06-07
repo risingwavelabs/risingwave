@@ -22,3 +22,6 @@ platforms = [
 
 # Write out exact versions rather than a semver range. (Defaults to false.)
 # exact-versions = true
+
+[traversal-excludes]
+workspace-members = ["workspace-static-link"]

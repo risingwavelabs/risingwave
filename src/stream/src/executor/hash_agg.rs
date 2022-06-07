@@ -21,7 +21,7 @@ use iter_chunks::IterChunks;
 use itertools::Itertools;
 use madsim::collections::HashMap;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::collection::evictable::EvictableHashMap;
@@ -131,6 +131,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // Primary key includes group key.
                 vec![OrderType::Descending; key_indices.len() + get_key_len(agg_call)],
                 Some(key_indices.clone()),
+                pk_indices.clone(),
             );
             state_tables.push(state_table);
         }
@@ -226,7 +227,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .map_err(StreamExecutorError::eval_error)?;
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone())
             .map_err(StreamExecutorError::eval_error)?;
-        let (columns, visibility) = data_chunk.into_parts();
+        let (columns, vis) = data_chunk.into_parts();
+        let visibility = match vis {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
+        };
 
         // --- Find unique keys in this batch and generate visibility map for each key ---
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.

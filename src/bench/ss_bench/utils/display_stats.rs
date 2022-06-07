@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_storage::monitor::{MyHistogram, StateStoreMetrics};
+use risingwave_common::monitor::my_stats::MyHistogram;
+use risingwave_storage::monitor::StateStoreMetrics;
 
 use super::my_stats::MyStateStoreStats;
 

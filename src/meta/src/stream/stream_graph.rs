@@ -27,7 +27,7 @@ use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, MergeNode, StreamActor,
+    DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
@@ -127,9 +127,8 @@ impl OrderedActorLink {
 }
 
 struct StreamActorDownstream {
-    /// Dispatcher
-    /// TODO: refactor to `DispatchStrategy`.
-    dispatcher: Dispatcher,
+    dispatch_strategy: DispatchStrategy,
+    dispatcher_id: u64,
 
     /// Downstream actors.
     actors: OrderedActorLink,
@@ -201,26 +200,19 @@ impl StreamActorBuilder {
         self.fragment_id
     }
 
-    /// Add a dispatcher to this actor. Note that the `downstream_actor_id` field must be left
-    /// empty, as we will fill this out when building actors.
+    /// Add a dispatcher to this actor.
     pub fn add_dispatcher(
         &mut self,
-        dispatcher: Dispatcher,
+        dispatch_strategy: DispatchStrategy,
+        dispatcher_id: u64,
         downstream_actors: OrderedActorLink,
         same_worker_node: bool,
     ) {
         assert!(!self.sealed);
-        // TODO: we should have a non-proto Dispatcher type here
-        assert!(
-            dispatcher.downstream_actor_id.is_empty(),
-            "should leave downstream_actor_id empty, will be filled later"
-        );
-        assert!(
-            dispatcher.hash_mapping.is_none(),
-            "should leave hash_mapping empty, will be filled later"
-        );
+
         self.downstreams.push(StreamActorDownstream {
-            dispatcher,
+            dispatch_strategy,
+            dispatcher_id,
             actors: downstream_actors,
             same_worker_node,
         });
@@ -236,26 +228,28 @@ impl StreamActorBuilder {
             .into_iter()
             .map(
                 |StreamActorDownstream {
-                     dispatcher,
+                     dispatch_strategy,
+                     dispatcher_id,
                      actors: downstreams,
                      same_worker_node,
                  }| {
                     let downstreams = downstreams.to_global_ids(actor_id_offset, actor_id_len);
 
-                    if dispatcher.r#type == DispatcherType::NoShuffle as i32 {
+                    if dispatch_strategy.r#type == DispatcherType::NoShuffle as i32 {
                         assert_eq!(
                             downstreams.0.len(),
                             1,
                             "no shuffle should only have one actor downstream"
                         );
                         assert!(
-                            dispatcher.column_indices.is_empty(),
+                            dispatch_strategy.column_indices.is_empty(),
                             "should leave `column_indices` empty"
                         );
                     }
 
                     StreamActorDownstream {
-                        dispatcher,
+                        dispatch_strategy,
+                        dispatcher_id,
                         actors: downstreams,
                         same_worker_node,
                     }
@@ -295,10 +289,17 @@ impl StreamActorBuilder {
             .iter()
             .map(
                 |StreamActorDownstream {
-                     dispatcher, actors, ..
+                     dispatch_strategy,
+                     dispatcher_id,
+                     actors,
+                     same_worker_node: _,
                  }| Dispatcher {
                     downstream_actor_id: actors.as_global_ids(),
-                    ..dispatcher.clone()
+                    r#type: dispatch_strategy.r#type,
+                    column_indices: dispatch_strategy.column_indices.clone(),
+                    // will be filled later by stream manager
+                    hash_mapping: None,
+                    dispatcher_id: *dispatcher_id,
                 },
             )
             .collect_vec();
@@ -376,17 +377,16 @@ impl StreamGraphBuilder {
         self.actor_builders.len()
     }
 
-    /// Add dependency between two connected node in the graph. Only provide `mapping` when it's
-    /// hash mapping.
+    /// Add dependency between two connected node in the graph.
     pub fn add_link(
         &mut self,
         upstream_actor_ids: &[LocalActorId],
         downstream_actor_ids: &[LocalActorId],
         exchange_operator_id: u64,
-        dispatcher: Dispatcher,
+        dispatch_strategy: DispatchStrategy,
         same_worker_node: bool,
     ) {
-        if dispatcher.get_type().unwrap() == DispatcherType::NoShuffle {
+        if dispatch_strategy.get_type().unwrap() == DispatcherType::NoShuffle {
             assert_eq!(
                 upstream_actor_ids.len(),
                 downstream_actor_ids.len(),
@@ -405,7 +405,8 @@ impl StreamGraphBuilder {
                         .get_mut(upstream_id)
                         .unwrap()
                         .add_dispatcher(
-                            dispatcher.clone(),
+                            dispatch_strategy.clone(),
+                            exchange_operator_id,
                             OrderedActorLink(vec![*downstream_id]),
                             same_worker_node,
                         );
@@ -448,7 +449,8 @@ impl StreamGraphBuilder {
                 .get_mut(upstream_id)
                 .unwrap()
                 .add_dispatcher(
-                    dispatcher.clone(),
+                    dispatch_strategy.clone(),
+                    exchange_operator_id,
                     OrderedActorLink(downstream_actor_ids.to_vec()),
                     same_worker_node,
                 );
@@ -539,42 +541,52 @@ impl StreamGraphBuilder {
                 let mut new_stream_node = stream_node.clone();
 
                 // Table id rewrite done below.
-
-                if let NodeBody::HashJoin(node) = new_stream_node.node_body.as_mut().unwrap() {
-                    // The operator id must be assigned with table ids. Otherwise it is a logic
-                    // error.
-                    let left_table_id = node.left_table_id + table_id_offset;
-                    let right_table_id = left_table_id + 1;
-                    node.left_table_id = left_table_id;
-                    node.right_table_id = right_table_id;
-                }
-
-                if let NodeBody::Lookup(node) = new_stream_node.node_body.as_mut().unwrap() {
-                    if let Some(ArrangementTableId::TableId(table_id)) =
-                        &mut node.arrangement_table_id
-                    {
-                        *table_id += table_id_offset;
-                    }
-                }
-
-                if let NodeBody::Arrange(node) = new_stream_node.node_body.as_mut().unwrap() {
-                    node.table_id += table_id_offset;
-                }
-
-                if let NodeBody::HashAgg(node) = new_stream_node.node_body.as_mut().unwrap() {
-                    assert_eq!(node.table_ids.len(), node.agg_calls.len());
-                    // In-place update the table id. Convert from local to global.
-                    for table_id in &mut node.table_ids {
-                        *table_id += table_id_offset;
-                    }
-                }
-
                 match new_stream_node.node_body.as_mut().unwrap() {
+                    NodeBody::HashJoin(node) => {
+                        // The operator id must be assigned with table ids. Otherwise it is a logic
+                        // error.
+                        let left_table_id = node.left_table_id + table_id_offset;
+                        let right_table_id = left_table_id + 1;
+                        node.left_table_id = left_table_id;
+                        node.right_table_id = right_table_id;
+                        ctx.internal_table_id_set.insert(left_table_id);
+                        ctx.internal_table_id_set.insert(right_table_id);
+                    }
+
+                    NodeBody::Lookup(node) => {
+                        if let Some(ArrangementTableId::TableId(table_id)) =
+                            &mut node.arrangement_table_id
+                        {
+                            *table_id += table_id_offset;
+                            ctx.internal_table_id_set.insert(*table_id);
+                        }
+                    }
+
+                    NodeBody::Arrange(node) => {
+                        node.table_id += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id);
+                    }
+
+                    NodeBody::HashAgg(node) => {
+                        assert_eq!(node.table_ids.len(), node.agg_calls.len());
+                        // In-place update the table id. Convert from local to global.
+                        for table_id in &mut node.table_ids {
+                            *table_id += table_id_offset;
+                            ctx.internal_table_id_set.insert(*table_id);
+                        }
+                    }
+
+                    NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
+                        node.table_id += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id);
+                    }
+
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
                         assert_eq!(node.table_ids.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
                         for table_id in &mut node.table_ids {
                             *table_id += table_id_offset;
+                            ctx.internal_table_id_set.insert(*table_id);
                         }
                     }
                     _ => {}
@@ -874,21 +886,15 @@ impl ActorGraphBuilder {
 
             let dispatch_strategy = dispatch_edge.dispatch_strategy.as_ref().unwrap();
             match dispatch_strategy.get_type()? {
-                ty @ (DispatcherType::Hash
+                DispatcherType::Hash
                 | DispatcherType::Simple
                 | DispatcherType::Broadcast
-                | DispatcherType::NoShuffle) => {
+                | DispatcherType::NoShuffle => {
                     state.stream_graph_builder.add_link(
                         &actor_ids,
                         downstream_actors,
                         dispatch_edge.link_id,
-                        Dispatcher {
-                            r#type: ty.into(),
-                            column_indices: dispatch_strategy.column_indices.clone(),
-                            hash_mapping: None,
-                            dispatcher_id: dispatch_edge.link_id,
-                            downstream_actor_id: vec![],
-                        },
+                        dispatch_strategy.clone(),
                         dispatch_edge.same_worker_node,
                     );
                 }

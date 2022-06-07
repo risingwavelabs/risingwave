@@ -42,6 +42,7 @@ impl Binder {
                 "avg" => Some(AggKind::Avg),
                 "string_agg" => Some(AggKind::StringAgg),
                 "single_value" => Some(AggKind::SingleValue),
+                "approx_count_distinct" => Some(AggKind::ApproxCountDistinct),
                 _ => None,
             };
             if let Some(kind) = agg_kind {
@@ -60,6 +61,8 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
+                "md5" => ExprType::Md5,
+                "to_char" => ExprType::ToChar,
                 "nullif" => {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case

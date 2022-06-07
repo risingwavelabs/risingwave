@@ -49,7 +49,9 @@ impl StreamDeltaJoin {
         let dist = StreamHashJoin::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &logical.l2o_col_mapping(),
+            &logical
+                .l2i_col_mapping()
+                .composite(&logical.i2o_col_mapping()),
         );
 
         // TODO: derive from input

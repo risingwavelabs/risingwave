@@ -30,7 +30,7 @@
 mod meta_client;
 pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
 mod compute_client;
-pub use compute_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
+pub use compute_client::{ComputeClient, ExchangeSource};
 mod compute_client_pool;
 pub use compute_client_pool::{ComputeClientPool, ComputeClientPoolRef};
 mod hummock_meta_client;

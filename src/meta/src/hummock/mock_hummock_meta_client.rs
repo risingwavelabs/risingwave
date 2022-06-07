@@ -88,6 +88,18 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(|e| e.into())
     }
 
+    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()> {
+        self.hummock_manager
+            .unpin_snapshot_before(
+                self.context_id,
+                HummockSnapshot {
+                    epoch: pinned_epochs,
+                },
+            )
+            .await
+            .map_err(|e| e.into())
+    }
+
     async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         self.hummock_manager
             .get_new_table_id()

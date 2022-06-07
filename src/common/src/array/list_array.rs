@@ -19,7 +19,9 @@ use std::hash::{Hash, Hasher};
 
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
+use prost::Message;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
+use risingwave_pb::expr::ListValue as ProstListValue;
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, RowRef,
@@ -209,6 +211,12 @@ impl Array for ListArray {
         )?;
         Ok(ArrayBuilderImpl::List(array_builder))
     }
+
+    fn array_meta(&self) -> ArrayMeta {
+        ArrayMeta::List {
+            datatype: Box::new(self.value_type.clone()),
+        }
+    }
 }
 
 impl ListArray {
@@ -231,7 +239,7 @@ impl ListArray {
         Ok(arr.into())
     }
 
-    #[cfg(test)]
+    // Used for testing purposes
     pub fn from_slices(
         null_bitmap: &[bool],
         values: Vec<Option<ArrayImpl>>,
@@ -277,7 +285,7 @@ impl ListArray {
 
 #[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
 pub struct ListValue {
-    values: Vec<Datum>,
+    values: Box<[Datum]>,
 }
 
 impl fmt::Display for ListValue {
@@ -305,11 +313,29 @@ impl Ord for ListValue {
 
 impl ListValue {
     pub fn new(values: Vec<Datum>) -> Self {
-        Self { values }
+        Self {
+            values: values.into_boxed_slice(),
+        }
     }
 
     pub fn values(&self) -> &[Datum] {
         &self.values
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        let value = ProstListValue {
+            fields: self
+                .values
+                .iter()
+                .map(|f| match f {
+                    None => {
+                        vec![]
+                    }
+                    Some(s) => s.to_protobuf(),
+                })
+                .collect_vec(),
+        };
+        value.encode_to_vec()
     }
 }
 
@@ -326,6 +352,25 @@ impl<'a> ListRef<'a> {
                 .map(|o| arr.value.value_at(o))
                 .collect(),
             ListRef::ValueRef { val } => val.values.iter().map(to_datum_ref).collect(),
+        }
+    }
+
+    pub fn value_at(&self, index: usize) -> Result<DatumRef<'a>> {
+        match self {
+            ListRef::Indexed { arr, .. } => {
+                if index <= arr.value.len() {
+                    Ok(arr.value.value_at(index - 1))
+                } else {
+                    Ok(None)
+                }
+            }
+            ListRef::ValueRef { val } => {
+                if let Some(datum) = val.values().iter().nth(index - 1) {
+                    Ok(to_datum_ref(datum))
+                } else {
+                    Ok(None)
+                }
+            }
         }
     }
 }
@@ -390,7 +435,7 @@ impl Display for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let values = self.values_ref().iter().map(display_datum_ref).join(",");
-        write!(f, "{{{}}}", values)
+        write!(f, "[{}]", values)
     }
 }
 
@@ -658,6 +703,6 @@ mod tests {
     fn test_list_ref_display() {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
-        assert_eq!("{1,NULL}".to_string(), format!("{}", r));
+        assert_eq!("[1,NULL]".to_string(), format!("{}", r));
     }
 }

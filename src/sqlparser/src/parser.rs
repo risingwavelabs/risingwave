@@ -1391,6 +1391,8 @@ impl Parser {
             self.parse_create_schema()
         } else if self.parse_keyword(Keyword::DATABASE) {
             self.parse_create_database()
+        } else if self.parse_keyword(Keyword::USER) {
+            self.parse_create_user()
         } else {
             self.expected("an object type after CREATE", self.peek_token())
         }
@@ -1456,6 +1458,16 @@ impl Parser {
             is_materialized,
             stmt: CreateSourceStatement::parse_to(self)?,
         })
+    }
+
+    // CREATE USER name [ [ WITH ] option [ ... ] ]
+    // where option can be:
+    //       SUPERUSER | NOSUPERUSER
+    //     | CREATEDB | NOCREATEDB
+    //     | LOGIN | NOLOGIN
+    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
+    fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }
 
     fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
