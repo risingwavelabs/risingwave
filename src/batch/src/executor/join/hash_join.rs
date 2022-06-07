@@ -417,6 +417,7 @@ mod tests {
     struct DataChunkMerger {
         data_types: Vec<DataType>,
         array_builders: Vec<ArrayBuilderImpl>,
+        array_len: usize,
     }
 
     impl DataChunkMerger {
@@ -429,6 +430,7 @@ mod tests {
             Ok(Self {
                 data_types,
                 array_builders,
+                array_len: 0,
             })
         }
 
@@ -437,6 +439,7 @@ mod tests {
             for idx in 0..self.array_builders.len() {
                 self.array_builders[idx].append_array(data_chunk.column_at(idx).array_ref())?;
             }
+            self.array_len += data_chunk.capacity();
 
             Ok(())
         }
@@ -448,7 +451,7 @@ mod tests {
                 .map(|array_builder| array_builder.finish().map(|arr| Column::new(Arc::new(arr))))
                 .collect::<Result<Vec<Column>>>()?;
 
-            DataChunk::try_from(columns)
+            Ok(DataChunk::new(columns, self.array_len))
         }
     }
 

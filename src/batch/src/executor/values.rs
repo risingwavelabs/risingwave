@@ -75,35 +75,29 @@ impl ValuesExecutor {
             let cardinality = self.rows.len();
             ensure!(cardinality > 0);
 
-            if self.schema.fields.is_empty() {
-                let cardinality = self.rows.len();
-                self.rows = vec![].into_iter();
-                yield DataChunk::new_dummy(cardinality);
-            } else {
-                while !self.rows.is_empty() {
-                    // We need a one row chunk rather than an empty chunk because constant
-                    // expression's eval result is same size as input chunk
-                    // cardinality.
-                    let one_row_chunk = DataChunk::new_dummy(1);
+            while !self.rows.is_empty() {
+                // We need a one row chunk rather than an empty chunk because constant
+                // expression's eval result is same size as input chunk
+                // cardinality.
+                let one_row_chunk = DataChunk::new_dummy(1);
 
-                    let chunk_size = self.chunk_size.min(self.rows.len());
-                    let mut array_builders = self.schema.create_array_builders(chunk_size)?;
-                    for row in self.rows.by_ref().take(chunk_size) {
-                        for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
-                            let out = expr.eval(&one_row_chunk)?;
-                            builder.append_array(&out)?;
-                        }
+                let chunk_size = self.chunk_size.min(self.rows.len());
+                let mut array_builders = self.schema.create_array_builders(chunk_size)?;
+                for row in self.rows.by_ref().take(chunk_size) {
+                    for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
+                        let out = expr.eval(&one_row_chunk)?;
+                        builder.append_array(&out)?;
                     }
-
-                    let columns = array_builders
-                        .into_iter()
-                        .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                        .collect::<Result<Vec<Column>>>()?;
-
-                    let chunk = DataChunk::builder().columns(columns).build();
-
-                    yield chunk
                 }
+
+                let columns = array_builders
+                    .into_iter()
+                    .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
+                    .collect::<Result<Vec<Column>>>()?;
+
+                let chunk = DataChunk::new(columns, chunk_size);
+
+                yield chunk
             }
         }
     }

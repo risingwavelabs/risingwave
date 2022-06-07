@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row};
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, DatumRef};
@@ -175,7 +175,7 @@ impl NestedLoopJoinExecutor {
             .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
             .collect::<Result<Vec<Column>>>()?;
 
-        Ok(DataChunk::builder().columns(result_columns).build())
+        Ok(DataChunk::new(result_columns, num_tuples))
     }
 
     /// Create constant data chunk (one tuple repeat `num_tuples` times).
@@ -564,10 +564,10 @@ impl NestedLoopJoinExecutor {
         concated_columns.extend_from_slice(left.columns());
         concated_columns.extend_from_slice(right.columns());
         // Only handle one side is constant row chunk: One of visibility must be None.
-        let vis = match (left.visibility(), right.visibility()) {
-            (None, _) => right.visibility().cloned(),
-            (_, None) => left.visibility().cloned(),
-            (Some(_), Some(_)) => {
+        let vis = match (left.vis(), right.vis()) {
+            (Vis::Compact(_), _) => right.vis().clone(),
+            (_, Vis::Compact(_)) => left.vis().clone(),
+            (Vis::Bitmap(_), Vis::Bitmap(_)) => {
                 return Err(ErrorCode::NotImplemented(
                     "The concatenate behaviour of two chunk with visibility is undefined"
                         .to_string(),
@@ -576,12 +576,7 @@ impl NestedLoopJoinExecutor {
                 .into())
             }
         };
-        let builder = DataChunk::builder().columns(concated_columns);
-        let data_chunk = if let Some(vis) = vis {
-            builder.visibility(vis).build()
-        } else {
-            builder.build()
-        };
+        let data_chunk = DataChunk::new(concated_columns, vis);
         Ok(data_chunk)
     }
 }

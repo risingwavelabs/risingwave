@@ -28,25 +28,35 @@ use tracing::error;
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::{OrderIndex, OrderSortedUncommittedData};
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
-pub(crate) type UploadTaskId = u64;
-pub(crate) type UploadTaskPayload = Vec<SharedBufferBatch>;
+pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
 pub(crate) type UploadTaskResult =
-    BTreeMap<(HummockEpoch, UploadTaskId), HummockResult<Vec<SstableInfo>>>;
+    BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<SstableInfo>>>;
 
 #[derive(Debug)]
 pub struct UploadTask {
-    pub(crate) id: UploadTaskId,
+    pub(crate) order_index: OrderIndex,
     pub(crate) epoch: HummockEpoch,
     pub(crate) payload: UploadTaskPayload,
+    pub(crate) is_local: bool,
 }
 
 impl UploadTask {
-    pub fn new(id: UploadTaskId, epoch: HummockEpoch, payload: UploadTaskPayload) -> Self {
-        Self { id, epoch, payload }
+    pub fn new(
+        order_index: OrderIndex,
+        epoch: HummockEpoch,
+        payload: UploadTaskPayload,
+        is_local: bool,
+    ) -> Self {
+        Self {
+            order_index,
+            epoch,
+            payload,
+            is_local,
+        }
     }
 }
 
@@ -119,9 +129,10 @@ impl SharedBufferUploader {
             let mut task_results = BTreeMap::new();
             let mut failed = false;
             for UploadTask {
-                id: task_id,
+                order_index,
                 epoch,
                 payload,
+                is_local,
             } in item.tasks
             {
                 // If a previous task failed, this task will also fail
@@ -130,16 +141,18 @@ impl SharedBufferUploader {
                         "failed due to previous failure",
                     ))
                 } else {
-                    self.flush(epoch, false, &payload).await.inspect_err(|e| {
-                        error!("Failed to flush shared buffer: {:?}", e);
-                        failed = true;
-                    })
+                    self.flush(epoch, is_local, &payload)
+                        .await
+                        .inspect_err(|e| {
+                            error!("Failed to flush shared buffer: {:?}", e);
+                            failed = true;
+                        })
                 };
                 assert!(
-                    task_results.insert((epoch, task_id), result).is_none(),
-                    "Upload task duplicate. epoch: {:?}, task_id: {:?}",
+                    task_results.insert((epoch, order_index), result).is_none(),
+                    "Upload task duplicate. epoch: {:?}, order_index: {:?}",
                     epoch,
-                    task_id,
+                    order_index,
                 );
             }
             item.notifier
@@ -151,7 +164,7 @@ impl SharedBufferUploader {
 
     async fn flush(
         &mut self,
-        epoch: HummockEpoch,
+        _epoch: HummockEpoch,
         is_local: bool,
         payload: &UploadTaskPayload,
     ) -> HummockResult<Vec<SstableInfo>> {
@@ -181,12 +194,7 @@ impl SharedBufferUploader {
             compaction_executor: self.compaction_executor.as_ref().cloned(),
         };
 
-        let tables = Compactor::compact_shared_buffer(
-            Arc::new(mem_compactor_ctx),
-            payload,
-            self.stats.clone(),
-        )
-        .await?;
+        let tables = Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), payload).await?;
 
         let uploaded_sst_info: Vec<SstableInfo> = tables
             .into_iter()
@@ -202,11 +210,16 @@ impl SharedBufferUploader {
             })
             .collect();
 
-        if let Some(detector) = &self.write_conflict_detector {
-            for batch in payload {
-                detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
-            }
-        }
+        // TODO: re-enable conflict detector after we have a better way to determine which actor
+        // writes the batch. if let Some(detector) = &self.write_conflict_detector {
+        //     for data_list in payload {
+        //         for data in data_list {
+        //             if let UncommittedData::Batch(batch) = data {
+        //                 detector.check_conflict_and_track_write_batch(batch.get_payload(),
+        // epoch);             }
+        //         }
+        //     }
+        // }
 
         Ok(uploaded_sst_info)
     }
