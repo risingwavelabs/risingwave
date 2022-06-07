@@ -1458,7 +1458,7 @@ async fn test_state_table_iter_with_bounds() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::executor_root(state_store, 0x42);
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -1612,7 +1612,8 @@ async fn test_state_table_iter_with_prefix() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::executor_root(state_store, 0x42);
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
+
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
