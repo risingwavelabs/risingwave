@@ -75,7 +75,9 @@ impl PlanAggCall {
             | AggKind::StringAgg
             | AggKind::SingleValue => self.agg_kind.clone(),
 
-            AggKind::Count | AggKind::RowCount | AggKind::Sum => AggKind::Sum,
+            AggKind::Count | AggKind::RowCount | AggKind::Sum | AggKind::ApproxCountDistinct => {
+                AggKind::Sum
+            }
         };
         PlanAggCall {
             agg_kind: total_agg_kind,

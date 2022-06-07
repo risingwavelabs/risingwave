@@ -29,6 +29,7 @@ members = [
   "src/utils/memcomparable",
   "src/utils/pgwire",
   "src/utils/stats_alloc",
+  "src/utils/static-link",
   "src/utils/value-encoding",
   "src/workspace-hack",
 ]

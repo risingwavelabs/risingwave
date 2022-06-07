@@ -25,10 +25,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::Result;
-use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
+    CompactMetrics, CompactTask, HummockVersion, KeyRange, Level, TableSetStatistics,
 };
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
@@ -185,12 +185,9 @@ impl CompactStatus {
         let target_level_id = ret.target_level.level_idx;
 
         let splits = if ret.split_ranges.is_empty() {
-            vec![KeyRange::inf().into()]
+            vec![KeyRange::inf()]
         } else {
             ret.split_ranges
-                .iter()
-                .map(|v| v.clone().into())
-                .collect_vec()
         };
         let compact_task = CompactTask {
             input_ssts: vec![ret.select_level, ret.target_level],
@@ -273,30 +270,49 @@ impl CompactStatus {
             assert_eq!(compact_task.input_ssts[0].level_idx, 0);
             let mut new_table_infos = vec![];
             let mut find_remove_position = false;
+            let mut new_total_file_size = 0;
             for (idx, table) in new_version.levels[0].table_infos.iter().enumerate() {
                 if !removed_table.contains(&table.id) {
                     new_table_infos.push(new_version.levels[0].table_infos[idx].clone());
+                    new_total_file_size += table.file_size;
                 } else if !find_remove_position {
+                    new_total_file_size += compact_task
+                        .sorted_output_ssts
+                        .iter()
+                        .map(|sst| sst.file_size)
+                        .sum::<u64>();
                     new_table_infos.extend(compact_task.sorted_output_ssts.clone());
                     find_remove_position = true;
                 }
             }
             new_version.levels[compact_task.target_level as usize].table_infos = new_table_infos;
+            new_version.levels[compact_task.target_level as usize].total_file_size =
+                new_total_file_size;
         } else {
             for input_level in &compact_task.input_ssts {
+                new_version.levels[input_level.level_idx as usize].total_file_size -= input_level
+                    .table_infos
+                    .iter()
+                    .map(|sst| sst.file_size)
+                    .sum::<u64>();
                 new_version.levels[input_level.level_idx as usize]
                     .table_infos
                     .retain(|sst| !removed_table.contains(&sst.id));
             }
+            new_version.levels[compact_task.target_level as usize].total_file_size += compact_task
+                .sorted_output_ssts
+                .iter()
+                .map(|sst| sst.file_size)
+                .sum::<u64>();
             new_version.levels[compact_task.target_level as usize]
                 .table_infos
                 .extend(compact_task.sorted_output_ssts.clone());
             new_version.levels[compact_task.target_level as usize]
                 .table_infos
                 .sort_by(|sst1, sst2| {
-                    let a = KeyRange::from(sst1.key_range.as_ref().unwrap());
-                    let b = KeyRange::from(sst2.key_range.as_ref().unwrap());
-                    a.cmp(&b)
+                    let a = sst1.key_range.as_ref().unwrap();
+                    let b = sst2.key_range.as_ref().unwrap();
+                    a.compare(b)
                 });
         }
         new_version
