@@ -38,8 +38,13 @@ impl<S: Sink> SinkExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        self.child.execute();
-        self.external_sink.write_batch();
+        let input = self.child.execute();
+        #[for_await]
+        for msg in input {
+            let msg = msg?;
+
+                self.external_sink.write_batch();
+        }
     }
 }
 

@@ -33,7 +33,7 @@ log = "0.4"
 madsim = "=0.2.0-alpha.3"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
-mysql = "22.1"
+mysql_async = "0.30"
 num-traits = "0.2"
 parse_duration = "2.1.1"
 paste = "1"
