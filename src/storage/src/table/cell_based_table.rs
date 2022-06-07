@@ -22,7 +22,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::RwError;
-use risingwave_common::hash::VNODE_BITMAP_LEN;
+use risingwave_common::consistent_hash::VNODE_BITMAP_LEN;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;

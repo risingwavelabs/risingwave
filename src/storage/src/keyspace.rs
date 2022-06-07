@@ -96,6 +96,7 @@ impl<S: StateStore> Keyspace<S> {
             buf.put_u32(id.table_id);
             buf.to_vec()
         };
+        dbg!(&vnodes);
         Self {
             store,
             prefix,
@@ -160,6 +161,8 @@ impl<S: StateStore> Keyspace<S> {
             table_id: self.vnodes.table_id,
             bitmap: bitmap_inner.to_vec(),
         };
+        println!("get_with_vnode: vnode is {}", vnode);
+        dbg!(&vnode_bitmap);
         self.store
             .get(&self.prefixed_key(key), epoch, Some(&vnode_bitmap))
             .await
