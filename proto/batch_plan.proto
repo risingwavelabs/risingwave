@@ -34,6 +34,8 @@ message ScanRange {
     Bound upper_bound = 2;
   }
   // (optional) The range of the next PK column subsequent to those in `eq_conds`.
+  // 
+  // `lower_bound` and `upper_bound` should not be both `None`.
   Range range = 2;
 }
 

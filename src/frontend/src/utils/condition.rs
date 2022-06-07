@@ -17,11 +17,12 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_pb::batch_plan::ScanRange;
+use risingwave_pb::batch_plan::scan_range::range::Bound;
+use risingwave_pb::batch_plan::{scan_range, ScanRange};
 
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
-    try_get_bool_constant, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
+    try_get_bool_constant, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef, Literal,
 };
 use crate::optimizer::plan_node::CollectInputRef;
 
@@ -67,6 +68,12 @@ impl Condition {
     pub fn true_cond() -> Self {
         Self {
             conjunctions: vec![],
+        }
+    }
+
+    pub fn false_cond() -> Self {
+        Self {
+            conjunctions: vec![ExprImpl::literal_bool(false)],
         }
     }
 
@@ -225,7 +232,115 @@ impl Condition {
 
     /// See also [`ScanRange`].
     pub fn split_to_scan_range(self, pk_idces: &[usize], num_cols: usize) -> (ScanRange, Self) {
-        todo!()
+        let mut col_idx_to_pk_idx = vec![None; num_cols];
+        pk_idces.iter().enumerate().for_each(|(idx, pk_idx)| {
+            col_idx_to_pk_idx[*pk_idx] = Some(idx);
+        });
+
+        // The i-th group only has exprs that reference the i-th PK column.
+        // The last group contains all the other exprs.
+        let mut groups = vec![vec![]; pk_idces.len() + 1];
+        for (key, group) in &self.conjunctions.into_iter().group_by(|expr| {
+            let input_bits = expr.collect_input_refs(num_cols);
+            if input_bits.count_ones(..) == 1 {
+                let col_idx = input_bits.ones().next().unwrap();
+                col_idx_to_pk_idx[col_idx].unwrap_or(pk_idces.len())
+            } else {
+                pk_idces.len()
+            }
+        }) {
+            groups[key].extend(group);
+        }
+
+        println!(
+            "pk_idces: {:?}, col_idx_to_pk_idx: {:?}\ngroups: {:?}\n",
+            pk_idces, col_idx_to_pk_idx, groups
+        );
+
+        let mut scan_range = full_table_scan();
+        let mut other_conds = groups.pop().unwrap();
+
+        for i in 0..pk_idces.len() {
+            let group = std::mem::take(&mut groups[i]);
+            if group.len() == 0 {
+                groups.push(other_conds);
+                return (
+                    scan_range,
+                    Self {
+                        conjunctions: groups[i + 1..].concat(),
+                    },
+                );
+            }
+            let mut lb = vec![];
+            let mut ub = vec![];
+            let mut eq_cond = None;
+            for expr in group.into_iter() {
+                if let Some((input_ref, lit)) = expr.as_eq_const() {
+                    assert_eq!(input_ref.index, pk_idces[i]);
+                    if let Some(l) = eq_cond && l != lit {
+                        // Always false
+                        return (
+                            full_table_scan(),
+                            Self::false_cond(),
+                        );
+                    }
+                    eq_cond = Some(lit);
+                } else if let Some((input_ref, op, lit)) = expr.as_comparison_const() {
+                    assert_eq!(input_ref.index, pk_idces[i]);
+                    match op {
+                        ExprType::LessThan | ExprType::LessThanOrEqual => {
+                            ub.push((
+                                Bound {
+                                    inclusive: op == ExprType::LessThanOrEqual,
+                                    value: Some(lit.to_expr_proto()),
+                                },
+                                expr,
+                            ));
+                        }
+                        ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                            lb.push((
+                                Bound {
+                                    inclusive: op == ExprType::GreaterThanOrEqual,
+                                    value: Some(lit.to_expr_proto()),
+                                },
+                                expr,
+                            ));
+                        }
+                        _ => unreachable!(),
+                    }
+                } else {
+                    other_conds.push(expr);
+                }
+            }
+
+            match eq_cond {
+                Some(lit) => {
+                    scan_range.eq_conds.push(lit.to_expr_proto());
+                    // TODO: simplify bounds
+                    other_conds.extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
+                }
+                None => {
+                    if lb.len() > 1 || ub.len() > 1 {
+                        // TODO: simplify bounds
+                        other_conds
+                            .extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
+                        break;
+                    } else if !lb.is_empty() || !ub.is_empty() {
+                        scan_range.range = Some(scan_range::Range {
+                            lower_bound: lb.first().map(|(bound, _)| bound.clone()),
+                            upper_bound: ub.first().map(|(bound, _)| bound.clone()),
+                        })
+                    }
+                }
+            }
+        }
+
+        (
+            scan_range,
+            Self {
+                conjunctions: other_conds,
+            },
+        )
     }
 
     /// Split the condition expressions into `N` groups.
@@ -319,6 +434,13 @@ impl Condition {
             }
         }
         Self { conjunctions: res }
+    }
+}
+
+fn full_table_scan() -> ScanRange {
+    ScanRange {
+        eq_conds: vec![],
+        range: None,
     }
 }
 

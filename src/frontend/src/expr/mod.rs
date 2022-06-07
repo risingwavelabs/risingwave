@@ -215,7 +215,8 @@ impl ExprImpl {
     /// ordered by the canonical ordering (lower, higher), else returns None
     pub fn as_eq_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && let (ExprType::Equal, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+            && function_call.get_expr_type() == ExprType::Equal
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
         {
             if x.index() < y.index() {
                 Some((*x, *y))
@@ -228,10 +229,11 @@ impl ExprImpl {
     }
 
     pub fn as_eq_const(&self) -> Option<(InputRef, Literal)> {
-        if let ExprImpl::FunctionCall(function_call) = self {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+        function_call.get_expr_type() == ExprType::Equal{
             match function_call.clone().decompose_as_binary() {
-                (ExprType::Equal, ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, *y)),
-                (ExprType::Equal, ExprImpl::Literal(x), ExprImpl::InputRef(y)) => Some((*y, *x)),
+                (_, ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, *y)),
+                (_, ExprImpl::Literal(x), ExprImpl::InputRef(y)) => Some((*y, *x)),
                 _ => None,
             }
         } else {
@@ -251,18 +253,20 @@ impl ExprImpl {
         }
 
         if let ExprImpl::FunctionCall(function_call) = self {
-            let (ty, op1, op2) = function_call.clone().decompose_as_binary();
-            match ty {
-                ExprType::LessThan
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
-                | ExprType::GreaterThanOrEqual => match (op1, op2) {
-                    (ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, ty, *y)),
-                    (ExprImpl::Literal(x), ExprImpl::InputRef(y)) => {
-                        Some((*y, reverse_comparison(ty), *x))
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    match (op1, op2) {
+                        (ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, ty, *y)),
+                        (ExprImpl::Literal(x), ExprImpl::InputRef(y)) => {
+                            Some((*y, reverse_comparison(ty), *x))
+                        }
+                        _ => None,
                     }
-                    _ => None,
-                },
+                }
                 _ => None,
             }
         } else {

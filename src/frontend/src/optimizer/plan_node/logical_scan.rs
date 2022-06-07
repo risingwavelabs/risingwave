@@ -133,6 +133,14 @@ impl LogicalScan {
             .collect()
     }
 
+    pub(super) fn pk_names(&self) -> Vec<String> {
+        self.table_desc
+            .pks
+            .iter()
+            .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect()
+    }
+
     pub fn table_name(&self) -> &str {
         &self.table_name
     }
@@ -330,9 +338,15 @@ impl ToBatch for LogicalScan {
         if self.predicate.always_true() {
             Ok(BatchSeqScan::new(self.clone(), full_table_scan()).into())
         } else {
-            let (scan, predicate, project_expr) = self.predicate_pull_up();
-            let (scan_range, predicate) =
-                predicate.split_to_scan_range(&self.table_desc.pks, self.table_desc.columns.len());
+            let (scan_range, predicate) = self
+                .predicate
+                .clone()
+                .split_to_scan_range(&self.table_desc.pks, self.table_desc.columns.len());
+            println!("before: {}\nafter: {}, {:?}\n", self.predicate, predicate, scan_range);
+
+            let mut scan = self.clone();
+            scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
+            let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
             let batch_scan = BatchSeqScan::new(scan, scan_range);
             let batch_filter = BatchFilter::new(LogicalFilter::new(batch_scan.into(), predicate));
