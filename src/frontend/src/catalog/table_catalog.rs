@@ -71,8 +71,6 @@ impl TableCatalog {
         self.order_desc.as_ref()
     }
 
-
-
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
         TableDesc {

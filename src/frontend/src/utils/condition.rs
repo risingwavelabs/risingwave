@@ -229,11 +229,18 @@ impl Condition {
     }
 
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
-    pub fn split_to_scan_range(self, order_column_ids: &[usize], num_cols: usize) -> (ScanRange, Self) {
+    pub fn split_to_scan_range(
+        self,
+        order_column_ids: &[usize],
+        num_cols: usize,
+    ) -> (ScanRange, Self) {
         let mut col_idx_to_pk_idx = vec![None; num_cols];
-        order_column_ids.iter().enumerate().for_each(|(idx, pk_idx)| {
-            col_idx_to_pk_idx[*pk_idx] = Some(idx);
-        });
+        order_column_ids
+            .iter()
+            .enumerate()
+            .for_each(|(idx, pk_idx)| {
+                col_idx_to_pk_idx[*pk_idx] = Some(idx);
+            });
 
         // The i-th group only has exprs that reference the i-th PK column.
         // The last group contains all the other exprs.
