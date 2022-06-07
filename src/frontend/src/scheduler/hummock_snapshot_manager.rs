@@ -72,13 +72,16 @@ impl HummockSnapshotManager {
                 }
             }
 
+            // Check the min epoch, if the epoch has no query running on it, this should be the min
+            // epoch to be unpin.
             let mut min_epoch = None;
             if let Some((epoch, query_ids)) = core_guard.epoch_to_query_ids.first_key_value() {
                 if !query_ids.is_empty() {
                     min_epoch = Some(*epoch)
                 }
             }
-
+            // Remove the epoch from the map. Need to send RPC unpin_snapshot_before with this epoch
+            // later.
             if let Some(min_epoch_inner) = min_epoch.as_ref() {
                 core_guard.epoch_to_query_ids.remove(min_epoch_inner);
             }
@@ -88,7 +91,6 @@ impl HummockSnapshotManager {
 
         let need_to_request_meta = min_epoch.await;
         if let Some(epoch_inner) = need_to_request_meta {
-            tracing::info!("Unpin epoch in frontend manager {:?}", epoch_inner);
             let meta_client = self.meta_client.clone();
             tokio::spawn(async move {
                 let handle =
@@ -97,6 +99,8 @@ impl HummockSnapshotManager {
                     );
                 if let Err(join_error) = handle.await && join_error.is_panic() {
                     error!("Request meta to unpin snapshot panic {:?}!", join_error);
+                } else {
+                    tracing::info!("Unpin epoch RPC succeed in frontend manager {:?}", epoch_inner);
                 }
             });
         }
