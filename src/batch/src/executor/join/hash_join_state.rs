@@ -160,6 +160,7 @@ pub(super) struct ProbeTable<K> {
     params: EquiJoinParams,
 
     array_builders: Vec<ArrayBuilderImpl>,
+    array_len: usize,
 }
 
 /// Iterator for joined row ids for one key.
@@ -216,6 +217,7 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
             cur_remaining_build_row_id: remaining_build_row_id,
             params: build_table.params,
             array_builders,
+            array_len: 0,
         })
     }
 }
@@ -972,6 +974,7 @@ impl<K: HashKey> ProbeTable<K> {
         // The indices before the offset are already appended and dirty.
         let offset = self.result_offset;
         self.result_offset = self.result_build_index.len();
+        self.array_len += self.result_offset - offset;
         for col_idx in 0..self.params.left_len() {
             let builder_idx = col_idx;
             for probe_row_id in &self.result_probe_index[offset..] {
@@ -1021,13 +1024,14 @@ impl<K: HashKey> ProbeTable<K> {
             .into_iter()
             .map(|builder| builder.finish())
             .collect::<Result<Vec<_>>>()?;
+        let new_len = mem::replace(&mut self.array_len, 0);
 
         let new_columns = new_arrays
             .into_iter()
             .map(|array| Column::new(Arc::new(array)))
             .collect_vec();
 
-        let data_chunk = DataChunk::try_from(new_columns)?;
+        let data_chunk = DataChunk::new(new_columns, new_len);
 
         Ok(data_chunk)
     }

@@ -18,11 +18,11 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::ordered::OrderedRowSerializer;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
+use risingwave_storage::table::cell_based_table::{
+    CellBasedTable, CellTableChunkIter, DedupPkCellBasedTableRowIter,
+};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use crate::executor::monitor::BatchMetrics;
@@ -42,7 +42,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 }
 
 pub enum ScanType<S: StateStore> {
-    TableScan(CellBasedTableRowIter<S>),
+    TableScan(DedupPkCellBasedTableRowIter<S>),
     PointGet(Option<Row>),
 }
 
@@ -103,7 +103,8 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        let pk_descs = seq_scan_node.table_desc.as_ref().unwrap().get_pk();
+        let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().pk;
+        let pk_descs = pk_descs_proto.iter().map(|d| d.into()).collect();
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
         let pk_prefix_value = Row(scan_range
             .eq_conds
@@ -115,21 +116,10 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
             let storage_stats = state_store.stats();
             let batch_stats = source.context().stats();
-            let table = CellBasedTable::new(
-                keyspace,
-                column_descs,
-                Some(OrderedRowSerializer::new(
-                    pk_descs
-                        .iter()
-                        .map(|desc| OrderType::from_prost(&desc.order()))
-                        .collect(),
-                )),
-                storage_stats,
-                None,
-            );
+            let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
 
             let scan_type = if pk_prefix_value.size() == 0 && scan_range.range.is_none() {
-                let iter = table.iter(source.epoch).await?;
+                let iter = table.iter_with_pk(source.epoch, pk_descs).await?;
                 ScanType::TableScan(iter)
             } else if pk_prefix_value.size() == pk_descs.len() {
                 let row = table.get_row(&pk_prefix_value, source.epoch).await?;

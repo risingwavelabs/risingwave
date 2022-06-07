@@ -26,6 +26,7 @@ pub type HummockVersionId = u64;
 pub type HummockContextId = u32;
 pub type HummockEpoch = u64;
 pub type HummockCompactionTaskId = u64;
+pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
 

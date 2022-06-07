@@ -91,6 +91,16 @@ impl HashMappingManager {
             .map(|info| info.vnode_mapping.clone())
     }
 
+    pub fn set_need_consolidation(&self, newflag: bool) {
+        let mut core = self.core.lock();
+        core.need_sst_consolidation = newflag;
+    }
+
+    pub fn get_need_consolidation(&self) -> bool {
+        let core = self.core.lock();
+        core.need_sst_consolidation
+    }
+
     /// For test.
     fn get_fragment_mapping_info(&self, fragment_id: &FragmentId) -> Option<HashMappingInfo> {
         let core = self.core.lock();
@@ -111,6 +121,7 @@ struct HashMappingInfo {
 }
 
 struct HashMappingManagerCore {
+    need_sst_consolidation: bool,
     /// Mapping from fragment to hash mapping information. One fragment will have exactly one vnode
     /// mapping, which describes the data distribution of the fragment.
     hash_mapping_infos: HashMap<FragmentId, HashMappingInfo>,
@@ -121,6 +132,7 @@ struct HashMappingManagerCore {
 impl HashMappingManagerCore {
     fn new() -> Self {
         Self {
+            need_sst_consolidation: true,
             hash_mapping_infos: HashMap::new(),
             state_table_fragment_mapping: HashMap::new(),
         }

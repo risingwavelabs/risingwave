@@ -155,6 +155,7 @@ impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
 
     use super::WriteBatch;
     use crate::memory::MemoryStateStore;
@@ -165,7 +166,7 @@ mod tests {
     async fn test_invalid_write_batch() {
         let state_store = MemoryStateStore::new();
         let mut write_batch = WriteBatch::new(state_store.clone());
-        let key_space = Keyspace::executor_root(state_store, 0x118);
+        let key_space = Keyspace::table_root(state_store, &TableId::from(0x118));
 
         assert!(write_batch.is_empty());
         let mut key_space_batch = write_batch.prefixify(&key_space);
