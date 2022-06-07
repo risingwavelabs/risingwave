@@ -200,7 +200,7 @@ where
         let mut ssts = Vec::with_capacity(self.write_results.len());
         let results = try_join_all(self.write_results)
             .await
-            .map_err(|_| HummockError::other(format!("Unable to get write result")))?;
+            .map_err(|_| HummockError::other("Unable to get write result".to_string()))?;
         for write_result in results {
             ssts.push(write_result?);
         }

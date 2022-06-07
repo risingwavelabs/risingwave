@@ -491,12 +491,23 @@ impl Compactor {
 
         // Seal.
         builder.seal_current();
-
         let ssts = builder.finish().await?;
+
+        for (sst, _) in &ssts {
+            if self.context.is_share_buffer_compact {
+                self.context
+                    .stats
+                    .shared_buffer_to_sstable_size
+                    .observe(sst.meta.estimated_size as _);
+            } else {
+                self.context.stats.compaction_upload_sst_counts.inc();
+            }
+        }
         self.context
             .stats
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
+
         Ok((split_index, ssts))
     }
 
