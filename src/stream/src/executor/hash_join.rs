@@ -164,6 +164,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     input_r: Option<BoxedExecutor>,
     /// the data types of the formed new columns
     output_data_types: Vec<DataType>,
+    /// the output indices of the join executor
+    output_indices: Vec<usize>,
     /// The schema of the hash join executor
     schema: Schema,
     /// The primary key indices of the schema
@@ -357,6 +359,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         params_l: JoinParams,
         params_r: JoinParams,
         pk_indices: PkIndices,
+        output_indices: Vec<usize>,
         executor_id: u64,
         cond: Option<RowExpression>,
         op_info: String,
@@ -377,9 +380,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .concat(),
         };
 
-        let output_data_types = schema_fields
+        let original_output_data_types: Vec<_> = schema_fields
             .iter()
             .map(|field| field.data_type.clone())
+            .collect();
+        let actual_output_data_types = output_indices
+            .iter()
+            .map(|&idx| original_output_data_types[idx].clone())
             .collect();
         let col_l_datatypes = input_l
             .schema()
@@ -416,13 +423,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             false
         };
 
+        let original_schema = Schema {
+            fields: schema_fields,
+        };
+        let actual_schema: Schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
         Self {
             input_l: Some(input_l),
             input_r: Some(input_r),
-            output_data_types,
-            schema: Schema {
-                fields: schema_fields,
-            },
+            output_data_types: actual_output_data_types,
+            schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
                     JOIN_CACHE_SIZE,
@@ -452,6 +464,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 keyspace: ks_r,
             },
             pk_indices,
+            output_indices,
             cond,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
@@ -480,7 +493,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk,
                         self.append_only_optimize,
                     ) {
-                        yield chunk.map_err(StreamExecutorError::hash_join_error)?;
+                        yield chunk.map_err(StreamExecutorError::hash_join_error).map(
+                            |v| match v {
+                                Message::Chunk(chunk) => {
+                                    Message::Chunk(chunk.reorder_columns(&self.output_indices))
+                                }
+                                barrier @ Message::Barrier(_) => barrier,
+                            },
+                        )?;
                     }
                 }
                 AlignedMessage::Right(chunk) => {
@@ -494,7 +514,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk,
                         self.append_only_optimize,
                     ) {
-                        yield chunk.map_err(StreamExecutorError::hash_join_error)?;
+                        yield chunk.map_err(StreamExecutorError::hash_join_error).map(
+                            |v| match v {
+                                Message::Chunk(chunk) => {
+                                    Message::Chunk(chunk.reorder_columns(&self.output_indices))
+                                }
+                                barrier @ Message::Barrier(_) => barrier,
+                            },
+                        )?;
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {
@@ -782,13 +809,18 @@ mod tests {
         let cond = with_condition.then(create_cond);
 
         let (ks_l, ks_r) = create_in_memory_keyspace();
-
+        let schema_len = match T {
+            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
+            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
+            _ => source_l.schema().len() + source_r.schema().len(),
+        };
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![1],
+            (0..schema_len).into_iter().collect_vec(),
             1,
             cond,
             "HashJoinExecutor".to_string(),
@@ -817,13 +849,18 @@ mod tests {
         let cond = with_condition.then(create_cond);
 
         let (ks_l, ks_r) = create_in_memory_keyspace();
-
+        let schema_len = match T {
+            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
+            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
+            _ => source_l.schema().len() + source_r.schema().len(),
+        };
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![1],
+            (0..schema_len).into_iter().collect_vec(),
             1,
             cond,
             "HashJoinExecutor".to_string(),
