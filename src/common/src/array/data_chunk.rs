@@ -22,7 +22,7 @@ use risingwave_pb::data::DataChunk as ProstDataChunk;
 
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{Row, RowRef};
-use crate::array::{ArrayBuilderImpl, ArrayImpl};
+use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 use crate::error::{Result, RwError};
 use crate::hash::HashCode;
@@ -454,25 +454,6 @@ impl fmt::Debug for DataChunk {
             self.capacity(),
             self.to_pretty_string()
         )
-    }
-}
-
-impl TryFrom<Vec<Column>> for DataChunk {
-    type Error = RwError;
-
-    fn try_from(columns: Vec<Column>) -> Result<Self> {
-        ensure!(!columns.is_empty(), "Columns can't be empty!");
-        ensure!(
-            columns
-                .iter()
-                .map(Column::array_ref)
-                .map(ArrayImpl::len)
-                .all_equal(),
-            "Not all columns length same!"
-        );
-
-        let len = columns[0].array_ref().len();
-        Ok(DataChunk::new(columns, len))
     }
 }
 
