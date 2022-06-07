@@ -107,8 +107,7 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
     local_stats: &mut StoreLocalStatistic,
     read_options: Arc<ReadOptions>,
 ) -> HummockResult<BoxedHummockIterator<T::Direction>> {
-    let mut ordered_iters = Vec::new();
-    // use `rev` because the larger order index comes at first.
+    let mut ordered_iters = Vec::with_capacity(uncommitted_data.len());
     for data_list in uncommitted_data {
         let mut data_iters = Vec::new();
         for data in data_list {
@@ -263,7 +262,12 @@ impl SharedBuffer {
                 // ascending order. We add the write batches to the task payload and
                 // stop when we meet a sst.
 
-                // Keep track of whether the data of an order index is non uploaded local batches
+                // Keep track of whether the data of an order index is non uploaded local batches.
+                // The key is the order index. The value for sst and uploading tasks are `None`. For
+                // write batches, their value is `Some((end_user_key, order index))`, which is the
+                // key stored in `uncommitted_data`. We store the key in `uncommitted_data` so that
+                // after we generate the upload task, we can remove the key from
+                // `uncommitted_data`.
                 let mut order_index_is_non_upload_batch = BTreeMap::new();
                 for ((end_key, order_index), data) in &self.uncommitted_data {
                     if matches!(data, UncommittedData::Batch(_)) {
