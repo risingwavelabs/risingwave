@@ -18,6 +18,8 @@ use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::state::SourceState;
+use risingwave_connector::{ConnectorState, SplitImpl};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{AddMutation, DispatcherMutation, NothingMutation, StopMutation};
@@ -60,6 +62,7 @@ pub enum Command {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
         dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
+        source_state: HashMap<ActorId, Vec<SplitImpl>>,
     },
 }
 
@@ -194,6 +197,7 @@ where
                 table_fragments,
                 dispatches,
                 table_sink_map,
+                source_state: _source_state,
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {

@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::{InternalError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
-use risingwave_common::{try_match_expand};
+use risingwave_common::try_match_expand;
 use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::Source;
@@ -34,11 +33,11 @@ use risingwave_pb::stream_service::{
     DropSourceRequest as ComputeNodeDropSourceRequest,
 };
 use risingwave_rpc_client::StreamClient;
-use tokio::sync::{Mutex, oneshot};
-use tokio::task::JoinHandle;
-use tokio::{select, time};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{oneshot, Mutex};
+use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
+use tokio::{select, time};
 
 use crate::barrier::BarrierManagerRef;
 use crate::cluster::ClusterManagerRef;
@@ -146,8 +145,8 @@ pub struct SourceManagerCore<S: MetaStore> {
 }
 
 impl<S> SourceManagerCore<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
         Self {
@@ -266,8 +265,8 @@ fn diff_splits(
 }
 
 impl<S> SourceManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -287,20 +286,28 @@ impl<S> SourceManager<S>
         })
     }
 
-    pub async fn patch_update(&self,
-                              source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
-                              actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>) {
+    pub async fn patch_update(
+        &self,
+        source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
+        actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
+    ) {
         let mut core = self.core.lock().await;
         if let Some(source_fragments) = source_fragments {
             for (source_id, mut fragment_ids) in source_fragments {
-                core.source_fragments.entry(source_id).or_insert(vec![]).append(&mut fragment_ids);
+                core.source_fragments
+                    .entry(source_id)
+                    .or_insert(vec![])
+                    .append(&mut fragment_ids);
             }
         }
 
         if let Some(actor_splits) = actor_splits {
             for (actor_id, mut splits) in actor_splits {
-                core.actor_splits.entry(actor_id).or_insert(vec![]).append(&mut splits);
-                //TODO store state
+                core.actor_splits
+                    .entry(actor_id)
+                    .or_insert(vec![])
+                    .append(&mut splits);
+                // TODO store state
             }
         }
     }
@@ -322,10 +329,7 @@ impl<S> SourceManager<S>
             let handle = core
                 .managed_sources
                 .get(&source_id)
-                .ok_or_else(|| internal_error(format!(
-                    "could not found source {}",
-                    source_id
-                )))?;
+                .ok_or_else(|| internal_error(format!("could not found source {}", source_id)))?;
 
             if handle.splits.lock().await.splits.is_none() {
                 // force refresh source
@@ -339,10 +343,13 @@ impl<S> SourceManager<S>
                     let empty_actor_splits = table_fragments
                         .fragments
                         .get(&fragment_id)
-                        .ok_or_else(|| internal_error(format!(
-                            "could not found source {}",
-                            source_id
-                        )))?.actors.iter().map(|actor| (actor.actor_id, vec![])).collect();
+                        .ok_or_else(|| {
+                            internal_error(format!("could not found source {}", source_id))
+                        })?
+                        .actors
+                        .iter()
+                        .map(|actor| (actor.actor_id, vec![]))
+                        .collect();
 
                     assigned.extend(diff_splits(empty_actor_splits, splits).unwrap());
                 }
@@ -354,7 +361,7 @@ impl<S> SourceManager<S>
         Ok(assigned)
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -369,8 +376,8 @@ impl<S> SourceManager<S>
                 .iter()
                 .map(|worker| self.env.stream_client_pool().get(worker)),
         )
-            .await?
-            .into_iter();
+        .await?
+        .into_iter();
 
         Ok(all_stream_clients)
     }
@@ -404,12 +411,14 @@ impl<S> SourceManager<S>
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
-        core.managed_sources
-            .insert(source.id, ConnectorSourceWorkerHandle {
+        core.managed_sources.insert(
+            source.id,
+            ConnectorSourceWorkerHandle {
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
-            });
+            },
+        );
 
         Ok(())
     }

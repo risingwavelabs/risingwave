@@ -592,9 +592,12 @@ where
             .await?;
 
         let table_id = table_fragments.table_id();
-        let result = self.source_manager.pre_allocate_splits(&table_id, source_fragments).await?;
+        let init_split_assignment = self
+            .source_manager
+            .pre_allocate_splits(&table_id, source_fragments.clone())
+            .await?;
 
-        println!("result {:?}", result);
+        println!("result {:?}", init_split_assignment);
 
         if let Err(err) = self
             .barrier_manager
@@ -602,6 +605,7 @@ where
                 table_fragments,
                 table_sink_map,
                 dispatches,
+                source_state: init_split_assignment.clone(),
             })
             .await
         {
@@ -609,6 +613,10 @@ where
                 .cancel_create_table_fragments(&table_id)
                 .await?;
             return Err(err);
+        } else {
+            self.source_manager
+                .patch_update(Some(source_fragments), Some(init_split_assignment))
+                .await;
         }
 
         Ok(())
