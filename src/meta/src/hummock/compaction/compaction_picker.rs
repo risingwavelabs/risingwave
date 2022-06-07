@@ -176,11 +176,13 @@ impl CompactionPicker for MinOverlappingPicker {
                 level_idx: self.level as u32,
                 level_type: levels[self.level].level_type,
                 table_infos: select_input_ssts,
+                total_file_size: 0,
             },
             target_level: Level {
                 level_idx: target_level as u32,
                 level_type: levels[target_level].level_type,
                 table_infos: target_input_ssts,
+                total_file_size: 0,
             },
             split_ranges: vec![],
         })
@@ -203,6 +205,7 @@ pub mod tests {
                 level_idx: 0,
                 level_type: LevelType::Overlapping as i32,
                 table_infos: vec![],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
@@ -212,6 +215,7 @@ pub mod tests {
                     generate_table(1, 1, 101, 200, 1),
                     generate_table(2, 1, 222, 300, 1),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -223,6 +227,7 @@ pub mod tests {
                     generate_table(7, 1, 501, 800, 1),
                     generate_table(8, 2, 301, 400, 1),
                 ],
+                total_file_size: 0,
             },
         ];
         let mut levels_handler = vec![
@@ -271,6 +276,7 @@ pub mod tests {
                 level_idx: 0,
                 level_type: LevelType::Overlapping as i32,
                 table_infos: vec![],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 1,
@@ -280,6 +286,7 @@ pub mod tests {
                     generate_table(1, 1, 100, 149, 2),
                     generate_table(2, 1, 150, 249, 2),
                 ],
+                total_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -288,6 +295,7 @@ pub mod tests {
                     generate_table(4, 1, 50, 199, 1),
                     generate_table(5, 1, 200, 399, 1),
                 ],
+                total_file_size: 0,
             },
         ];
         let mut levels_handler = vec![

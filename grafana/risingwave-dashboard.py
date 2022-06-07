@@ -70,11 +70,14 @@ class Panels:
 
     def timeseries_count(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10)
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10, legendDisplayMode="table",
+                          legendPlacement="right")
 
     def timeseries_latency(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=10)
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
 
     def timeseries_bytes_per_sec(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
@@ -86,7 +89,12 @@ class Panels:
 
     def timeseries_kilobytes(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="deckbytes", fillOpacity=10)
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="deckbytes", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
+    def timeseries_dollar(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="$", fillOpacity=10)
 
     def timeseries_ops(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
@@ -136,7 +144,12 @@ def section_compaction(panels):
         panels.row("Compaction"),
         panels.timeseries_count("SST Counts", [
             panels.target(
-                "sum(storage_level_sst_num) by (instance, level_index)", "{{level_index}}"
+                "sum(storage_level_sst_num) by (instance, level_index)", "L{{level_index}}"
+            ),
+        ]),
+        panels.timeseries_kilobytes("KBs level sst", [
+            panels.target(
+                "sum(storage_level_total_file_size) by (instance, level_index)", "L{{level_index}}"
             ),
         ]),
         panels.timeseries_count("Compaction Count", [
@@ -180,7 +193,7 @@ def section_compaction(panels):
         ]),
         panels.timeseries_count("Compacting SST Count", [
             panels.target(
-                "storage_level_compact_cnt", "{{level_index}}"
+                "storage_level_compact_cnt", "L{{level_index}}"
             ),
         ]),
         panels.timeseries_bytes("Hummock Version Size", [
@@ -190,50 +203,50 @@ def section_compaction(panels):
         ]),
         panels.timeseries_bytes("GBs Read from Next Level", [
             panels.target(
-                "histogram_quantile(0.5, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))", "{{level_index}} read bytes p50"
+                "histogram_quantile(0.5, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))", "L{{level_index}} read bytes p50"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))", "{{level_index}} read bytes p99"
+                "histogram_quantile(0.99, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))", "L{{level_index}} read bytes p99"
             ),
         ]),
         panels.timeseries_bytes("GBs Read from Current Level", [
             panels.target(
-                "histogram_quantile(0.5, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))", "{{level_index}} read bytes p50"
+                "histogram_quantile(0.5, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))", "L{{level_index}} read bytes p50"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))", "{{level_index}} read bytes p99"
+                "histogram_quantile(0.99, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))", "L{{level_index}} read bytes p99"
             ),
         ]),
         panels.timeseries_count("Count of SSTs Read from Current Level", [
             panels.target(
-                "histogram_quantile(0.5, sum(rate(storage_level_compact_read_sstn_curr_bucket[1m])) by (le, level_index))", "{{level_index}} p50"
+                "histogram_quantile(0.5, sum(rate(storage_level_compact_read_sstn_curr_bucket[1m])) by (le, level_index))", "L{{level_index}} p50"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(storage_level_compact_read_sstn_curr_bucket[1m])) by (le, level_index))", "{{level_index}} p99"
+                "histogram_quantile(0.99, sum(rate(storage_level_compact_read_sstn_curr_bucket[1m])) by (le, level_index))", "L{{level_index}} p99"
             ),
         ]),
         panels.timeseries_bytes("GBs Written to Next Level", [
             panels.target(
-                "histogram_quantile(0.5, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))", "{{level_index}} write bytes p50"
+                "histogram_quantile(0.5, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))", "L{{level_index}} write bytes p50"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))", "{{level_index}} write bytes p99"
+                "histogram_quantile(0.99, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))", "L{{level_index}} write bytes p99"
             ),
         ]),
         panels.timeseries_count("Count of SSTs Written to Next Level", [
             panels.target(
-                "histogram_quantile(0.5, sum(rate(storage_level_compact_write_sstn_bucket[1m])) by (le, level_index))", "{{level_index}} write count p50"
+                "histogram_quantile(0.5, sum(rate(storage_level_compact_write_sstn_bucket[1m])) by (le, level_index))", "L{{level_index}} write count p50"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(storage_level_compact_write_sstn_bucket[1m])) by (le, level_index))", "{{level_index}} write count p99"
+                "histogram_quantile(0.99, sum(rate(storage_level_compact_write_sstn_bucket[1m])) by (le, level_index))", "L{{level_index}} write count p99"
             ),
         ]),
         panels.timeseries_count("Count of SSTs Read from Next Level", [
             panels.target(
-                "histogram_quantile(0.5, sum(rate(storage_level_compact_read_sstn_next_bucket[1m])) by (le, level_index))", "{{level_index}} read count p50"
+                "histogram_quantile(0.5, sum(rate(storage_level_compact_read_sstn_next_bucket[1m])) by (le, level_index))", "L{{level_index}} read count p50"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(storage_level_compact_read_sstn_next_bucket[1m])) by (le, level_index))", "{{level_index}} read count p99"
+                "histogram_quantile(0.99, sum(rate(storage_level_compact_read_sstn_next_bucket[1m])) by (le, level_index))", "L{{level_index}} read count p99"
             ),
         ]),
     ]
@@ -275,6 +288,20 @@ def section_object_storage(panels):
             ),
             panels.target(
                 "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))", "{{type}} p80"
+            ),
+        ]),
+        panels.timeseries_dollar("Estimated S3 Cost (Total)", [
+            panels.target(
+                "sum(object_store_read_bytes) * 0.01 / 1000 / 1000 / 1000", "Data Transfer Cost"
+            ),
+            panels.target(
+                "sum(object_store_operation_latency_count{type=~'read|delete'}) * 0.0004 / 1000", "GET + DELETE Request Cost"
+            ),
+            panels.target(
+                "sum(object_store_operation_latency_count{type='upload'}) * 0.005 / 1000", "PUT Request Cost"
+            ),
+            panels.target(
+                "sum(minio_bucket_usage_total_bytes) * 0.023 / 1000 / 1000 / 1000", "Storage Cost"
             ),
         ]),
     ]

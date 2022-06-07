@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::time::Duration;
 
-use futures::StreamExt;
-use log::trace;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
@@ -26,8 +24,8 @@ use risingwave_pb::batch_plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, Ta
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
-    CreateTaskRequest, CreateTaskResponse, GetDataRequest, GetDataResponse, GetStreamRequest,
-    GetStreamResponse,
+    CreateTaskRequest, CreateTaskResponse, ExecuteRequest, GetDataRequest, GetDataResponse,
+    GetStreamRequest, GetStreamResponse,
 };
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
@@ -56,21 +54,12 @@ impl ComputeClient {
         })
     }
 
-    pub async fn get_data(&self, output_id: TaskOutputId) -> Result<GrpcExchangeSource> {
-        let stream = self.get_data_inner(output_id.clone()).await?;
-        Ok(GrpcExchangeSource {
-            stream,
-            task_id: output_id.get_task_id().unwrap().clone(),
-            output_id,
-        })
-    }
-
-    async fn get_data_inner(&self, output_id: TaskOutputId) -> Result<Streaming<GetDataResponse>> {
+    pub async fn get_data(&self, output_id: TaskOutputId) -> Result<Streaming<GetDataResponse>> {
         Ok(self
             .exchange_client
             .to_owned()
             .get_data(GetDataRequest {
-                task_output_id: Some(output_id.clone()),
+                task_output_id: Some(output_id),
             })
             .await
             .to_rw_result()?
@@ -143,54 +132,20 @@ impl ComputeClient {
             .to_rw_result()?
             .into_inner())
     }
+
+    pub async fn execute(&self, req: ExecuteRequest) -> Result<Streaming<GetDataResponse>> {
+        Ok(self
+            .task_client
+            .to_owned()
+            .execute(req)
+            .await
+            .to_rw_result()?
+            .into_inner())
+    }
 }
 
 /// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
 #[async_trait::async_trait]
 pub trait ExchangeSource: Send + Debug {
     async fn take_data(&mut self) -> Result<Option<DataChunk>>;
-}
-
-/// Use grpc client as the source.
-pub struct GrpcExchangeSource {
-    stream: Streaming<GetDataResponse>,
-
-    output_id: TaskOutputId,
-    task_id: TaskId,
-}
-
-impl GrpcExchangeSource {
-    pub async fn create(addr: HostAddr, output_id: TaskOutputId) -> Result<Self> {
-        let client = ComputeClient::new(addr).await?;
-        client.get_data(output_id).await
-    }
-}
-
-impl Debug for GrpcExchangeSource {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GrpcExchangeSource")
-            .field("task_output_id", &self.output_id)
-            .finish()
-    }
-}
-
-#[async_trait::async_trait]
-impl ExchangeSource for GrpcExchangeSource {
-    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-        let res = match self.stream.next().await {
-            None => return Ok(None),
-            Some(r) => r,
-        };
-        let task_data = res.to_rw_result()?;
-        let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact()?;
-
-        trace!(
-            "Receiver task: {:?}, output = {:?}, data = {:?}",
-            self.task_id,
-            self.output_id,
-            data
-        );
-
-        Ok(Some(data))
-    }
 }

@@ -229,6 +229,7 @@ impl StageExecution {
                 ExchangeSource {
                     task_output_id: Some(task_output_id),
                     host: Some(status_holder.inner.load_full().location.clone().unwrap()),
+                    local_execute_plan: None,
                 }
             })
             .collect()
