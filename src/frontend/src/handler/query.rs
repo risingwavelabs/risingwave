@@ -47,6 +47,8 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         .map(|entry| entry.get_val(QueryMode::default()))
         .unwrap_or_default();
 
+    println!("query_mode:{:?}", query_mode);
+
     let (data_stream, pg_descs) = match query_mode {
         QueryMode::Local => local_execute(context, bound).await?,
         QueryMode::Distributed => distribute_execute(context, bound).await?,
@@ -142,9 +144,9 @@ async fn local_execute(
         (query, pg_descs)
     };
 
-    let hummock_snapshot_manager = session.env().hummock_snapshot_manager().clone();
+    let front_env = session.env();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(query, hummock_snapshot_manager, "");
+    let execution = LocalQueryExecution::new(query, front_env.clone(), "");
     Ok((Box::pin(execution.run()), pg_descs))
 }
