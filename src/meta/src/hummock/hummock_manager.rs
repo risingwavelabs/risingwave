@@ -636,7 +636,7 @@ where
 
                     // to found exist table_id from
                     if exist_table_id_from_meta.contains(&table_id) {
-                        compact_task.exist_table_id.push(table_id);
+                        compact_task.existing_table_ids.push(table_id);
                     }
                 }
 

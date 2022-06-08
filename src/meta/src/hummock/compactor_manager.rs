@@ -173,7 +173,7 @@ mod tests {
             task_status: false,
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
-            exist_table_id: vec![],
+            existing_table_ids: vec![],
         }
     }
 

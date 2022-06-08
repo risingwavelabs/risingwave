@@ -158,7 +158,7 @@ impl CompactStatus {
             task_status: false,
             vnode_mappings: vec![],
             compaction_group_id,
-            exist_table_id: vec![],
+            existing_table_ids: vec![],
         };
         Some(compact_task)
     }
