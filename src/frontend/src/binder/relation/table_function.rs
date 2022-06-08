@@ -16,10 +16,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr};
+use risingwave_sqlparser::ast::FunctionArg;
 
 use super::{Binder, Result};
-use crate::expr::{align_types, Expr as _, ExprImpl};
+use crate::expr::{align_types, Expr as _, ExprImpl, ExprType};
 
 #[derive(Debug, Clone)]
 pub struct BoundTableFunction {
@@ -40,11 +40,17 @@ impl Binder {
             .into());
         }
 
-        let arg = args[0].get_expr();
-        if let FunctionArgExpr::Expr(expr) = arg {
-            // Only accept Array as unnest input
-            if let Expr::Array(_) = expr {
-                // flatten array expr in recursive way
+        let exprs = self.bind_function_arg(args[0].clone())?;
+        if exprs.len() != 1 {
+            return Err(ErrorCode::BindError(
+                "the length of expr of unnest function should be 1".to_string(),
+            )
+            .into());
+        }
+
+        let expr = &exprs[0];
+        if let ExprImpl::FunctionCall(func) = expr {
+            if func.get_expr_type() == ExprType::Array {
                 let mut exprs = self.array_flatten(expr)?;
                 let data_type = align_types(exprs.iter_mut())?;
                 let columns = [(
@@ -65,10 +71,10 @@ impl Binder {
                     data_type,
                 })
             } else {
-                Err(
-                    ErrorCode::BindError("the arg of unnest function should be array".to_string())
-                        .into(),
+                Err(ErrorCode::BindError(
+                    "the expr function of unnest function should be array".to_string(),
                 )
+                .into())
             }
         } else {
             unimplemented!()
@@ -116,16 +122,19 @@ impl Binder {
         })
     }
 
-    fn array_flatten(&mut self, expr: Expr) -> Result<Vec<ExprImpl>> {
-        if let Expr::Array(exprs) = expr {
-            let exprs: Vec<Expr> = exprs;
-            let mut result = vec![];
-            for e in exprs {
-                result.append(&mut self.array_flatten(e)?);
+    fn array_flatten(&mut self, expr: &ExprImpl) -> Result<Vec<ExprImpl>> {
+        if let ExprImpl::FunctionCall(func) = expr {
+            if func.get_expr_type() == ExprType::Array {
+                let mut result = vec![];
+                for e in func.inputs() {
+                    result.append(&mut self.array_flatten(e)?);
+                }
+                Ok(result)
+            } else {
+                Ok(vec![expr.clone()])
             }
-            Ok(result)
         } else {
-            Ok(vec![self.bind_expr(expr)?])
+            Ok(vec![expr.clone()])
         }
     }
 }
