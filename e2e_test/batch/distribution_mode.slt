@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 SET QUERY_MODE TO distributed;
 
 include ./boolean.slt.part
