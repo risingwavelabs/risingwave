@@ -151,12 +151,12 @@ mod test {
     use std::vec;
 
     use futures_async_stream::for_await;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
     use crate::executor::mview::test_utils::gen_basic_table;
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
 
     #[tokio::test]
     async fn test_basic() {

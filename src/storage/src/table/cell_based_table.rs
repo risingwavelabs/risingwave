@@ -573,7 +573,7 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
-        pk_descs: &Vec<OrderedColumnDesc>,
+        pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<Self> {
         let inner =
             CellBasedTableRowIter::new(&keyspace, table_descs.clone(), epoch, _stats).await?;
