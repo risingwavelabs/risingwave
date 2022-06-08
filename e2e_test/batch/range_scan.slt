@@ -20,9 +20,6 @@ insert into orders values
     (4, 43, 2222),
     (5, 42, 3333);
 
-statement ok
-flush;
-
 query III
 SELECT * FROM orders_count_by_user WHERE user_id = 42;
 ----
@@ -38,12 +35,24 @@ SELECT * FROM orders_count_by_user WHERE user_id < 43;
 42 3333 1
 
 query III
-SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date=2222;
+SELECT * FROM orders_count_by_user WHERE user_id > 42;
+----
+43 1111 1
+43 2222 1
+
+query III
+SELECT * FROM orders_count_by_user WHERE user_id >= 42;
+----
+43 1111 1
+43 2222 1
+
+query III
+SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date = 2222;
 ----
 42 2222 2
 
 query III
-SELECT * FROM orders_count_by_user WHERE date > 1111 AND user_id = 42 AND 5<6
+SELECT * FROM orders_count_by_user WHERE date > 1111 AND user_id = 42 AND 5<6 AND date <= 3333
 ----
 42 2222 2
 42 3333 1

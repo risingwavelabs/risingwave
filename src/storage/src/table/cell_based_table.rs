@@ -368,11 +368,11 @@ impl<S: StateStore> CellBasedTable<S> {
                 if is_start_bound {
                     Included(self.keyspace.prefixed_key(&serialized_pk_prefix))
                 } else {
-                    if pk_prefix.size() == 0 {
-                        Excluded(next_key(self.keyspace.key()))
+                    Excluded(if pk_prefix.size() == 0 {
+                        next_key(self.keyspace.key())
                     } else {
-                        Excluded(self.keyspace.prefixed_key(&next_key(&serialized_pk_prefix)))
-                    }
+                        self.keyspace.prefixed_key(&next_key(&serialized_pk_prefix))
+                    })
                 }
             }
         })
