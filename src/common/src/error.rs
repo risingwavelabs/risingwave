@@ -152,6 +152,10 @@ pub enum ErrorCode {
     UnknownError(String),
 }
 
+pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
+    ErrorCode::InternalError(msg.into().to_string()).into()
+}
+
 pub fn internal_error(msg: impl Into<String>) -> RwError {
     ErrorCode::InternalError(msg.into()).into()
 }

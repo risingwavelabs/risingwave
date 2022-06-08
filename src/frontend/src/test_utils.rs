@@ -46,6 +46,7 @@ use crate::planner::Planner;
 use crate::session::{FrontendEnv, OptimizerContext, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
+use crate::user::UserName;
 use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
@@ -302,21 +303,23 @@ impl UserInfoWriter for MockUserInfoWriter {
     /// `GrantAllSources` when grant privilege to user.
     async fn grant_privilege(
         &self,
-        user_name: &str,
+        users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
     ) -> Result<()> {
         let privileges = privileges
             .into_iter()
             .map(|mut p| {
-                p.privilege_with_opts
+                p.action_with_opts
                     .iter_mut()
-                    .for_each(|po| po.with_grant_option = with_grant_option);
+                    .for_each(|ao| ao.with_grant_option = with_grant_option);
                 p
             })
             .collect::<Vec<_>>();
-        if let Some(u) = self.user_info.write().get_user_mut(user_name) {
-            u.grant_privileges.extend(privileges);
+        for user_name in users {
+            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+                u.grant_privileges.extend(privileges.clone());
+            }
         }
         Ok(())
     }
@@ -325,35 +328,39 @@ impl UserInfoWriter for MockUserInfoWriter {
     /// `RevokeAllSources` when revoke privilege from user.
     async fn revoke_privilege(
         &self,
-        user_name: &str,
+        users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         revoke_grant_option: bool,
     ) -> Result<()> {
-        if let Some(u) = self.user_info.write().get_user_mut(user_name) {
-            u.grant_privileges.iter_mut().for_each(|p| {
-                for rp in &privileges {
-                    if rp.target != p.target {
-                        continue;
-                    }
-                    if revoke_grant_option {
-                        for po in &mut p.privilege_with_opts {
-                            if rp
-                                .privilege_with_opts
-                                .iter()
-                                .any(|rpo| rpo.privilege == po.privilege)
-                            {
-                                po.with_grant_option = false;
-                            }
+        for user_name in users {
+            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+                u.grant_privileges.iter_mut().for_each(|p| {
+                    for rp in &privileges {
+                        if rp.object != p.object {
+                            continue;
                         }
-                    } else {
-                        p.privilege_with_opts.retain(|po| {
-                            rp.privilege_with_opts
-                                .iter()
-                                .all(|rpo| rpo.privilege != po.privilege)
-                        });
+                        if revoke_grant_option {
+                            for ao in &mut p.action_with_opts {
+                                if rp
+                                    .action_with_opts
+                                    .iter()
+                                    .any(|rao| rao.action == ao.action)
+                                {
+                                    ao.with_grant_option = false;
+                                }
+                            }
+                        } else {
+                            p.action_with_opts.retain(|po| {
+                                rp.action_with_opts
+                                    .iter()
+                                    .all(|rao| rao.action != po.action)
+                            });
+                        }
                     }
-                }
-            });
+                });
+                u.grant_privileges
+                    .retain(|p| !p.action_with_opts.is_empty());
+            }
         }
         Ok(())
     }
@@ -389,6 +396,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn unpin_snapshot(&self, _epoch: u64) -> Result<()> {
+        Ok(())
+    }
+
+    async fn unpin_snapshot_before(&self, _epoch: u64) -> Result<()> {
         Ok(())
     }
 }

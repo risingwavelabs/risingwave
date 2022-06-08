@@ -14,14 +14,14 @@
 
 use std::fmt::{Debug, Formatter};
 
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use log::debug;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::batch_plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
 use risingwave_pb::common::HostAddress;
-use risingwave_rpc_client::{ComputeClientPoolRef, ExchangeSource};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use uuid::Uuid;
 
 use super::QueryExecution;
@@ -94,15 +94,13 @@ impl QueryManager {
             .get_epoch(query_id.clone())
             .await?;
 
-        if let Err(e) = compute_client
+        let creat_task_resp = compute_client
             .create_task(task_id.clone(), plan, epoch)
-            .await
-        {
-            self.hummock_snapshot_manager
-                .unpin_snapshot(epoch, &query_id)
-                .await?;
-            return Err(e);
-        }
+            .await;
+        self.hummock_snapshot_manager
+            .unpin_snapshot(epoch, &query_id)
+            .await?;
+        creat_task_resp?;
 
         let query_result_fetcher = QueryResultFetcher::new(
             epoch,
@@ -176,10 +174,9 @@ impl QueryResultFetcher {
             .compute_client_pool
             .get_client_for_addr((&self.task_host).into())
             .await?;
-
-        let mut source = compute_client.get_data(self.task_output_id).await?;
-        while let Some(chunk) = source.take_data().await? {
-            yield chunk;
+        let mut stream = compute_client.get_data(self.task_output_id.clone()).await?;
+        while let Some(response) = stream.next().await {
+            yield DataChunk::from_protobuf(response.to_rw_result()?.get_record_batch()?)?
         }
     }
 }

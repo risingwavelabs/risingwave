@@ -128,10 +128,18 @@ message TaskOutputId {
   uint32 output_id = 2;
 }
 
+message LocalExecutePlan {
+  batch_plan.PlanFragment plan = 1;
+  uint64 epoch = 2;
+}
+
 // ExchangeSource describes where to read results from children operators
 message ExchangeSource {
   TaskOutputId task_output_id = 1;
   common.HostAddress host = 2;
+  oneof local_execute_plan {
+    LocalExecutePlan plan = 3;
+  }
 }
 
 message ExchangeNode {

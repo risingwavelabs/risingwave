@@ -32,39 +32,7 @@ message UserInfo {
 
 /// GrantPrivilege defines a privilege granted to a user.
 message GrantPrivilege {
-  message GrantDatabase {
-    uint32 database_id = 1;
-  }
-
-  message GrantSchema {
-    uint32 database_id = 1;
-    uint32 schema_id = 2;
-  }
-
-  message GrantTable {
-    uint32 database_id = 1;
-    uint32 schema_id = 2;
-    uint32 table_id = 3;
-  }
-
-  message GrantSource {
-    uint32 database_id = 1;
-    uint32 schema_id = 2;
-    uint32 source_id = 3;
-  }
-
-  /// To support grant privilege on ALL TABLES IN SCHEMA schema_name.
-  message GrantAllTables {
-    uint32 database_id = 1;
-    uint32 schema_id = 2;
-  }
-
-  message GrantAllSources {
-    uint32 database_id = 1;
-    uint32 schema_id = 2;
-  }
-
-  enum Privilege {
+  enum Action {
     UNKNOWN = 0;
     SELECT = 1;
     INSERT = 2;
@@ -74,20 +42,20 @@ message GrantPrivilege {
     CONNECT = 6;
   }
 
-  message PrivilegeWithGrantOption {
-    Privilege privilege = 1;
+  message ActionWithGrantOption {
+    Action action = 1;
     bool with_grant_option = 2;
   }
 
-  oneof target {
-    GrantDatabase grant_database = 1;
-    GrantSchema grant_schema = 2;
-    GrantTable grant_table = 3;
-    GrantSource grant_source = 4;
-    GrantAllTables grant_all_tables = 5;
-    GrantAllSources grant_all_sources = 6;
+  oneof object {
+    uint32 database_id = 1;
+    uint32 schema_id = 2;
+    uint32 table_id = 3;
+    uint32 source_id = 4;
+    uint32 all_tables_schema_id = 5;
+    uint32 all_sources_schema_id = 6;
   }
-  repeated PrivilegeWithGrantOption privilege_with_opts = 7;
+  repeated ActionWithGrantOption action_with_opts = 7;
 }
 
 message CreateUserRequest {
@@ -109,7 +77,7 @@ message DropUserResponse {
 }
 
 message GrantPrivilegeRequest {
-  string user_name = 1;
+  repeated string users = 1;
   repeated GrantPrivilege privileges = 2;
   bool with_grant_option = 3;
 }
@@ -120,7 +88,7 @@ message GrantPrivilegeResponse {
 }
 
 message RevokePrivilegeRequest {
-  string user_name = 1;
+  repeated string users = 1;
   repeated GrantPrivilege privileges = 2;
   bool revoke_grant_option = 3;
 }

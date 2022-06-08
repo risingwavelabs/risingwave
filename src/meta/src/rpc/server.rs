@@ -38,6 +38,7 @@ use crate::barrier::GlobalBarrierManager;
 use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
+use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::CompactionScheduler;
 use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv, UserManager};
 use crate::rpc::metrics::MetaMetrics;
@@ -133,10 +134,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .await
             .unwrap(),
     );
+    let compaction_group_manager =
+        Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let hummock_manager = Arc::new(
-        hummock::HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
-            .await
-            .unwrap(),
+        hummock::HummockManager::new(
+            env.clone(),
+            cluster_manager.clone(),
+            meta_metrics.clone(),
+            compaction_group_manager.clone(),
+        )
+        .await
+        .unwrap(),
     );
 
     if let Some(dashboard_addr) = dashboard_addr {
