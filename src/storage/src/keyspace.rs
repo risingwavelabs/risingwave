@@ -16,9 +16,8 @@ use std::future::Future;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{VirtualNode, VNODE_BITMAP_LEN};
+use risingwave_common::consistent_hash::{VNodeBitmap, VirtualNode};
 use risingwave_hummock_sdk::key::next_key;
-use risingwave_pb::common::VNodeBitmap;
 
 use crate::error::StorageResult;
 use crate::{StateStore, StateStoreIter};
@@ -31,8 +30,9 @@ pub struct Keyspace<S: StateStore> {
     /// Encoded representation for all segments.
     prefix: Vec<u8>,
 
-    /// Records vnodes that the keyspace owns.
-    vnodes: VNodeBitmap,
+    /// Records vnodes that the keyspace owns and the id of state table. Currently, it will be None
+    /// in batch, and might be refactored later.
+    vnode_bitmap: Option<VNodeBitmap>,
 }
 
 impl<S: StateStore> Keyspace<S> {
@@ -53,23 +53,41 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store,
             prefix,
-            vnodes: Default::default(),
+            vnode_bitmap: None,
         }
     }
 
-    /// Creates a root [`Keyspace`] for a table with specific vnodes.
-    pub fn table_root_with_vnodes(store: S, id: &TableId, vnodes: VNodeBitmap) -> Self {
+    /// Creates a root [`Keyspace`] for a table with default vnode (i.e. only no.1 vnode is
+    /// present). This is used for singleton stateful executor.
+    pub fn table_root_with_default_vnodes(store: S, id: &TableId) -> Self {
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
             buf.put_u32(id.table_id);
             buf.to_vec()
         };
-        dbg!(&vnodes);
+        let vnode_bitmap = VNodeBitmap::new_with_default_bitmap(id.table_id);
         Self {
             store,
             prefix,
-            vnodes,
+            vnode_bitmap: Some(vnode_bitmap),
+        }
+    }
+
+    /// Creates a root [`Keyspace`] for a table with specific vnodes. This is used for non-singleton
+    /// stateful executor.
+    pub fn table_root_with_vnodes(store: S, id: &TableId, bitmap_inner: Vec<u8>) -> Self {
+        let prefix = {
+            let mut buf = BytesMut::with_capacity(5);
+            buf.put_u8(b't');
+            buf.put_u32(id.table_id);
+            buf.to_vec()
+        };
+        let vnode_bitmap = VNodeBitmap::new(id.table_id, bitmap_inner);
+        Self {
+            store,
+            prefix,
+            vnode_bitmap: Some(vnode_bitmap),
         }
     }
 
@@ -81,7 +99,7 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store: self.store.clone(),
             prefix,
-            vnodes: self.vnodes.clone(),
+            vnode_bitmap: self.vnode_bitmap.clone(),
         }
     }
 
@@ -117,21 +135,18 @@ impl<S: StateStore> Keyspace<S> {
         self.store.get(&self.prefixed_key(key), epoch, None).await
     }
 
+    /// Current only works for streaming.
     pub async fn get_with_vnode(
         &self,
         key: impl AsRef<[u8]>,
         epoch: u64,
         vnode: VirtualNode,
     ) -> StorageResult<Option<Bytes>> {
-        // Construct vnode bitmap.
-        let mut bitmap_inner = [0; VNODE_BITMAP_LEN];
-        bitmap_inner[(vnode >> 3) as usize] |= 1 << (vnode & 0b111);
-        let vnode_bitmap = VNodeBitmap {
-            table_id: self.vnodes.table_id,
-            bitmap: bitmap_inner.to_vec(),
-        };
-        println!("get_with_vnode: vnode is {}", vnode);
-        dbg!(&vnode_bitmap);
+        assert!(self.vnode_bitmap.is_some());
+        let vnode_bitmap = VNodeBitmap::new_with_single_vnode(
+            self.vnode_bitmap.as_ref().unwrap().table_id(),
+            vnode,
+        );
         self.store
             .get(&self.prefixed_key(key), epoch, Some(&vnode_bitmap))
             .await
@@ -151,7 +166,7 @@ impl<S: StateStore> Keyspace<S> {
         let range = start_key_with_prefix..next_key(self.prefix.as_slice());
         let mut pairs = self
             .store
-            .scan(range, limit, epoch, self.vnodes.clone())
+            .scan(range, limit, epoch, self.vnode_bitmap.clone())
             .await?;
         pairs
             .iter_mut()
@@ -170,7 +185,7 @@ impl<S: StateStore> Keyspace<S> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
         let mut pairs = self
             .store
-            .scan(range, limit, epoch, self.vnodes.clone())
+            .scan(range, limit, epoch, self.vnode_bitmap.clone())
             .await?;
         pairs
             .iter_mut()
@@ -182,7 +197,9 @@ impl<S: StateStore> Keyspace<S> {
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     async fn iter_inner(&'_ self, epoch: u64) -> StorageResult<S::Iter> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
-        self.store.iter(range, epoch, self.vnodes.clone()).await
+        self.store
+            .iter(range, epoch, self.vnode_bitmap.clone())
+            .await
     }
 
     pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
@@ -200,7 +217,13 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     pub fn vnode_bitmap(&self) -> &VNodeBitmap {
-        &self.vnodes
+        self.vnode_bitmap.as_ref().unwrap()
+    }
+
+    /// Current only works for streaming.
+    pub fn table_id(&self) -> u32 {
+        assert!(self.vnode_bitmap.is_some());
+        self.vnode_bitmap.as_ref().unwrap().table_id()
     }
 }
 

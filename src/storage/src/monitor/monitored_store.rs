@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
-use risingwave_pb::common::VNodeBitmap;
+use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_pb::hummock::SstableInfo;
 use tracing::error;
 
@@ -106,7 +106,7 @@ where
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -134,7 +134,7 @@ where
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -187,7 +187,7 @@ where
         &self,
         key_range: R,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -203,7 +203,7 @@ where
         &self,
         key_range: R,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,

@@ -17,9 +17,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::try_match_expand;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::meta::table_fragments::ActorState;

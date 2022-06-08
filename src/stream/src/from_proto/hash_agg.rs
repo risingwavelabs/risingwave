@@ -18,7 +18,6 @@ use std::marker::PhantomData;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_pb::common::VNodeBitmap;
 
 use super::*;
 use crate::executor::aggregation::AggCall;
@@ -81,10 +80,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 Keyspace::table_root_with_vnodes(
                     store.clone(),
                     &TableId::new(table_id),
-                    VNodeBitmap {
-                        table_id,
-                        bitmap: (*params.vnode_bitmap).clone(),
-                    },
+                    (*params.vnode_bitmap).clone(),
                 )
             })
             .collect();

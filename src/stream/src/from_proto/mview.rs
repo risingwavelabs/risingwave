@@ -14,7 +14,6 @@
 
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_pb::common::VNodeBitmap;
 
 use super::*;
 use crate::executor::MaterializeExecutor;
@@ -42,14 +41,8 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .map(|id| ColumnId::from(*id))
             .collect();
 
-        let keyspace = Keyspace::table_root_with_vnodes(
-            store,
-            &table_id,
-            VNodeBitmap {
-                table_id: table_id.table_id,
-                bitmap: (*params.vnode_bitmap).clone(),
-            },
-        );
+        let keyspace =
+            Keyspace::table_root_with_vnodes(store, &table_id, (*params.vnode_bitmap).clone());
 
         let distribution_keys = node
             .distribution_keys
@@ -81,7 +74,11 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
 
-        let keyspace = Keyspace::table_root(store, &TableId::from(arrange_node.table_id));
+        let keyspace = Keyspace::table_root_with_vnodes(
+            store,
+            &TableId::from(arrange_node.table_id),
+            (*params.vnode_bitmap).clone(),
+        );
 
         let keys = arrange_node
             .get_table_info()?

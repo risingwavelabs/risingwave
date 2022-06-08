@@ -16,8 +16,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::executor::block_on;
-use risingwave_common::consistent_hash::VNodeBitmap;
-use risingwave_common::hash::VNODE_BITMAP_LEN;
+use risingwave_common::consistent_hash::{VNodeBitmap, VNODE_BITMAP_LEN};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;

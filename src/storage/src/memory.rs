@@ -22,7 +22,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
-use risingwave_pb::common::VNodeBitmap;
+use risingwave_common::consistent_hash::VNodeBitmap;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::HummockError;
@@ -136,7 +136,7 @@ impl StateStore for MemoryStateStore {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        _vnodes: VNodeBitmap,
+        _vnodes: Option<VNodeBitmap>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -173,7 +173,7 @@ impl StateStore for MemoryStateStore {
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-        _vnodes: VNodeBitmap,
+        _vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -210,7 +210,7 @@ impl StateStore for MemoryStateStore {
         &self,
         key_range: R,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -230,7 +230,7 @@ impl StateStore for MemoryStateStore {
         &self,
         _key_range: R,
         _epoch: u64,
-        _vnodes: VNodeBitmap,
+        _vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,

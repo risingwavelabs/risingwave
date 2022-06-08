@@ -76,7 +76,7 @@ impl HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
@@ -110,7 +110,8 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, Some(&vnodes));
+            let table_infos =
+                prune_ssts(level.get_table_infos().iter(), &key_range, vnodes.as_ref());
             if table_infos.is_empty() {
                 continue;
             }
@@ -327,7 +328,7 @@ impl StateStore for HummockStorage {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -346,7 +347,7 @@ impl StateStore for HummockStorage {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -404,7 +405,7 @@ impl StateStore for HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -419,7 +420,7 @@ impl StateStore for HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
-        vnodes: VNodeBitmap,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
