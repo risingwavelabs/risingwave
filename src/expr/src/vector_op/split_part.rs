@@ -68,42 +68,34 @@ pub fn split_part(
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-    use risingwave_common::error::{ErrorCode, Result, RwError};
 
     use super::split_part;
 
     #[test]
     fn test_split_part() {
-        let cases: Vec<(&str, &str, i32, Result<&str>)> = vec![
+        let cases: Vec<(&str, &str, i32, Option<&str>)> = vec![
             // postgres cases
-            ("", "@", 1, Ok("")),
-            ("", "@", -1, Ok("")),
-            ("joeuser@mydatabase", "", 1, Ok("joeuser@mydatabase")),
-            ("joeuser@mydatabase", "", 2, Ok("")),
-            ("joeuser@mydatabase", "", -1, Ok("joeuser@mydatabase")),
-            ("joeuser@mydatabase", "", -2, Ok("")),
-            (
-                "joeuser@mydatabase",
-                "@",
-                0,
-                Err(RwError::from(ErrorCode::InvalidParameterValue(
-                    "field position must not be zero".into(),
-                ))),
-            ),
-            ("joeuser@mydatabase", "@@", 1, Ok("joeuser@mydatabase")),
-            ("joeuser@mydatabase", "@@", 2, Ok("")),
-            ("joeuser@mydatabase", "@", 1, Ok("joeuser")),
-            ("joeuser@mydatabase", "@", 2, Ok("mydatabase")),
-            ("joeuser@mydatabase", "@", 3, Ok("")),
-            ("@joeuser@mydatabase@", "@", 2, Ok("joeuser")),
-            ("joeuser@mydatabase", "@", -1, Ok("mydatabase")),
-            ("joeuser@mydatabase", "@", -2, Ok("joeuser")),
-            ("joeuser@mydatabase", "@", -3, Ok("")),
-            ("@joeuser@mydatabase@", "@", -2, Ok("mydatabase")),
+            ("", "@", 1, Some("")),
+            ("", "@", -1, Some("")),
+            ("joeuser@mydatabase", "", 1, Some("joeuser@mydatabase")),
+            ("joeuser@mydatabase", "", 2, Some("")),
+            ("joeuser@mydatabase", "", -1, Some("joeuser@mydatabase")),
+            ("joeuser@mydatabase", "", -2, Some("")),
+            ("joeuser@mydatabase", "@", 0, None),
+            ("joeuser@mydatabase", "@@", 1, Some("joeuser@mydatabase")),
+            ("joeuser@mydatabase", "@@", 2, Some("")),
+            ("joeuser@mydatabase", "@", 1, Some("joeuser")),
+            ("joeuser@mydatabase", "@", 2, Some("mydatabase")),
+            ("joeuser@mydatabase", "@", 3, Some("")),
+            ("@joeuser@mydatabase@", "@", 2, Some("joeuser")),
+            ("joeuser@mydatabase", "@", -1, Some("mydatabase")),
+            ("joeuser@mydatabase", "@", -2, Some("joeuser")),
+            ("joeuser@mydatabase", "@", -3, Some("")),
+            ("@joeuser@mydatabase@", "@", -2, Some("mydatabase")),
             // other cases
 
             // makes sure that `rsplit` is not used internally when `nth` is negative
-            ("@@@", "@@", -1, Ok("@")),
+            ("@@@", "@@", -1, Some("@")),
         ];
 
         for (i, case @ (string_expr, delimiter_expr, nth_expr, expected)) in
@@ -122,10 +114,8 @@ mod tests {
 
                     assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)
                 }
-                Err(err) => {
-                    let expected = expected.clone().unwrap_err().to_string();
-                    let actual = err.to_string();
-                    assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)
+                Err(_err) => {
+                    assert!(expected.is_none());
                 }
             };
         }
