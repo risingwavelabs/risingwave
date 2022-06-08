@@ -412,21 +412,23 @@ where
             return Ok(());
         }
 
-        let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
-        let current_splits_ref = worker.current_splits.clone();
-        log::info!("Spawning new watcher for source {}", source.id);
+        if let Some(Info::StreamSource(_)) = source.info {
+            let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
+            let current_splits_ref = worker.current_splits.clone();
+            log::info!("Spawning new watcher for source {}", source.id);
 
-        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
-        core.managed_sources.insert(
-            source.id,
-            ConnectorSourceWorkerHandle {
-                handle,
-                sync_call_tx,
-                splits: current_splits_ref,
-            },
-        );
+            let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
+            core.managed_sources.insert(
+                source.id,
+                ConnectorSourceWorkerHandle {
+                    handle,
+                    sync_call_tx,
+                    splits: current_splits_ref,
+                },
+            );
+        }
 
         Ok(())
     }
