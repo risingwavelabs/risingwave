@@ -94,3 +94,6 @@ drop materialized view mv2;
 
 statement ok
 drop materialized view mv3;
+
+statement ok
+drop table t;
