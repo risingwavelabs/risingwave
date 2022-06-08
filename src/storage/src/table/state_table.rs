@@ -129,7 +129,7 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
+    pub fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
         let mem_table_iter = self.mem_table.buffer.iter();
         Ok(StateTableRowIter::into_stream(
             &self.keyspace,
@@ -140,7 +140,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// This function scans rows from the relational table with specific `pk_bounds`.
-    pub async fn iter_with_pk_bounds<R, B>(
+    pub fn iter_with_pk_bounds<R, B>(
         &self,
         pk_bounds: R,
         epoch: u64,
@@ -201,13 +201,19 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_with_pk_prefix(
+    pub fn iter_with_pk_prefix(
         &self,
         pk_prefix: Row,
-        prefix_serializer: OrderedRowSerializer,
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
         let mem_table_iter = self.mem_table.buffer.iter();
+        let pk_serializer = self
+            .cell_based_table
+            .pk_serializer
+            .clone()
+            .expect("pk_serializer is None");
+        let order_types = &pk_serializer.into_order_types()[0..pk_prefix.size()];
+        let prefix_serializer = OrderedRowSerializer::new(order_types.into());
         let key_bytes = serialize_pk(&pk_prefix, &prefix_serializer).map_err(err)?;
         let start_key_with_prefix = self.keyspace.prefixed_key(&key_bytes);
         let cell_based_bounds = (

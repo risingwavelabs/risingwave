@@ -17,10 +17,10 @@ use std::alloc::Global;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
-use bytes::Buf;
+use futures_async_stream::for_await;
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
-use risingwave_common::array::{Row, RowDeserializer};
+use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{ErrorCode, Result as RwResult};
@@ -96,7 +96,7 @@ impl JoinRow {
         Ok(vec)
     }
 
-    pub fn to_row(mut self) -> Row {
+    pub fn into_row(mut self) -> Row {
         self.row.0.push(Some(ScalarImpl::Int64(self.degree)));
         self.row
     }
@@ -255,6 +255,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     async fn fetch_cached_state(&self, key: &K) -> RwResult<Option<JoinEntryState<S>>> {
         let keyspace = self.get_state_keyspace(key)?;
+        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
+        
+        let table_iter = self.state_table.iter_with_pk_prefix(key, self.current_epoch)?;
+        
+        #[for_await]
+        for row in table_iter {
+
+        }
         JoinEntryState::with_cached_state(
             keyspace,
             self.data_types.clone(),
@@ -264,6 +272,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         .await
     }
 
+    pub async fn flush(&mut self) {
+        self.state_table.commit_with_value_meta(self.current_epoch).await;
+    }
+
     /// Insert a key
     pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()>{
         if let Some(entry) = self.inner.get_mut(join_key) {
@@ -271,7 +283,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
         let key = join_key.clone().deserialize(self.join_key_data_types.iter())?;
         // If no cache maintained, only update the flush buffer.
-        self.state_table.insert(&key, value.to_row())?;
+        self.state_table.insert(&key, value.into_row())?;
         Ok(())
     }
 

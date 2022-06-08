@@ -479,7 +479,7 @@ async fn test_state_table_iter() {
         .unwrap();
 
     {
-        let iter = state.iter(epoch).await.unwrap();
+        let iter = state.iter(epoch).unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -586,7 +586,7 @@ async fn test_state_table_iter() {
         )
         .unwrap();
 
-    let iter = state.iter(epoch).await.unwrap();
+    let iter = state.iter(epoch).unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -784,9 +784,9 @@ async fn test_multi_state_table_iter() {
         .unwrap();
 
     {
-        let iter_1 = state_1.iter(epoch).await.unwrap();
+        let iter_1 = state_1.iter(epoch).unwrap();
         pin_mut!(iter_1);
-        let iter_2 = state_2.iter(epoch).await.unwrap();
+        let iter_2 = state_2.iter(epoch).unwrap();
         pin_mut!(iter_2);
 
         let res_1_1 = iter_1.next().await.unwrap().unwrap();
@@ -1703,7 +1703,7 @@ async fn test_state_table_iter_with_bounds() {
     let epoch = u64::MAX;
     let pk_bounds = Row(vec![Some(2_i32.into()), Some(22_i32.into())])
         ..Row(vec![Some(6_i32.into()), Some(66_i32.into())]);
-    let iter = state.iter_with_pk_bounds(pk_bounds, epoch).await.unwrap();
+    let iter = state.iter_with_pk_bounds(pk_bounds, epoch).unwrap();
     pin_mut!(iter);
 
     // this row exists in cell_based_table
@@ -1856,7 +1856,7 @@ async fn test_state_table_iter_with_unbounded_range() {
         .unwrap();
     let epoch = u64::MAX;
     let pk_bounds = Row(vec![Some(3_i32.into()), Some(33_i32.into())])..;
-    let iter = state.iter_with_pk_bounds(pk_bounds, epoch).await.unwrap();
+    let iter = state.iter_with_pk_bounds(pk_bounds, epoch).unwrap();
     pin_mut!(iter);
 
     // this row exists in cell_based_table
@@ -2015,10 +2015,8 @@ async fn test_state_table_iter_with_prefix() {
         .unwrap();
     let epoch = u64::MAX;
     let pk_prefix = Row(vec![Some(1_i32.into())]);
-    let prefix_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
     let iter = state
-        .iter_with_pk_prefix(pk_prefix, prefix_serializer, epoch)
-        .await
+        .iter_with_pk_prefix(pk_prefix, epoch)
         .unwrap();
     pin_mut!(iter);
 

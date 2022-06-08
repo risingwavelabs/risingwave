@@ -139,8 +139,9 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> JoinSide<K, S> {
+    // WARNING: Please do not call this until we implement it. 
     fn is_dirty(&self) -> bool {
-        self.ht.values().any(|state| state.is_dirty())
+        false
     }
 
     #[allow(dead_code)]
@@ -509,14 +510,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     }
 
     async fn flush_data(&mut self) -> Result<()> {
-        let epoch = self.epoch;
-        for side in [&mut self.side_l, &mut self.side_r] {
-            let mut write_batch = side.keyspace.state_store().start_write_batch();
-            for state in side.ht.values_mut() {
-                state.flush(&mut write_batch)?;
-            }
-            write_batch.ingest(epoch).await.unwrap();
-        }
+        self.side_l.ht.flush().await;
+        self.side_r.ht.flush().await;
 
         // evict the LRU cache
         assert!(!self.side_l.is_dirty());

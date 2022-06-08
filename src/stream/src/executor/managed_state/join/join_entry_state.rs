@@ -16,14 +16,10 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use madsim::collections::{btree_map, BTreeMap};
-use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::*;
 
 type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
@@ -109,28 +105,6 @@ impl<S: StateStore> JoinEntryState<S> {
         self.cached.remove(&pk);
     }
 
-    // Flush data to the state store
-    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
-        let mut local = write_batch.prefixify(&self.keyspace);
-
-        for (pk, v) in std::mem::take(&mut self.flush_buffer) {
-            // pk here does not to be memcomparable.
-            let key_encoded = pk.value_encode()?;
-
-            match v.into_option() {
-                Some(v) => {
-                    let value = v.serialize()?;
-                    // TODO(Yuanxin): Implement value meta
-                    local.put(key_encoded, StorageValue::new_default_put(value));
-                }
-                None => {
-                    local.delete(key_encoded);
-                }
-            }
-        }
-        Ok(())
-    }
-
     #[allow(dead_code)]
     pub async fn iter(&mut self, epoch: u64) -> JoinEntryStateIter<'_> {
         self.cached.iter()
@@ -164,7 +138,6 @@ mod tests {
             vec![DataType::Int64, DataType::Int64].into(),
             vec![DataType::Int64].into(),
         );
-        assert!(!managed_state.is_dirty());
         let pk_indices = [0];
         let col1 = [1, 2, 3];
         let col2 = [6, 5, 4];
@@ -195,12 +168,5 @@ mod tests {
             assert_eq!(value.row[1], Some(ScalarImpl::Int64(*d2)));
             assert_eq!(value.degree, 0);
         }
-
-        // flush to write batch and write to state store
-        let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
-        write_batch.ingest(epoch).await.unwrap();
-
-        assert!(!managed_state.is_dirty());
     }
 }
