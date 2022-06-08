@@ -42,6 +42,7 @@ impl Binder {
                 "avg" => Some(AggKind::Avg),
                 "string_agg" => Some(AggKind::StringAgg),
                 "single_value" => Some(AggKind::SingleValue),
+                "approx_count_distinct" => Some(AggKind::ApproxCountDistinct),
                 _ => None,
             };
             if let Some(kind) = agg_kind {
@@ -94,6 +95,8 @@ impl Binder {
                     inputs = Self::rewrite_two_bool_inputs(inputs)?;
                     ExprType::NotEqual
                 }
+                "char_length" => ExprType::CharLength,
+                "character_length" => ExprType::CharLength,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),

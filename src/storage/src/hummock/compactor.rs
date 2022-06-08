@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
@@ -40,11 +41,14 @@ use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator
 use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::ReadOptions;
+use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
+use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::{CachePolicy, HummockError};
+use crate::hummock::HummockError;
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
@@ -115,9 +119,11 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         payload: &UploadTaskPayload,
-        stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
-        let mut start_user_keys = payload.iter().map(|m| m.start_user_key()).collect_vec();
+        let mut start_user_keys = payload
+            .iter()
+            .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
+            .collect_vec();
         start_user_keys.sort();
         start_user_keys.dedup();
         let mut splits = Vec::with_capacity(start_user_keys.len());
@@ -152,11 +158,13 @@ impl Compactor {
             is_target_ultimate_and_leveling: false,
             metrics: None,
             task_status: false,
-            // TODO: get compaction group info from meta
-            prefix_pairs: vec![],
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
+            compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
         };
+
+        let sstable_store = context.sstable_store.clone();
+        let stats = context.stats.clone();
 
         let parallelism = compact_task.splits.len();
         let mut compact_success = true;
@@ -166,14 +174,17 @@ impl Compactor {
 
         let vnode2unit: Arc<HashMap<u32, Vec<u32>>> = Arc::new(HashMap::new());
 
+        let mut local_stats = StoreLocalStatistic::default();
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
-            let iter = {
-                let iters = payload.iter().map(|m| {
-                    Box::new(m.clone().into_forward_iter()) as BoxedForwardHummockIterator
-                });
-                Box::new(MergeIterator::new(iters, stats.clone()))
-            };
+            let iter = build_ordered_merge_iter::<ForwardIter>(
+                payload,
+                sstable_store.clone(),
+                stats.clone(),
+                &mut local_stats,
+                Arc::new(ReadOptions::default()),
+            )
+            .await? as BoxedForwardHummockIterator;
             let vnode2unit = vnode2unit.clone();
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
             let split_task = async move {
@@ -184,6 +195,7 @@ impl Compactor {
             let rx = Compactor::request_execution(compaction_executor, split_task)?;
             compaction_futures.push(rx);
         }
+        local_stats.report(stats.as_ref());
 
         let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
         let mut err = None;
@@ -461,10 +473,11 @@ impl Compactor {
                 Ok((table_id, builder))
             },
             VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
+            self.context.sstable_store.clone(),
         );
 
         // Monitor time cost building shared buffer to SSTs.
-        let _timer = if self.context.is_share_buffer_compact {
+        let compact_timer = if self.context.is_share_buffer_compact {
             self.context.stats.write_build_l0_sst_duration.start_timer()
         } else {
             self.context.stats.compact_sst_duration.start_timer()
@@ -477,34 +490,24 @@ impl Compactor {
             self.compact_task.watermark,
         )
         .await?;
+        let builder_len = builder.len();
+        let sealed_builders = builder.finish();
+        compact_timer.observe_duration();
 
-        // Seal.
-        builder.seal_current();
-
-        let mut ssts = Vec::new();
-        ssts.reserve(builder.len());
-        // TODO: decide upload concurrency. Maybe we shall create a upload task channel for multiple
-        // compaction tasks.
-        let mut pending_requests = vec![];
-        let files = builder.finish();
-        let file_count = files.len();
-        for (table_id, data, meta, vnode_bitmaps) in files {
+        let mut ssts = Vec::with_capacity(builder_len);
+        let mut upload_join_handles = vec![];
+        for SealedSstableBuilder {
+            id: table_id,
+            meta,
+            vnode_bitmaps,
+            upload_join_handle,
+            data_len,
+        } in sealed_builders
+        {
             let sst = Sstable { id: table_id, meta };
-            let len = data.len();
+            let len = data_len;
             ssts.push((sst.clone(), vnode_bitmaps));
-            if file_count > 1 {
-                let sstable_store = self.context.sstable_store.clone();
-                let ret =
-                    tokio::spawn(
-                        async move { sstable_store.put(sst, data, CachePolicy::Fill).await },
-                    );
-                pending_requests.push(ret);
-            } else {
-                self.context
-                    .sstable_store
-                    .put(sst, data, CachePolicy::Fill)
-                    .await?;
-            }
+            upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
                 self.context
@@ -515,14 +518,19 @@ impl Compactor {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
         }
-        if !pending_requests.is_empty() {
-            for ret in try_join_all(pending_requests)
-                .await
-                .map_err(HummockError::other)?
-            {
-                ret?;
-            }
-        }
+
+        // Wait for all upload to finish
+        try_join_all(upload_join_handles.into_iter().map(|join_handle| {
+            join_handle.map(|result| match result {
+                Ok(upload_result) => upload_result,
+                Err(e) => Err(HummockError::other(format!(
+                    "fail to receive from upload join handle: {:?}",
+                    e
+                ))),
+            })
+        }))
+        .await?;
+
         self.context
             .stats
             .get_table_id_total_time_duration

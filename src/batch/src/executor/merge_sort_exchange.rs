@@ -113,12 +113,9 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
         // and put one row of each chunk into the heap
         if self.first_execution {
             for source_idx in 0..self.proto_sources.len() {
-                let new_source = CS::create_source(
-                    self.context.clone(),
-                    &self.proto_sources[source_idx],
-                    self.task_id.clone(),
-                )
-                .await?;
+                let new_source =
+                    CS::create_source(self.context.clone(), &self.proto_sources[source_idx])
+                        .await?;
                 self.sources.push(new_source);
                 self.get_source_chunk(source_idx).await?;
                 if let Some(chunk) = &self.source_inputs[source_idx] {
@@ -149,6 +146,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                         .create_array_builder(K_PROCESSING_WINDOW_SIZE)
                 })
                 .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+            let mut array_len = 0;
             while want_to_produce > 0 && !self.min_heap.is_empty() {
                 let top_elem = self.min_heap.pop().unwrap();
                 let child_idx = top_elem.chunk_idx;
@@ -161,6 +159,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                     builder.append_datum(&datum)?;
                 }
                 want_to_produce -= 1;
+                array_len += 1;
                 // check whether we have another row from the same chunk being popped
                 let possible_next_row_idx = cur_chunk.next_visible_row_idx(row_idx + 1);
                 match possible_next_row_idx {
@@ -181,7 +180,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                 .into_iter()
                 .map(|builder| Ok(Column::new(Arc::new(builder.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
-            let chunk = DataChunk::builder().columns(columns).build();
+            let chunk = DataChunk::new(columns, array_len);
             yield chunk
         }
     }
@@ -274,7 +273,6 @@ mod tests {
             async fn create_source(
                 _: impl BatchTaskContext,
                 _: &ProstExchangeSource,
-                _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let chunk = DataChunk::from_pretty(
                     "i

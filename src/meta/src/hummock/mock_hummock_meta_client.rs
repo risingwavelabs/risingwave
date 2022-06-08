@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
     CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
@@ -45,7 +46,7 @@ impl MockHummockMetaClient {
 
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
-            .get_compact_task()
+            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
             .await
             .unwrap_or(None)
     }
@@ -84,6 +85,18 @@ impl HummockMetaClient for MockHummockMetaClient {
             .collect();
         self.hummock_manager
             .unpin_snapshot(self.context_id, snapshots)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()> {
+        self.hummock_manager
+            .unpin_snapshot_before(
+                self.context_id,
+                HummockSnapshot {
+                    epoch: pinned_epochs,
+                },
+            )
             .await
             .map_err(|e| e.into())
     }

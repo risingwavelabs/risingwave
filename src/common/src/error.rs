@@ -137,6 +137,9 @@ pub enum ErrorCode {
     #[error("Unknown worker")]
     UnknownWorker,
 
+    #[error("unrecognized configuration parameter \"{0}\"")]
+    UnrecognizedConfigurationParameter(String),
+
     /// `Eof` represents an upstream node will not generate new data. This error is rare in our
     /// system, currently only used in the `BatchQueryExecutor` as an ephemeral solution.
     #[error("End of the stream")]
@@ -144,6 +147,10 @@ pub enum ErrorCode {
 
     #[error("Unknown error: {0}")]
     UnknownError(String),
+}
+
+pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
+    ErrorCode::InternalError(msg.into().to_string()).into()
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -308,6 +315,7 @@ impl ErrorCode {
             ErrorCode::UnknownWorker => 24,
             ErrorCode::ConnectorError(_) => 25,
             ErrorCode::InvalidParameterValue(_) => 26,
+            ErrorCode::UnrecognizedConfigurationParameter(_) => 27,
             ErrorCode::UnknownError(_) => 101,
         }
     }

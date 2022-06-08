@@ -16,16 +16,15 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::{CompactionGroupId, Prefix};
+use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::key::{get_table_id, FullKey};
-use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_pb::common::VNodeBitmap;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId};
 
-use crate::hummock::multi_builder::CapacitySplitTableBuilder;
+use crate::hummock::multi_builder::{CapacitySplitTableBuilder, SealedSstableBuilder};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableBuilder, SstableMeta};
+use crate::hummock::{HummockResult, SSTableBuilder};
 
 pub type KeyValueGroupId = u64;
 const DEFAULT_KEY_VALUE_GROUP_ID: KeyValueGroupId = KeyValueGroupId::MAX;
@@ -75,7 +74,7 @@ impl KeyValueGrouping for CompactionGroupGrouping {
         _value: &HummockValue<&[u8]>,
     ) -> Option<KeyValueGroupId> {
         let prefix = get_table_id(full_key.inner()).unwrap();
-        self.prefixes.get(&prefix.into()).cloned().map(|v| v.into())
+        self.prefixes.get(&prefix.into()).cloned()
     }
 }
 
@@ -116,6 +115,7 @@ pub struct GroupedSstableBuilder<B> {
     get_id_and_builder: B,
     grouping: KeyValueGroupingImpl,
     builders: HashMap<KeyValueGroupId, CapacitySplitTableBuilder<B>>,
+    sstable_store: SstableStoreRef,
 }
 
 impl<B, F> GroupedSstableBuilder<B>
@@ -123,14 +123,19 @@ where
     B: Clone + Fn() -> F,
     F: Future<Output = HummockResult<(HummockSSTableId, SSTableBuilder)>>,
 {
-    pub fn new(get_id_and_builder: B, grouping: KeyValueGroupingImpl) -> Self {
+    pub fn new(
+        get_id_and_builder: B,
+        grouping: KeyValueGroupingImpl,
+        sstable_store: SstableStoreRef,
+    ) -> Self {
         Self {
             get_id_and_builder: get_id_and_builder.clone(),
             grouping,
             builders: HashMap::from([(
                 DEFAULT_KEY_VALUE_GROUP_ID,
-                CapacitySplitTableBuilder::new(get_id_and_builder),
+                CapacitySplitTableBuilder::new(get_id_and_builder, sstable_store.clone()),
             )]),
+            sstable_store,
         }
     }
 
@@ -153,10 +158,12 @@ where
             .grouping
             .group(&full_key, &value)
             .unwrap_or(DEFAULT_KEY_VALUE_GROUP_ID);
-        let entry = self
-            .builders
-            .entry(group_id)
-            .or_insert_with(|| CapacitySplitTableBuilder::new(self.get_id_and_builder.clone()));
+        let entry = self.builders.entry(group_id).or_insert_with(|| {
+            CapacitySplitTableBuilder::new(
+                self.get_id_and_builder.clone(),
+                self.sstable_store.clone(),
+            )
+        });
         entry.add_full_key(full_key, value, allow_split).await
     }
 
@@ -166,7 +173,8 @@ where
             .for_each(|(_k, v)| v.seal_current());
     }
 
-    pub fn finish(self) -> Vec<(u64, Bytes, SstableMeta, Vec<VNodeBitmap>)> {
+    pub fn finish(mut self) -> Vec<SealedSstableBuilder> {
+        self.seal_current();
         self.builders
             .into_iter()
             .flat_map(|(_k, v)| v.finish())
@@ -182,6 +190,7 @@ mod tests {
     use bytes::Buf;
 
     use super::*;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::{SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
@@ -205,9 +214,10 @@ mod tests {
         let prefix = b"\x01\x02\x03\x04".as_slice().get_u32();
         // one compaction group defined
         let grouping = KeyValueGroupingImpl::CompactionGroup(CompactionGroupGrouping::new(
-            HashMap::from([(prefix.into(), 1.into())]),
+            HashMap::from([(prefix.into(), 1 as CompactionGroupId)]),
         ));
-        let mut builder = GroupedSstableBuilder::new(get_id_and_builder, grouping);
+        let mut builder =
+            GroupedSstableBuilder::new(get_id_and_builder, grouping, mock_sstable_store());
         for i in 0..10 {
             // key value belongs to no compaction group
             builder

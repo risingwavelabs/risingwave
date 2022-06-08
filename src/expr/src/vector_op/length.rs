@@ -15,8 +15,8 @@
 use risingwave_common::error::Result;
 
 #[inline(always)]
-pub fn length_default(s: &str) -> Result<i64> {
-    Ok(s.chars().count() as i64)
+pub fn length_default(s: &str) -> Result<i32> {
+    Ok(s.chars().count() as i32)
 }
 
 #[cfg(test)]

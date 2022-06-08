@@ -26,7 +26,7 @@ pub(super) fn handle_set(
     let string_val = to_string(&value[0]);
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
-    context.session_ctx.set_config(&name.value, &string_val);
+    context.session_ctx.set_config(&name.value, &string_val)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }

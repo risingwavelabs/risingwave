@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use prometheus::core::Metric;
-use risingwave_storage::monitor::{MyHistogram, StateStoreMetrics};
+use risingwave_common::monitor::my_stats::MyHistogram;
+use risingwave_storage::monitor::StateStoreMetrics;
 
 #[derive(Clone, Default)]
 pub(crate) struct MyStateStoreStats {

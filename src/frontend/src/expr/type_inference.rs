@@ -256,9 +256,33 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         T::Decimal,
     );
 
+    // build bitwise operator
+    // bitwise operator
+    let integral_types = [T::Int16, T::Int32, T::Int64]; // reusable for and/or/xor/not
+
+    build_binary_atm_funcs(
+        &mut map,
+        &[E::BitwiseAnd, E::BitwiseOr, E::BitwiseXor],
+        &integral_types,
+    );
+
+    // Shift Operator is not using `build_binary_atm_funcs` because
+    // allowed rhs is different from allowed lhs
+    // return type is lhs rather than larger of the two
+    for (e, lt, rt) in iproduct!(
+        &[E::BitwiseShiftLeft, E::BitwiseShiftRight],
+        &integral_types,
+        &[T::Int16, T::Int32]
+    ) {
+        map.insert(FuncSign::new(*e, vec![*lt, *rt]), *lt);
+    }
+
+    build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
+
     build_round_funcs(&mut map, E::Round);
     build_round_funcs(&mut map, E::Ceil);
     build_round_funcs(&mut map, E::Floor);
+
     // temporal expressions
     for (base, delta) in [
         (T::Date, T::Int32),
@@ -317,7 +341,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
             T::Varchar,
         );
     }
-    for e in [E::Length, E::Ascii] {
+    for e in [E::Length, E::Ascii, E::CharLength] {
         map.insert(FuncSign::new(e, vec![T::Varchar]), T::Int32);
     }
     map.insert(
@@ -566,6 +590,43 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_bitwise() {
+        use DataType::*;
+        let bitwise_exprs = vec![
+            ExprType::BitwiseAnd,
+            ExprType::BitwiseOr,
+            ExprType::BitwiseXor,
+        ];
+        let num_promote_table = vec![
+            (Int16, Int16, Int16),
+            (Int16, Int32, Int32),
+            (Int16, Int64, Int64),
+            (Int32, Int16, Int32),
+            (Int32, Int32, Int32),
+            (Int32, Int64, Int64),
+            (Int64, Int16, Int64),
+            (Int64, Int32, Int64),
+            (Int64, Int64, Int64),
+        ];
+        for (expr, (t1, t2, tr)) in iproduct!(bitwise_exprs, num_promote_table) {
+            test_simple_infer_type(expr, vec![t1, t2], tr);
+        }
+
+        for (expr, (t1, t2, tr)) in iproduct!(
+            vec![ExprType::BitwiseShiftLeft, ExprType::BitwiseShiftRight,],
+            vec![
+                (Int16, Int16, Int16),
+                (Int32, Int16, Int32),
+                (Int64, Int16, Int64),
+                (Int16, Int32, Int16),
+                (Int64, Int32, Int64),
+                (Int32, Int32, Int32),
+            ]
+        ) {
+            test_simple_infer_type(expr, vec![t1, t2], tr);
+        }
+    }
     #[test]
     fn test_bool_num_not_exist() {
         let exprs = vec![

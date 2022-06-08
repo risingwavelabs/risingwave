@@ -154,6 +154,7 @@ pub fn get_length_prefixed_slice(buf: &mut &[u8]) -> Vec<u8> {
 pub enum CompressionAlgorithm {
     None,
     Lz4,
+    Zstd,
 }
 
 impl CompressionAlgorithm {
@@ -161,6 +162,7 @@ impl CompressionAlgorithm {
         let v = match self {
             Self::None => 0,
             Self::Lz4 => 1,
+            Self::Zstd => 2,
         };
         buf.put_u8(v);
     }
@@ -169,6 +171,7 @@ impl CompressionAlgorithm {
         match buf.get_u8() {
             0 => Ok(Self::None),
             1 => Ok(Self::Lz4),
+            2 => Ok(Self::Zstd),
             _ => Err(HummockError::decode_error(
                 "not valid compression algorithm",
             )),
@@ -181,6 +184,7 @@ impl From<CompressionAlgorithm> for u8 {
         match ca {
             CompressionAlgorithm::None => 0,
             CompressionAlgorithm::Lz4 => 1,
+            CompressionAlgorithm::Zstd => 2,
         }
     }
 }
@@ -190,6 +194,7 @@ impl From<CompressionAlgorithm> for u64 {
         match ca {
             CompressionAlgorithm::None => 0,
             CompressionAlgorithm::Lz4 => 1,
+            CompressionAlgorithm::Zstd => 2,
         }
     }
 }
@@ -201,6 +206,7 @@ impl TryFrom<u8> for CompressionAlgorithm {
         match v {
             0 => Ok(Self::None),
             1 => Ok(Self::Lz4),
+            2 => Ok(Self::Zstd),
             _ => Err(HummockError::decode_error(
                 "not valid compression algorithm",
             )),

@@ -12,6 +12,7 @@ members = [
   "src/frontend",
   "src/frontend/test_runner",
   "src/meta",
+  "src/object_store",
   "src/prost",
   "src/prost/helpers",
   "src/risedevtool",
@@ -27,6 +28,8 @@ members = [
   "src/utils/logging",
   "src/utils/memcomparable",
   "src/utils/pgwire",
+  "src/utils/static-link",
+  "src/utils/stats_alloc",
   "src/utils/value-encoding",
   "src/workspace-hack",
 ]

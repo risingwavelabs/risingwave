@@ -197,7 +197,7 @@ impl DataType {
             DataType::Int64 => DataSize::Fixed(size_of::<i64>()),
             DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
             DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
-            DataType::Decimal => DataSize::Fixed(16),
+            DataType::Decimal => DataSize::Fixed(size_of::<Decimal>()),
             DataType::Varchar => DataSize::Variable,
             DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
             DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
@@ -219,6 +219,18 @@ impl DataType {
                 | DataType::Float64
                 | DataType::Decimal
         )
+    }
+
+    /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
+    pub fn mem_cmp_eq_value_enc(&self) -> bool {
+        use DataType::*;
+        match self {
+            Boolean | Int16 | Int32 | Int64 => true,
+            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz
+            | Interval => false,
+            Struct { fields } => fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
+            List { datatype } => datatype.mem_cmp_eq_value_enc(),
+        }
     }
 }
 
@@ -893,5 +905,15 @@ mod tests {
         let decoded_floats = memcomparables.into_iter().map(deserialize).collect_vec();
         assert!(decoded_floats.is_sorted());
         assert_eq!(floats, decoded_floats);
+    }
+
+    #[test]
+    fn test_size() {
+        assert_eq!(std::mem::size_of::<StructValue>(), 16);
+        assert_eq!(std::mem::size_of::<ListValue>(), 16);
+        // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
+        assert_eq!(std::mem::size_of::<Decimal>(), 20);
+        assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
+        assert_eq!(std::mem::size_of::<Datum>(), 32);
     }
 }

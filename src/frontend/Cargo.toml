@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_frontend"
-version = "0.1.7"
+version = "0.1.9"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,6 +24,7 @@ lazy_static = "1"
 log = "0.4"
 madsim = "=0.2.0-alpha.3"
 maplit = "1"
+md5 = "0.7.0"
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -40,6 +41,7 @@ risingwave_source = { path = "../source" }
 risingwave_sqlparser = { path = "../sqlparser" }
 risingwave_storage = { path = "../storage" }
 serde_json = "1"
+sha2 = "0.10.2"
 smallvec = { version = "1.6.1", features = ["serde"] }
 tempfile = "3"
 thiserror = "1"

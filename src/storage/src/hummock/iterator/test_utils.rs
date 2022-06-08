@@ -21,6 +21,7 @@ use futures::executor::block_on;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_object_store::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
 use crate::hummock::iterator::{BoxedForwardHummockIterator, ReadOptions};
 use crate::hummock::sstable_store::SstableStore;
@@ -31,7 +32,6 @@ use crate::hummock::{
     SstableStoreRef,
 };
 use crate::monitor::ObjectStoreMetrics;
-use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]

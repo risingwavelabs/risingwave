@@ -64,9 +64,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
         }));
         let schema = Schema::new(fields);
-        let keyspace = Keyspace::executor_root(store, params.executor_id);
+        let keyspace = Keyspace::table_root(store, &source_id);
 
         Ok(Box::new(SourceExecutor::new(
+            params.actor_id,
             source_id,
             source_desc,
             keyspace,

@@ -1,13 +1,13 @@
 [package]
 name = "risingwave_logging"
-version = "0.1.0"
+version = "0.1.9"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 async-trait = "0.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-isahc = "1" # isahc is the http client used for tracing. Always set it as the same version as opentelemetry-jaeger's.
+isahc = { version = "1", default-features = false } # isahc is the http client used for tracing. Always set it as the same version as opentelemetry-jaeger's.
 madsim = "=0.2.0-alpha.3"
 opentelemetry = { version = "0.17", features = ["rt-tokio", "trace"] }
 opentelemetry-jaeger = { version = "0.16", features = [

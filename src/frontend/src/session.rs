@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Formatter;
+use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -24,7 +25,8 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::session_config::{DELTA_JOIN, IMPLICIT_FLUSH, QUERY_MODE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
@@ -35,13 +37,15 @@ use tokio::task::JoinHandle;
 
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
-use crate::handler::dml::IMPLICIT_FLUSH;
 use crate::handler::handle;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
+use crate::test_utils::MockUserInfoWriter;
+use crate::user::user_manager::UserInfoManager;
+use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -124,6 +128,8 @@ pub struct FrontendEnv {
     meta_client: Arc<dyn FrontendMetaClient>,
     catalog_writer: Arc<dyn CatalogWriter>,
     catalog_reader: CatalogReader,
+    user_info_writer: Arc<dyn UserInfoWriter>,
+    user_info_reader: UserInfoReader,
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -143,6 +149,9 @@ impl FrontendEnv {
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
+        let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
+        let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
+        let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
@@ -156,6 +165,8 @@ impl FrontendEnv {
             meta_client,
             catalog_writer,
             catalog_reader,
+            user_info_writer,
+            user_info_reader,
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
@@ -205,12 +216,22 @@ impl FrontendEnv {
             compute_client_pool,
         );
 
+        let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
+        let (user_info_updated_tx, user_info_updated_rx) = watch::channel(0);
+        let user_info_reader = UserInfoReader::new(user_info_manager.clone());
+        let user_info_writer = Arc::new(UserInfoWriterImpl::new(
+            meta_client.clone(),
+            user_info_updated_rx,
+        ));
+
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
             frontend_address.clone(),
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
+            user_info_manager,
+            user_info_updated_tx,
             hummock_snapshot_manager.clone(),
         )
         .await;
@@ -222,6 +243,8 @@ impl FrontendEnv {
             Self {
                 catalog_reader,
                 catalog_writer,
+                user_info_reader,
+                user_info_writer,
                 worker_node_manager,
                 meta_client: frontend_meta_client,
                 query_manager,
@@ -241,6 +264,16 @@ impl FrontendEnv {
     /// Get a reference to the frontend env's catalog reader.
     pub fn catalog_reader(&self) -> &CatalogReader {
         &self.catalog_reader
+    }
+
+    /// Get a reference to the frontend env's user info writer.
+    pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
+        &*self.user_info_writer
+    }
+
+    /// Get a reference to the frontend env's user info reader.
+    pub fn user_info_reader(&self) -> &UserInfoReader {
+        &self.user_info_reader
     }
 
     pub fn worker_node_manager(&self) -> &WorkerNodeManager {
@@ -298,6 +331,20 @@ impl ConfigEntry {
     }
 }
 
+fn build_default_session_config_map() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    m.insert(IMPLICIT_FLUSH.to_ascii_lowercase(), "false".to_string());
+    m.insert(DELTA_JOIN.to_ascii_lowercase(), "false".to_string());
+    m.insert(QUERY_MODE.to_ascii_lowercase(), "distributed".to_string());
+    m
+}
+
+lazy_static::lazy_static! {
+    static ref DEFAULT_SESSION_CONFIG_MAP: HashMap<String, String> = {
+        build_default_session_config_map()
+    };
+}
+
 impl SessionImpl {
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self {
@@ -326,25 +373,30 @@ impl SessionImpl {
 
     /// Set configuration values in this session.
     /// For example, `set_config("RW_IMPLICIT_FLUSH", true)` will implicit flush for every inserts.
-    pub fn set_config(&self, key: &str, val: &str) {
+    pub fn set_config(&self, key: &str, val: &str) -> Result<()> {
+        let lower_key = key.to_ascii_lowercase();
+        self.config_map
+            .read()
+            .get(&lower_key)
+            .ok_or_else(|| ErrorCode::UnrecognizedConfigurationParameter(key.to_string()))?;
         self.config_map
             .write()
-            .insert(key.to_string(), ConfigEntry::new(val.to_string()));
+            .insert(lower_key, ConfigEntry::new(val.to_string()));
+        Ok(())
     }
 
     /// Get configuration values in this session.
     pub fn get_config(&self, key: &str) -> Option<ConfigEntry> {
+        let key = key.to_ascii_lowercase();
         let reader = self.config_map.read();
-        reader.get(key).cloned()
+        reader.get(&key).cloned()
     }
 
     fn init_config_map() -> RwLock<HashMap<String, ConfigEntry>> {
         let mut map = HashMap::new();
-        // FIXME: May need better init way + default config.
-        map.insert(
-            IMPLICIT_FLUSH.to_string(),
-            ConfigEntry::new("false".to_string()),
-        );
+        for (key, value) in &*DEFAULT_SESSION_CONFIG_MAP {
+            map.insert(key.clone(), ConfigEntry::new(value.clone()));
+        }
         RwLock::new(map)
     }
 }
@@ -360,6 +412,14 @@ impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(&self, database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        let catalog_reader = self.env.catalog_reader();
+        let reader = catalog_reader.read_guard();
+        if reader.get_database_by_name(database).is_err() {
+            return Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Not found database name: {}", database),
+            )));
+        }
         Ok(SessionImpl::new(self.env.clone(), database.to_string()).into())
     }
 }
