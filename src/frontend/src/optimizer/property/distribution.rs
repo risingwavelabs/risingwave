@@ -56,13 +56,14 @@ use crate::optimizer::PlanRef;
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
-    /// there only one partition, and all records on it.
+    /// There is only one partition. All records are placed on it.
     Single,
-    /// records are shard on partitions, and satisfy the `AnyShard` but without any guarantee about
-    /// their placed rules.
+    /// Records are sharded into partitions, and satisfy the `AnyShard` but without any guarantee
+    /// about their placement rules.
     SomeShard,
-    /// records are shard on partitions based on hash value of some keys, which means the records
-    /// with same hash values must be on the same partition.
+    /// Records are sharded into partitions based on the hash value of some keys, which means the
+    /// records with the same hash values must be on the same partition.
+    /// `usize` is the index of column used as the distribution key.
     HashShard(Vec<usize>),
 }
 
