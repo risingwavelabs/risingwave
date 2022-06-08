@@ -15,6 +15,7 @@
 // limitations under the License.
 
 pub mod error;
+pub mod pg_extended;
 pub mod pg_field_descriptor;
 pub mod pg_message;
 pub mod pg_protocol;

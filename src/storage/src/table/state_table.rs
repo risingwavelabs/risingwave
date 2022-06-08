@@ -264,9 +264,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                 .peekable();
         pin_mut!(cell_based_table_iter);
 
-        let mut mem_table_iter = mem_table_iter
-            .map(|(k, v)| Ok::<_, StorageError>((k, v)))
-            .peekable();
+        let mut mem_table_iter = mem_table_iter.peekable();
 
         loop {
             match (
@@ -279,7 +277,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                     yield Cow::Owned(row);
                 }
                 (None, Some(_)) => {
-                    let row_op = mem_table_iter.next().unwrap()?.1;
+                    let row_op = mem_table_iter.next().unwrap().1;
                     match row_op {
                         RowOp::Insert(row) | RowOp::Update((_, row)) => {
                             yield Cow::Borrowed(row);
@@ -290,7 +288,7 @@ impl<S: StateStore> StateTableRowIter<S> {
 
                 (
                     Some(Ok((cell_based_pk, cell_based_row))),
-                    Some(Ok((mem_table_pk, _mem_table_row_op))),
+                    Some((mem_table_pk, _mem_table_row_op)),
                 ) => {
                     match cell_based_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
@@ -302,7 +300,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                             // mem_table_item will be return, while both cell_based_streaming_iter
                             // and mem_table_iter need to execute next()
                             // once.
-                            let row_op = mem_table_iter.next().unwrap()?.1;
+                            let row_op = mem_table_iter.next().unwrap().1;
                             match row_op {
                                 RowOp::Insert(row) => yield Cow::Borrowed(row),
                                 RowOp::Delete(_) => {}
@@ -315,7 +313,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                         }
                         Ordering::Greater => {
                             // mem_table_item will be return
-                            let row_op = mem_table_iter.next().unwrap()?.1;
+                            let row_op = mem_table_iter.next().unwrap().1;
                             match row_op {
                                 RowOp::Insert(row) => yield Cow::Borrowed(row),
                                 RowOp::Delete(_) => {}
@@ -327,7 +325,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                 (Some(_), Some(_)) => {
                     // Throw the error.
                     cell_based_table_iter.next().await.unwrap()?;
-                    mem_table_iter.next().unwrap()?;
+                    mem_table_iter.next().unwrap();
 
                     unreachable!()
                 }
@@ -359,9 +357,7 @@ impl<S: StateStore> StateTableRowIter<S> {
             .peekable();
         pin_mut!(cell_based_table_iter);
 
-        let mut mem_table_iter = mem_table_iter
-            .map(|(k, v)| Ok::<_, StorageError>((k, v)))
-            .peekable();
+        let mut mem_table_iter = mem_table_iter.peekable();
         loop {
             match (
                 cell_based_table_iter.as_mut().peek().await,
@@ -373,7 +369,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                     yield Cow::Owned(row);
                 }
                 (None, Some(_)) => {
-                    let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
+                    let (mem_table_pk, row_op) = mem_table_iter.next().unwrap();
 
                     if mem_table_bounds.contains(mem_table_pk) {
                         match row_op {
@@ -387,7 +383,7 @@ impl<S: StateStore> StateTableRowIter<S> {
 
                 (
                     Some(Ok((cell_based_pk, cell_based_row))),
-                    Some(Ok((mem_table_pk, _mem_table_row_op))),
+                    Some((mem_table_pk, _mem_table_row_op)),
                 ) => {
                     match cell_based_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
@@ -399,7 +395,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                             // mem_table_item will be return, while both
                             // and mem_table_iter need to execute
                             // once.
-                            let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
+                            let (mem_table_pk, row_op) = mem_table_iter.next().unwrap();
                             if mem_table_bounds.contains(mem_table_pk) {
                                 match row_op {
                                     RowOp::Insert(row) => yield Cow::Borrowed(row),
@@ -414,7 +410,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                         }
                         Ordering::Greater => {
                             // mem_table_item will be return
-                            let (mem_table_pk, row_op) = mem_table_iter.next().unwrap()?;
+                            let (mem_table_pk, row_op) = mem_table_iter.next().unwrap();
                             if mem_table_bounds.contains(mem_table_pk) {
                                 match row_op {
                                     RowOp::Insert(row) => yield Cow::Borrowed(row),
@@ -428,7 +424,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                 (Some(_), Some(_)) => {
                     // Throw the error.
                     cell_based_table_iter.next().await.unwrap()?;
-                    mem_table_iter.next().unwrap()?;
+                    mem_table_iter.next().unwrap();
 
                     unreachable!()
                 }
