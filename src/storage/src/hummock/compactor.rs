@@ -381,7 +381,6 @@ impl Compactor {
             );
         }
 
-        // let existing_table_id: HashSet<u32> = HashSet::from_iter(compact_task.exist_table_id);
         let compaction_filter =
             StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
 
@@ -801,17 +800,6 @@ impl Compactor {
         let mut skip_key = BytesMut::new();
         let mut last_key = BytesMut::new();
 
-        // let mut use_compaction_filter = false;
-        // let use_compaction_filter = match compaction_filter_option {
-        //     None => false,
-        //     Some(_) => true,
-        // };
-
-        // let compaction_filter = nullptr;
-        // if use_compaction_filter {
-        //     compaction_filter = compaction_filter_option.unwrap();
-        // }
-
         while iter.is_valid() {
             let iter_key = iter.key();
 
@@ -849,7 +837,11 @@ impl Compactor {
                 if iter.value().is_delete() && !has_user_key_overlap {
                     drop = true;
                 }
-            } else if !compaction_filter.filter(iter_key) {
+            }
+
+            // in our design, frontend avoid to access keys which had be deleted, so we dont need to
+            // consider the epoch when the compaction_filter match (it means that mv had drop)
+            if !compaction_filter.filter(iter_key) {
                 drop = true;
             }
 
