@@ -29,7 +29,6 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;

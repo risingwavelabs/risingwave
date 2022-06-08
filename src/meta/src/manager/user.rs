@@ -19,7 +19,6 @@ use risingwave_common::catalog::DEFAULT_SUPPER_USER;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};

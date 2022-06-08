@@ -307,12 +307,12 @@ where
             .config
             .get("database")
             .cloned()
-            .unwrap_or("dev".to_string());
+            .unwrap_or_else(||"dev".to_string());
         let user_name = msg
             .config
             .get("user")
             .cloned()
-            .unwrap_or("risingwave".to_string());
+            .unwrap_or_else(|| "risingwave".to_string());
 
         let session = self
             .session_mgr
