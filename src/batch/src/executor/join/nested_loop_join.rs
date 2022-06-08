@@ -49,7 +49,7 @@ pub struct NestedLoopJoinExecutor {
     join_type: JoinType,
     schema: Schema,
     /// We may only need certain columns.
-    /// [`output_indices`] are the indices of the columns that we needed.
+    /// output_indices are the indices of the columns that we needed.
     output_indices: Vec<usize>,
     /// Return data chunk in batch.
     chunk_builder: DataChunkBuilder,

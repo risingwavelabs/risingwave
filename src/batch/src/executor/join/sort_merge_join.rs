@@ -51,7 +51,7 @@ pub struct SortMergeJoinExecutor {
     last_probe_key: Option<Row>,
     schema: Schema,
     /// We may only need certain columns.
-    /// [`output_indices`] are the indices of the columns that we needed.
+    /// output_indices are the indices of the columns that we needed.
     output_indices: Vec<usize>,
     /// Sort key column index of probe side and build side.
     /// They should have the same length and be one-to-one mapping.
