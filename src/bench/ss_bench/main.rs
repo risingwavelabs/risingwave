@@ -156,6 +156,7 @@ async fn main() {
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
         share_buffer_compaction_worker_threads_number: 1,
+        share_buffer_upload_concurrency: 4,
     });
 
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
