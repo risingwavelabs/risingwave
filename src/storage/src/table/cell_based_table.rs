@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -309,7 +310,7 @@ impl<S: StateStore> CellBasedTable<S> {
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&self, epoch: u64) -> StorageResult<CellBasedTableRowIter<S>> {
         CellBasedTableRowIter::new(
-            self.keyspace.clone(),
+            &self.keyspace,
             self.column_descs.clone(),
             epoch,
             self.stats.clone(),
@@ -328,6 +329,59 @@ impl<S: StateStore> CellBasedTable<S> {
             epoch,
             self.stats.clone(),
             pk_descs,
+        )
+        .await
+    }
+
+    fn serialized_pk_bound(&self, pk_bound: Bound<&Row>) -> StorageResult<Bound<Vec<u8>>> {
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
+        Ok(match pk_bound {
+            Included(k) => Included(
+                self.keyspace
+                    .prefixed_key(&serialize_pk(k, pk_serializer).map_err(err)?),
+            ),
+            Excluded(k) => Excluded(
+                self.keyspace
+                    .prefixed_key(&serialize_pk(k, pk_serializer).map_err(err)?),
+            ),
+            Unbounded => Unbounded,
+        })
+    }
+
+    pub async fn iter_with_pk_bounds(
+        &self,
+        epoch: u64,
+        pk_bounds: impl RangeBounds<Row>,
+    ) -> StorageResult<CellBasedTableRowIter<S>> {
+        let start_key = self.serialized_pk_bound(pk_bounds.start_bound())?;
+        let end_key = self.serialized_pk_bound(pk_bounds.end_bound())?;
+
+        CellBasedTableRowIter::new_with_bounds(
+            &self.keyspace,
+            self.column_descs.clone(),
+            (start_key, end_key),
+            epoch,
+            self.stats.clone(),
+        )
+        .await
+    }
+
+    pub async fn iter_with_pk_prefix(
+        &self,
+        epoch: u64,
+        pk_prefix: Row,
+    ) -> StorageResult<CellBasedTableRowIter<S>> {
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
+        let serialized_pk_prefix = &serialize_pk(&pk_prefix, pk_serializer).map_err(err)?[..];
+        let start_key = Included(self.keyspace.prefixed_key(&serialized_pk_prefix));
+        let next_key = Excluded(next_key(serialized_pk_prefix));
+
+        CellBasedTableRowIter::new_with_bounds(
+            &self.keyspace,
+            self.column_descs.clone(),
+            (start_key, next_key),
+            epoch,
+            self.stats.clone(),
         )
         .await
     }
@@ -363,7 +417,7 @@ pub struct CellBasedTableRowIter<S: StateStore> {
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
     pub async fn new(
-        keyspace: Keyspace<S>,
+        keyspace: &Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
@@ -374,6 +428,30 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
 
         let iter = keyspace.iter(epoch).await?;
 
+        let iter = Self {
+            iter,
+            cell_based_row_deserializer,
+            _stats,
+        };
+        Ok(iter)
+    }
+
+    pub async fn new_with_bounds<R, B>(
+        keyspace: &Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        serialized_pk_bounds: R,
+        epoch: u64,
+        _stats: Arc<StateStoreMetrics>,
+    ) -> StorageResult<Self>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
+
+        let iter = keyspace
+            .iter_with_range(serialized_pk_bounds, epoch)
+            .await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,
@@ -446,7 +524,7 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         pk_descs: Vec<OrderedColumnDesc>,
     ) -> StorageResult<Self> {
         let inner =
-            CellBasedTableRowIter::new(keyspace, table_descs.clone(), epoch, _stats).await?;
+            CellBasedTableRowIter::new(&keyspace, table_descs.clone(), epoch, _stats).await?;
 
         let (data_types, order_types) = pk_descs
             .iter()

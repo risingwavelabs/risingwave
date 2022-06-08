@@ -1,3 +1,4 @@
+use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
@@ -21,8 +22,9 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_storage::table::cell_based_table::{
-    CellBasedTable, CellTableChunkIter, DedupPkCellBasedTableRowIter,
+    CellBasedTable, CellBasedTableRowIter, CellTableChunkIter, DedupPkCellBasedTableRowIter,
 };
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
@@ -44,6 +46,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
 pub enum ScanType<S: StateStore> {
     TableScan(DedupPkCellBasedTableRowIter<S>),
+    RangeScan(CellBasedTableRowIter<S>),
     PointGet(Option<Row>),
 }
 
@@ -81,6 +84,44 @@ impl RowSeqScanExecutorBuilder {
     pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 }
 
+fn get_scan_bound(scan_range: ScanRange) -> (Row, Option<impl RangeBounds<Row>>) {
+    let pk_prefix_value = Row(scan_range
+        .eq_conds
+        .iter()
+        .map(|v| LiteralExpression::try_from(v).unwrap().literal())
+        .collect_vec());
+    if scan_range.range.is_none() {
+        return (pk_prefix_value, None);
+    }
+
+    let build_bound = |bound: &scan_range::range::Bound| -> Bound<Row> {
+        let mut row = pk_prefix_value.clone();
+        row.0.push(
+            LiteralExpression::try_from(bound.value.as_ref().unwrap())
+                .unwrap()
+                .literal(),
+        );
+        if bound.inclusive {
+            Bound::Included(row)
+        } else {
+            Bound::Excluded(row)
+        }
+    };
+
+    let scan_range::Range {
+        lower_bound,
+        upper_bound,
+    } = scan_range.range.as_ref().unwrap();
+
+    let pk_bounds: (Bound<Row>, Bound<Row>) = match (lower_bound, upper_bound) {
+        (Some(lb), Some(ub)) => (build_bound(lb), build_bound(ub)),
+        (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)),
+        (Some(lb), None) => (build_bound(lb), Bound::Unbounded),
+        (None, None) => unreachable!(),
+    };
+    (pk_prefix_value, Some(pk_bounds))
+}
+
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
@@ -110,11 +151,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             OrderedRowSerializer::new(pk_descs.iter().map(|desc| desc.order).collect());
 
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
-        let pk_prefix_value = Row(scan_range
-            .eq_conds
-            .iter()
-            .map(|v| LiteralExpression::try_from(v).unwrap().literal())
-            .collect_vec());
+        let (pk_prefix_value, pk_bounds) = get_scan_bound(scan_range.clone());
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
@@ -136,7 +173,15 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 ScanType::PointGet(row)
             } else {
                 assert!(pk_prefix_value.size() < pk_descs.len());
-                todo!("range prefix scan")
+                let iter = match pk_bounds {
+                    None => {
+                        table
+                            .iter_with_pk_prefix(source.epoch, pk_prefix_value)
+                            .await?
+                    }
+                    Some(pk_bounds) => table.iter_with_pk_bounds(source.epoch, pk_bounds).await?,
+                };
+                ScanType::RangeScan(iter)
             };
 
             Ok(Box::new(RowSeqScanExecutor::new(
@@ -171,6 +216,22 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         if !self.should_ignore() {
             match self.scan_type {
                 ScanType::TableScan(mut iter) => loop {
+                    let timer = self.stats.row_seq_scan_next_duration.start_timer();
+
+                    let chunk = iter
+                        .collect_data_chunk(&self.schema, Some(self.chunk_size))
+                        .await
+                        .map_err(RwError::from)?;
+                    timer.observe_duration();
+
+                    if let Some(chunk) = chunk {
+                        yield chunk
+                    } else {
+                        break;
+                    }
+                },
+                ScanType::RangeScan(mut iter) => loop {
+                    // TODO: same as TableScan except iter type
                     let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
                     let chunk = iter
