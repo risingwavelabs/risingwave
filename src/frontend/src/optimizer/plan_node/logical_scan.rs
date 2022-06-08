@@ -260,17 +260,15 @@ impl LogicalScan {
         )
     }
 
-    pub fn rewrtie_scan(&self, required_col_idx: Vec<usize>) -> Option<PlanRef> {
-        Some(
-            Self::new(
-                self.table_name.clone(),
-                required_col_idx,
-                self.table_desc.clone(),
-                self.indexes.clone(),
-                self.base.ctx.clone(),
-            )
-            .into(),
+    pub fn clone_with_required_col_idx(&self, required_col_idx: Vec<usize>) -> PlanRef {
+        Self::new(
+            self.table_name.clone(),
+            required_col_idx,
+            self.table_desc.clone(),
+            self.indexes.clone(),
+            self.base.ctx.clone(),
         )
+        .into()
     }
 }
 

@@ -160,25 +160,6 @@ impl LogicalProject {
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
         (self.exprs, self.input)
     }
-
-    pub fn rewrite_project(&self) -> Option<PlanRef> {
-        // `LogicalProject` is used to pick up those columns needed by `LogicalApply`'s right.
-        let mut required_col_idx = vec![];
-        for expr in &self.exprs {
-            if let ExprImpl::InputRef(input_ref) = expr {
-                required_col_idx.push(input_ref.index());
-            } else {
-                return None;
-            }
-        }
-        if let Some(join) = self.input.as_logical_join() {
-            join.rewrite_join(required_col_idx)
-        } else if let Some(scan) = self.input.as_logical_scan() {
-            scan.rewrtie_scan(required_col_idx)
-        } else {
-            None
-        }
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {

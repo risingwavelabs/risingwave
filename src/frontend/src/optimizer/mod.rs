@@ -114,7 +114,19 @@ impl PlanRoot {
     pub fn gen_optimized_logical_plan(&self) -> PlanRef {
         let mut plan = self.plan.clone();
 
-        // Subquery Unnesting.
+        // Simple Unnesting.
+        plan = {
+            let rules = vec![PullUpCorrelatedPredicate::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
+        // General Unnesting.
+        plan = {
+            let rules = vec![TranslateApply::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
+            heuristic_optimizer.optimize(plan)
+        };
         plan = {
             let rules = vec![
                 ApplyAgg::create(),

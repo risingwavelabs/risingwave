@@ -18,15 +18,19 @@ use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::{LogicalJoin, LogicalProject, PlanTreeNodeBinary};
+use crate::expr::{
+    CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef,
+};
+use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::optimizer::PlanRef;
+use crate::utils::Condition;
 
 pub struct ApplyScan {}
 impl Rule for ApplyScan {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type) = apply.clone().decompose();
+        let (left, right, on, join_type, correlated_indices, index_mapping) =
+            apply.clone().decompose();
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
         // TODO: Push `LogicalApply` down `LogicalJoin`.
@@ -41,7 +45,7 @@ impl Rule for ApplyScan {
         let mut column_mapping = HashMap::new();
         on.conjunctions.iter().for_each(|expr| {
             if let ExprImpl::FunctionCall(func_call) = expr {
-                if let Some((left, right, data_type)) = Self::check(func_call, apply_left_len) {
+                if let Some((left, right, data_type)) = Self::check(func_call) {
                     column_mapping.insert(left, (right, data_type));
                 }
             }
@@ -52,11 +56,11 @@ impl Rule for ApplyScan {
             // Replace `LogicalApply` with `LogicalProject` and insert the `InputRef`s which is
             // equal to `CorrelatedInputRef` at the beginning of `LogicalProject`.
             // See the fourth section of Unnesting Arbitrary Queries for how to do the optimization.
-            let mut exprs: Vec<ExprImpl> = (0..apply_left_len)
+            let mut exprs: Vec<ExprImpl> = correlated_indices
                 .into_iter()
-                .map(|left| {
-                    let (right, data_type) = column_mapping.get(&left).unwrap();
-                    InputRef::new(*right - apply_left_len, data_type.clone()).into()
+                .map(|correlated_index| {
+                    let (col_index, data_type) = column_mapping.get(&correlated_index).unwrap();
+                    InputRef::new(*col_index - apply_left_len, data_type.clone()).into()
                 })
                 .collect();
             exprs.extend(
@@ -71,16 +75,22 @@ impl Rule for ApplyScan {
             // TODO: add LogicalFilter here to do null-check.
             Some(project)
         } else {
-            // Rewrite `LogicalApply`'s left.
+            // TODO: Use index_mapping to rewrite CorrelatedInputRef here.
+            // TODO: Rewrite CorrelatedInputRef to InputRef here.
+            let mut rewriter = Rewriter { index_mapping };
+            let rewritten_exprs = on
+                .into_iter()
+                .map(|expr| rewriter.rewrite_expr(expr))
+                .collect();
 
-            // Use `rewrite_agg`, `rewrite_project`, `rewrite_join` and `rewrite_scan` to remove
-            // useless columns.
-            let left = apply.left();
-            let new_left = left
-                .as_logical_agg()
-                .map(|agg| agg.rewrite_agg().unwrap())
-                .unwrap();
-            let join = LogicalJoin::new(new_left, right, join_type, on);
+            let join = LogicalJoin::new(
+                left,
+                right,
+                join_type,
+                Condition {
+                    conjunctions: rewritten_exprs,
+                },
+            );
             Some(join.into())
         }
     }
@@ -93,29 +103,39 @@ impl ApplyScan {
 
     /// Check whether the `func_call` is like v1 = v2, in which v1 and v2 belong respectively to
     /// `LogicalApply`'s left and right.
-    fn check(func_call: &FunctionCall, apply_left_len: usize) -> Option<(usize, usize, DataType)> {
+    fn check(func_call: &FunctionCall) -> Option<(usize, usize, DataType)> {
         let inputs = func_call.inputs();
         if func_call.get_expr_type() == ExprType::Equal && inputs.len() == 2 {
             let left = &inputs[0];
             let right = &inputs[1];
             match (left, right) {
-                (ExprImpl::InputRef(left), ExprImpl::InputRef(right)) => {
-                    let left_type = left.return_type();
-                    let left = left.index();
-                    let right_type = right.return_type();
-                    let right = right.index();
-                    if left < apply_left_len && right >= apply_left_len {
-                        Some((left, right, right_type))
-                    } else if left >= apply_left_len && right < apply_left_len {
-                        Some((right, left, left_type))
-                    } else {
-                        None
-                    }
+                (ExprImpl::CorrelatedInputRef(left), ExprImpl::InputRef(right)) => {
+                    Some((left.index(), right.index(), right.return_type()))
+                }
+                (ExprImpl::InputRef(right), ExprImpl::CorrelatedInputRef(left)) => {
+                    Some((left.index(), right.index(), right.return_type()))
                 }
                 _ => None,
             }
         } else {
             None
         }
+    }
+}
+
+struct Rewriter {
+    index_mapping: HashMap<usize, usize>,
+}
+
+impl ExprRewriter for Rewriter {
+    fn rewrite_correlated_input_ref(
+        &mut self,
+        correlated_input_ref: CorrelatedInputRef,
+    ) -> ExprImpl {
+        let new_index = *self
+            .index_mapping
+            .get(&correlated_input_ref.index())
+            .unwrap();
+        InputRef::new(new_index, correlated_input_ref.return_type()).into()
     }
 }

@@ -94,20 +94,13 @@
     create table b (b1 int, b2 int);
     SELECT b2 from b where exists (select 2 from t where v1 in (3, 1.0, b1));
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$1] }
-        BatchHashJoin { type: LeftSemi, predicate: $0 = $2 }
-          BatchExchange { order: [], dist: HashShard([0]) }
-            BatchScan { table: b, columns: [b1, b2] }
-          BatchExchange { order: [], dist: HashShard([0]) }
-            BatchProject { exprs: [$0] }
-              BatchNestedLoopJoin { type: Inner, predicate: (In($1::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR ($1 = $0)) }
-                BatchExchange { order: [], dist: Single }
-                  BatchHashAgg { group_keys: [$0], aggs: [] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchScan { table: b, columns: [b1] }
-                BatchExchange { order: [], dist: Single }
-                  BatchScan { table: t, columns: [v1] }
+    BatchProject { exprs: [$1] }
+      BatchNestedLoopJoin { type: LeftSemi, predicate: (In($2::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR ($3 = $0)) }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: b, columns: [b1, b2] }
+        BatchExchange { order: [], dist: Single }
+          BatchProject { exprs: [$0, $0] }
+            BatchScan { table: t, columns: [v1] }
 - sql: |
     select +1.0, -2.0;
   batch_plan: |

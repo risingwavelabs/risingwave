@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -171,17 +173,14 @@ impl Planner {
         } else {
             JoinType::LeftSemi
         };
-        let mut subquery = expr.into_subquery().unwrap();
-        let correlated_inputs = subquery.get_and_change_correlated_input_ref();
+        let subquery = expr.into_subquery().unwrap();
+        let correlated_indices = subquery.collect_correlated_indices();
         let output_column_type = subquery.query.data_types()[0].clone();
         let right_plan = self.plan_query(subquery.query)?.as_subplan();
         let on = match subquery.kind {
             SubqueryKind::Existential => ExprImpl::literal_bool(true),
             SubqueryKind::In(left_expr) => {
-                let right_expr = InputRef::new(
-                    input.schema().fields().len() + correlated_inputs.len(),
-                    output_column_type,
-                );
+                let right_expr = InputRef::new(input.schema().len(), output_column_type);
                 FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?.into()
             }
             kind => {
@@ -192,7 +191,7 @@ impl Planner {
                 .into())
             }
         };
-        *input = Self::create_join(correlated_inputs, input.clone(), right_plan, on, join_type);
+        *input = Self::create_join(correlated_indices, input.clone(), right_plan, on, join_type);
         Ok(())
     }
 
@@ -212,20 +211,17 @@ impl Planner {
         struct SubstituteSubQueries {
             input_col_num: usize,
             subqueries: Vec<Subquery>,
-            correlated_inputs_collection: Vec<Vec<InputRef>>,
+            correlated_indices_collection: Vec<Vec<usize>>,
         }
 
         // TODO: consider the multi-subquery case for normal predicate.
+        // TODO: rewrite.
         impl ExprRewriter for SubstituteSubQueries {
-            fn rewrite_subquery(&mut self, mut subquery: Subquery) -> ExprImpl {
-                let correlated_inputs = subquery.get_and_change_correlated_input_ref();
-                let input_ref = InputRef::new(
-                    self.input_col_num + correlated_inputs.len(),
-                    subquery.return_type(),
-                )
-                .into();
-                self.input_col_num += 1 + correlated_inputs.len();
-                self.correlated_inputs_collection.push(correlated_inputs);
+            fn rewrite_subquery(&mut self, subquery: Subquery) -> ExprImpl {
+                let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
+                self.input_col_num += 1;
+                self.correlated_indices_collection
+                    .push(subquery.collect_correlated_indices());
                 self.subqueries.push(subquery);
                 input_ref
             }
@@ -234,17 +230,17 @@ impl Planner {
         let mut rewriter = SubstituteSubQueries {
             input_col_num: root.schema().len(),
             subqueries: vec![],
-            correlated_inputs_collection: vec![],
+            correlated_indices_collection: vec![],
         };
         exprs = exprs
             .into_iter()
             .map(|e| rewriter.rewrite_expr(e))
             .collect();
 
-        for (subquery, correlated_inputs) in rewriter
+        for (subquery, correlated_indices) in rewriter
             .subqueries
             .into_iter()
-            .zip_eq(rewriter.correlated_inputs_collection)
+            .zip_eq(rewriter.correlated_indices_collection)
         {
             let mut right = self.plan_query(subquery.query)?.as_subplan();
 
@@ -263,7 +259,7 @@ impl Planner {
             }
 
             root = Self::create_join(
-                correlated_inputs,
+                correlated_indices,
                 root,
                 right,
                 ExprImpl::literal_bool(true),
@@ -274,54 +270,21 @@ impl Planner {
     }
 
     fn create_join(
-        correlated_inputs: Vec<InputRef>,
+        correlated_indices: Vec<usize>,
         left: PlanRef,
         right: PlanRef,
-        mut on: ExprImpl,
+        on: ExprImpl,
         join_type: JoinType,
     ) -> PlanRef {
-        if !correlated_inputs.is_empty() {
-            // Translate Apply according to the fomula provided by Unnesting Arbitrary Queries.
-
-            // `correlated_inputs` is the Domain. We use `LogicalProject` to pick up the columns in
-            // Domain, and then use `LogicalAgg` to de-duplicate.
-            let logical_project = LogicalProject::create(
-                left.clone(),
-                correlated_inputs
-                    .clone()
-                    .into_iter()
-                    .map(|input| input.into())
-                    .collect(),
-            );
-            let group_exprs = (0..correlated_inputs.len()).collect();
-            let logical_agg = LogicalAgg::new(vec![], group_exprs, logical_project);
-            let logical_apply = LogicalApply::create(
-                logical_agg.into(),
+        if !correlated_indices.is_empty() {
+            LogicalApply::create(
+                left,
                 right,
-                JoinType::Inner,
-                Condition::true_cond(),
-            );
-
-            // Construct the equations here so that we can align rows later.
-            let apply_left_len = left.schema().len();
-            correlated_inputs
-                .into_iter()
-                .enumerate()
-                .for_each(|(index, input)| {
-                    let shifted_input = InputRef::new(index + apply_left_len, input.return_type());
-                    let equal_predicate = FunctionCall::new(
-                        ExprType::Equal,
-                        vec![input.into(), shifted_input.into()],
-                    )
-                    .unwrap()
-                    .into();
-                    on = ExprImpl::FunctionCall(
-                        FunctionCall::new(ExprType::And, vec![on.clone(), equal_predicate])
-                            .unwrap()
-                            .into(),
-                    );
-                });
-            LogicalJoin::create(left, logical_apply, join_type, on)
+                join_type,
+                Condition::with_expr(on),
+                correlated_indices,
+                HashMap::new(),
+            )
         } else {
             LogicalJoin::create(left, right, join_type, on)
         }

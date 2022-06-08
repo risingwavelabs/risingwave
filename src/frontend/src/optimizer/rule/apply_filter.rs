@@ -16,23 +16,24 @@ use itertools::{Either, Itertools};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// Push `LogicalFilter` down `LogicalApply`
 pub struct ApplyFilter {}
 impl Rule for ApplyFilter {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type) = apply.clone().decompose();
+        let (left, right, on, join_type, correlated_indices, index_mapping) =
+            apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let filter = right.as_logical_filter()?;
+        let input = filter.input();
 
-        let mut rewriter = Rewriter {
-            offset: left.schema().len(),
-        };
+        let mut col_index_mapping =
+            ColIndexMapping::with_shift_offset(input.schema().len(), left.schema().len() as isize);
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
         let (cor_exprs, uncor_exprs) =
@@ -41,17 +42,25 @@ impl Rule for ApplyFilter {
                 .clone()
                 .into_iter()
                 .partition_map(|expr| {
+                    let expr = col_index_mapping.rewrite_expr(expr);
                     if expr.has_correlated_input_ref() {
-                        Either::Left(rewriter.rewrite_expr(expr))
+                        Either::Left(expr)
                     } else {
-                        Either::Right(rewriter.rewrite_expr(expr))
+                        Either::Right(expr)
                     }
                 });
 
         let new_on = on.and(Condition {
             conjunctions: cor_exprs,
         });
-        let new_apply = LogicalApply::create(left, filter.input(), join_type, new_on);
+        let new_apply = LogicalApply::create(
+            left,
+            input,
+            join_type,
+            new_on,
+            correlated_indices,
+            index_mapping,
+        );
         let new_filter = LogicalFilter::new(
             new_apply,
             Condition {
@@ -66,29 +75,5 @@ impl Rule for ApplyFilter {
 impl ApplyFilter {
     pub fn create() -> BoxedRule {
         Box::new(ApplyFilter {})
-    }
-}
-
-/// Convert `CorrelatedInputRef` to `InputRef` and shift `InputRef` with offset.
-struct Rewriter {
-    offset: usize,
-}
-
-impl ExprRewriter for Rewriter {
-    fn rewrite_correlated_input_ref(
-        &mut self,
-        correlated_input_ref: CorrelatedInputRef,
-    ) -> ExprImpl {
-        // Convert correlated_input_ref to input_ref.
-        // TODO: use LiftCorrelatedInputRef here.
-        InputRef::new(
-            correlated_input_ref.index(),
-            correlated_input_ref.return_type(),
-        )
-        .into()
-    }
-
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
     }
 }

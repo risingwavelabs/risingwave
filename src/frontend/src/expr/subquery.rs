@@ -16,7 +16,7 @@ use std::hash::Hash;
 
 use risingwave_common::types::DataType;
 
-use super::{Expr, ExprImpl, ExprType, InputRef};
+use super::{Expr, ExprImpl, ExprType};
 use crate::binder::BoundQuery;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -48,8 +48,8 @@ impl Subquery {
         self.query.is_correlated()
     }
 
-    pub fn get_and_change_correlated_input_ref(&mut self) -> Vec<InputRef> {
-        self.query.get_and_change_correlated_input_ref()
+    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+        self.query.collect_correlated_indices()
     }
 }
 

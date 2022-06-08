@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use std::collections::HashMap;
 use std::fmt;
 
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -32,6 +33,9 @@ pub struct LogicalApply {
     right: PlanRef,
     on: Condition,
     join_type: JoinType,
+
+    correlated_indices: Vec<usize>,
+    index_mapping: HashMap<usize, usize>,
 }
 
 impl fmt::Display for LogicalApply {
@@ -45,12 +49,14 @@ impl fmt::Display for LogicalApply {
 }
 
 impl LogicalApply {
-    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
-        assert!(
-            matches!(join_type, JoinType::Inner),
-            "Invalid join type {:?} for LogicalApply",
-            join_type
-        );
+    pub(crate) fn new(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        on: Condition,
+        correlated_indices: Vec<usize>,
+        index_mapping: HashMap<usize, usize>,
+    ) -> Self {
         let ctx = left.ctx();
         let out_column_num =
             LogicalJoin::out_column_num(left.schema().len(), right.schema().len(), join_type);
@@ -72,11 +78,28 @@ impl LogicalApply {
             right,
             on,
             join_type,
+            correlated_indices,
+            index_mapping,
         }
     }
 
-    pub fn create(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> PlanRef {
-        Self::new(left, right, join_type, on).into()
+    pub fn create(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        on: Condition,
+        correlated_indices: Vec<usize>,
+        index_mapping: HashMap<usize, usize>,
+    ) -> PlanRef {
+        Self::new(
+            left,
+            right,
+            join_type,
+            on,
+            correlated_indices,
+            index_mapping,
+        )
+        .into()
     }
 
     /// Get the join type of the logical apply.
@@ -84,8 +107,24 @@ impl LogicalApply {
         self.join_type
     }
 
-    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType) {
-        (self.left, self.right, self.on, self.join_type)
+    pub fn decompose(
+        self,
+    ) -> (
+        PlanRef,
+        PlanRef,
+        Condition,
+        JoinType,
+        Vec<usize>,
+        HashMap<usize, usize>,
+    ) {
+        (
+            self.left,
+            self.right,
+            self.on,
+            self.join_type,
+            self.correlated_indices,
+            self.index_mapping,
+        )
     }
 }
 
@@ -99,7 +138,14 @@ impl PlanTreeNodeBinary for LogicalApply {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(left, right, self.join_type, self.on.clone())
+        Self::new(
+            left,
+            right,
+            self.join_type,
+            self.on.clone(),
+            self.correlated_indices.clone(),
+            self.index_mapping.clone(),
+        )
     }
 }
 

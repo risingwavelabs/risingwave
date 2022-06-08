@@ -29,7 +29,6 @@ mod subquery;
 
 mod expr_rewriter;
 mod expr_visitor;
-mod expr_visitor_mut;
 mod type_inference;
 mod utils;
 
@@ -44,7 +43,6 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
-pub use expr_visitor_mut::ExprVisitorMut;
 pub use type_inference::{align_types, cast_ok, infer_type, least_restrictive, CastContext};
 pub use utils::*;
 
@@ -153,55 +151,6 @@ macro_rules! impl_has_variant {
 impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
 
 impl ExprImpl {
-    /// Used to change the `CorrelatedInputRef` in the expression and returns `InputRef` with the
-    /// same `index` and same `return_type`.
-    ///
-    /// Used to construct the `Domain`(i.e. the collection of `CorrelatedInputRef`) of a correlated
-    /// subquery.
-    pub fn get_and_change_correlated_input_ref(&mut self, index: &mut usize) -> Vec<InputRef> {
-        struct VisitorMut {
-            correlated_inputs: Vec<InputRef>,
-            depth: usize,
-            index: usize,
-        }
-        impl ExprVisitorMut for VisitorMut {
-            fn mut_correlated_input_ref(&mut self, correlated_input_ref: &mut CorrelatedInputRef) {
-                if correlated_input_ref.depth() == self.depth {
-                    self.correlated_inputs.push(InputRef::new(
-                        correlated_input_ref.index(),
-                        correlated_input_ref.return_type(),
-                    ));
-                    correlated_input_ref.index = self.index;
-                    self.index += 1;
-                }
-            }
-
-            fn mut_subquery(&mut self, subquery: &mut Subquery) {
-                use crate::binder::BoundSetExpr;
-
-                self.depth += 1;
-                match &mut subquery.query.body {
-                    BoundSetExpr::Select(select) => select
-                        .select_items
-                        .iter_mut()
-                        .chain(select.group_by.iter_mut())
-                        .chain(select.where_clause.iter_mut())
-                        .for_each(|expr| self.mut_expr(expr)),
-                    BoundSetExpr::Values(_) => {}
-                }
-                self.depth -= 1;
-            }
-        }
-        let mut visitor_mut = VisitorMut {
-            correlated_inputs: vec![],
-            depth: 1,
-            index: *index,
-        };
-        visitor_mut.mut_expr(self);
-        *index = visitor_mut.index;
-        visitor_mut.correlated_inputs
-    }
-
     /// Used to check whether the expression has [`CorrelatedInputRef`].
     // We need to traverse inside subqueries.
     pub fn has_correlated_input_ref(&self) -> bool {
@@ -240,6 +189,44 @@ impl ExprImpl {
         };
         visitor.visit_expr(self);
         visitor.has
+    }
+
+    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+        struct Collector {
+            depth: usize,
+            correlated_indices: Vec<usize>,
+        }
+
+        impl ExprVisitor for Collector {
+            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
+                if correlated_input_ref.depth() == self.depth {
+                    self.correlated_indices.push(correlated_input_ref.index());
+                }
+            }
+
+            fn visit_subquery(&mut self, subquery: &Subquery) {
+                use crate::binder::BoundSetExpr;
+
+                self.depth += 1;
+                match &subquery.query.body {
+                    BoundSetExpr::Select(select) => select
+                        .select_items
+                        .iter()
+                        .chain(select.group_by.iter())
+                        .chain(select.where_clause.iter())
+                        .for_each(|expr| self.visit_expr(expr)),
+                    BoundSetExpr::Values(_) => {}
+                }
+                self.depth -= 1;
+            }
+        }
+
+        let mut collector = Collector {
+            depth: 1,
+            correlated_indices: vec![],
+        };
+        collector.visit_expr(self);
+        collector.correlated_indices
     }
 
     /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
