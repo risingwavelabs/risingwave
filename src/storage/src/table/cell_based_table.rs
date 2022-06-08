@@ -145,6 +145,8 @@ impl<S: StateStore> CellBasedTable<S> {
         ]
         .concat();
         let mut get_res = Vec::new();
+
+        self.keyspace.state_store().wait_epoch(epoch).await?;
         let sentinel_cell = self.keyspace.get(&sentinel_key, epoch).await?;
 
         if sentinel_cell.is_none() {
@@ -499,6 +501,8 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
+        keyspace.state_store().wait_epoch(epoch).await?;
+
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
         let iter = keyspace
