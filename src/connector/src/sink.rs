@@ -20,21 +20,30 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_async::*;
+use risingwave_common::array::Op::*;
 use risingwave_common::array::{Row, StreamChunk};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
 
 #[async_trait]
 pub trait Sink {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
+    async fn write_batch(&mut self, chunk: StreamChunk, schema: Schema) -> Result<()>;
+
+    fn endpoint(&self) -> String;
+    fn table(&self) -> String;
+    fn database(&self) -> Option<String>;
+    fn user(&self) -> Option<String>;
+    fn password(&self) -> Option<String>; // TODO(nanderstabel): auth?
 }
 
 // Primitive design of MySQLSink
 #[allow(dead_code)]
 pub struct MySQLSink {
-    pub endpoint: String,
-    pub table: String,
-    pub database: Option<String>,
-    pub user: Option<String>,
-    pub password: Option<String>,
+    endpoint: String,
+    table: String,
+    database: Option<String>,
+    user: Option<String>,
+    password: Option<String>,
 }
 
 impl MySQLSink {
@@ -57,15 +66,17 @@ impl MySQLSink {
 
 #[async_trait]
 impl Sink for MySQLSink {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk, schema: Schema) -> Result<()> {
         // TODO(nanderstabel): fix, currently defaults to port 3306
         let builder = OptsBuilder::default()
-            .user(self.user.clone())
-            .pass(self.password.clone())
-            .ip_or_hostname(self.endpoint.clone())
-            .db_name(self.database.clone());
+            .user(self.user())
+            .pass(self.password())
+            .ip_or_hostname(self.endpoint())
+            .db_name(self.database());
 
         let mut conn = Conn::new(builder).await?;
+
+        let mut transaction = conn.start_transaction(TxOpts::default()).await?;
 
         for (idx, op) in chunk.ops().iter().enumerate() {
             let row = Row(chunk
@@ -74,14 +85,24 @@ impl Sink for MySQLSink {
                 .map(|x| x.array_ref().datum_at(idx))
                 .collect_vec());
 
-            let result: Vec<i32> = conn
-                .query(format!(
-                    "INSERT INTO {} VALUES ({})",
-                    self.table,
-                    row.0[0].clone().unwrap().as_int32()
-                ))
-                .await?;
+            match *op {
+                Insert | UpdateInsert => {
+                    transaction
+                        .exec_drop(
+                            format!(
+                                "INSERT INTO {} VALUES ({})",
+                                self.table(),
+                                row.0[0].clone().unwrap().as_int32()
+                            ),
+                            Params::Empty,
+                        )
+                        .await?
+                }
+                Delete | UpdateDelete => (),
+            }
         }
+
+        transaction.commit().await?;
 
         // // Save ints
         // r"INSERT INTO t
@@ -96,13 +117,53 @@ impl Sink for MySQLSink {
         drop(conn);
         Ok(())
     }
+
+    fn endpoint(&self) -> String {
+        self.endpoint.clone()
+    }
+
+    fn table(&self) -> String {
+        self.table.clone()
+    }
+
+    fn database(&self) -> Option<String> {
+        self.database.clone()
+    }
+
+    fn user(&self) -> Option<String> {
+        self.user.clone()
+    }
+
+    fn password(&self) -> Option<String> {
+        self.password.clone()
+    }
 }
 
 pub struct RedisSink;
 
 #[async_trait]
 impl Sink for RedisSink {
-    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
+    async fn write_batch(&mut self, _chunk: StreamChunk, _schema: Schema) -> Result<()> {
+        todo!();
+    }
+
+    fn endpoint(&self) -> String {
+        todo!();
+    }
+
+    fn table(&self) -> String {
+        todo!();
+    }
+
+    fn database(&self) -> Option<String> {
+        todo!();
+    }
+
+    fn user(&self) -> Option<String> {
+        todo!();
+    }
+
+    fn password(&self) -> Option<String> {
         todo!();
     }
 }
@@ -118,17 +179,8 @@ mod test {
 
     use super::*;
 
-    // use anyhow::Error;
-
     #[tokio::test]
     async fn test_basic_async() -> Result<()> {
-        // // Create a temporary table
-        // r"CREATE TEMPORARY TABLE payment (
-        //     customer_id int not null,
-        //     amount int not null,
-        //     account_name text
-        // )".ignore(&mut conn).await?;
-
         let mut sink = MySQLSink::new(
             "127.0.0.1".into(),
             "t".into(),
@@ -139,23 +191,36 @@ mod test {
 
         let chunk = StreamChunk::from_pretty(
             " i
-            + 1
-            + 2
-            + 3",
+            + 55
+            + 44
+            + 33",
         );
 
-        sink.write_batch(chunk).await?;
+        let schema = Schema::new(vec![Field {
+            data_type: DataType::Int32,
+            name: "v1".to_string(),
+            sub_fields: vec![],
+            type_name: "test".to_string(),
+        }]);
 
-        //     // Load ints from the database. Type inference will work here.
-        //     let loaded_ints = "SELECT v1 FROM t"
-        //         .with(())
-        //         .map(&mut conn, |i| Int { i })
-        //         .await?;
+        sink.write_batch(chunk, schema).await?;
 
-        //     // Delete ints
-        //    let result: Vec<i32> = conn.query("DELETE FROM t").await?;
+        let builder = OptsBuilder::default()
+            .user(sink.user())
+            .pass(sink.password())
+            .ip_or_hostname(sink.endpoint())
+            .db_name(sink.database());
 
-        // the async fn returns Result, so
+        let mut conn = Conn::new(builder).await?;
+        let select: Vec<i32> = conn
+            .query(format!("SELECT * FROM {};", sink.table()))
+            .await?;
+
+        println!("{:?}", select);
+
+        conn.query_drop("DELETE FROM t;").await?;
+        drop(conn);
+
         Ok(())
     }
 }
