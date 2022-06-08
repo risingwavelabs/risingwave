@@ -17,6 +17,7 @@ message StreamSourceInfo {
 
 message TableSourceInfo {
   repeated plan_common.ColumnCatalog columns = 1;
+  map<string, string> properties = 2;
 }
 
 message Source {

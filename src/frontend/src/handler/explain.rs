@@ -16,7 +16,7 @@ use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{Statement, WithProperties};
 
 use super::create_mv::gen_create_mv_plan;
 use super::create_table::gen_create_table_plan;
@@ -42,8 +42,20 @@ pub(super) fn handle_explain(
             ..
         } => gen_create_mv_plan(&*session, planner.ctx(), query, name)?.0,
 
-        Statement::CreateTable { name, columns, .. } => {
-            gen_create_table_plan(&*session, planner.ctx(), name, columns)?.0
+        Statement::CreateTable {
+            name,
+            columns,
+            with_options,
+            ..
+        } => {
+            gen_create_table_plan(
+                &*session,
+                planner.ctx(),
+                name,
+                columns,
+                WithProperties { 0: with_options },
+            )?
+            .0
         }
 
         stmt => {

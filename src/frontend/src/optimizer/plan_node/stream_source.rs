@@ -35,7 +35,7 @@ impl StreamSource {
             logical.schema().clone(),
             logical.pk_indices().to_vec(),
             Distribution::SomeShard,
-            false, // TODO: determine the `append-only` field of source
+            logical.source_catalog().append_only,
         );
         Self { base, logical }
     }
@@ -55,9 +55,10 @@ impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamSource {{ source: {},  columns: [{}] }}",
+            "StreamSource {{ source: {},  columns: [{}], appendonly: {} }}",
             self.logical.source_catalog.name,
-            self.column_names().join(", ")
+            self.column_names().join(", "),
+            self.base.append_only,
         )
     }
 }
