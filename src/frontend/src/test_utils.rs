@@ -19,10 +19,9 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager};
+use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
     TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER,
-    DEFAULT_SUPPER_USER_PASSWORD,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -30,8 +29,8 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_pb::user::{AuthInfo, GrantPrivilege, UserInfo};
+
+use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tempfile::{Builder, NamedTempFile};
@@ -58,7 +57,11 @@ pub struct LocalFrontend {
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
-    fn connect(&self, _database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    fn connect(
+        &self,
+        _database: &str,
+        _user_name: &str,
+    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
     }
 }
@@ -113,6 +116,8 @@ impl LocalFrontend {
         Arc::new(SessionImpl::new(
             self.env.clone(),
             DEFAULT_DATABASE_NAME.to_string(),
+            DEFAULT_SUPPER_USER.to_string(),
+            UserAuthenticator::None,
         ))
     }
 }
@@ -373,10 +378,6 @@ impl MockUserInfoWriter {
             is_supper: true,
             can_create_db: true,
             can_login: true,
-            auth_info: Some(AuthInfo {
-                encryption_type: EncryptionType::Plaintext as i32,
-                encrypted_value: Vec::from(DEFAULT_SUPPER_USER_PASSWORD.as_bytes()),
-            }),
             ..Default::default()
         });
         Self { user_info }

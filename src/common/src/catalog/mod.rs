@@ -26,7 +26,6 @@ pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "dev";
 
 pub const DEFAULT_SUPPER_USER: &str = "risingwave";
-pub const DEFAULT_SUPPER_USER_PASSWORD: &str = "risingwave";
 
 pub type CatalogVersion = u64;
 
