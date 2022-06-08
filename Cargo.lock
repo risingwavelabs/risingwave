@@ -4285,6 +4285,7 @@ dependencies = [
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_test_runner",
  "serde",
  "smallvec",
  "spin 0.9.3",
@@ -4356,6 +4357,13 @@ dependencies = [
  "url",
  "value-encoding",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_test_runner"
+version = "0.1.8"
+dependencies = [
+ "fail",
 ]
 
 [[package]]
