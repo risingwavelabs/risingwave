@@ -322,7 +322,7 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn iter_with_pk(
         &self,
         epoch: u64,
-        pk_descs: &Vec<OrderedColumnDesc>,
+        pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<DedupPkCellBasedTableRowIter<S>> {
         DedupPkCellBasedTableRowIter::new(
             self.keyspace.clone(),
