@@ -24,6 +24,7 @@ members = [
   "src/storage/compactor",
   "src/storage/hummock_sdk",
   "src/stream",
+  "src/test_runner",
   "src/tests/regress",
   "src/utils/logging",
   "src/utils/memcomparable",
@@ -32,7 +33,6 @@ members = [
   "src/utils/stats_alloc",
   "src/utils/value-encoding",
   "src/workspace-hack",
-  "src/test_runner",
 ]
 
 [profile.bench]
