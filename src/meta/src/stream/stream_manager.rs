@@ -597,8 +597,6 @@ where
             .pre_allocate_splits(&table_id, source_fragments.clone())
             .await?;
 
-        println!("result {:?}", init_split_assignment);
-
         if let Err(err) = self
             .barrier_manager
             .run_command(Command::CreateMaterializedView {

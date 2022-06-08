@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::{BorrowMut};
+use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,8 +20,7 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
@@ -48,6 +47,7 @@ use crate::stream::FragmentManagerRef;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
+#[allow(dead_code)]
 pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
@@ -62,6 +62,7 @@ pub struct SharedSplitMap {
 
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
 
+#[allow(dead_code)]
 pub struct ConnectorSourceWorker {
     source_id: SourceId,
     current_splits: SharedSplitMapRef,
@@ -133,20 +134,14 @@ pub struct ConnectorSourceWorkerHandle {
 
 pub struct SourceManagerCore<S: MetaStore> {
     pub fragment_manager: FragmentManagerRef<S>,
-
-    // may fetch from catalog
     pub managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
-
-    // may fetch from catalog
     pub source_fragments: HashMap<SourceId, Vec<FragmentId>>,
-
-    // should store
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 impl<S> SourceManagerCore<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
         Self {
@@ -157,6 +152,7 @@ impl<S> SourceManagerCore<S>
         }
     }
 
+    #[allow(dead_code)]
     async fn diff(&mut self) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
         // first, list all fragment, so that we can get `FragmentId` -> `Vec<ActorId>` map
         let table_frags = self.fragment_manager.list_table_fragments().await?;
@@ -222,8 +218,11 @@ impl<S> SourceManagerCore<S>
         Ok(changed_actors)
     }
 
-    pub async fn patch_diff(&mut self, source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
-                            actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>) -> Result<()> {
+    pub async fn patch_diff(
+        &mut self,
+        source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
+        actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
+    ) -> Result<()> {
         if let Some(source_fragments) = source_fragments {
             for (source_id, mut fragment_ids) in source_fragments {
                 self.source_fragments
@@ -236,9 +235,6 @@ impl<S> SourceManagerCore<S>
         if let Some(actor_splits) = actor_splits {
             for (actor_id, splits) in actor_splits {
                 self.actor_splits.insert(actor_id, splits);
-                // .entry(actor_id)
-                // .or_insert(vec![])
-                // .append(&mut splits);
                 // TODO store state
             }
         }
@@ -294,8 +290,8 @@ fn diff_splits(
 }
 
 impl<S> SourceManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -373,7 +369,7 @@ impl<S> SourceManager<S>
         Ok(assigned)
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -388,8 +384,8 @@ impl<S> SourceManager<S>
                 .iter()
                 .map(|worker| self.env.stream_client_pool().get(worker)),
         )
-            .await?
-            .into_iter();
+        .await?
+        .into_iter();
 
         Ok(all_stream_clients)
     }
@@ -455,53 +451,10 @@ impl<S> SourceManager<S>
     }
 
     async fn tick(&self) -> Result<()> {
-        let mut core_guard = self.core.lock().await;
-
-        let diff = core_guard.diff().await?;
-
-        for (actor_id, splits) in diff.iter() {
-            println!("actor #{} -> {:?}", actor_id, splits);
-        }
-
-        println!("---------------");
-
-        core_guard.patch_diff(None, Some(diff)).await.unwrap();
-
-
-        // for (id, x) in &core_guard.managed_sources {
-        //     let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        //     let source = catalog_guard.get_source(*id).await?.ok_or_else(|| {
-        //         RwError::from(InternalError(format!(
-        //             "could not find source catalog for {}",
-        //             id
-        //         )))
-        //     })?;
-        //
-        //     let guard = x.splits.lock().await;
-        //     println!("source: {}", source.name);
-        //
-        //     if let Some(splits) = &guard.splits {
-        //         for (k, v) in splits {
-        //             println!("\tid: {}, split {:?}", k, v);
-        //         }
-        //     }
-
-
-        // }
-
-        // let x = {
-        //     let mut core_guard = self.core.lock().await;
-        //     core_guard.diff().await
-        // };
-        //
-        // println!("{:?}", x);
-        //
-
         Ok(())
     }
 
     pub async fn run(&self) -> Result<()> {
-        // todo: uncomment me when stable
         let mut ticker = time::interval(Duration::from_secs(1));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
