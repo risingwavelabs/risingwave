@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
@@ -135,6 +137,34 @@ impl<S: StateStore> Keyspace<S> {
 
     pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
         let iter = self.iter_inner(epoch).await?;
+        let strip_prefix_iterator = StripPrefixIterator {
+            iter,
+            prefix_len: self.prefix.len(),
+        };
+        Ok(strip_prefix_iterator)
+    }
+
+    pub async fn iter_with_range<R, B>(
+        &self,
+        pk_bounds: R,
+        epoch: u64,
+    ) -> StorageResult<StripPrefixIterator<S::Iter>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        let start = match pk_bounds.start_bound() {
+            Included(k) => Included(Bytes::copy_from_slice(k.as_ref())),
+            Excluded(k) => Excluded(Bytes::copy_from_slice(k.as_ref())),
+            Unbounded => Unbounded,
+        };
+        let end = match pk_bounds.end_bound() {
+            Included(k) => Included(Bytes::copy_from_slice(k.as_ref())),
+            Excluded(k) => Excluded(Bytes::copy_from_slice(k.as_ref())),
+            Unbounded => Unbounded,
+        };
+        let range = (start, end);
+        let iter = self.store.iter(range, epoch).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),
