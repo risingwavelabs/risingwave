@@ -156,6 +156,8 @@ where
             return Err(InternalError("fragment has no actor".to_string()).into());
         }
 
+        self.hash_mapping_manager.set_need_consolidation(true);
+
         if fragment.distribution_type == FragmentDistributionType::Single as i32 {
             // Singleton fragment
             let actor = &fragment.actors[0];

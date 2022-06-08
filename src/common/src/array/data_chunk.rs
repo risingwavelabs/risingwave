@@ -22,61 +22,12 @@ use risingwave_pb::data::DataChunk as ProstDataChunk;
 
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{Row, RowRef};
-use crate::array::{ArrayBuilderImpl, ArrayImpl};
+use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 use crate::error::{Result, RwError};
 use crate::hash::HashCode;
 use crate::types::{DataType, NaiveDateTimeWrapper};
 use crate::util::hash_util::finalize_hashers;
-
-pub struct DataChunkBuilder {
-    columns: Vec<Column>,
-    visibility: Option<Bitmap>,
-}
-
-impl DataChunkBuilder {
-    fn new() -> Self {
-        DataChunkBuilder {
-            columns: vec![],
-            visibility: None,
-        }
-    }
-
-    pub fn columns(self, columns: Vec<Column>) -> DataChunkBuilder {
-        DataChunkBuilder {
-            columns,
-            visibility: self.visibility,
-        }
-    }
-
-    pub fn visibility(self, visibility: Bitmap) -> DataChunkBuilder {
-        DataChunkBuilder {
-            columns: self.columns,
-            visibility: Some(visibility),
-        }
-    }
-
-    pub fn build(self) -> DataChunk {
-        let vis = if let Some(bitmap) = self.visibility {
-            // with visibility bitmap
-            for column in &self.columns {
-                assert_eq!(bitmap.len(), column.array_ref().len())
-            }
-            Vis::Bitmap(bitmap)
-        } else if !self.columns.is_empty() {
-            // without visibility bitmap
-            let card = self.columns.first().unwrap().array_ref().len();
-            for column in self.columns.iter().skip(1) {
-                assert_eq!(card, column.array_ref().len())
-            }
-            Vis::Compact(card)
-        } else {
-            // no data (dummy)
-            Vis::Compact(0)
-        };
-        DataChunk::new(self.columns, vis)
-    }
-}
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
@@ -166,10 +117,6 @@ impl DataChunk {
                 }
             }
         }
-    }
-
-    pub fn builder() -> DataChunkBuilder {
-        DataChunkBuilder::new()
     }
 
     pub fn into_parts(self) -> (Vec<Column>, Vis) {
@@ -273,19 +220,14 @@ impl DataChunk {
     }
 
     pub fn from_protobuf(proto: &ProstDataChunk) -> Result<Self> {
-        if proto.columns.is_empty() {
-            // Dummy chunk, we should deserialize cardinality
-            Ok(DataChunk::new_dummy(proto.cardinality as usize))
-        } else {
-            let mut columns = vec![];
-            for any_col in proto.get_columns() {
-                let cardinality = proto.get_cardinality() as usize;
-                columns.push(Column::from_protobuf(any_col, cardinality)?);
-            }
-
-            let chunk = DataChunk::new(columns, proto.cardinality as usize);
-            Ok(chunk)
+        let mut columns = vec![];
+        for any_col in proto.get_columns() {
+            let cardinality = proto.get_cardinality() as usize;
+            columns.push(Column::from_protobuf(any_col, cardinality)?);
         }
+
+        let chunk = DataChunk::new(columns, proto.cardinality as usize);
+        Ok(chunk)
     }
 
     /// `rechunk` creates a new vector of data chunk whose size is `each_size_limit`.
@@ -306,7 +248,6 @@ impl DataChunk {
         if chunks.is_empty() {
             return Ok(Vec::new());
         }
-        assert!(!chunks[0].columns.is_empty());
 
         let mut total_capacity = chunks
             .iter()
@@ -326,6 +267,7 @@ impl DataChunk {
             .iter()
             .map(|col| col.array_ref().create_builder(new_chunk_require))
             .try_collect()?;
+        let mut array_len = new_chunk_require;
         let mut new_chunks = Vec::with_capacity(num_chunks);
         while chunk_idx < chunks.len() {
             let capacity = chunks[chunk_idx].capacity();
@@ -368,10 +310,11 @@ impl DataChunk {
                     .map(|col_type| col_type.array_ref().create_builder(new_chunk_require))
                     .try_collect()?;
 
-                let data_chunk = DataChunk::builder().columns(new_columns).build();
+                let data_chunk = DataChunk::new(new_columns, array_len);
                 new_chunks.push(data_chunk);
 
                 new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
+                array_len = new_chunk_require;
             }
         }
 
@@ -461,25 +404,6 @@ impl fmt::Debug for DataChunk {
             self.capacity(),
             self.to_pretty_string()
         )
-    }
-}
-
-impl TryFrom<Vec<Column>> for DataChunk {
-    type Error = RwError;
-
-    fn try_from(columns: Vec<Column>) -> Result<Self> {
-        ensure!(!columns.is_empty(), "Columns can't be empty!");
-        ensure!(
-            columns
-                .iter()
-                .map(Column::array_ref)
-                .map(ArrayImpl::len)
-                .all_equal(),
-            "Not all columns length same!"
-        );
-
-        let len = columns[0].array_ref().len();
-        Ok(DataChunk::new(columns, len))
     }
 }
 
