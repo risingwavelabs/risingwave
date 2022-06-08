@@ -72,7 +72,6 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
-        // FIXME: use pk_descs as a reference instead, since we only read from it.
         let mut iter = self.table.iter_with_pk(epoch, &self.pk_descs).await?;
 
         while let Some(data_chunk) = iter
