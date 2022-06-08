@@ -362,14 +362,14 @@ impl<S: StateStore> CellBasedTable<S> {
                 )
             }
             Unbounded => {
-                if pk_prefix.size() == 0 {
-                    Unbounded
+                let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+                let serialized_pk_prefix =
+                    serialize_pk(pk_prefix, &pk_prefix_serializer).map_err(err)?;
+                if is_start_bound {
+                    Included(self.keyspace.prefixed_key(&serialized_pk_prefix))
                 } else {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-                    let serialized_pk_prefix =
-                        serialize_pk(pk_prefix, &pk_prefix_serializer).map_err(err)?;
-                    if is_start_bound {
-                        Included(self.keyspace.prefixed_key(&serialized_pk_prefix))
+                    if pk_prefix.size() == 0 {
+                        Excluded(next_key(self.keyspace.key()))
                     } else {
                         Excluded(self.keyspace.prefixed_key(&next_key(&serialized_pk_prefix)))
                     }
