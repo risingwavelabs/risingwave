@@ -135,6 +135,7 @@ impl Executor for ChainExecutor {
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
+    use std::default::Default;
     use std::sync::Arc;
 
     use futures::StreamExt;
@@ -145,7 +146,7 @@ mod test {
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorInfo, Barrier, Executor, Message, Mutation, PkIndices};
+    use crate::executor::{ActorInfo, AddOutput, Barrier, Executor, Message, Mutation, PkIndices};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
@@ -168,16 +169,19 @@ mod test {
             PkIndices::new(),
             vec![
                 Message::Barrier(
-                    Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput({
-                        let mut actors = HashMap::default();
-                        actors.insert(
-                            (0, 233),
-                            vec![ActorInfo {
-                                actor_id: 0,
-                                host: None,
-                            }],
-                        );
-                        actors
+                    Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput(AddOutput {
+                        map: {
+                            let mut actors = HashMap::default();
+                            actors.insert(
+                                (0, 233),
+                                vec![ActorInfo {
+                                    actor_id: 0,
+                                    host: None,
+                                }],
+                            );
+                            actors
+                        },
+                        ..Default::default()
                     })),
                 ),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
