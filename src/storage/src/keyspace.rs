@@ -93,7 +93,6 @@ impl<S: StateStore> Keyspace<S> {
         self.store.get(&self.prefixed_key(key), epoch).await
     }
 
-
     /// Scans `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
     /// the given prefix will be scanned. Note that the prefix of this keyspace will be stripped.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
