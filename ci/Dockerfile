@@ -19,7 +19,7 @@ WORKDIR /risingwave
 
 ENV PATH /root/.cargo/bin/:$PATH
 
-RUN wget https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.4/sqllogictest-linux-amd64.tar.gz -O - | tar xz && \
+RUN wget https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.4.0/sqllogictest-linux-amd64.tar.gz -O - | tar xz && \
     mv sqllogictest /usr/local/bin/sqllogictest && \
     chmod +x /usr/local/bin/sqllogictest
 
