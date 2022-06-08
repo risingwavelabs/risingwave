@@ -12,24 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+/// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
+/// until the entire dataflow is refreshed. In other words, every related table & MV will
+/// be able to see the write.
+pub const IMPLICIT_FLUSH: &str = "RW_IMPLICIT_FLUSH";
 
-#[inline(always)]
-pub fn length_default(s: &str) -> Result<i32> {
-    Ok(s.chars().count() as i32)
-}
+/// A temporary config variable to force query running in either local or distributed mode.
+/// It will be removed in the future.
+pub const QUERY_MODE: &str = "QUERY_MODE";
 
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn test_length() {
-        let cases = [("hello world", Ok(11)), ("hello rust", Ok(10))];
-
-        for (s, expected) in cases {
-            assert_eq!(length_default(s), expected)
-        }
-    }
-}
+/// To force the usage of delta join in streaming execution.
+pub const DELTA_JOIN: &str = "RW_FORCE_DELTA_JOIN";

@@ -12,24 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
-
-#[inline(always)]
-pub fn length_default(s: &str) -> Result<i32> {
-    Ok(s.chars().count() as i32)
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn test_length() {
-        let cases = [("hello world", Ok(11)), ("hello rust", Ok(10))];
-
-        for (s, expected) in cases {
-            assert_eq!(length_default(s), expected)
-        }
-    }
-}
+mod vnode;
+pub use vnode::*;

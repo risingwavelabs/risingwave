@@ -19,9 +19,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::SstableInfo;
 
 use super::iterator::{

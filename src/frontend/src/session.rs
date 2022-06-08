@@ -25,7 +25,8 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::session_config::{DELTA_JOIN, IMPLICIT_FLUSH, QUERY_MODE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
@@ -36,7 +37,6 @@ use tokio::task::JoinHandle;
 
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
-use crate::handler::dml::IMPLICIT_FLUSH;
 use crate::handler::handle;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
@@ -331,6 +331,20 @@ impl ConfigEntry {
     }
 }
 
+fn build_default_session_config_map() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    m.insert(IMPLICIT_FLUSH.to_ascii_lowercase(), "false".to_string());
+    m.insert(DELTA_JOIN.to_ascii_lowercase(), "false".to_string());
+    m.insert(QUERY_MODE.to_ascii_lowercase(), "distributed".to_string());
+    m
+}
+
+lazy_static::lazy_static! {
+    static ref DEFAULT_SESSION_CONFIG_MAP: HashMap<String, String> = {
+        build_default_session_config_map()
+    };
+}
+
 impl SessionImpl {
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self {
@@ -359,11 +373,16 @@ impl SessionImpl {
 
     /// Set configuration values in this session.
     /// For example, `set_config("RW_IMPLICIT_FLUSH", true)` will implicit flush for every inserts.
-    pub fn set_config(&self, key: &str, val: &str) {
-        let key = key.to_ascii_lowercase();
+    pub fn set_config(&self, key: &str, val: &str) -> Result<()> {
+        let lower_key = key.to_ascii_lowercase();
+        self.config_map
+            .read()
+            .get(&lower_key)
+            .ok_or_else(|| ErrorCode::UnrecognizedConfigurationParameter(key.to_string()))?;
         self.config_map
             .write()
-            .insert(key, ConfigEntry::new(val.to_string()));
+            .insert(lower_key, ConfigEntry::new(val.to_string()));
+        Ok(())
     }
 
     /// Get configuration values in this session.
@@ -375,11 +394,9 @@ impl SessionImpl {
 
     fn init_config_map() -> RwLock<HashMap<String, ConfigEntry>> {
         let mut map = HashMap::new();
-        // FIXME: May need better init way + default config.
-        map.insert(
-            IMPLICIT_FLUSH.to_string().to_ascii_lowercase(),
-            ConfigEntry::new("false".to_string()),
-        );
+        for (key, value) in &*DEFAULT_SESSION_CONFIG_MAP {
+            map.insert(key.clone(), ConfigEntry::new(value.clone()));
+        }
         RwLock::new(map)
     }
 }
