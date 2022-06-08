@@ -53,7 +53,7 @@ pub(super) struct EquiJoinParams {
     right_key_columns: Vec<usize>,
     /// Data types of right keys in equi join, e.g., the column types of `a1` and `a3` in `a`.
     right_key_types: Vec<DataType>,
-    /// Data types of right columns in equi join, e.g., the column typ&es of `a1` `a2` `a3` in `a`.
+    /// Data types of right columns in equi join, e.g., the column types of `a1` `a2` `a3` in `a`.
     right_col_len: usize,
     /// Column types of the concatenation of two input side, e.g. the column types of
     /// `a1`, `a2`, `a3`, `b1`, `b2`, `b3`.
