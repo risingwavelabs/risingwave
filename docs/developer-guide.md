@@ -85,7 +85,7 @@ You can now build RiseDev and start a dev cluster. It is as simple as:
 
 ```shell
 ./risedev d                        # shortcut for ./risedev dev
-psql -h localhost -p 4566 -d dev
+psql -h localhost -p 4566 -d dev -U risingwave
 ```
 
 The default dev cluster includes metadata-node, compute-node and frontend-node processes, and an embedded volatile in-memory state storage. No data will be persisted. This configuration is intended to make it easier to develop and debug RisingWave.
@@ -172,7 +172,7 @@ cargo run --bin risingwave -- playground
 Then, connect to the playground instance via:
 
 ```shell
-psql -h localhost -p 4566 -d dev
+psql -h localhost -p 4566 -d dev -U risingwave
 ```
 
 ## Develop the dashboard
@@ -276,7 +276,7 @@ Before running end-to-end tests, you will need to start a full cluster first:
 Then run the end-to-end tests (replace `**/*.slt` with the test case directories and files available):
 
 ```shell
-./risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt'
+./risedev slt -p 4566 -d dev -u risingwave './e2e_test/streaming/**/*.slt'
 ```
 
 After running e2e tests, you may kill the cluster and clean data.

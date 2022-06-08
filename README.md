@@ -58,7 +58,7 @@ To connect to the RisingWave server, you will need to [install PostgreSQL shell]
 
 ```shell
 # Use psql to connect RisingWave cluster
-psql -h localhost -p 4566 -d dev
+psql -h localhost -p 4566 -d dev -U risingwave
 ```
 
 ```sql
