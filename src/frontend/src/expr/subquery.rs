@@ -49,7 +49,10 @@ impl Subquery {
     }
 
     pub fn collect_correlated_indices(&self) -> Vec<usize> {
-        self.query.collect_correlated_indices()
+        let mut correlated_indices = self.query.collect_correlated_indices();
+        correlated_indices.sort();
+        correlated_indices.dedup();
+        correlated_indices
     }
 }
 

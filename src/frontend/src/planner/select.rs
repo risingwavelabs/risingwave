@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -282,7 +280,6 @@ impl Planner {
                 join_type,
                 Condition::with_expr(on),
                 correlated_indices,
-                HashMap::new(),
             )
         } else {
             LogicalJoin::create(left, right, join_type, on)

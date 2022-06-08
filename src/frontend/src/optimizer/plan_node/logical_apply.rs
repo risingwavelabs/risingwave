@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::collections::HashMap;
 use std::fmt;
 
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -35,14 +34,7 @@ pub struct LogicalApply {
     join_type: JoinType,
 
     /// The indices of `CorrelatedInputRef`s of `right`. It was collected in `Planner`.
-    ///
-    /// The most important thing `correlated_indices` preserves is the order of its internal
-    /// indices. We use this order in `TranslatedApply` to construct equal conditions and then use
-    /// it in `ApplyScan` to remove DAG, and this is why we can't use the traversal of keys of
-    /// `index_mapping` to replace the traversal of `correlated_indices`.
     correlated_indices: Vec<usize>,
-    /// Mapping from original index of `CorrelatedInputRef` to its new index.
-    index_mapping: HashMap<usize, usize>,
 }
 
 impl fmt::Display for LogicalApply {
@@ -62,7 +54,6 @@ impl LogicalApply {
         join_type: JoinType,
         on: Condition,
         correlated_indices: Vec<usize>,
-        index_mapping: HashMap<usize, usize>,
     ) -> Self {
         let ctx = left.ctx();
         let out_column_num =
@@ -86,7 +77,6 @@ impl LogicalApply {
             on,
             join_type,
             correlated_indices,
-            index_mapping,
         }
     }
 
@@ -96,17 +86,8 @@ impl LogicalApply {
         join_type: JoinType,
         on: Condition,
         correlated_indices: Vec<usize>,
-        index_mapping: HashMap<usize, usize>,
     ) -> PlanRef {
-        Self::new(
-            left,
-            right,
-            join_type,
-            on,
-            correlated_indices,
-            index_mapping,
-        )
-        .into()
+        Self::new(left, right, join_type, on, correlated_indices).into()
     }
 
     /// Get the join type of the logical apply.
@@ -114,23 +95,13 @@ impl LogicalApply {
         self.join_type
     }
 
-    pub fn decompose(
-        self,
-    ) -> (
-        PlanRef,
-        PlanRef,
-        Condition,
-        JoinType,
-        Vec<usize>,
-        HashMap<usize, usize>,
-    ) {
+    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
         (
             self.left,
             self.right,
             self.on,
             self.join_type,
             self.correlated_indices,
-            self.index_mapping,
         )
     }
 }
@@ -151,7 +122,6 @@ impl PlanTreeNodeBinary for LogicalApply {
             self.join_type,
             self.on.clone(),
             self.correlated_indices.clone(),
-            self.index_mapping.clone(),
         )
     }
 }

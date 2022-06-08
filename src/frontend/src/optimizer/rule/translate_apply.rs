@@ -25,7 +25,7 @@ use crate::optimizer::plan_node::{
     PlanTreeNodeUnary,
 };
 use crate::optimizer::PlanRef;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// Translate `LogicalApply` into `LogicalJoin` and `LogicalApply`, and rewrite
 /// `LogicalApply`'s left.
@@ -33,12 +33,14 @@ pub struct TranslateApply {}
 impl Rule for TranslateApply {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_indices, _) = apply.clone().decompose();
+        let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
         let apply_left_len = left.schema().len();
         let correlated_indices_len = correlated_indices.len();
 
-        let mut index_mapping = HashMap::new();
+        let mut index_mapping =
+            ColIndexMapping::with_target_size(vec![None; apply_left_len], apply_left_len);
         let mut data_types = HashMap::new();
+        let mut index = 0;
 
         let rewritten_left = Self::rewrite(
             &left,
@@ -46,18 +48,33 @@ impl Rule for TranslateApply {
             0,
             &mut index_mapping,
             &mut data_types,
+            &mut index,
         )?;
-        let distinct = LogicalAgg::new(
-            vec![],
-            (0..rewritten_left.schema().len()).collect_vec(),
-            rewritten_left,
-        );
+
+        // This `LogicalProject` is used to make sure that after `LogicalApply`'s left is rewritten
+        // the new index of `correlated_index` is always its position in `correlated_indices`.
+        let exprs = correlated_indices
+            .clone()
+            .into_iter()
+            .enumerate()
+            .map(|(i, correlated_index)| {
+                let index = index_mapping.map(correlated_index);
+                let data_type = rewritten_left.schema().fields()[index].data_type.clone();
+                index_mapping.put(correlated_index, Some(i));
+                InputRef::new(index, data_type).into()
+            })
+            .collect();
+        let project = LogicalProject::create(rewritten_left, exprs);
+
+        let distinct = LogicalAgg::new(vec![], (0..project.schema().len()).collect_vec(), project);
 
         let eq_predicates = correlated_indices
             .clone()
             .into_iter()
-            .map(|correlated_index| {
-                let shifted_index = *index_mapping.get(&correlated_index).unwrap() + apply_left_len;
+            .enumerate()
+            .map(|(i, correlated_index)| {
+                assert_eq!(i, index_mapping.map(correlated_index));
+                let shifted_index = i + apply_left_len;
                 let data_type = data_types.get(&correlated_index).unwrap().clone();
                 let left = InputRef::new(correlated_index, data_type.clone());
                 let right = InputRef::new(shifted_index, data_type);
@@ -79,7 +96,6 @@ impl Rule for TranslateApply {
             JoinType::Inner,
             Condition::true_cond(),
             correlated_indices,
-            index_mapping,
         );
         let new_join = LogicalJoin::new(left, new_apply, join_type, on);
 
@@ -117,13 +133,28 @@ impl TranslateApply {
         plan: &PlanRef,
         correlated_indices: Vec<usize>,
         offset: usize,
-        index_mapping: &mut HashMap<usize, usize>,
+        index_mapping: &mut ColIndexMapping,
         data_types: &mut HashMap<usize, DataType>,
+        index: &mut usize,
     ) -> Option<PlanRef> {
         if let Some(join) = plan.as_logical_join() {
-            Self::rewrite_join(join, correlated_indices, offset, index_mapping, data_types)
+            Self::rewrite_join(
+                join,
+                correlated_indices,
+                offset,
+                index_mapping,
+                data_types,
+                index,
+            )
         } else if let Some(scan) = plan.as_logical_scan() {
-            Self::rewrite_scan(scan, correlated_indices, offset, index_mapping, data_types)
+            Self::rewrite_scan(
+                scan,
+                correlated_indices,
+                offset,
+                index_mapping,
+                data_types,
+                index,
+            )
         } else if let Some(filter) = plan.as_logical_filter() {
             Self::rewrite(
                 &filter.input(),
@@ -131,6 +162,7 @@ impl TranslateApply {
                 offset,
                 index_mapping,
                 data_types,
+                index,
             )
         } else {
             panic!()
@@ -141,8 +173,9 @@ impl TranslateApply {
         join: &LogicalJoin,
         required_col_idx: Vec<usize>,
         mut offset: usize,
-        index_mapping: &mut HashMap<usize, usize>,
+        index_mapping: &mut ColIndexMapping,
         data_types: &mut HashMap<usize, DataType>,
+        index: &mut usize,
     ) -> Option<PlanRef> {
         // TODO: Do we need to take the `on` into account?
         let left_len = join.left().schema().len();
@@ -156,9 +189,9 @@ impl TranslateApply {
                     offset += left_len;
                 }
                 if let Some(join) = plan.as_logical_join() {
-                    Self::rewrite_join(join, indices, offset, index_mapping, data_types)
+                    Self::rewrite_join(join, indices, offset, index_mapping, data_types, index)
                 } else if let Some(scan) = plan.as_logical_scan() {
-                    Self::rewrite_scan(scan, indices, offset, index_mapping, data_types)
+                    Self::rewrite_scan(scan, indices, offset, index_mapping, data_types, index)
                 } else {
                     None
                 }
@@ -178,21 +211,20 @@ impl TranslateApply {
 
     fn rewrite_scan(
         scan: &LogicalScan,
-        mut required_col_idx: Vec<usize>,
+        required_col_idx: Vec<usize>,
         offset: usize,
-        index_mapping: &mut HashMap<usize, usize>,
+        index_mapping: &mut ColIndexMapping,
         data_types: &mut HashMap<usize, DataType>,
+        index: &mut usize,
     ) -> Option<PlanRef> {
-        // TODO: do we really need sort here?
-        required_col_idx.sort();
-
         for i in &required_col_idx {
             let correlated_index = *i + offset;
-            index_mapping.insert(correlated_index, index_mapping.len());
+            index_mapping.put(correlated_index, Some(*index));
             data_types.insert(
                 correlated_index,
                 scan.schema().fields()[*i].data_type.clone(),
             );
+            *index += 1;
         }
 
         Some(scan.clone_with_output_indices(required_col_idx).into())

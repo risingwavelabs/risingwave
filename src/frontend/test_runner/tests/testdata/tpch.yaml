@@ -241,9 +241,9 @@
                                       StreamExchange { dist: HashShard([0]) }
                                         StreamTableScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost, _row_id], pk_indices: [3] }
                                       StreamExchange { dist: HashShard([0]) }
-                                        StreamProject { exprs: [$0, $1, $4] }
-                                          StreamFilter { predicate: ($3 = 4:Int32) AND Like($2, '%TIN':Varchar) }
-                                            StreamTableScan { table: part, columns: [p_partkey, p_mfgr, p_type, p_size, _row_id], pk_indices: [4] }
+                                        StreamProject { exprs: [$0, $1, $2] }
+                                          StreamFilter { predicate: ($4 = 4:Int32) AND Like($3, '%TIN':Varchar) }
+                                            StreamTableScan { table: part, columns: [p_partkey, p_mfgr, _row_id, p_type, p_size], pk_indices: [2] }
                                 StreamExchange { dist: HashShard([0]) }
                                   StreamTableScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id], pk_indices: [7] }
                           StreamHashAgg { group_keys: [$0], aggs: [count, min($1)] }
@@ -263,15 +263,15 @@
                                         StreamExchange { dist: HashShard([0]) }
                                           StreamTableScan { table: nation, columns: [n_nationkey, n_regionkey, _row_id], pk_indices: [2] }
                                   StreamExchange { dist: HashShard([0]) }
-                                    StreamProject { exprs: [$0, $2] }
-                                      StreamFilter { predicate: ($1 = 'AFRICA':Varchar) }
-                                        StreamTableScan { table: region, columns: [r_regionkey, r_name, _row_id], pk_indices: [2] }
+                                    StreamProject { exprs: [$0, $1] }
+                                      StreamFilter { predicate: ($2 = 'AFRICA':Varchar) }
+                                        StreamTableScan { table: region, columns: [r_regionkey, _row_id, r_name], pk_indices: [1] }
                     StreamExchange { dist: HashShard([0]) }
                       StreamTableScan { table: nation, columns: [n_nationkey, n_name, n_regionkey, _row_id], pk_indices: [3] }
               StreamExchange { dist: HashShard([0]) }
-                StreamProject { exprs: [$0, $2] }
-                  StreamFilter { predicate: ($1 = 'AFRICA':Varchar) }
-                    StreamTableScan { table: region, columns: [r_regionkey, r_name, _row_id], pk_indices: [2] }
+                StreamProject { exprs: [$0, $1] }
+                  StreamFilter { predicate: ($2 = 'AFRICA':Varchar) }
+                    StreamTableScan { table: region, columns: [r_regionkey, _row_id, r_name], pk_indices: [1] }
 - id: tpch_q3
   before:
     - create_tables
@@ -1440,9 +1440,9 @@
                         StreamExchange { dist: HashShard([0]) }
                           StreamTableScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice, _row_id], pk_indices: [3] }
                         StreamExchange { dist: HashShard([0]) }
-                          StreamProject { exprs: [$0, $3] }
-                            StreamFilter { predicate: ($1 = 'Brand#13':Varchar) AND ($2 = 'JUMBO PKG':Varchar) }
-                              StreamTableScan { table: part, columns: [p_partkey, p_brand, p_container, _row_id], pk_indices: [3] }
+                          StreamProject { exprs: [$0, $1] }
+                            StreamFilter { predicate: ($2 = 'Brand#13':Varchar) AND ($3 = 'JUMBO PKG':Varchar) }
+                              StreamTableScan { table: part, columns: [p_partkey, _row_id, p_brand, p_container], pk_indices: [1] }
                   StreamProject { exprs: [$0, (0.2:Decimal * ($2 / $3))] }
                     StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1)] }
                       StreamExchange { dist: HashShard([0]) }
@@ -1693,15 +1693,15 @@
                         StreamExchange { dist: HashShard([0]) }
                           StreamTableScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, _row_id], pk_indices: [3] }
                         StreamExchange { dist: HashShard([0]) }
-                          StreamProject { exprs: [$0, $2] }
-                            StreamFilter { predicate: Like($1, 'forest%':Varchar) }
-                              StreamTableScan { table: part, columns: [p_partkey, p_name, _row_id], pk_indices: [2] }
+                          StreamProject { exprs: [$0, $1] }
+                            StreamFilter { predicate: Like($2, 'forest%':Varchar) }
+                              StreamTableScan { table: part, columns: [p_partkey, _row_id, p_name], pk_indices: [1] }
                     StreamProject { exprs: [$0, $1, (0.5:Decimal * $3)] }
                       StreamHashAgg { group_keys: [$0, $1], aggs: [count, sum($2)] }
                         StreamExchange { dist: HashShard([0, 1]) }
-                          StreamProject { exprs: [$0, $1, $2, $4] }
-                            StreamFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-                              StreamTableScan { table: lineitem, columns: [l_partkey, l_suppkey, l_quantity, l_shipdate, _row_id], pk_indices: [4] }
+                          StreamProject { exprs: [$0, $1, $2, $3] }
+                            StreamFilter { predicate: ($4 >= '1994-01-01':Varchar::Date) AND ($4 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                              StreamTableScan { table: lineitem, columns: [l_partkey, l_suppkey, l_quantity, _row_id, l_shipdate], pk_indices: [3] }
 - id: tpch_q21
   before:
     - create_tables
@@ -1810,7 +1810,6 @@
                                   StreamFilter { predicate: ($2 = 'GERMANY':Varchar) }
                                     StreamTableScan { table: nation, columns: [n_nationkey, _row_id, n_name], pk_indices: [1] }
                         StreamExchange { dist: HashShard([0]) }
-<<<<<<< HEAD
                           StreamProject { exprs: [$0, $1] }
                             StreamFilter { predicate: ($2 = 'F':Varchar) }
                               StreamTableScan { table: orders, columns: [o_orderkey, _row_id, o_orderstatus], pk_indices: [1] }
@@ -1820,40 +1819,6 @@
                     StreamProject { exprs: [$0, $1, $2] }
                       StreamFilter { predicate: ($4 > $3) }
                         StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, _row_id, l_commitdate, l_receiptdate], pk_indices: [2] }
-=======
-                          StreamProject { exprs: [$0, $2] }
-                            StreamFilter { predicate: ($1 = 'F':Varchar) }
-                              StreamTableScan { table: orders, columns: [o_orderkey, o_orderstatus, _row_id], pk_indices: [2] }
-<<<<<<< HEAD
-                    StreamProject { exprs: [$0, $1, $5] }
-                      StreamFilter { predicate: ($4 <> $1) }
-                        StreamHashJoin { type: Inner, predicate: $0 = $3 }
-                          StreamExchange { dist: HashShard([0]) }
-                            StreamHashAgg { group_keys: [$0, $1], aggs: [count] }
-                              StreamExchange { dist: HashShard([0, 1]) }
-                                StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, _row_id], pk_indices: [2] }
-                          StreamExchange { dist: HashShard([0]) }
-                            StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, _row_id], pk_indices: [2] }
-                  StreamProject { exprs: [$0, $1, $5] }
-                    StreamFilter { predicate: ($4 <> $1) }
-                      StreamHashJoin { type: Inner, predicate: $0 = $3 }
-                        StreamExchange { dist: HashShard([0]) }
-                          StreamHashAgg { group_keys: [$0, $1], aggs: [count] }
-                            StreamExchange { dist: HashShard([0, 1]) }
-                              StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, _row_id], pk_indices: [2] }
-                        StreamExchange { dist: HashShard([0]) }
-                          StreamProject { exprs: [$0, $1, $4] }
-                            StreamFilter { predicate: ($3 > $2) }
-                              StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate, _row_id], pk_indices: [4] }
->>>>>>> fix some bugs.
-=======
-                    StreamExchange { dist: HashShard([0]) }
-                      StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, _row_id], pk_indices: [2] }
-                  StreamExchange { dist: HashShard([0]) }
-                    StreamProject { exprs: [$0, $1, $4] }
-                      StreamFilter { predicate: ($3 > $2) }
-                        StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate, _row_id], pk_indices: [4] }
->>>>>>> split unnesting into two-phase.
 - id: tpch_q22
   before:
     - create_tables

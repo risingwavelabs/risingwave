@@ -14,23 +14,21 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{
-    CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef,
-};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::optimizer::PlanRef;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 pub struct ApplyScan {}
 impl Rule for ApplyScan {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_indices, index_mapping) =
-            apply.clone().decompose();
+        let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
         // TODO: Push `LogicalApply` down `LogicalJoin`.
@@ -75,10 +73,12 @@ impl Rule for ApplyScan {
             // TODO: add LogicalFilter here to do null-check.
             Some(project)
         } else {
-            let mut rewriter = Rewriter { index_mapping };
+            let mut index_mapping =
+                ColIndexMapping::new(correlated_indices.into_iter().map(Some).collect_vec())
+                    .inverse();
             let rewritten_exprs = on
                 .into_iter()
-                .map(|expr| rewriter.rewrite_expr(expr))
+                .map(|expr| index_mapping.rewrite_expr(expr))
                 .collect();
 
             let join = LogicalJoin::new(
@@ -117,22 +117,5 @@ impl ApplyScan {
         } else {
             None
         }
-    }
-}
-
-struct Rewriter {
-    index_mapping: HashMap<usize, usize>,
-}
-
-impl ExprRewriter for Rewriter {
-    fn rewrite_correlated_input_ref(
-        &mut self,
-        correlated_input_ref: CorrelatedInputRef,
-    ) -> ExprImpl {
-        let new_index = *self
-            .index_mapping
-            .get(&correlated_input_ref.index())
-            .unwrap();
-        InputRef::new(new_index, correlated_input_ref.return_type()).into()
     }
 }

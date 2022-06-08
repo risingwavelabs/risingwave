@@ -26,8 +26,7 @@ pub struct ApplyFilter {}
 impl Rule for ApplyFilter {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_indices, index_mapping) =
-            apply.clone().decompose();
+        let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let filter = right.as_logical_filter()?;
         let input = filter.input();
@@ -53,14 +52,7 @@ impl Rule for ApplyFilter {
         let new_on = on.and(Condition {
             conjunctions: cor_exprs,
         });
-        let new_apply = LogicalApply::create(
-            left,
-            input,
-            join_type,
-            new_on,
-            correlated_indices,
-            index_mapping,
-        );
+        let new_apply = LogicalApply::create(left, input, join_type, new_on, correlated_indices);
         let new_filter = LogicalFilter::new(
             new_apply,
             Condition {
