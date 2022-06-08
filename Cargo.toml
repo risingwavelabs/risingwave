@@ -32,6 +32,7 @@ members = [
   "src/utils/stats_alloc",
   "src/utils/value-encoding",
   "src/workspace-hack",
+  "src/test_runner",
 ]
 
 [profile.bench]
