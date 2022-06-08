@@ -28,12 +28,12 @@ use crate::utils::Condition;
 pub struct LogicalTableFunction {
     pub base: PlanBase,
     pub(super) args: Vec<ExprImpl>,
-    pub series_type: SeriesType,
+    pub series_type: FunctionType,
     pub data_type: DataType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SeriesType {
+pub enum FunctionType {
     Generate,
     Unnest,
 }
@@ -43,7 +43,7 @@ impl LogicalTableFunction {
     pub fn new(
         args: Vec<ExprImpl>,
         schema: Schema,
-        series_type: SeriesType,
+        series_type: FunctionType,
         data_type: DataType,
         ctx: OptimizerContextRef,
     ) -> Self {
@@ -70,7 +70,7 @@ impl LogicalTableFunction {
         Self::new(
             vec![start, stop, step],
             schema,
-            SeriesType::Generate,
+            FunctionType::Generate,
             data_type,
             ctx,
         )
@@ -80,19 +80,19 @@ impl LogicalTableFunction {
     pub fn create_unnest(args: Vec<ExprImpl>, schema: Schema, ctx: OptimizerContextRef) -> PlanRef {
         // No additional checks after binder.
         let data_type = args[0].return_type();
-        Self::new(args, schema, SeriesType::Unnest, data_type, ctx).into()
+        Self::new(args, schema, FunctionType::Unnest, data_type, ctx).into()
     }
 
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         match self.series_type {
-            SeriesType::Generate => {
+            FunctionType::Generate => {
                 write!(
                     f,
                     "{} {{ start: {:?} stop: {:?} step: {:?} }}",
                     name, self.args[0], self.args[1], self.args[2],
                 )
             }
-            SeriesType::Unnest => {
+            FunctionType::Unnest => {
                 write!(f, "{} {{ {:?} }}", name, self.args,)
             }
         }

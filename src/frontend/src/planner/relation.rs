@@ -40,7 +40,7 @@ impl Planner {
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
             Relation::GenerateSeriesFunction(gs) => self.plan_generate_series_function(*gs),
-            Relation::UnnestFunction(gs) => self.plan_unnest_series_function(*gs),
+            Relation::UnnestFunction(gs) => self.plan_unnest_function(*gs),
         }
     }
 
@@ -113,7 +113,7 @@ impl Planner {
         ))
     }
 
-    pub(super) fn plan_unnest_series_function(
+    pub(super) fn plan_unnest_function(
         &mut self,
         table_function: BoundTableFunction,
     ) -> Result<PlanRef> {

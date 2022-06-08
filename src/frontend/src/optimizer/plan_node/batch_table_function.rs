@@ -66,14 +66,14 @@ impl ToDistributedBatch for BatchTableFunction {
 impl ToBatchProst for BatchTableFunction {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::TableFunction(TableFunctionNode {
-            series_type: self.logical.series_type.clone() as i32,
+            function_type: self.logical.series_type.clone() as i32,
             args: self
                 .logical
                 .args
                 .iter()
                 .map(|c| c.to_expr_proto())
                 .collect_vec(),
-            data_type: Some(self.logical.data_type.to_protobuf()),
+            return_type: Some(self.logical.data_type.to_protobuf()),
         })
     }
 }

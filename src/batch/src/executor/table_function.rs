@@ -131,6 +131,64 @@ impl Executor for TableFunctionExecutor {
 
 pub struct TableFunctionExecutorBuilder {}
 
+impl TableFunctionExecutorBuilder {
+    fn new_time_generate_series(
+        array_refs: Vec<ArrayRef>,
+    ) -> Result<GenerateSeries<NaiveDateTimeArray, IntervalArray>> {
+        let start = array_refs[0].clone().as_naivedatetime().value_at(0);
+        let stop = array_refs[1].clone().as_naivedatetime().value_at(0);
+        let step = array_refs[2].clone().as_interval().value_at(0);
+
+        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+            Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray> { start, stop, step })
+        } else {
+            Err(ErrorCode::InternalError(
+                "the parameters of Generate SeriesFunction are incorrect".to_string(),
+            )
+            .into())
+        }
+    }
+
+    fn new_int_generate_series(
+        array_refs: Vec<ArrayRef>,
+    ) -> Result<GenerateSeries<I32Array, I32Array>> {
+        let start = array_refs[0].clone().as_int32().value_at(0);
+        let stop = array_refs[1].clone().as_int32().value_at(0);
+        let step = array_refs[2].clone().as_int32().value_at(0);
+
+        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+            Ok(GenerateSeries::<I32Array, I32Array> { start, stop, step })
+        } else {
+            Err(ErrorCode::InternalError(
+                "the parameters of Generate Series Function are incorrect".to_string(),
+            )
+            .into())
+        }
+    }
+
+    pub fn new_generate_series(
+        array_refs: Vec<ArrayRef>,
+        return_type: DataType,
+    ) -> Result<(Schema, TableFunction)> {
+        match return_type {
+            DataType::Timestamp => {
+                let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
+                let func = TableFunctionExecutorBuilder::new_time_generate_series(array_refs)?;
+                Ok((schema, TableFunction::GenerateSeriesTime(func)))
+            }
+            DataType::Int32 => {
+                let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
+                let func = TableFunctionExecutorBuilder::new_int_generate_series(array_refs)?;
+                Ok((schema, TableFunction::GenerateSeriesInt(func)))
+            }
+            _ => Err(ErrorCode::InternalError(
+                "the parameters of Generate Series Function are incorrect".to_string(),
+            )
+            .into()),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
@@ -158,81 +216,22 @@ impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
                 expr.eval(&dummy_chunk)
             })
             .collect::<Result<Vec<_>>>()?;
-        let return_type = DataType::from(node.data_type.as_ref().unwrap());
-        match node.get_series_type()? {
-            Generate => {
-                let start = array_refs[0].clone();
-                let stop = array_refs[1].clone();
-                let step = array_refs[2].clone();
-                match return_type {
-                    DataType::Timestamp => {
-                        let start = start.as_naivedatetime().value_at(0);
-                        let stop = stop.as_naivedatetime().value_at(0);
-                        let step = step.as_interval().value_at(0);
-
-                        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                            let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
-
-                            Ok(Box::new(TableFunctionExecutor {
-                                schema,
-                                identity,
-                                table_function: TableFunction::GenerateSeriesTime(GenerateSeries {
-                                    start,
-                                    stop,
-                                    step,
-                                }),
-                            }))
-                        } else {
-                            Err(ErrorCode::InternalError(
-                                "the parameters of Generate SeriesFunction are incorrect"
-                                    .to_string(),
-                            )
-                            .into())
-                        }
-                    }
-                    DataType::Int32 => {
-                        let start = start.as_int32().value_at(0);
-                        let stop = stop.as_int32().value_at(0);
-                        let step = step.as_int32().value_at(0);
-
-                        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                            let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
-
-                            Ok(Box::new(TableFunctionExecutor {
-                                schema,
-                                identity,
-                                table_function: TableFunction::GenerateSeriesInt(GenerateSeries {
-                                    start,
-                                    stop,
-                                    step,
-                                }),
-                            }))
-                        } else {
-                            Err(ErrorCode::InternalError(
-                                "the parameters of Generate Series Function are incorrect"
-                                    .to_string(),
-                            )
-                            .into())
-                        }
-                    }
-                    _ => Err(ErrorCode::InternalError(
-                        "the parameters of Generate Series Function are incorrect".to_string(),
-                    )
-                    .into()),
-                }
-            }
-            Unnest => {
-                let schema = Schema::new(vec![Field::unnamed(return_type.clone())]);
-                Ok(Box::new(TableFunctionExecutor {
-                    schema,
-                    identity,
-                    table_function: TableFunction::Unnest(Unnest {
-                        array_refs,
-                        return_type,
-                    }),
-                }))
-            }
-        }
+        let return_type = DataType::from(node.return_type.as_ref().unwrap());
+        let (schema, table_function) = match node.get_function_type()? {
+            Generate => TableFunctionExecutorBuilder::new_generate_series(array_refs, return_type)?,
+            Unnest => (
+                Schema::new(vec![Field::unnamed(return_type.clone())]),
+                TableFunction::Unnest(Unnest {
+                    array_refs,
+                    return_type,
+                }),
+            ),
+        };
+        Ok(Box::new(TableFunctionExecutor {
+            schema,
+            identity,
+            table_function,
+        }))
     }
 }
 

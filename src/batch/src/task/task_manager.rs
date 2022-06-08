@@ -261,7 +261,7 @@ mod tests {
                 children: vec![],
                 identity: "".to_string(),
                 node_body: Some(NodeBody::TableFunction(TableFunctionNode {
-                    series_type: Type::Generate as i32,
+                    function_type: Type::Generate as i32,
                     args: vec![
                         make_i32_literal(1),
                         make_i32_literal(i32::MAX),
@@ -269,7 +269,7 @@ mod tests {
                     ],
                     // This is a bit hacky as we want to make sure the task lasts long enough
                     // for us to abort it.
-                    data_type: Some(DataType::Int32.to_protobuf()),
+                    return_type: Some(DataType::Int32.to_protobuf()),
                 })),
             }),
             exchange_info: Some(ExchangeInfo {
