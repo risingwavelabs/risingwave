@@ -154,6 +154,9 @@ mod test {
 
     use super::*;
     use crate::executor::mview::test_utils::gen_basic_table;
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
 
     #[tokio::test]
     async fn test_basic() {
@@ -173,13 +176,24 @@ mod test {
             }
             builder.finish()
         };
+        let pk_descs = Arc::new(vec![
+            OrderedColumnDesc {
+                column_desc: ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+                order: OrderType::Ascending,
+            },
+            OrderedColumnDesc {
+                column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+                order: OrderType::Descending,
+            },
+        ]);
+
         let executor = Box::new(BatchQueryExecutor::new(
             table,
             Some(test_batch_size),
             info,
             vec![],
             hash_filter,
-            Arc::new(vec![]), // TODO: update
+            pk_descs,
         ));
 
         let stream = executor.execute_with_epoch(u64::MAX);
