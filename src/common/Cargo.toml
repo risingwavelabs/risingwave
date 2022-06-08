@@ -14,6 +14,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 comfy-table = "6"
 crc32fast = "1"
 either = "1"
+fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"

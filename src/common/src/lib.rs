@@ -34,6 +34,7 @@
 #![feature(fn_traits)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
+#![feature(custom_test_frameworks)]
 #![feature(trusted_len)]
 #![feature(allocator_api)]
 
@@ -52,9 +53,12 @@ pub mod consistent_hash;
 pub mod hash;
 pub mod monitor;
 pub mod service;
+pub mod test_runner;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;
+
+extern crate test;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};

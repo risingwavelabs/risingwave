@@ -36,7 +36,7 @@
 #![feature(custom_test_frameworks)]
 #![feature(result_option_inspect)]
 #![feature(generators)]
-#![test_runner(hummock::test_runner::run_failpont_tests)]
+#![test_runner(risingwave_common::test_runner::run_failpont_tests)]
 
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
