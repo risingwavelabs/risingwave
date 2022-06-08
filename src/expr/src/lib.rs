@@ -31,6 +31,12 @@
 #![feature(backtrace)]
 #![feature(fn_traits)]
 #![feature(assert_matches)]
+#![feature(let_else)]
 
+pub mod error;
 pub mod expr;
 pub mod vector_op;
+
+pub use error::ExprError;
+pub type Result<T> = std::result::Result<T, ExprError>;
+pub type ExprResult<T> = Result<T>;

@@ -23,6 +23,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::ExprResult;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{
@@ -121,7 +122,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
                 .get_cells()
                 .iter()
                 .map(build_from_prost)
-                .collect::<Result<Vec<BoxedExpression>>>()?;
+                .collect::<ExprResult<Vec<BoxedExpression>>>()?;
             rows.push(expr_row);
         }
 

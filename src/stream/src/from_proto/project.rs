@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::ExprResult;
 
 use super::*;
 use crate::executor::ProjectExecutor;
@@ -31,7 +32,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             .get_select_list()
             .iter()
             .map(build_from_prost)
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<ExprResult<Vec<_>>>()?;
 
         Ok(ProjectExecutor::new(
             params.input.remove(0),
