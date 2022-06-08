@@ -12,13 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 
-use bytes::Bytes;
 use madsim::collections::{btree_map, BTreeMap};
-use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-use risingwave_storage::{Keyspace, StateStore};
 
 use super::*;
 
@@ -31,64 +26,18 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 /// We manages a `BTreeMap` in memory for all entries belonging to a join key,
 /// since each `WriteBatch` is an ordered list of key-value pairs.
 /// When evicted, `BTreeMap` does not hold any entries.
-pub struct JoinEntryState<S: StateStore> {
+pub struct JoinEntryState {
     /// The full copy of the state. If evicted, it will be `None`.
     cached: BTreeMap<PkType, StateValueType>,
-
-    /// Data types of the sort column
-    data_types: Arc<[DataType]>,
-
-    /// Data types of primary keys
-    pk_data_types: Arc<[DataType]>,
-
-    /// The keyspace to operate on.
-    keyspace: Keyspace<S>,
 }
 
-impl<S: StateStore> JoinEntryState<S> {
-    pub fn new(
-        keyspace: Keyspace<S>,
-        data_types: Arc<[DataType]>,
-        pk_data_types: Arc<[DataType]>,
+impl JoinEntryState {
+    pub fn with_cached(
+        cached: BTreeMap<PkType, StateValueType>
     ) -> Self {
         Self {
-            cached: BTreeMap::new(),
-            data_types,
-            pk_data_types,
-            keyspace,
+            cached,
         }
-    }
-
-    pub async fn with_cached_state(
-        keyspace: Keyspace<S>,
-        data_types: Arc<[DataType]>,
-        pk_data_types: Arc<[DataType]>,
-        epoch: u64,
-    ) -> Result<Option<Self>> {
-        let all_data = keyspace.scan(None, epoch).await?;
-        if !all_data.is_empty() {
-            // Insert cached states.
-            let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
-            Ok(Some(Self {
-                cached,
-                data_types,
-                pk_data_types,
-                keyspace,
-            }))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn fill_cached(
-        data: Vec<(Bytes, Bytes)>,
-        data_types: Arc<[DataType]>,
-        pk_data_types: Arc<[DataType]>,
-    ) -> Result<BTreeMap<PkType, StateValueType>> {
-        let mut cached = BTreeMap::new();
-        
-
-        Ok(cached)
     }
 
     /// If the cache is empty
@@ -106,16 +55,16 @@ impl<S: StateStore> JoinEntryState<S> {
     }
 
     #[allow(dead_code)]
-    pub async fn iter(&mut self, epoch: u64) -> JoinEntryStateIter<'_> {
+    pub fn iter(&mut self) -> JoinEntryStateIter<'_> {
         self.cached.iter()
     }
 
     #[allow(dead_code)]
-    pub async fn values(&mut self, epoch: u64) -> JoinEntryStateValues<'_> {
+    pub fn values(&mut self) -> JoinEntryStateValues<'_> {
         self.cached.values()
     }
 
-    pub async fn values_mut(&mut self, epoch: u64) -> JoinEntryStateValuesMut<'_> {
+    pub fn values_mut(&mut self) -> JoinEntryStateValuesMut<'_> {
         self.cached.values_mut()
     }
 }
@@ -123,21 +72,13 @@ impl<S: StateStore> JoinEntryState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::*;
-    use risingwave_common::catalog::TableId;
     use risingwave_common::types::ScalarImpl;
-    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
 
     #[tokio::test]
     async fn test_managed_all_or_none_state() {
-        let store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
-        let mut managed_state = JoinEntryState::new(
-            keyspace,
-            vec![DataType::Int64, DataType::Int64].into(),
-            vec![DataType::Int64].into(),
-        );
+        let mut managed_state = JoinEntryState::with_cached(BTreeMap::new());
         let pk_indices = [0];
         let col1 = [1, 2, 3];
         let col2 = [6, 5, 4];
@@ -156,10 +97,8 @@ mod tests {
             managed_state.insert(pk, join_row);
         }
 
-        let epoch = 0;
         for state in managed_state
-            .iter(epoch)
-            .await
+            .iter()
             .zip_eq(col1.iter().zip_eq(col2.iter()))
         {
             let ((key, value), (d1, d2)) = state;

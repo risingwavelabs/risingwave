@@ -315,6 +315,16 @@ impl Row {
         }
         Ok(HashCode(hasher.finish()))
     }
+
+    /// Get an owned `Row` by the given `indices` from current row.
+    ///
+    /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
+    pub fn by_indices(&self, indices: &[usize]) -> Row {
+        Row(indices
+            .iter()
+            .map(|&idx| self.0[idx].clone())
+            .collect_vec())
+    }
 }
 
 /// Deserializer of the `Row`.

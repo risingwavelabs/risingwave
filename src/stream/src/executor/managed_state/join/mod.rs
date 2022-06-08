@@ -14,16 +14,17 @@
 
 mod join_entry_state;
 use std::alloc::Global;
+use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut, Index};
-use std::sync::Arc;
 
+use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::error::{ErrorCode, Result as RwResult};
+use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::OrderType;
@@ -83,32 +84,28 @@ impl JoinRow {
             .collect_vec())
     }
 
-    /// Serialize the `JoinRow` into a value encoding bytes.
-    pub fn serialize(&self) -> RwResult<Vec<u8>> {
-        let mut vec = Vec::with_capacity(10);
-
-        // Serialize row.
-        vec.extend(self.row.value_encode()?);
-
-        // Serialize degree.
-        vec.extend(self.degree.to_le_bytes());
-
-        Ok(vec)
-    }
-
+    /// Make degree as the last datum of row
     pub fn into_row(mut self) -> Row {
         self.row.0.push(Some(ScalarImpl::Int64(self.degree)));
         self.row
+    }
+
+    /// Convert [`Row`] with last datum as degree to [`JoinRow`]
+    pub fn from_row(row: Row) -> Self {
+        let mut datums = row.0;
+        let degree_datum = datums.pop().expect("missing degree in JoinRow").expect("degree should not be null");
+        let degree = degree_datum.into_int64();
+        JoinRow { row: Row(datums), degree }
     }
 }
 
 type PkType = Row;
 
 pub type StateValueType = JoinRow;
-pub type HashValueType<S> = JoinEntryState<S>;
+pub type HashValueType = JoinEntryState;
 
-type JoinHashMapInner<K, S> =
-    EvictableHashMap<K, HashValueType<S>, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+type JoinHashMapInner<K> =
+    EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Allocator
@@ -116,15 +113,11 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Store the join states.
     // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
     // itself. Use the field is safe iff the struct is constructed with [`moveit`](https://crates.io/crates/moveit)'s way.
-    inner: JoinHashMapInner<K, S>,
+    inner: JoinHashMapInner<K>,
     /// Data types of the columns
-    data_types: Arc<[DataType]>,
-    /// Data types of the columns
-    join_key_data_types: Arc<[DataType]>,
-    /// Data types of primary keys
-    pk_data_types: Arc<[DataType]>,
-    /// The keyspace to operate on.
-    keyspace: Keyspace<S>,
+    join_key_data_types: Vec<DataType>,
+    /// Indices of the primary keys
+    pk_indices: Vec<usize>,
     /// Current epoch
     current_epoch: u64,
     /// State table
@@ -141,10 +134,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         keyspace: Keyspace<S>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        let pk_data_types = pk_indices
-            .iter()
-            .map(|idx| data_types[*idx].clone())
-            .collect_vec();
         let join_key_data_types = join_key_indices
             .iter()
             .map(|idx| data_types[*idx].clone())
@@ -171,10 +160,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 PrecomputedBuildHasher,
                 alloc.clone(),
             ),
-            data_types: data_types.into(),
-            join_key_data_types: join_key_data_types.into(),
-            pk_data_types: pk_data_types.into(),
-            keyspace,
+            join_key_data_types,
+            pk_indices,
             current_epoch: 0,
             state_table,
             alloc,
@@ -192,17 +179,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.current_epoch = epoch;
     }
 
-    fn get_state_keyspace(&self, key: &K) -> RwResult<Keyspace<S>> {
-        // TODO: in pure in-memory engine, we should not do this serialization.
-        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
-        let key_encoded = key.serialize().unwrap();
-        Ok(self.keyspace.append(key_encoded))
-    }
-
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
     #[allow(dead_code)]
-    pub async fn get(&mut self, key: &K) -> Option<&HashValueType<S>> {
+    pub async fn get(&mut self, key: &K) -> Option<&HashValueType> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -219,7 +199,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
-    pub async fn get_mut(&mut self, key: &K) -> Option<&mut HashValueType<S>> {
+    pub async fn get_mut(&mut self, key: &K) -> Option<&mut HashValueType> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -253,27 +233,25 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
-    async fn fetch_cached_state(&self, key: &K) -> RwResult<Option<JoinEntryState<S>>> {
-        let keyspace = self.get_state_keyspace(key)?;
+    async fn fetch_cached_state(&self, key: &K) -> RwResult<Option<JoinEntryState>> {
         let key = key.clone().deserialize(self.join_key_data_types.iter())?;
         
         let table_iter = self.state_table.iter_with_pk_prefix(key, self.current_epoch)?;
-        
+        pin_mut!(table_iter);
+
+        let mut cached = BTreeMap::new();
         #[for_await]
         for row in table_iter {
+            let row = row?.into_owned();
+            let pk = row.by_indices(&self.pk_indices);
 
+            cached.insert(pk, JoinRow::from_row(row));
         }
-        JoinEntryState::with_cached_state(
-            keyspace,
-            self.data_types.clone(),
-            self.pk_data_types.clone(),
-            self.current_epoch,
-        )
-        .await
+        Ok(Some(JoinEntryState::with_cached(cached)))
     }
 
-    pub async fn flush(&mut self) {
-        self.state_table.commit_with_value_meta(self.current_epoch).await;
+    pub async fn flush(&mut self) -> RwResult<()> {
+        self.state_table.commit_with_value_meta(self.current_epoch).await.map_err(|e| RwError::from(e))
     }
 
     /// Insert a key
@@ -300,7 +278,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> Deref for JoinHashMap<K, S> {
-    type Target = JoinHashMapInner<K, S>;
+    type Target = JoinHashMapInner<K>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner

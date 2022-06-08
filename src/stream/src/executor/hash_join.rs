@@ -123,8 +123,6 @@ struct JoinSide<K: HashKey, S: StateStore> {
     col_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
-    /// The join side operates on this keyspace.
-    keyspace: Keyspace<S>,
 }
 
 impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
@@ -426,14 +424,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_l.clone(),
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
-                    ks_l.clone(),
+                    ks_l,
                     Some(distribution_keys.clone()),
                 ), // TODO: decide the target cap
                 key_indices: params_l.key_indices,
                 col_types: col_l_datatypes,
                 pk_indices: pk_indices_l,
                 start_pos: 0,
-                keyspace: ks_l,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -441,14 +438,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_r.clone(),
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
-                    ks_r.clone(),
+                    ks_r,
                     Some(distribution_keys),
                 ), // TODO: decide the target cap
                 key_indices: params_r.key_indices,
                 col_types: col_r_datatypes,
                 pk_indices: pk_indices_r,
                 start_pos: side_l_column_n,
-                keyspace: ks_r,
             },
             pk_indices,
             cond,
@@ -470,7 +466,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 AlignedMessage::Left(chunk) => {
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Left }>(
-                        self.epoch,
                         &mut self.side_l,
                         &mut self.side_r,
                         &self.output_data_types,
@@ -484,7 +479,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 AlignedMessage::Right(chunk) => {
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Right }>(
-                        self.epoch,
                         &mut self.side_l,
                         &mut self.side_r,
                         &self.output_data_types,
@@ -510,8 +504,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     }
 
     async fn flush_data(&mut self) -> Result<()> {
-        self.side_l.ht.flush().await;
-        self.side_r.ht.flush().await;
+        self.side_l.ht.flush().await?;
+        self.side_r.ht.flush().await?;
 
         // evict the LRU cache
         assert!(!self.side_l.is_dirty());
@@ -526,7 +520,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     async fn hash_eq_match<'a>(
         key: &'a K,
         ht: &'a mut JoinHashMap<K, S>,
-    ) -> Option<&'a mut HashValueType<S>> {
+    ) -> Option<&'a mut HashValueType> {
         if key.has_null() {
             None
         } else {
@@ -563,7 +557,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
     #[try_stream(ok = Message, error = RwError)]
     async fn eq_join_oneside<'a, const SIDE: SideTypePrimitive>(
-        epoch: u64,
         mut side_l: &'a mut JoinSide<K, S>,
         mut side_r: &'a mut JoinSide<K, S>,
         output_data_types: &'a [DataType],
@@ -623,7 +616,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let mut degree = 0;
                     let mut matched_pks: Vec<Row> = Vec::with_capacity(1);
                     if let Some(matched_rows) = matched_rows.as_mut() {
-                        for matched_row in (*matched_rows).values_mut(epoch).await {
+                        for matched_row in (*matched_rows).values_mut() {
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
                                 if !forward_exactly_once(T, SIDE) {
@@ -681,7 +674,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     if let Some(matched_rows) = matched_rows {
                         let mut matched = false;
-                        for matched_row in matched_rows.values_mut(epoch).await {
+                        for matched_row in matched_rows.values_mut() {
                             if check_join_condition(&row, &matched_row.row)? {
                                 matched = true;
                                 matched_row.dec_degree()?;
