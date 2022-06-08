@@ -19,7 +19,9 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
@@ -84,7 +86,7 @@ impl RowSeqScanExecutorBuilder {
     pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 }
 
-fn get_scan_bound(scan_range: ScanRange) -> (Row, Option<impl RangeBounds<Row>>) {
+fn get_scan_bound(scan_range: ScanRange) -> (Row, Option<impl RangeBounds<Datum>>) {
     let pk_prefix_value = Row(scan_range
         .eq_conds
         .iter()
@@ -94,17 +96,14 @@ fn get_scan_bound(scan_range: ScanRange) -> (Row, Option<impl RangeBounds<Row>>)
         return (pk_prefix_value, None);
     }
 
-    let build_bound = |bound: &scan_range::range::Bound| -> Bound<Row> {
-        let mut row = pk_prefix_value.clone();
-        row.0.push(
-            LiteralExpression::try_from(bound.value.as_ref().unwrap())
-                .unwrap()
-                .literal(),
-        );
+    let build_bound = |bound: &scan_range::range::Bound| -> Bound<Datum> {
+        let datum = LiteralExpression::try_from(bound.value.as_ref().unwrap())
+            .unwrap()
+            .literal();
         if bound.inclusive {
-            Bound::Included(row)
+            Bound::Included(datum)
         } else {
-            Bound::Excluded(row)
+            Bound::Excluded(datum)
         }
     };
 
@@ -113,13 +112,13 @@ fn get_scan_bound(scan_range: ScanRange) -> (Row, Option<impl RangeBounds<Row>>)
         upper_bound,
     } = scan_range.range.as_ref().unwrap();
 
-    let pk_bounds: (Bound<Row>, Bound<Row>) = match (lower_bound, upper_bound) {
+    let next_col_bounds: (Bound<Datum>, Bound<Datum>) = match (lower_bound, upper_bound) {
         (Some(lb), Some(ub)) => (build_bound(lb), build_bound(ub)),
         (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)),
         (Some(lb), None) => (build_bound(lb), Bound::Unbounded),
         (None, None) => unreachable!(),
     };
-    (pk_prefix_value, Some(pk_bounds))
+    (pk_prefix_value, Some(next_col_bounds))
 }
 
 #[async_trait::async_trait]
@@ -147,11 +146,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .collect_vec();
         let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().pk;
         let pk_descs: Vec<OrderedColumnDesc> = pk_descs_proto.iter().map(|d| d.into()).collect();
-        let ordered_row_serializer =
-            OrderedRowSerializer::new(pk_descs.iter().map(|desc| desc.order).collect());
+        let order_types: Vec<OrderType> = pk_descs.iter().map(|desc| desc.order).collect();
+        let ordered_row_serializer = OrderedRowSerializer::new(order_types);
 
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
-        let (pk_prefix_value, pk_bounds) = get_scan_bound(scan_range.clone());
+        let (pk_prefix_value, next_col_bounds) = get_scan_bound(scan_range.clone());
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
@@ -173,13 +172,18 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 ScanType::PointGet(row)
             } else {
                 assert!(pk_prefix_value.size() < pk_descs.len());
-                let iter = match pk_bounds {
+
+                let iter = match next_col_bounds {
                     None => {
                         table
                             .iter_with_pk_prefix(source.epoch, pk_prefix_value)
                             .await?
                     }
-                    Some(pk_bounds) => table.iter_with_pk_bounds(source.epoch, pk_bounds).await?,
+                    Some(next_col_bounds) => {
+                        table
+                            .iter_with_pk_bounds(source.epoch, pk_prefix_value, next_col_bounds)
+                            .await?
+                    }
                 };
                 ScanType::RangeScan(iter)
             };

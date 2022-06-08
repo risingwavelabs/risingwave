@@ -20,10 +20,12 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use log::debug;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
 use risingwave_common::error::RwError;
+use risingwave_common::types::Datum;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -333,28 +335,63 @@ impl<S: StateStore> CellBasedTable<S> {
         .await
     }
 
-    fn serialized_pk_bound(&self, pk_bound: Bound<&Row>) -> StorageResult<Bound<Vec<u8>>> {
+    fn serialized_pk_bound(
+        &self,
+        pk_prefix: &Row,
+        next_col_bound: Bound<&Datum>,
+        is_start_bound: bool,
+    ) -> StorageResult<Bound<Vec<u8>>> {
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        Ok(match pk_bound {
-            Included(k) => Included(
-                self.keyspace
-                    .prefixed_key(&serialize_pk(k, pk_serializer).map_err(err)?),
-            ),
-            Excluded(k) => Excluded(
-                self.keyspace
-                    .prefixed_key(&serialize_pk(k, pk_serializer).map_err(err)?),
-            ),
-            Unbounded => Unbounded,
+        Ok(match next_col_bound {
+            Included(k) => {
+                let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                let mut key = pk_prefix.clone();
+                key.0.push(k.clone());
+                Included(
+                    self.keyspace
+                        .prefixed_key(&serialize_pk(&key, &pk_prefix_serializer).map_err(err)?),
+                )
+            }
+            Excluded(k) => {
+                let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                let mut key = pk_prefix.clone();
+                key.0.push(k.clone());
+                Excluded(
+                    self.keyspace
+                        .prefixed_key(&serialize_pk(&key, &pk_prefix_serializer).map_err(err)?),
+                )
+            }
+            Unbounded => {
+                if pk_prefix.size() == 0 {
+                    Unbounded
+                } else {
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+                    let serialized_pk_prefix =
+                        serialize_pk(&pk_prefix, &pk_prefix_serializer).map_err(err)?;
+                    if is_start_bound {
+                        Included(self.keyspace.prefixed_key(&serialized_pk_prefix))
+                    } else {
+                        Excluded(self.keyspace.prefixed_key(&next_key(&serialized_pk_prefix)))
+                    }
+                }
+            }
         })
     }
 
     pub async fn iter_with_pk_bounds(
         &self,
         epoch: u64,
-        pk_bounds: impl RangeBounds<Row>,
+        pk_prefix: Row,
+        next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<CellBasedTableRowIter<S>> {
-        let start_key = self.serialized_pk_bound(pk_bounds.start_bound())?;
-        let end_key = self.serialized_pk_bound(pk_bounds.end_bound())?;
+        let start_key =
+            self.serialized_pk_bound(&pk_prefix, next_col_bounds.start_bound(), true)?;
+        let end_key = self.serialized_pk_bound(&pk_prefix, next_col_bounds.end_bound(), false)?;
+
+        debug!(
+            "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
+            start_key, end_key
+        );
 
         CellBasedTableRowIter::new_with_bounds(
             &self.keyspace,
@@ -372,9 +409,15 @@ impl<S: StateStore> CellBasedTable<S> {
         pk_prefix: Row,
     ) -> StorageResult<CellBasedTableRowIter<S>> {
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let serialized_pk_prefix = &serialize_pk(&pk_prefix, pk_serializer).map_err(err)?[..];
+        let prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+        let serialized_pk_prefix = &serialize_pk(&pk_prefix, &prefix_serializer).map_err(err)?[..];
         let start_key = Included(self.keyspace.prefixed_key(&serialized_pk_prefix));
-        let next_key = Excluded(next_key(serialized_pk_prefix));
+        let next_key = Excluded(self.keyspace.prefixed_key(next_key(serialized_pk_prefix)));
+
+        debug!(
+            "iter_with_pk_prefix: start_key: {:?}, next_key: {:?}",
+            start_key, next_key
+        );
 
         CellBasedTableRowIter::new_with_bounds(
             &self.keyspace,
