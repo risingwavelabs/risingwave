@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t1 (v1 int, v2 int, v3 int);
 
 statement ok
@@ -24,9 +27,6 @@ select avg_v1, sum_v2, count_v3 from mv2;
 statement ok
 insert into t1 values (3,4,4), (4,3,5);
 
-statement ok
-flush;
-
 query RII
 select avg_v1, sum_v2, count_v3 from mv2;
 ----
@@ -50,3 +50,47 @@ drop table t1
 
 statement ok
 drop table t4
+
+statement ok
+create table t (v1 interval, v2 timestamp, v3 varchar, v4 date);
+
+statement ok
+create materialized view mv1 as select max(v1) as a1, max(v2) as a2, max(v3) as a3, max(v4) as a4 from t;
+
+statement ok
+create materialized view mv2 as select min(v1) as a1, min(v2) as a2, min(v3) as a3, min(v4) as a4 from t;
+
+statement ok
+create materialized view mv3 as select count(v1) as a1, count(v2) as a2, count(v3) as a3, count(v4) as a4 from t;
+
+statement ok
+insert into t values (interval '1' minute, timestamp '2001-02-16 20:38:40', 'abc', date '2001-02-16');
+
+query TTTTTT
+select max(v1), max(v2), max(v3), max(v4) from t;
+----
+00:01:00   2001-02-16 20:38:40   abc   2001-02-16
+
+query TTTTTT
+select * from mv1;
+----
+00:01:00   2001-02-16 20:38:40   abc   2001-02-16
+
+query TTTTTT
+select * from mv2;
+----
+00:01:00   2001-02-16 20:38:40   abc   2001-02-16
+
+query TTTT
+select * from mv3;
+----
+1 1 1 1
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
