@@ -24,7 +24,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{Executor, ExecutorInfo, Message};
-use crate::executor::{Arc, BoxedMessageStream};
+use crate::executor::BoxedMessageStream;
 
 pub struct BatchQueryExecutor<S: StateStore> {
     /// The [`CellBasedTable`] that needs to be queried
@@ -43,7 +43,7 @@ pub struct BatchQueryExecutor<S: StateStore> {
 
     /// public key field descriptors. Used to decode pk into datums
     /// for dedup pk encoding.
-    pk_descs: Arc<Vec<OrderedColumnDesc>>,
+    pk_descs: Vec<OrderedColumnDesc>,
 }
 
 impl<S> BatchQueryExecutor<S>
@@ -58,7 +58,7 @@ where
         info: ExecutorInfo,
         key_indices: Vec<usize>,
         hash_filter: Bitmap,
-        pk_descs: Arc<Vec<OrderedColumnDesc>>,
+        pk_descs: Vec<OrderedColumnDesc>,
     ) -> Self {
         Self {
             table,
@@ -175,7 +175,7 @@ mod test {
             }
             builder.finish()
         };
-        let pk_descs = Arc::new(vec![
+        let pk_descs = vec![
             OrderedColumnDesc {
                 column_desc: ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
                 order: OrderType::Ascending,
@@ -184,7 +184,7 @@ mod test {
                 column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
                 order: OrderType::Descending,
             },
-        ]);
+        ];
 
         let executor = Box::new(BatchQueryExecutor::new(
             table,

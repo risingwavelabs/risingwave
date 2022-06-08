@@ -82,7 +82,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             },
             key_indices,
             hash_filter,
-            Arc::new(pk_descs),
+            pk_descs,
         );
 
         Ok(executor.boxed())
