@@ -289,6 +289,11 @@ pub fn new_unary_expr(
             return_type,
             ascii,
         )),
+        (ProstType::CharLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+            child_expr,
+            return_type,
+            length_default,
+        )),
         (ProstType::Neg, _, _) => {
             gen_unary_atm_expr! { "Neg", child_expr, return_type, general_neg,
                 {
@@ -334,7 +339,7 @@ pub fn new_unary_expr(
 }
 
 pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryExpression::<Utf8Array, I64Array, _>::new(
+    Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         return_type,
         length_default,
