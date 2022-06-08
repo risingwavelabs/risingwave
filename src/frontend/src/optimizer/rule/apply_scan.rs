@@ -14,15 +14,13 @@
 
 use std::collections::HashMap;
 
-use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::optimizer::PlanRef;
-use crate::utils::{ColIndexMapping, Condition};
 
 pub struct ApplyScan {}
 impl Rule for ApplyScan {
@@ -43,7 +41,7 @@ impl Rule for ApplyScan {
         let mut column_mapping = HashMap::new();
         on.conjunctions.iter().for_each(|expr| {
             if let ExprImpl::FunctionCall(func_call) = expr {
-                if let Some((left, right, data_type)) = Self::check(func_call) {
+                if let Some((left, right, data_type)) = Self::check(func_call, apply_left_len) {
                     column_mapping.insert(left, (right, data_type));
                 }
             }
@@ -70,25 +68,10 @@ impl Rule for ApplyScan {
                     .map(|(index, data_type)| InputRef::new(index, data_type).into()),
             );
             let project = LogicalProject::create(right, exprs);
-            // TODO: add LogicalFilter here to do null-check.
+            // TODO: add LogicalFilter here.
             Some(project)
         } else {
-            let mut index_mapping =
-                ColIndexMapping::new(correlated_indices.into_iter().map(Some).collect_vec())
-                    .inverse();
-            let rewritten_exprs = on
-                .into_iter()
-                .map(|expr| index_mapping.rewrite_expr(expr))
-                .collect();
-
-            let join = LogicalJoin::new(
-                left,
-                right,
-                join_type,
-                Condition {
-                    conjunctions: rewritten_exprs,
-                },
-            );
+            let join = LogicalJoin::new(left, right, join_type, on);
             Some(join.into())
         }
     }
@@ -99,18 +82,26 @@ impl ApplyScan {
         Box::new(ApplyScan {})
     }
 
-    /// Check whether the `func_call` is like `CorrelatedInputRef` = `InputRef`.
-    fn check(func_call: &FunctionCall) -> Option<(usize, usize, DataType)> {
+    /// Check whether the `func_call` is like v1 = v2, in which v1 and v2 belong respectively to
+    /// `LogicalApply`'s left and right.
+    fn check(func_call: &FunctionCall, apply_left_len: usize) -> Option<(usize, usize, DataType)> {
         let inputs = func_call.inputs();
         if func_call.get_expr_type() == ExprType::Equal && inputs.len() == 2 {
             let left = &inputs[0];
             let right = &inputs[1];
             match (left, right) {
-                (ExprImpl::CorrelatedInputRef(left), ExprImpl::InputRef(right)) => {
-                    Some((left.index(), right.index(), right.return_type()))
-                }
-                (ExprImpl::InputRef(right), ExprImpl::CorrelatedInputRef(left)) => {
-                    Some((left.index(), right.index(), right.return_type()))
+                (ExprImpl::InputRef(left), ExprImpl::InputRef(right)) => {
+                    let left_type = left.return_type();
+                    let left = left.index();
+                    let right_type = right.return_type();
+                    let right = right.index();
+                    if left < apply_left_len && right >= apply_left_len {
+                        Some((left, right, right_type))
+                    } else if left >= apply_left_len && right < apply_left_len {
+                        Some((right, left, left_type))
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
             }

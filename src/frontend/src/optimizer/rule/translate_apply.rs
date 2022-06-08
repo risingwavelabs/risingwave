@@ -19,7 +19,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalScan, PlanTreeNodeBinary,
     PlanTreeNodeUnary,
@@ -86,7 +86,7 @@ impl Rule for TranslateApply {
                 .into()
             })
             .collect::<Vec<ExprImpl>>();
-        let on = on.and(Condition {
+        let on = Self::rewrite_on(on, correlated_indices_len, apply_left_len).and(Condition {
             conjunctions: eq_predicates,
         });
 
@@ -202,7 +202,9 @@ impl TranslateApply {
             (false, false) => {
                 let left = rewrite(join.left(), left_idxs, false)?;
                 let right = rewrite(join.right(), right_idxs, true)?;
-                let new_join = join.clone_with_left_right(left, right);
+                // let new_join = join.clone_with_left_right(left, right);
+                let new_join =
+                    LogicalJoin::new(left, right, join.join_type(), Condition::true_cond());
                 Some(new_join.into())
             }
             _ => None,
@@ -228,5 +230,32 @@ impl TranslateApply {
         }
 
         Some(scan.clone_with_output_indices(required_col_idx).into())
+    }
+
+    fn rewrite_on(on: Condition, offset: usize, apply_left_len: usize) -> Condition {
+        struct Rewriter {
+            offset: usize,
+            apply_left_len: usize,
+        }
+        impl ExprRewriter for Rewriter {
+            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                let index = input_ref.index();
+                if index >= self.apply_left_len {
+                    InputRef::new(index + self.offset, input_ref.return_type()).into()
+                } else {
+                    input_ref.into()
+                }
+            }
+        }
+        let mut rewriter = Rewriter {
+            offset,
+            apply_left_len,
+        };
+        Condition {
+            conjunctions: on
+                .into_iter()
+                .map(|expr| rewriter.rewrite_expr(expr))
+                .collect_vec(),
+        }
     }
 }
