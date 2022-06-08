@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use madsim::collections::btree_map;
+use madsim::collections::{btree_map, hash_map};
 
 macro_rules! impl_flush_status {
     ([], $( { $entry_type:ty, $struct_name:ident } ),*) => {
@@ -110,8 +110,8 @@ macro_rules! for_all_entry {
         ($macro:ident $(, $x:tt)*) => {
                 $macro! {
                         [$($x),*],
-                        { btree_map::Entry<K, Self>, BtreeMapFlushStatus }
-                        // { hash_map::Entry<K, Self>, HashMapFlushStatus }
+                        { btree_map::Entry<K, Self>, BtreeMapFlushStatus },
+                        { hash_map::Entry<K, Self>, HashMapFlushStatus }
                 }
         };
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -23,7 +24,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
+use super::super::flush_status::HashMapFlushStatus as FlushStatus;
 use super::*;
 
 type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
@@ -40,7 +41,7 @@ pub struct JoinEntryState<S: StateStore> {
     cached: Option<BTreeMap<PkType, StateValueType>>,
 
     /// The actions that will be taken on next flush
-    flush_buffer: BTreeMap<PkType, FlushStatus<StateValueType>>,
+    flush_buffer: HashMap<PkType, FlushStatus<StateValueType>>,
 
     /// Data types of the sort column
     data_types: Arc<[DataType]>,
@@ -60,7 +61,7 @@ impl<S: StateStore> JoinEntryState<S> {
     ) -> Self {
         Self {
             cached: None,
-            flush_buffer: BTreeMap::new(),
+            flush_buffer: HashMap::new(),
             data_types,
             pk_data_types,
             keyspace,
@@ -79,7 +80,7 @@ impl<S: StateStore> JoinEntryState<S> {
             let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
             Ok(Some(Self {
                 cached: Some(cached),
-                flush_buffer: BTreeMap::new(),
+                flush_buffer: HashMap::new(),
                 data_types,
                 pk_data_types,
                 keyspace,
