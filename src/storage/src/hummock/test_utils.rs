@@ -54,6 +54,7 @@ pub fn default_config_for_test() -> StorageConfig {
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
         enable_compression: true,
+        share_buffer_upload_concurrency: 1,
     }
 }
 
