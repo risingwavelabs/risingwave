@@ -19,7 +19,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
 
-  - label: "end-to-end test"
+  - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p dev"
     depends_on: "build"
     plugins:
