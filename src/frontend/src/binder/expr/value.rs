@@ -322,4 +322,56 @@ mod tests {
         let expr = build_from_prost(&expr_pb).unwrap();
         assert_eq!(expr.return_type(), DataType::Int32);
     }
+
+    #[test]
+    fn test_bind_interval() {
+        use super::*;
+
+        let mut binder = mock_binder();
+        let values = vec![
+            "1 hour",
+            "1 h",
+            "1 year",
+            "6 second",
+            "2 minutes",
+            "1 month",
+        ];
+        let data = vec![
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_ymd(1, 0, 0))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_millis(6 * 1000))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(2))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_month(1))),
+                DataType::Interval,
+            )),
+        ];
+
+        for i in 0..values.len() {
+            let value = Value::Interval {
+                value: values[i].to_string(),
+                leading_field: None,
+                leading_precision: None,
+                last_field: None,
+                fractional_seconds_precision: None,
+            };
+            assert_eq!(binder.bind_value(value), data[i]);
+        }
+    }
 }
