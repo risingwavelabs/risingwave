@@ -41,8 +41,9 @@ use risingwave_pb::hummock::{
     PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
     ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
     ReportVacuumTaskResponse, SstableInfo, SubscribeCompactTasksRequest,
-    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
-    UnpinVersionRequest, UnpinVersionResponse, VacuumTask,
+    SubscribeCompactTasksResponse, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse,
+    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
+    VacuumTask,
 };
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -254,12 +255,12 @@ impl MetaClient {
 
     pub async fn grant_privilege(
         &self,
-        user_name: &str,
+        users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
-            user_name: user_name.to_string(),
+            users,
             privileges,
             with_grant_option,
         };
@@ -269,12 +270,12 @@ impl MetaClient {
 
     pub async fn revoke_privilege(
         &self,
-        user_name: &str,
+        users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         revoke_grant_option: bool,
     ) -> Result<u64> {
         let request = RevokePrivilegeRequest {
-            user_name: user_name.to_string(),
+            users,
             privileges,
             revoke_grant_option,
         };
@@ -402,6 +403,18 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
+    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()> {
+        let req = UnpinSnapshotBeforeRequest {
+            context_id: self.worker_id(),
+            // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
+            min_snapshot: Some(HummockSnapshot {
+                epoch: pinned_epochs,
+            }),
+        };
+        self.inner.unpin_snapshot_before(req).await?;
+        Ok(())
+    }
+
     async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         let resp = self.inner.get_new_table_id(GetNewTableIdRequest {}).await?;
         Ok(resp.table_id)
@@ -517,6 +530,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
+            ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }

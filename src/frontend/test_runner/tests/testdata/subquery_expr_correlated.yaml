@@ -20,8 +20,7 @@
           LogicalAgg { group_keys: [0, 1, 2], agg_calls: [min($3)] }
             LogicalJoin { type: LeftOuter, on: ($2 = $4), output_indices: [0, 1, 2, 3] }
               LogicalScan { table: t1, columns: [_row_id, x, y] }
-              LogicalFilter { predicate: ($1 = 1000:Int32) }
-                LogicalScan { table: t2, columns: [x, y] }
+              LogicalScan { table: t2, output_columns: [x, y], required_columns: [$1:x, $2:y], predicate: ($2 = 1000:Int32) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -77,8 +76,7 @@
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: ($0 = $2) AND ($1 = $3), output_indices: all }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalFilter { predicate: ($1 = 100:Int32) AND ($0 = 1000:Int32) }
-        LogicalScan { table: t2, columns: [x, y] }
+      LogicalScan { table: t2, output_columns: [x, y], required_columns: [$1:x, $2:y], predicate: ($2 = 100:Int32) AND ($1 = 1000:Int32) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -180,8 +178,7 @@
             LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: ($1 = $2) AND (($0 + $3) = 100:Int32), output_indices: [0] }
-      LogicalFilter { predicate: ($1 = 1000:Int32) }
-        LogicalScan { table: t1, columns: [x, y] }
+      LogicalScan { table: t1, output_columns: [x, y], required_columns: [$1:x, $2:y], predicate: ($2 = 1000:Int32) }
       LogicalProject { exprs: [$1, $0] }
         LogicalScan { table: t2, columns: [x, y] }
 - sql: |

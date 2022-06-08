@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod compaction;
+pub mod compaction;
+pub mod compaction_group;
 mod compaction_scheduler;
 mod compactor_manager;
 pub mod error;

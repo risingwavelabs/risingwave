@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Formatter;
+use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -359,22 +360,24 @@ impl SessionImpl {
     /// Set configuration values in this session.
     /// For example, `set_config("RW_IMPLICIT_FLUSH", true)` will implicit flush for every inserts.
     pub fn set_config(&self, key: &str, val: &str) {
+        let key = key.to_ascii_lowercase();
         self.config_map
             .write()
-            .insert(key.to_string(), ConfigEntry::new(val.to_string()));
+            .insert(key, ConfigEntry::new(val.to_string()));
     }
 
     /// Get configuration values in this session.
     pub fn get_config(&self, key: &str) -> Option<ConfigEntry> {
+        let key = key.to_ascii_lowercase();
         let reader = self.config_map.read();
-        reader.get(key).cloned()
+        reader.get(&key).cloned()
     }
 
     fn init_config_map() -> RwLock<HashMap<String, ConfigEntry>> {
         let mut map = HashMap::new();
         // FIXME: May need better init way + default config.
         map.insert(
-            IMPLICIT_FLUSH.to_string(),
+            IMPLICIT_FLUSH.to_string().to_ascii_lowercase(),
             ConfigEntry::new("false".to_string()),
         );
         RwLock::new(map)
@@ -392,6 +395,14 @@ impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(&self, database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        let catalog_reader = self.env.catalog_reader();
+        let reader = catalog_reader.read_guard();
+        if reader.get_database_by_name(database).is_err() {
+            return Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Not found database name: {}", database),
+            )));
+        }
         Ok(SessionImpl::new(self.env.clone(), database.to_string()).into())
     }
 }
