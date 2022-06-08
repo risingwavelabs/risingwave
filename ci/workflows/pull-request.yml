@@ -19,6 +19,16 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
 
+  - label: "end-to-end test"
+    command: "ci/scripts/e2e-test-parallel.sh -p dev"
+    depends_on: "build"
+    plugins:
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh"
     depends_on: "build"
