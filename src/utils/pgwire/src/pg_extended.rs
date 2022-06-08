@@ -22,14 +22,15 @@ use crate::pg_protocol::cstr_to_str;
 
 fn replace_params(query_string: String, generic_params: &[usize], params: &[Bytes]) -> String {
     let mut tmp = query_string;
+    tmp.push(' ');
     for &i in generic_params.iter() {
         let pattern = Regex::new(format!(r"(?P<x>\${})(?P<y>[,;\s]+)", i).as_str()).unwrap();
         let param = cstr_to_str(&params[i.sub(1)]).unwrap();
         tmp = pattern
-            .replace_all(&tmp, format!("{}$y", param))
+            .replace_all(&tmp, format!("\'{}\'$y", param))
             .to_string();
     }
-
+    tmp.pop();
     tmp
 }
 
@@ -70,6 +71,13 @@ impl PgStatement {
 
     pub fn instance(&self, name: String, params: &[Bytes]) -> PgPortal {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
+
+        if params.len() == 0 {
+            return PgPortal {
+                name,
+                query_string: self.query_string.clone(),
+            };
+        }
 
         // 1. Identify all the $n.
         let parameter_pattern = Regex::new(r"\$[0-9][0-9]*").unwrap();
@@ -123,18 +131,18 @@ mod tests {
     #[test]
     fn test_replace_params() {
         let res = replace_params(
-            "SELECT $3,$2,$1;".to_string(),
+            "SELECT $3,$2,$1".to_string(),
             &[1, 2, 3],
             &["A".into(), "B".into(), "C".into()],
         );
-        assert!(res == "SELECT C,B,A;");
+        assert!(res == "SELECT \'C\',\'B\',\'A\'");
 
         let res = replace_params(
             "SELECT $2,$3,$1  ,$3 ,$2 ,$1     ;".to_string(),
             &[1, 2, 3],
             &["A".into(), "B".into(), "C".into()],
         );
-        assert!(res == "SELECT B,C,A  ,C ,B ,A     ;");
+        assert!(res == "SELECT \'B\',\'C\',\'A\'  ,\'C\' ,\'B\' ,\'A\'     ;");
 
         let res = replace_params(
             "SELECT $11,$2,$1;".to_string(),
@@ -153,10 +161,10 @@ mod tests {
                 "K".into(),
             ],
         );
-        assert!(res == "SELECT K,B,A;");
+        assert!(res == "SELECT \'K\',\'B\',\'A\';");
 
         let res = replace_params(
-            "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  \"He1ll2o\",1;".to_string(),
+            "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  \'He1ll2o\',1;".to_string(),
             &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
             &[
                 "A".into(),
@@ -173,10 +181,12 @@ mod tests {
                 "L".into(),
             ],
         );
-        assert!(res == "SELECT B,A,K,J ,K, A,L , B,  \"He1ll2o\",1;");
+        assert!(
+            res == "SELECT \'B\',\'A\',\'K\',\'J\' ,\'K\', \'A\',\'L\' , \'B\',  \'He1ll2o\',1;"
+        );
 
         let res = replace_params(
-            "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  \"He1ll2o\",1;".to_string(),
+            "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  \'He1ll2o\',1;".to_string(),
             &[2, 1, 11, 10, 12, 9, 7, 8, 5, 6, 4, 3],
             &[
                 "A".into(),
@@ -193,6 +203,8 @@ mod tests {
                 "L".into(),
             ],
         );
-        assert!(res == "SELECT B,A,K,J ,K, A,L , B,  \"He1ll2o\",1;");
+        assert!(
+            res == "SELECT \'B\',\'A\',\'K\',\'J\' ,\'K\', \'A\',\'L\' , \'B\',  \'He1ll2o\',1;"
+        );
     }
 }

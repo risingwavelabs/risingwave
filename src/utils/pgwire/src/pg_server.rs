@@ -163,7 +163,13 @@ mod tests {
             let res: Vec<Option<String>> = sql
                 .split(&[' ', ',', ';'])
                 .skip(1)
-                .map(|x| Some(x.to_string()))
+                .map(|x| {
+                    Some(
+                        x.trim_start_matches("\'")
+                            .trim_end_matches("\'")
+                            .to_string(),
+                    )
+                })
                 .collect();
 
             Ok(PgResponse::new(
