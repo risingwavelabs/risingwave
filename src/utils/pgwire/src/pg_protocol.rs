@@ -307,7 +307,7 @@ where
             .config
             .get("database")
             .cloned()
-            .unwrap_or_else(||"dev".to_string());
+            .unwrap_or_else(|| "dev".to_string());
         let user_name = msg
             .config
             .get("user")
