@@ -13,8 +13,15 @@
                   - 1
                 appendOnly: true
                 batchPlan:
-                  tableRefId:
+                  tableDesc:
                     tableId: 2
+                    pk:
+                      - columnDesc:
+                          columnType:
+                            typeName: INT64
+                            isNullable: true
+                          name: _row_id
+                        order: ASCENDING
                   columnDescs:
                     - columnType:
                         typeName: INT32
@@ -144,8 +151,15 @@
               - 1
             appendOnly: true
             batchPlan:
-              tableRefId:
+              tableDesc:
                 tableId: 2
+                pk:
+                  - columnDesc:
+                      columnType:
+                        typeName: INT64
+                        isNullable: true
+                      name: _row_id
+                    order: ASCENDING
               columnDescs:
                 - columnType:
                     typeName: INT32
@@ -245,8 +259,15 @@
               - 1
             appendOnly: true
             batchPlan:
-              tableRefId:
+              tableDesc:
                 tableId: 2
+                pk:
+                  - columnDesc:
+                      columnType:
+                        typeName: INT64
+                        isNullable: true
+                      name: _row_id
+                    order: ASCENDING
               columnDescs:
                 - columnType:
                     typeName: INT32
@@ -352,8 +373,15 @@
                       - 1
                     appendOnly: true
                     batchPlan:
-                      tableRefId:
+                      tableDesc:
                         tableId: 2
+                        pk:
+                          - columnDesc:
+                              columnType:
+                                typeName: INT64
+                                isNullable: true
+                              name: _row_id
+                            order: ASCENDING
                       columnDescs:
                         - columnType:
                             typeName: INT32
@@ -503,8 +531,15 @@
                               - 2
                             appendOnly: true
                             batchPlan:
-                              tableRefId:
+                              tableDesc:
                                 tableId: 2
+                                pk:
+                                  - columnDesc:
+                                      columnType:
+                                        typeName: INT64
+                                        isNullable: true
+                                      name: _row_id
+                                    order: ASCENDING
                               columnDescs:
                                 - columnType:
                                     typeName: INT32
