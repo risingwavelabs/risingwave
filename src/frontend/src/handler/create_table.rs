@@ -141,7 +141,7 @@ pub async fn handle_create_table(
             context.into(),
             table_name.clone(),
             columns,
-            WithProperties { 0: with_options },
+            WithProperties(with_options),
         )?;
         let plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(plan);
@@ -190,7 +190,7 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(source.name, "t");
-        assert_eq!(source.append_only, true);
+        assert!(source.append_only);
 
         // Check table exists.
         let table = catalog_reader

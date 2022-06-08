@@ -53,7 +53,7 @@ pub(super) fn handle_explain(
                 planner.ctx(),
                 name,
                 columns,
-                WithProperties { 0: with_options },
+                WithProperties(with_options),
             )?
             .0
         }
