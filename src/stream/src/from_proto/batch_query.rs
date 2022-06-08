@@ -37,6 +37,10 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
         let table_id = node.table_desc.as_ref().unwrap().table_id.into();
+
+        let pk_descs_proto = &node.table_desc.as_ref().unwrap().pk;
+        let pk_descs = pk_descs_proto.iter().map(|d| d.into()).collect();
+
         let column_descs = node
             .column_descs
             .iter()
@@ -78,6 +82,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             },
             key_indices,
             hash_filter,
+            pk_descs,
         );
 
         Ok(executor.boxed())

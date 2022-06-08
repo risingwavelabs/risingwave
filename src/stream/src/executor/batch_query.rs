@@ -16,7 +16,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{OrderedColumnDesc, Schema};
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::cell_based_table::{CellBasedTable, CellTableChunkIter};
@@ -40,6 +40,10 @@ pub struct BatchQueryExecutor<S: StateStore> {
 
     /// vnode bitmap used to filter data belong to this parallel unit.
     hash_filter: Bitmap,
+
+    /// public key field descriptors. Used to decode pk into datums
+    /// for dedup pk encoding.
+    pk_descs: Vec<OrderedColumnDesc>,
 }
 
 impl<S> BatchQueryExecutor<S>
@@ -54,6 +58,7 @@ where
         info: ExecutorInfo,
         key_indices: Vec<usize>,
         hash_filter: Bitmap,
+        pk_descs: Vec<OrderedColumnDesc>,
     ) -> Self {
         Self {
             table,
@@ -61,12 +66,14 @@ where
             info,
             key_indices,
             hash_filter,
+            pk_descs,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
-        let mut iter = self.table.iter(epoch).await?;
+        // FIXME: use pk_descs as a reference instead
+        let mut iter = self.table.iter_with_pk(epoch, self.pk_descs.clone()).await?;
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(self.schema(), Some(self.batch_size))
@@ -172,6 +179,7 @@ mod test {
             info,
             vec![],
             hash_filter,
+            vec![], // TODO: update
         ));
 
         let stream = executor.execute_with_epoch(u64::MAX);
