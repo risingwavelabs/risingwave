@@ -55,7 +55,7 @@ echo "--- Kill cluster"
 
 echo "--- e2e, ci-3cn-1fe, batch distributed"
 ~/cargo-make/makers ci-start default
-timeout 2m sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' -j 8
+timeout 2m sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt'
 timeout 2m sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt' -j 8
 
 echo "--- Kill cluster"
