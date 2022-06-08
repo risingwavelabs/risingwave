@@ -841,7 +841,7 @@ impl Compactor {
 
             // in our design, frontend avoid to access keys which had be deleted, so we dont need to
             // consider the epoch when the compaction_filter match (it means that mv had drop)
-            if !compaction_filter.filter(iter_key) {
+            if !drop && !compaction_filter.filter(iter_key) {
                 drop = true;
             }
 

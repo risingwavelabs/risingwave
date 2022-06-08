@@ -467,8 +467,8 @@ where
         Ok(())
     }
 
-    // existing_table_ids include the table_ref_id (source and materialized_view) + internal_table_id
-    // (stateful executor)
+    // existing_table_ids include the table_ref_id (source and materialized_view) +
+    // internal_table_id (stateful executor)
     pub async fn existing_table_ids(&self) -> Result<HashSet<u32>> {
         let mut result_set = HashSet::default();
         let map = &self.core.read().await.table_fragments;
