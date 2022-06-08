@@ -53,13 +53,18 @@ impl_plan_tree_node_for_leaf! { StreamSource }
 
 impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "StreamSource {{ source: {},  columns: [{}], appendonly: {} }}",
-            self.logical.source_catalog.name,
-            self.column_names().join(", "),
-            self.base.append_only,
-        )
+        let mut builder = f.debug_struct("StreamSource");
+        builder
+            .field("source", &self.logical.source_catalog.name)
+            .field(
+                "columns",
+                &format_args!("[{}]", &self.column_names().join(", ")),
+            );
+
+        if self.append_only() {
+            builder.field("appendonly", &format_args!("{}", true));
+        }
+        builder.finish()
     }
 }
 

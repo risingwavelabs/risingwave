@@ -33,6 +33,9 @@ pub struct TableDesc {
     pub distribution_keys: Vec<usize>,
     /// Column indices for primary keys.
     pub pks: Vec<usize>,
+
+    /// Whether the table source is append-only
+    pub appendonly: bool,
 }
 
 impl TableDesc {

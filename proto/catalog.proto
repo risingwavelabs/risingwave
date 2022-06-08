@@ -55,6 +55,7 @@ message Table {
   uint32 index_on_id = 11;
   repeated int32 distribution_keys = 12;
   repeated int32 pk = 13;
+  bool appendonly = 14;
 }
 
 message Schema {
