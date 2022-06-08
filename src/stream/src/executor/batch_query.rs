@@ -24,7 +24,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{Executor, ExecutorInfo, Message};
-use crate::executor::BoxedMessageStream;
+use crate::executor::{Arc, BoxedMessageStream};
 
 pub struct BatchQueryExecutor<S: StateStore> {
     /// The [`CellBasedTable`] that needs to be queried
@@ -43,7 +43,7 @@ pub struct BatchQueryExecutor<S: StateStore> {
 
     /// public key field descriptors. Used to decode pk into datums
     /// for dedup pk encoding.
-    pk_descs: Vec<OrderedColumnDesc>,
+    pk_descs: Arc<Vec<OrderedColumnDesc>>,
 }
 
 impl<S> BatchQueryExecutor<S>
@@ -58,7 +58,7 @@ where
         info: ExecutorInfo,
         key_indices: Vec<usize>,
         hash_filter: Bitmap,
-        pk_descs: Vec<OrderedColumnDesc>,
+        pk_descs: Arc<Vec<OrderedColumnDesc>>,
     ) -> Self {
         Self {
             table,
@@ -72,8 +72,8 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
-        // FIXME: use pk_descs as a reference instead
-        let mut iter = self.table.iter_with_pk(epoch, self.pk_descs.clone()).await?;
+        // FIXME: use pk_descs as a reference instead, since we only read from it.
+        let mut iter = self.table.iter_with_pk(epoch, &self.pk_descs).await?;
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(self.schema(), Some(self.batch_size))
@@ -179,7 +179,7 @@ mod test {
             info,
             vec![],
             hash_filter,
-            vec![], // TODO: update
+            Arc::new(vec![]), // TODO: update
         ));
 
         let stream = executor.execute_with_epoch(u64::MAX);

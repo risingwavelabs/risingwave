@@ -221,7 +221,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.schema().clone(),
         ScanType::TableScan(
             table
-                .iter_with_pk(u64::MAX, ordered_column_descs.clone())
+                .iter_with_pk(u64::MAX, &ordered_column_descs)
                 .await?,
         ),
         1024,
@@ -284,7 +284,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.schema().clone(),
         ScanType::TableScan(
             table
-                .iter_with_pk(u64::MAX, ordered_column_descs.clone())
+                .iter_with_pk(u64::MAX, &ordered_column_descs)
                 .await?,
         ),
         1024,
@@ -356,7 +356,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.schema().clone(),
         ScanType::TableScan(
             table
-                .iter_with_pk(u64::MAX, ordered_column_descs.clone())
+                .iter_with_pk(u64::MAX, &ordered_column_descs)
                 .await?,
         ),
         1024,
@@ -441,7 +441,7 @@ async fn test_row_seq_scan() -> Result<()> {
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        ScanType::TableScan(table.iter_with_pk(u64::MAX, pk_descs).await.unwrap()),
+        ScanType::TableScan(table.iter_with_pk(u64::MAX, &pk_descs).await.unwrap()),
         1,
         true,
         "RowSeqScanExecutor2".to_string(),
