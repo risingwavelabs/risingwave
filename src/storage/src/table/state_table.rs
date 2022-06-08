@@ -217,12 +217,12 @@ impl<S: StateStore> StateTable<S> {
         let start_key_with_prefix = self.keyspace.prefixed_key(&key_bytes);
         let cell_based_bounds = (
             Included(start_key_with_prefix.clone()),
-            Included(next_key(start_key_with_prefix.as_slice())),
+            Excluded(next_key(start_key_with_prefix.as_slice())),
         );
 
         let mem_table_bounds = (
             Included(key_bytes.clone()),
-            Included(next_key(key_bytes.as_slice())),
+            Excluded(next_key(key_bytes.as_slice())),
         );
         Ok(StateTableRowIter::into_stream(
             &self.keyspace,
