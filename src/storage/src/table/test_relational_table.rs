@@ -1559,7 +1559,7 @@ async fn test_state_table_iter_with_bounds() {
     let epoch = u64::MAX;
     let pk_bounds = Row(vec![Some(2_i32.into()), Some(22_i32.into())])
         ..Row(vec![Some(6_i32.into()), Some(66_i32.into())]);
-    let iter = state.iter_with_bounds(pk_bounds, epoch).await.unwrap();
+    let iter = state.iter_with_pk_bounds(pk_bounds, epoch).await.unwrap();
     pin_mut!(iter);
 
     // this row exists in cell_based_table
@@ -1712,7 +1712,7 @@ async fn test_state_table_iter_with_unbounded_range() {
         .unwrap();
     let epoch = u64::MAX;
     let pk_bounds = Row(vec![Some(3_i32.into()), Some(33_i32.into())])..;
-    let iter = state.iter_with_bounds(pk_bounds, epoch).await.unwrap();
+    let iter = state.iter_with_pk_bounds(pk_bounds, epoch).await.unwrap();
     pin_mut!(iter);
 
     // this row exists in cell_based_table
@@ -1870,10 +1870,10 @@ async fn test_state_table_iter_with_prefix() {
         )
         .unwrap();
     let epoch = u64::MAX;
-    let pk_prifix = Row(vec![Some(1_i32.into())]);
-    let prifix_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
+    let pk_prefix = Row(vec![Some(1_i32.into())]);
+    let prefix_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
     let iter = state
-        .iter_with_prefix(pk_prifix, prifix_serializer, epoch)
+        .iter_with_pk_prefix(pk_prefix, prefix_serializer, epoch)
         .await
         .unwrap();
     pin_mut!(iter);
