@@ -157,7 +157,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let storage_stats = state_store.stats();
             let batch_stats = source.context().stats();
             let table = CellBasedTable::new(
-                keyspace,
+                keyspace.clone(),
                 column_descs,
                 Some(ordered_row_serializer),
                 storage_stats,
@@ -168,6 +168,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 let iter = table.iter_with_pk(source.epoch, pk_descs).await?;
                 ScanType::TableScan(iter)
             } else if pk_prefix_value.size() == pk_descs.len() {
+                keyspace.state_store().wait_epoch(source.epoch).await?;
                 let row = table.get_row(&pk_prefix_value, source.epoch).await?;
                 ScanType::PointGet(row)
             } else {

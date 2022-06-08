@@ -146,7 +146,6 @@ impl<S: StateStore> CellBasedTable<S> {
         .concat();
         let mut get_res = Vec::new();
 
-        self.keyspace.state_store().wait_epoch(epoch).await?;
         let sentinel_cell = self.keyspace.get(&sentinel_key, epoch).await?;
 
         if sentinel_cell.is_none() {
