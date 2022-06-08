@@ -367,7 +367,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 } else {
                     let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
                     let serialized_pk_prefix =
-                        serialize_pk(&pk_prefix, &pk_prefix_serializer).map_err(err)?;
+                        serialize_pk(pk_prefix, &pk_prefix_serializer).map_err(err)?;
                     if is_start_bound {
                         Included(self.keyspace.prefixed_key(&serialized_pk_prefix))
                     } else {
