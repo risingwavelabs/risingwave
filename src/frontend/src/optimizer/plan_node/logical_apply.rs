@@ -34,7 +34,14 @@ pub struct LogicalApply {
     on: Condition,
     join_type: JoinType,
 
+    /// The indices of `CorrelatedInputRef`s of `right`. It was collected in `Planner`.
+    ///
+    /// The most important thing `correlated_indices` preserves is the order of its internal
+    /// indices. We use this order in `TranslatedApply` to construct equal conditions and then use
+    /// it in `ApplyScan` to remove DAG, and this is why we can't use the traversal of keys of
+    /// `index_mapping` to replace the traversal of `correlated_indices`.
     correlated_indices: Vec<usize>,
+    /// Mapping from original index of `CorrelatedInputRef` to its new index.
     index_mapping: HashMap<usize, usize>,
 }
 

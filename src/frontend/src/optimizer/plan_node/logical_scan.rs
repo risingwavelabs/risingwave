@@ -249,7 +249,7 @@ impl LogicalScan {
         )
     }
 
-    fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
+    pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         Self::new(
             self.table_name.clone(),
             output_col_idx,
@@ -258,17 +258,6 @@ impl LogicalScan {
             self.base.ctx.clone(),
             self.predicate.clone(),
         )
-    }
-
-    pub fn clone_with_required_col_idx(&self, required_col_idx: Vec<usize>) -> PlanRef {
-        Self::new(
-            self.table_name.clone(),
-            required_col_idx,
-            self.table_desc.clone(),
-            self.indexes.clone(),
-            self.base.ctx.clone(),
-        )
-        .into()
     }
 }
 

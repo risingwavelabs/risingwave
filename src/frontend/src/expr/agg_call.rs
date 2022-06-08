@@ -23,7 +23,7 @@ use super::{Expr, ExprImpl};
 pub struct AggCall {
     agg_kind: AggKind,
     return_type: DataType,
-    pub inputs: Vec<ExprImpl>,
+    inputs: Vec<ExprImpl>,
     distinct: bool,
 }
 

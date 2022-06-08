@@ -75,8 +75,6 @@ impl Rule for ApplyScan {
             // TODO: add LogicalFilter here to do null-check.
             Some(project)
         } else {
-            // TODO: Use index_mapping to rewrite CorrelatedInputRef here.
-            // TODO: Rewrite CorrelatedInputRef to InputRef here.
             let mut rewriter = Rewriter { index_mapping };
             let rewritten_exprs = on
                 .into_iter()
@@ -101,8 +99,7 @@ impl ApplyScan {
         Box::new(ApplyScan {})
     }
 
-    /// Check whether the `func_call` is like v1 = v2, in which v1 and v2 belong respectively to
-    /// `LogicalApply`'s left and right.
+    /// Check whether the `func_call` is like `CorrelatedInputRef` = `InputRef`.
     fn check(func_call: &FunctionCall) -> Option<(usize, usize, DataType)> {
         let inputs = func_call.inputs();
         if func_call.get_expr_type() == ExprType::Equal && inputs.len() == 2 {

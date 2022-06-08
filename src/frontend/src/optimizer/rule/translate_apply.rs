@@ -27,13 +27,15 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
+/// Translate `LogicalApply` into `LogicalJoin` and `LogicalApply`, and rewrite
+/// `LogicalApply`'s left.
 pub struct TranslateApply {}
 impl Rule for TranslateApply {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_indices, _) = apply.clone().decompose();
         let apply_left_len = left.schema().len();
-        let correlated_len = correlated_indices.len();
+        let correlated_indices_len = correlated_indices.len();
 
         let mut index_mapping = HashMap::new();
         let mut data_types = HashMap::new();
@@ -45,7 +47,7 @@ impl Rule for TranslateApply {
             &mut index_mapping,
             &mut data_types,
         )?;
-        let distinct_agg = LogicalAgg::new(
+        let distinct = LogicalAgg::new(
             vec![],
             (0..rewritten_left.schema().len()).collect_vec(),
             rewritten_left,
@@ -72,7 +74,7 @@ impl Rule for TranslateApply {
         });
 
         let new_apply = LogicalApply::create(
-            distinct_agg.into(),
+            distinct.into(),
             right,
             JoinType::Inner,
             Condition::true_cond(),
@@ -81,18 +83,20 @@ impl Rule for TranslateApply {
         );
         let new_join = LogicalJoin::new(left, new_apply, join_type, on);
 
-        let mut exprs: Vec<ExprImpl> = vec![];
-        new_join
-            .schema()
-            .data_types()
-            .into_iter()
-            .enumerate()
-            .for_each(|(index, data_type)| {
-                if index < apply_left_len || index >= apply_left_len + correlated_len {
-                    exprs.push(InputRef::new(index, data_type).into());
-                }
-            });
         let new_node = if new_join.join_type() != JoinType::LeftSemi {
+            // `new_join`'s shcema is different from original apply's schema, so `LogicalProject` is
+            // needed to ensure they are the same.
+            let mut exprs: Vec<ExprImpl> = vec![];
+            new_join
+                .schema()
+                .data_types()
+                .into_iter()
+                .enumerate()
+                .for_each(|(index, data_type)| {
+                    if index < apply_left_len || index >= apply_left_len + correlated_indices_len {
+                        exprs.push(InputRef::new(index, data_type).into());
+                    }
+                });
             LogicalProject::create(new_join.into(), exprs)
         } else {
             new_join.into()
@@ -106,6 +110,9 @@ impl TranslateApply {
         Box::new(TranslateApply {})
     }
 
+    /// Used to rewrite `LogicalApply`'s left.
+    ///
+    /// Assumption: only `LogicalJoin`, `LogicalScan` and `LogicalFilter` are in the left.
     fn rewrite(
         plan: &PlanRef,
         correlated_indices: Vec<usize>,
@@ -188,6 +195,6 @@ impl TranslateApply {
             );
         }
 
-        Some(scan.clone_with_required_col_idx(required_col_idx))
+        Some(scan.clone_with_output_indices(required_col_idx).into())
     }
 }

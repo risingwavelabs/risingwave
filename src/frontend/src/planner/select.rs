@@ -215,7 +215,6 @@ impl Planner {
         }
 
         // TODO: consider the multi-subquery case for normal predicate.
-        // TODO: rewrite.
         impl ExprRewriter for SubstituteSubQueries {
             fn rewrite_subquery(&mut self, subquery: Subquery) -> ExprImpl {
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();

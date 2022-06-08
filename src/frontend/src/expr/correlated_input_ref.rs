@@ -26,9 +26,9 @@ use super::Expr;
 ///
 /// `index` is the index in the refered relation.
 pub struct CorrelatedInputRef {
-    pub index: usize,
-    pub data_type: DataType,
-    pub depth: usize,
+    index: usize,
+    data_type: DataType,
+    depth: usize,
 }
 
 impl CorrelatedInputRef {

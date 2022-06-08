@@ -32,7 +32,7 @@ impl Rule for ApplyFilter {
         let filter = right.as_logical_filter()?;
         let input = filter.input();
 
-        let mut col_index_mapping =
+        let mut shift_with_offset =
             ColIndexMapping::with_shift_offset(input.schema().len(), left.schema().len() as isize);
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
@@ -42,7 +42,7 @@ impl Rule for ApplyFilter {
                 .clone()
                 .into_iter()
                 .partition_map(|expr| {
-                    let expr = col_index_mapping.rewrite_expr(expr);
+                    let expr = shift_with_offset.rewrite_expr(expr);
                     if expr.has_correlated_input_ref() {
                         Either::Left(expr)
                     } else {
