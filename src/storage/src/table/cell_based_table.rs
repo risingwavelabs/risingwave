@@ -335,7 +335,7 @@ impl<S: StateStore> CellBasedTable<S> {
         .await
     }
 
-    fn serialized_pk_bound(
+    fn serialize_pk_bound(
         &self,
         pk_prefix: &Row,
         next_col_bound: Bound<&Datum>,
@@ -347,19 +347,29 @@ impl<S: StateStore> CellBasedTable<S> {
                 let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
                 let mut key = pk_prefix.clone();
                 key.0.push(k.clone());
-                Included(
-                    self.keyspace
-                        .prefixed_key(&serialize_pk(&key, &pk_prefix_serializer).map_err(err)?),
-                )
+                let serialized_key = serialize_pk(&key, &pk_prefix_serializer).map_err(err)?;
+                if is_start_bound {
+                    Included(
+                        self.keyspace
+                            .prefixed_key(&serialize_pk(&key, &pk_prefix_serializer).map_err(err)?),
+                    )
+                } else {
+                    // Should use excluded next key for end bound.
+                    // Otherwise keys starting with the bound is not included.
+                    Excluded(self.keyspace.prefixed_key(&next_key(&serialized_key)))
+                }
             }
             Excluded(k) => {
                 let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
                 let mut key = pk_prefix.clone();
                 key.0.push(k.clone());
-                Excluded(
-                    self.keyspace
-                        .prefixed_key(&serialize_pk(&key, &pk_prefix_serializer).map_err(err)?),
-                )
+                let serialized_key = serialize_pk(&key, &pk_prefix_serializer).map_err(err)?;
+                if is_start_bound {
+                    // storage doesn't support excluded begin key yet, so transform it to included
+                    Included(self.keyspace.prefixed_key(&next_key(&serialized_key)))
+                } else {
+                    Excluded(self.keyspace.prefixed_key(&serialized_key))
+                }
             }
             Unbounded => {
                 let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
@@ -384,9 +394,8 @@ impl<S: StateStore> CellBasedTable<S> {
         pk_prefix: Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<CellBasedTableRowIter<S>> {
-        let start_key =
-            self.serialized_pk_bound(&pk_prefix, next_col_bounds.start_bound(), true)?;
-        let end_key = self.serialized_pk_bound(&pk_prefix, next_col_bounds.end_bound(), false)?;
+        let start_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.start_bound(), true)?;
+        let end_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.end_bound(), false)?;
 
         debug!(
             "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
