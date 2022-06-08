@@ -81,7 +81,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = StateTable::new(keyspace, column_descs, order_type, None, pk_indices);
+        let state_table = StateTable::new(keyspace.clone(), column_descs, order_type, None, pk_indices);
         Self {
             top_n: BTreeMap::new(),
             bottom_n: BTreeMap::new(),

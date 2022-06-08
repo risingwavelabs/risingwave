@@ -166,7 +166,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
                 row_data_types,
                 ordered_row_deserializer,
                 cell_based_row_deserializer,
-                pk_indices
+                pk_indices.clone()
             ),
             pk_indices,
             internal_key_indices,

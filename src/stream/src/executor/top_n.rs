@@ -252,7 +252,7 @@ impl<S: StateStore> Executor for InnerTopNExecutor<S> {
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
     async fn apply_chunk(
-        &'a mut self,
+        &mut self,
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
