@@ -183,10 +183,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Logical Operator Info
     op_info: String,
 
-    #[allow(dead_code)]
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
-
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
 }
@@ -360,7 +356,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<RowExpression>,
         op_info: String,
-        key_indices: Vec<usize>,
+        distribution_keys: Vec<usize>,
         ks_l: Keyspace<S>,
         ks_r: Keyspace<S>,
         append_only: bool,
@@ -430,6 +426,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
                     ks_l.clone(),
+                    Some(distribution_keys.clone()),
                 ), // TODO: decide the target cap
                 key_indices: params_l.key_indices,
                 col_types: col_l_datatypes,
@@ -444,6 +441,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
                     ks_r.clone(),
+                    Some(distribution_keys),
                 ), // TODO: decide the target cap
                 key_indices: params_r.key_indices,
                 col_types: col_r_datatypes,
@@ -455,7 +453,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cond,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            key_indices,
             epoch: 0,
             append_only_optimize,
         }
@@ -628,7 +625,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             let mut matched_rows = Self::hash_eq_match(key, &mut side_match.ht).await;
             match *op {
                 Op::Insert | Op::UpdateInsert => {
-                    let entry_value = side_update.ht.get_or_init_without_cache(key).await?;
                     let mut degree = 0;
                     let mut matched_pks: Vec<Row> = Vec::with_capacity(1);
                     if let Some(matched_rows) = matched_rows.as_mut() {
@@ -678,18 +674,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 v.remove(matched_pks.remove(0));
                             }
                             None => {
-                                entry_value.insert(pk, JoinRow::new(value, degree));
+                                side_update.ht.insert(key, pk, JoinRow::new(value, degree))?;
                             }
                         }
                     } else {
-                        entry_value.insert(pk, JoinRow::new(value, degree));
+                        side_update.ht.insert(key, pk, JoinRow::new(value, degree))?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    if let Some(v) = side_update.ht.get_mut_without_cached(key).await? {
-                        // remove the row by it's primary key
-                        v.remove(pk);
-                    }
+                    side_update.ht.delete(key, pk, value)?;
 
                     if let Some(matched_rows) = matched_rows {
                         let mut matched = false;

@@ -37,10 +37,7 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 /// When evicted, `BTreeMap` does not hold any entries.
 pub struct JoinEntryState<S: StateStore> {
     /// The full copy of the state. If evicted, it will be `None`.
-    cached: Option<BTreeMap<PkType, StateValueType>>,
-
-    /// The actions that will be taken on next flush
-    flush_buffer: BTreeMap<PkType, FlushStatus<StateValueType>>,
+    cached: BTreeMap<PkType, StateValueType>,
 
     /// Data types of the sort column
     data_types: Arc<[DataType]>,
@@ -59,8 +56,7 @@ impl<S: StateStore> JoinEntryState<S> {
         pk_data_types: Arc<[DataType]>,
     ) -> Self {
         Self {
-            cached: None,
-            flush_buffer: BTreeMap::new(),
+            cached: BTreeMap::new(),
             data_types,
             pk_data_types,
             keyspace,
@@ -78,8 +74,7 @@ impl<S: StateStore> JoinEntryState<S> {
             // Insert cached states.
             let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
             Ok(Some(Self {
-                cached: Some(cached),
-                flush_buffer: BTreeMap::new(),
+                cached,
                 data_types,
                 pk_data_types,
                 keyspace,
@@ -95,37 +90,23 @@ impl<S: StateStore> JoinEntryState<S> {
         pk_data_types: Arc<[DataType]>,
     ) -> Result<BTreeMap<PkType, StateValueType>> {
         let mut cached = BTreeMap::new();
-        for (raw_key, raw_value) in data {
-            let pk_deserializer = RowDeserializer::new(pk_data_types.to_vec());
-            let key = pk_deserializer.value_decode(raw_key)?;
-            let deserializer = JoinRowDeserializer::new(data_types.to_vec());
-            let value = deserializer.deserialize(raw_value)?;
-            cached.insert(key, value);
-        }
+        
+
         Ok(cached)
     }
 
-    /// The state is dirty means there are unflush
-    #[allow(dead_code)]
-    pub fn is_dirty(&self) -> bool {
-        !self.flush_buffer.is_empty()
+    /// If the cache is empty
+    pub fn is_empty(&self) -> bool {
+        self.cached.is_empty()
     }
 
     // Insert into the cache and flush buffer.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
-        if let Some(cached) = self.cached.as_mut() {
-            cached.insert(key.clone(), value.clone());
-        }
-        // If no cache maintained, only update the flush buffer.
-        FlushStatus::do_insert(self.flush_buffer.entry(key), value);
+        self.cached.insert(key.clone(), value.clone());
     }
 
     pub fn remove(&mut self, pk: PkType) {
-        if let Some(cached) = self.cached.as_mut() {
-            cached.remove(&pk);
-        }
-        // If no cache maintained, only update the flush buffer.
-        FlushStatus::do_delete(self.flush_buffer.entry(pk));
+        self.cached.remove(&pk);
     }
 
     // Flush data to the state store
@@ -150,65 +131,18 @@ impl<S: StateStore> JoinEntryState<S> {
         Ok(())
     }
 
-    // Fetch cache from the state store.
-    async fn populate_cache(&mut self, epoch: u64) -> Result<()> {
-        assert!(self.cached.is_none());
-
-        let all_data = self.keyspace.scan(None, epoch).await?;
-
-        // Insert cached states.
-        let mut cached = Self::fill_cached(
-            all_data,
-            self.data_types.clone(),
-            self.pk_data_types.clone(),
-        )?;
-
-        // Apply current flush buffer to cached states.
-        for (pk, row) in &self.flush_buffer {
-            match row.as_option() {
-                Some(row) => {
-                    cached.insert(pk.clone(), row.clone());
-                }
-                None => {
-                    cached.remove(pk);
-                }
-            }
-        }
-
-        self.cached = Some(cached);
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn clear_cache(&mut self) {
-        assert!(
-            !self.is_dirty(),
-            "cannot clear cache while all or none state is dirty"
-        );
-        self.cached = None;
-    }
-
     #[allow(dead_code)]
     pub async fn iter(&mut self, epoch: u64) -> JoinEntryStateIter<'_> {
-        if self.cached.is_none() {
-            self.populate_cache(epoch).await.unwrap();
-        }
-        self.cached.as_ref().unwrap().iter()
+        self.cached.iter()
     }
 
     #[allow(dead_code)]
     pub async fn values(&mut self, epoch: u64) -> JoinEntryStateValues<'_> {
-        if self.cached.is_none() {
-            self.populate_cache(epoch).await.unwrap();
-        }
-        self.cached.as_ref().unwrap().values()
+        self.cached.values()
     }
 
     pub async fn values_mut(&mut self, epoch: u64) -> JoinEntryStateValuesMut<'_> {
-        if self.cached.is_none() {
-            self.populate_cache(epoch).await.unwrap();
-        }
-        self.cached.as_mut().unwrap().values_mut()
+        self.cached.values_mut()
     }
 }
 

@@ -56,7 +56,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         };
         trace!("Join non-equi condition: {:?}", condition);
 
-        let key_indices = node
+        let distribution_keys = node
             .get_distribution_keys()
             .iter()
             .map(|key| *key as usize)
@@ -111,7 +111,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
-            key_indices,
+            distribution_keys,
             keyspace_l: Keyspace::table_root(store.clone(), &left_table_id),
             keyspace_r: Keyspace::table_root(store, &right_table_id),
             append_only,
@@ -134,7 +134,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<RowExpression>,
     op_info: String,
-    key_indices: Vec<usize>,
+    distribution_keys: Vec<usize>,
     keyspace_l: Keyspace<S>,
     keyspace_r: Keyspace<S>,
     append_only: bool,
@@ -156,7 +156,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.executor_id,
             args.cond,
             args.op_info,
-            args.key_indices,
+            args.distribution_keys,
             args.keyspace_l,
             args.keyspace_r,
             args.append_only,
