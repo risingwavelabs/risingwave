@@ -23,9 +23,9 @@ use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::is_remote_sst_id;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use self::shared_buffer_batch::SharedBufferBatch;
