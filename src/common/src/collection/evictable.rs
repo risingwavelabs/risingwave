@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::alloc::{Allocator, Global};
 use std::cmp::Eq;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
@@ -19,11 +20,28 @@ use std::ops::{Deref, DerefMut};
 use lru::{DefaultHasher, LruCache};
 
 /// A wrapper for [`LruCache`] which provides manual eviction.
-pub struct EvictableHashMap<K, V, S = DefaultHasher> {
-    inner: LruCache<K, V, S>,
+pub struct EvictableHashMap<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
+    inner: LruCache<K, V, S, A>,
 
     /// Target capacity to keep when calling `evict_to_target_cap`.
     target_cap: usize,
+}
+
+impl<K: Hash + Eq, V, A: Clone + Allocator> EvictableHashMap<K, V, DefaultHasher, A> {
+    /// Create a [`EvictableHashMap`] with the given target capacity and allocator.
+    pub fn new_in(target_cap: usize, alloc: A) -> Self {
+        Self::with_hasher_in(target_cap, DefaultHasher::new(), alloc)
+    }
+}
+
+impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> EvictableHashMap<K, V, S, A> {
+    /// Create a [`EvictableHashMap`] with the given target capacity, hasher and allocator.
+    pub fn with_hasher_in(target_cap: usize, hasher: S, alloc: A) -> Self {
+        Self {
+            inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
+            target_cap,
+        }
+    }
 }
 
 impl<K: Hash + Eq, V> EvictableHashMap<K, V> {
@@ -41,7 +59,9 @@ impl<K: Hash + Eq, V, S: BuildHasher> EvictableHashMap<K, V, S> {
             target_cap,
         }
     }
+}
 
+impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> EvictableHashMap<K, V, S, A> {
     pub fn target_cap(&self) -> usize {
         self.target_cap
     }
@@ -79,15 +99,15 @@ impl<K: Hash + Eq, V, S: BuildHasher> EvictableHashMap<K, V, S> {
     }
 }
 
-impl<K, V, S> Deref for EvictableHashMap<K, V, S> {
-    type Target = LruCache<K, V, S>;
+impl<K, V, S, A: Clone + Allocator> Deref for EvictableHashMap<K, V, S, A> {
+    type Target = LruCache<K, V, S, A>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<K, V, S> DerefMut for EvictableHashMap<K, V, S> {
+impl<K, V, S, A: Clone + Allocator> DerefMut for EvictableHashMap<K, V, S, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }

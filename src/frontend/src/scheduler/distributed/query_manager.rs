@@ -94,15 +94,13 @@ impl QueryManager {
             .get_epoch(query_id.clone())
             .await?;
 
-        if let Err(e) = compute_client
+        let creat_task_resp = compute_client
             .create_task(task_id.clone(), plan, epoch)
-            .await
-        {
-            self.hummock_snapshot_manager
-                .unpin_snapshot(epoch, &query_id)
-                .await?;
-            return Err(e);
-        }
+            .await;
+        self.hummock_snapshot_manager
+            .unpin_snapshot(epoch, &query_id)
+            .await?;
+        creat_task_resp?;
 
         let query_result_fetcher = QueryResultFetcher::new(
             epoch,

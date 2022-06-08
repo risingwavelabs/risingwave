@@ -23,7 +23,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use crate::user::user_manager::UserInfoManager;
-use crate::user::UserInfoVersion;
+use crate::user::{UserInfoVersion, UserName};
 
 pub type UserInfoReadGuard = ArcRwLockReadGuard<RawRwLock, UserInfoManager>;
 
@@ -47,14 +47,14 @@ pub trait UserInfoWriter: Send + Sync {
 
     async fn grant_privilege(
         &self,
-        user_name: &str,
+        users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
     ) -> Result<()>;
 
     async fn revoke_privilege(
         &self,
-        user_name: &str,
+        users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         revoke_grant_option: bool,
     ) -> Result<()>;
@@ -80,26 +80,26 @@ impl UserInfoWriter for UserInfoWriterImpl {
 
     async fn grant_privilege(
         &self,
-        user_name: &str,
+        users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .grant_privilege(user_name, privileges, with_grant_option)
+            .grant_privilege(users, privileges, with_grant_option)
             .await?;
         self.wait_version(version).await
     }
 
     async fn revoke_privilege(
         &self,
-        user_name: &str,
+        users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         revoke_grant_option: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .revoke_privilege(user_name, privileges, revoke_grant_option)
+            .revoke_privilege(users, privileges, revoke_grant_option)
             .await?;
         self.wait_version(version).await
     }

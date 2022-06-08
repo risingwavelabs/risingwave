@@ -36,6 +36,7 @@ pub enum StatementType {
     CREATE_SCHEMA,
     CREATE_USER,
     DESCRIBE_TABLE,
+    GRANT_PRIVILEGE,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
     DROP_INDEX,
@@ -43,6 +44,7 @@ pub enum StatementType {
     DROP_SCHEMA,
     DROP_DATABASE,
     DROP_USER,
+    REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
     ORDER_BY,

@@ -3554,6 +3554,7 @@ fn test_revoke() {
             objects: GrantObjects::Tables(tables),
             grantees,
             cascade,
+            revoke_grant_option,
             granted_by,
         } => {
             assert_eq!(
@@ -3571,6 +3572,7 @@ fn test_revoke() {
                 grantees.iter().map(ToString::to_string).collect::<Vec<_>>()
             );
             assert!(cascade);
+            assert!(!revoke_grant_option);
             assert_eq!(None, granted_by);
         }
         _ => unreachable!(),
