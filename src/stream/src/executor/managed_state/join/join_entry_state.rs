@@ -216,6 +216,7 @@ impl<S: StateStore> JoinEntryState<S> {
 mod tests {
     use risingwave_common::array::*;
     use risingwave_common::column_nonnull;
+    use risingwave_common::catalog::TableId;
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -224,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = JoinEntryState::new(
             keyspace,
             vec![DataType::Int64, DataType::Int64].into(),

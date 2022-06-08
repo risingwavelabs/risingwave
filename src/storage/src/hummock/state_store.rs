@@ -19,9 +19,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::SstableInfo;
 
 use super::iterator::{
@@ -36,7 +36,9 @@ use crate::hummock::iterator::{
 };
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::UncommittedData;
+use crate::hummock::shared_buffer::{
+    build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
+};
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
@@ -44,7 +46,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
-trait HummockIteratorType {
+pub(crate) trait HummockIteratorType {
     type Direction: HummockIteratorDirection;
     type SstableIteratorType: SSTableIteratorType<Direction = Self::Direction>;
     type UserIteratorBuilder: DirectedUserIteratorBuilder<Direction = Self::Direction>;
@@ -54,8 +56,8 @@ trait HummockIteratorType {
     }
 }
 
-struct ForwardIter;
-struct BackwardIter;
+pub(crate) struct ForwardIter;
+pub(crate) struct BackwardIter;
 
 impl HummockIteratorType for ForwardIter {
     type Direction = Forward;
@@ -93,25 +95,16 @@ impl HummockStorage {
                 overlapped_iters
                     .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
             }
-            for data in uncommitted_data {
-                match data {
-                    UncommittedData::Batch(batch) => {
-                        overlapped_iters
-                            .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
-                    }
-                    UncommittedData::Sst(table_info) => {
-                        let table = self
-                            .sstable_store
-                            .sstable(table_info.id, &mut stats)
-                            .await?;
-                        overlapped_iters.push(Box::new(T::SstableIteratorType::create(
-                            table,
-                            self.sstable_store(),
-                            read_options.clone(),
-                        )));
-                    }
-                }
-            }
+            overlapped_iters.push(
+                build_ordered_merge_iter::<T>(
+                    &uncommitted_data,
+                    self.sstable_store.clone(),
+                    self.stats.clone(),
+                    &mut stats,
+                    read_options.clone(),
+                )
+                .await?,
+            );
         }
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
@@ -217,36 +210,40 @@ impl HummockStorage {
         // TODO: may want to avoid use Arc in read options
         let read_options = Arc::new(ReadOptions::default());
 
-        for (replicated_batches, uncommitted_data) in &shared_buffer_data {
+        // Query shared buffer. Return the value without iterating SSTs if found
+        for (replicated_batches, uncommitted_data) in shared_buffer_data {
             for batch in replicated_batches {
-                if let Some(v) = get_from_batch(batch) {
+                if let Some(v) = get_from_batch(&batch) {
                     return Ok(v);
                 }
             }
-            for data in uncommitted_data {
-                match data {
-                    UncommittedData::Batch(batch) => {
-                        if let Some(v) = get_from_batch(batch) {
-                            return Ok(v);
+            // iterate over uncommitted data in order index in descending order
+            for data_list in uncommitted_data {
+                for data in data_list {
+                    match data {
+                        UncommittedData::Batch(batch) => {
+                            if let Some(v) = get_from_batch(&batch) {
+                                return Ok(v);
+                            }
                         }
-                    }
-                    UncommittedData::Sst(table_info) => {
-                        let table = self
-                            .sstable_store
-                            .sstable(table_info.id, &mut stats)
-                            .await?;
-                        table_counts += 1;
-                        if let Some(v) = self
-                            .get_from_table(
-                                table,
-                                &internal_key,
-                                key,
-                                read_options.clone(),
-                                &mut stats,
-                            )
-                            .await?
-                        {
-                            return Ok(Some(v));
+                        UncommittedData::Sst(table_info) => {
+                            let table = self
+                                .sstable_store
+                                .sstable(table_info.id, &mut stats)
+                                .await?;
+                            table_counts += 1;
+                            if let Some(v) = self
+                                .get_from_table(
+                                    table,
+                                    &internal_key,
+                                    key,
+                                    read_options.clone(),
+                                    &mut stats,
+                                )
+                                .await?
+                            {
+                                return Ok(Some(v));
+                            }
                         }
                     }
                 }
@@ -289,7 +286,7 @@ impl HummockStorage {
         key_range: &R,
         vnode_set: Option<&VNodeBitmap>,
     ) -> HummockResult<(
-        Vec<(Vec<SharedBufferBatch>, Vec<UncommittedData>)>,
+        Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
         Arc<PinnedVersion>,
     )>
     where

@@ -35,6 +35,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
 #![feature(trusted_len)]
+#![feature(allocator_api)]
 
 #[macro_use]
 pub mod error;
@@ -47,6 +48,7 @@ pub mod cache;
 pub mod catalog;
 pub mod collection;
 pub mod config;
+pub mod consistent_hash;
 pub mod hash;
 pub mod monitor;
 pub mod service;

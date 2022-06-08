@@ -534,7 +534,7 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
+        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
 
         let executor = SourceExecutor::new(
             0x3f3f3f,
@@ -658,7 +658,7 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
+        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
         let executor = SourceExecutor::new(
             0x3f3f3f,
             table_id,
