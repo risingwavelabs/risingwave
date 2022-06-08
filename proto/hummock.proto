@@ -230,7 +230,7 @@ message ReportVacuumTaskResponse {
 
 message GetCompactionGroupsRequest {}
 
-message  GetCompactionGroupsResponse {
+message GetCompactionGroupsResponse {
   common.Status status = 1;
   repeated CompactionGroup compaction_groups = 2;
 }
