@@ -269,14 +269,14 @@ mod tests {
         let val = Bytes::from(b"0"[..].repeat(4 << 20)); // 4MB value
 
         let drop_table_id = 1;
-        let exist_table_id = 2;
+        let existing_table_ids = 2;
         let kv_count = 128;
         let mut epoch: u64 = 1;
         for index in 0..kv_count {
             let table_id = if index % 2 == 0 {
                 drop_table_id
             } else {
-                exist_table_id
+                existing_table_ids
             };
             let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
             let mut write_batch = keyspace.state_store().start_write_batch();
@@ -359,7 +359,7 @@ mod tests {
         let mut scan_count = 0;
         for (k, _) in scan_result {
             let table_id = get_table_id(&k).unwrap();
-            assert_eq!(table_id, exist_table_id);
+            assert_eq!(table_id, existing_table_ids);
             scan_count += 1;
         }
         assert_eq!(key_count, scan_count);

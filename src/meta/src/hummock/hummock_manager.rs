@@ -74,7 +74,7 @@ pub struct HummockManager<S: MetaStore> {
     // TODO: refactor to remove this field
     config: Arc<CompactionConfig>,
 
-    // for compaction to get some info (e.g. exist_table_id)
+    // for compaction to get some info (e.g. existing_table_ids)
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -579,7 +579,7 @@ where
             task_id as HummockCompactionTaskId,
             compaction_group_id,
         );
-        let exist_table_id_from_meta = self.fragment_manager.exist_table_ids().await?;
+        let existing_table_ids_from_meta = self.fragment_manager.existing_table_ids().await?;
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
@@ -635,7 +635,7 @@ where
                     }
 
                     // to found exist table_id from
-                    if exist_table_id_from_meta.contains(&table_id) {
+                    if existing_table_ids_from_meta.contains(&table_id) {
                         compact_task.existing_table_ids.push(table_id);
                     }
                 }
