@@ -255,6 +255,7 @@ mod tests {
             distribution_keys: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
+            appendonly: false,
         }
         .into();
 
@@ -301,6 +302,7 @@ mod tests {
                     order: OrderType::Ascending
                 }],
                 distribution_keys: vec![],
+                appendonly: false
             }
         );
     }
