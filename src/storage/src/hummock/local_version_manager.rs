@@ -141,7 +141,7 @@ impl LocalVersionManager {
         ));
 
         // Uploader shared buffer to S3.
-        let mut uploader = SharedBufferUploader::new(
+        let uploader = SharedBufferUploader::new(
             options.clone(),
             sstable_store,
             hummock_meta_client,

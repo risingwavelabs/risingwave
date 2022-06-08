@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -563,6 +564,26 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
     ) -> StorageResult<Self> {
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
         let iter = keyspace.iter(epoch).await?;
+        let iter = Self {
+            iter,
+            cell_based_row_deserializer,
+        };
+        Ok(iter)
+    }
+
+    pub async fn new_with_bounds<R, B>(
+        keyspace: &Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        pk_bounds: R,
+        epoch: u64,
+    ) -> StorageResult<Self>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
+
+        let iter = keyspace.iter_with_range(pk_bounds, epoch).await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,
