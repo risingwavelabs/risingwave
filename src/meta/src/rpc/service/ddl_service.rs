@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{tonic_err, Result as RwResult};
@@ -43,6 +44,10 @@ pub struct DdlServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+
+    /// Although we already have a catalog lock in catalog manager, ddl lock is still necessary due
+    /// to some race condition. We can later see how to remove this lock.
+    ddl_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -64,6 +69,8 @@ where
             source_manager,
             cluster_manager,
             fragment_manager,
+
+            ddl_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 }
@@ -228,6 +235,8 @@ where
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
+        let _guard = self.ddl_lock.lock().await;
+
         let req = request.into_inner();
         let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
         let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
@@ -316,6 +325,8 @@ where
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         use risingwave_common::catalog::TableId;
 
+        let _guard = self.ddl_lock.lock().await;
+
         let table_id = request.into_inner().table_id;
         // 1. Drop table in catalog. Ref count will be checked.
         let version = self
@@ -340,6 +351,8 @@ where
         &self,
         request: Request<CreateMaterializedSourceRequest>,
     ) -> Result<Response<CreateMaterializedSourceResponse>, Status> {
+        let _guard = self.ddl_lock.lock().await;
+
         let request = request.into_inner();
         let source = request.source.unwrap();
         let mview = request.materialized_view.unwrap();
@@ -362,6 +375,8 @@ where
         &self,
         request: Request<DropMaterializedSourceRequest>,
     ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
+        let _guard = self.ddl_lock.lock().await;
+
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
