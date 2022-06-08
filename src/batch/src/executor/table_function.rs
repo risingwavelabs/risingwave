@@ -81,6 +81,40 @@ where
             yield chunk;
         }
     }
+
+    fn new_time_generate_series(
+        array_refs: Vec<ArrayRef>,
+    ) -> Result<GenerateSeries<NaiveDateTimeArray, IntervalArray>> {
+        let start = array_refs[0].clone().as_naivedatetime().value_at(0);
+        let stop = array_refs[1].clone().as_naivedatetime().value_at(0);
+        let step = array_refs[2].clone().as_interval().value_at(0);
+
+        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+            Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray> { start, stop, step })
+        } else {
+            Err(ErrorCode::InternalError(
+                "the parameters of Generate Series Function are incorrect".to_string(),
+            )
+            .into())
+        }
+    }
+
+    fn new_int_generate_series(
+        array_refs: Vec<ArrayRef>,
+    ) -> Result<GenerateSeries<I32Array, I32Array>> {
+        let start = array_refs[0].clone().as_int32().value_at(0);
+        let stop = array_refs[1].clone().as_int32().value_at(0);
+        let step = array_refs[2].clone().as_int32().value_at(0);
+
+        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+            Ok(GenerateSeries::<I32Array, I32Array> { start, stop, step })
+        } else {
+            Err(ErrorCode::InternalError(
+                "the parameters of Generate Series Function are incorrect".to_string(),
+            )
+            .into())
+        }
+    }
 }
 
 pub struct Unnest {
@@ -132,40 +166,6 @@ impl Executor for TableFunctionExecutor {
 pub struct TableFunctionExecutorBuilder {}
 
 impl TableFunctionExecutorBuilder {
-    fn new_time_generate_series(
-        array_refs: Vec<ArrayRef>,
-    ) -> Result<GenerateSeries<NaiveDateTimeArray, IntervalArray>> {
-        let start = array_refs[0].clone().as_naivedatetime().value_at(0);
-        let stop = array_refs[1].clone().as_naivedatetime().value_at(0);
-        let step = array_refs[2].clone().as_interval().value_at(0);
-
-        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-            Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray> { start, stop, step })
-        } else {
-            Err(ErrorCode::InternalError(
-                "the parameters of Generate SeriesFunction are incorrect".to_string(),
-            )
-            .into())
-        }
-    }
-
-    fn new_int_generate_series(
-        array_refs: Vec<ArrayRef>,
-    ) -> Result<GenerateSeries<I32Array, I32Array>> {
-        let start = array_refs[0].clone().as_int32().value_at(0);
-        let stop = array_refs[1].clone().as_int32().value_at(0);
-        let step = array_refs[2].clone().as_int32().value_at(0);
-
-        if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-            Ok(GenerateSeries::<I32Array, I32Array> { start, stop, step })
-        } else {
-            Err(ErrorCode::InternalError(
-                "the parameters of Generate Series Function are incorrect".to_string(),
-            )
-            .into())
-        }
-    }
-
     pub fn new_generate_series(
         array_refs: Vec<ArrayRef>,
         return_type: DataType,
@@ -173,12 +173,16 @@ impl TableFunctionExecutorBuilder {
         match return_type {
             DataType::Timestamp => {
                 let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
-                let func = TableFunctionExecutorBuilder::new_time_generate_series(array_refs)?;
+                let func =
+                    GenerateSeries::<NaiveDateTimeArray, IntervalArray>::new_time_generate_series(
+                        array_refs,
+                    )?;
                 Ok((schema, TableFunction::GenerateSeriesTime(func)))
             }
             DataType::Int32 => {
                 let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
-                let func = TableFunctionExecutorBuilder::new_int_generate_series(array_refs)?;
+                let func =
+                    GenerateSeries::<I32Array, I32Array>::new_int_generate_series(array_refs)?;
                 Ok((schema, TableFunction::GenerateSeriesInt(func)))
             }
             _ => Err(ErrorCode::InternalError(
