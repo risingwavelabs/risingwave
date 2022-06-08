@@ -200,6 +200,7 @@ impl SortMergeJoinExecutor {
 }
 
 impl SortMergeJoinExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         join_type: JoinType,
         schema: Schema,

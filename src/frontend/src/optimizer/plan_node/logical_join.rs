@@ -21,8 +21,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream, BatchProject,
+    BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{
