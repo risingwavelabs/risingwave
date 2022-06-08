@@ -149,7 +149,6 @@ async fn test_table_v2_materialize() -> Result<()> {
         1,
         "SourceExecutor".to_string(),
         Arc::new(StreamingMetrics::unused()),
-        vec![],
         u64::MAX,
     )?;
 
