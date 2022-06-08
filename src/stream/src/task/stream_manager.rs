@@ -512,6 +512,7 @@ impl LocalStreamManagerCore {
         let executor = Self::wrap_executor_for_debug(
             executor,
             actor_id,
+            executor_id,
             input_pos,
             self.streaming_metrics.clone(),
         );
@@ -545,10 +546,18 @@ impl LocalStreamManagerCore {
     fn wrap_executor_for_debug(
         executor: BoxedExecutor,
         actor_id: ActorId,
+        executor_id: u64,
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> BoxedExecutor {
-        DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
+        DebugExecutor::new(
+            executor,
+            input_pos,
+            actor_id,
+            executor_id,
+            streaming_metrics,
+        )
+        .boxed()
     }
 
     pub(crate) fn get_receive_message(
