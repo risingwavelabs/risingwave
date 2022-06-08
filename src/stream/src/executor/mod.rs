@@ -165,7 +165,7 @@ pub const INVALID_EPOCH: u64 = 0;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub struct AddOutput {
     map: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
     splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -175,7 +175,6 @@ pub struct AddOutput {
 pub enum Mutation {
     Stop(HashSet<ActorId>),
     UpdateOutputs(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
-    // AddOutput(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
     AddOutput(AddOutput),
     SourceChangeSplit(HashMap<ActorId, ConnectorState>),
 }

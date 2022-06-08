@@ -995,7 +995,7 @@ mod tests {
                     );
                     actors
                 },
-                splits: HashMap::new(),
+                ..Default::default()
             })),
         ))
         .await

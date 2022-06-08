@@ -135,6 +135,7 @@ impl Executor for ChainExecutor {
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
+    use std::default::Default;
     use std::sync::Arc;
 
     use futures::StreamExt;
@@ -180,7 +181,7 @@ mod test {
                             );
                             actors
                         },
-                        splits: Default::default(),
+                        ..Default::default()
                     })),
                 ),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
