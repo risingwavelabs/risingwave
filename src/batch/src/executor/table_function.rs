@@ -215,7 +215,7 @@ impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
                 let expr = build_from_prost(a)?;
                 expr.eval(&dummy_chunk)
             })
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
         let return_type = DataType::from(node.return_type.as_ref().unwrap());
         let (schema, table_function) = match node.get_function_type()? {
             Generate => TableFunctionExecutorBuilder::new_generate_series(array_refs, return_type)?,
