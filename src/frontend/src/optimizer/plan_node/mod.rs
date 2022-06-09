@@ -208,7 +208,6 @@ pub use predicate_pushdown::*;
 mod batch_delete;
 mod batch_exchange;
 mod batch_filter;
-mod batch_generate_series;
 mod batch_hash_agg;
 mod batch_hash_join;
 mod batch_hop_window;
@@ -219,6 +218,7 @@ mod batch_project;
 mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
+mod batch_table_function;
 mod batch_topn;
 mod batch_update;
 mod batch_values;
@@ -226,7 +226,6 @@ mod logical_agg;
 mod logical_apply;
 mod logical_delete;
 mod logical_filter;
-mod logical_generate_series;
 mod logical_hop_window;
 mod logical_insert;
 mod logical_join;
@@ -235,6 +234,7 @@ mod logical_multi_join;
 mod logical_project;
 mod logical_scan;
 mod logical_source;
+mod logical_table_function;
 mod logical_topn;
 mod logical_update;
 mod logical_values;
@@ -255,7 +255,6 @@ mod stream_topn;
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
-pub use batch_generate_series::BatchGenerateSeries;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
@@ -266,6 +265,7 @@ pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
+pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
@@ -273,7 +273,6 @@ pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
-pub use logical_generate_series::LogicalGenerateSeries;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
@@ -282,6 +281,7 @@ pub use logical_multi_join::LogicalMultiJoin;
 pub use logical_project::LogicalProject;
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
+pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
@@ -332,7 +332,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Limit }
             , { Logical, TopN }
             , { Logical, HopWindow }
-            , { Logical, GenerateSeries }
+            , { Logical, TableFunction }
             , { Logical, MultiJoin }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
@@ -351,7 +351,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Limit }
             , { Batch, TopN }
             , { Batch, HopWindow }
-            , { Batch, GenerateSeries }
+            , { Batch, TableFunction }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -389,7 +389,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Limit }
             , { Logical, TopN }
             , { Logical, HopWindow }
-            , { Logical, GenerateSeries }
+            , { Logical, TableFunction }
             , { Logical, MultiJoin }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
@@ -419,7 +419,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Delete }
             , { Batch, Update }
             , { Batch, HopWindow }
-            , { Batch, GenerateSeries }
+            , { Batch, TableFunction }
         }
     };
 }
