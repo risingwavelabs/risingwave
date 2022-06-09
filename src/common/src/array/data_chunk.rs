@@ -13,20 +13,21 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
-use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
+use std::{fmt, iter};
 
+use auto_enums::auto_enum;
 use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{Row, RowRef};
 use crate::array::ArrayBuilderImpl;
-use crate::buffer::Bitmap;
+use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::{Result, RwError};
 use crate::hash::HashCode;
-use crate::types::{DataType, NaiveDateTimeWrapper};
+use crate::types::{DataType, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
@@ -53,6 +54,33 @@ impl From<Bitmap> for Vis {
 impl From<usize> for Vis {
     fn from(c: usize) -> Self {
         Vis::Compact(c)
+    }
+}
+
+impl Vis {
+    pub fn len(&self) -> usize {
+        match self {
+            Vis::Bitmap(b) => b.len(),
+            Vis::Compact(c) => *c,
+        }
+    }
+
+    pub fn is_set(&self, idx: usize) -> Result<bool> {
+        match self {
+            Vis::Bitmap(b) => b.is_set(idx),
+            Vis::Compact(c) => {
+                ensure!(idx <= *c);
+                Ok(true)
+            }
+        }
+    }
+
+    #[auto_enum(Iterator)]
+    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
+        match self {
+            Vis::Bitmap(b) => b.iter(),
+            Vis::Compact(c) => iter::repeat(true).take(*c),
+        }
     }
 }
 
@@ -409,10 +437,6 @@ impl fmt::Debug for DataChunk {
 
 /// Test utilities for [`DataChunk`].
 pub trait DataChunkTestExt {
-    fn from_pretty(s: &str) -> Self;
-}
-
-impl DataChunkTestExt for DataChunk {
     /// Parse a chunk from string.
     ///
     /// # Format
@@ -441,6 +465,18 @@ impl DataChunkTestExt for DataChunk {
     /// //     T: str
     /// //    TS: Timestamp
     /// ```
+    fn from_pretty(s: &str) -> Self;
+
+    /// Insert one invisible hole after every record.
+    fn with_invisible_holes(self) -> Self
+    where
+        Self: Sized;
+
+    /// Panic if the chunk is invalid.
+    fn assert_valid(&self);
+}
+
+impl DataChunkTestExt for DataChunk {
     fn from_pretty(s: &str) -> Self {
         use crate::types::ScalarImpl;
 
@@ -527,7 +563,47 @@ impl DataChunkTestExt for DataChunk {
         } else {
             Vis::Bitmap(Bitmap::try_from(visibility).unwrap())
         };
-        DataChunk::new(columns, vis)
+        let chunk = DataChunk::new(columns, vis);
+        chunk.assert_valid();
+        chunk
+    }
+
+    fn with_invisible_holes(self) -> Self
+    where
+        Self: Sized,
+    {
+        let (cols, vis) = self.into_parts();
+        let n = vis.len();
+        let mut new_vis = BitmapBuilder::with_capacity(n * 2);
+        for b in vis.iter() {
+            new_vis.append(b);
+            new_vis.append(false);
+        }
+        let new_cols = cols
+            .into_iter()
+            .map(|col| {
+                let arr = col.array_ref();
+                let mut builder = arr.create_builder(n * 2).unwrap();
+                for v in arr.iter() {
+                    builder.append_datum(&v.to_owned_datum()).unwrap();
+                    builder.append_null().unwrap();
+                }
+                let col = Column::new(builder.finish().unwrap().into());
+                col
+            })
+            .collect();
+        let chunk = DataChunk::new(new_cols, Vis::Bitmap(new_vis.finish()));
+        chunk.assert_valid();
+        chunk
+    }
+
+    fn assert_valid(&self) {
+        let cols = self.columns();
+        let vis = &self.vis2;
+        let n = vis.len();
+        for col in cols.iter() {
+            assert_eq!(col.array().len(), n);
+        }
     }
 }
 
