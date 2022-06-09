@@ -32,6 +32,7 @@ pub enum FeMessage {
     Startup(FeStartupMessage),
     Query(FeQueryMessage),
     Parse(FeParseMessage),
+    Password(FePasswordMessage),
     Describe(FeDescribeMessage),
     Bind(FeBindMessage),
     Execute(FeExecuteMessage),
@@ -88,6 +89,11 @@ pub struct FeParseMessage {
     pub statement_name: Bytes,
     pub query_string: Bytes,
     pub type_ids: Vec<i32>,
+}
+
+#[derive(Debug)]
+pub struct FePasswordMessage {
+    pub password: Bytes,
 }
 
 #[derive(Debug)]
@@ -194,6 +200,14 @@ impl FeParseMessage {
     }
 }
 
+impl FePasswordMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let password = read_null_terminated(&mut buf)?;
+
+        Ok(FeMessage::Password(FePasswordMessage { password }))
+    }
+}
+
 impl FeQueryMessage {
     pub fn get_sql(&self) -> Result<&str> {
         match CStr::from_bytes_with_nul(&self.sql_bytes) {
@@ -241,6 +255,7 @@ impl FeMessage {
             b'S' => Ok(FeMessage::Sync),
             b'X' => Ok(FeMessage::Terminate),
             b'C' => FeCloseMessage::parse(sql_bytes),
+            b'p' => FePasswordMessage::parse(sql_bytes),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("Unsupported tag of regular message: {}", val),
@@ -302,6 +317,8 @@ fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
 #[derive(Debug)]
 pub enum BeMessage<'a> {
     AuthenticationOk,
+    AuthenticationCleartextPassword,
+    AuthenticationMD5Password(&'a [u8; 4]),
     CommandComplete(BeCommandCompleteMessage),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
     EncryptionResponse,
@@ -344,6 +361,30 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'R');
                 buf.put_i32(8);
                 buf.put_i32(0);
+            }
+
+            // AuthenticationCleartextPassword
+            // +-----+----------+-----------+
+            // | 'R' | int32(8) | int32(3)  |
+            // +-----+----------+-----------+
+            BeMessage::AuthenticationCleartextPassword => {
+                buf.put_u8(b'R');
+                buf.put_i32(8);
+                buf.put_i32(3);
+            }
+
+            // AuthenticationMD5Password
+            // +-----+----------+-----------+----------------+
+            // | 'R' | int32(12) | int32(5)  |  Byte4(salt)  |
+            // +-----+----------+-----------+----------------+
+            //
+            // The 4-byte random salt will be used by client to send encrypted password as
+            // concat('md5', md5(concat(md5(concat(password, username)), random-salt))).
+            BeMessage::AuthenticationMD5Password(salt) => {
+                buf.put_u8(b'R');
+                buf.put_i32(12);
+                buf.put_i32(5);
+                buf.put_slice(&salt[..]);
             }
 
             // ParameterStatus

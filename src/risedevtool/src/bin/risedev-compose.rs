@@ -162,7 +162,11 @@ fn main() -> Result<()> {
                     writeln!(
                         log_buffer,
                         "-- Frontend --\nAccess inside cluster: {}\ntpch-bench args: {}\n",
-                        style(format!("psql -d dev -h {} -p {}", c.address, c.port)).green(),
+                        style(format!(
+                            "psql -d dev -h {} -p {} -U root",
+                            c.address, c.port
+                        ))
+                        .green(),
                         style(&arg).green()
                     )?;
                     fs::write(

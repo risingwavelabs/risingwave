@@ -1453,7 +1453,7 @@ async fn test_dedup_cell_based_table_iter_with(
             .iter()
             .map(|row_idx| row[*row_idx].clone())
             .collect_vec());
-        let pk_bytes = serialize_pk(&pk, &ordered_row_serializer).unwrap();
+        let pk_bytes = serialize_pk(&pk, &ordered_row_serializer);
 
         let partial_row = Row(row
             .iter()
@@ -1478,7 +1478,7 @@ async fn test_dedup_cell_based_table_iter_with(
     let mut actual_rows = vec![];
 
     // ---------- Init reader
-    let mut iter = table.iter_with_pk(epoch, pk_ordered_descs).await.unwrap();
+    let mut iter = table.iter_with_pk(epoch, &pk_ordered_descs).await.unwrap();
     for _ in 0..rows.len() {
         // ---------- Read + Deserialize from storage
         let actual = iter.next().await.unwrap();

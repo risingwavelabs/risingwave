@@ -292,8 +292,12 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ) -> Result<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
         match TOP_N_TYPE {
-            TOP_N_MIN => self.state_table.delete::<false>(&key.clone().into_row(), value)?,
-            TOP_N_MAX => self.state_table.delete::<true>(&key.clone().into_row(), value)?,
+            TOP_N_MIN => self
+                .state_table
+                .delete::<false>(&key.clone().into_row(), value)?,
+            TOP_N_MAX => self
+                .state_table
+                .delete::<true>(&key.clone().into_row(), value)?,
             _ => unreachable!(),
         }
 
@@ -344,8 +348,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
         Ok(())
     }
-
-   
 
     /// `Flush` can be called by the executor when it receives a barrier and thus needs to
     /// checkpoint.

@@ -18,13 +18,12 @@ use std::sync::Arc;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Row, Utf8ArrayBuilder,
 };
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Scalar};
-use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
+use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
 pub struct ConcatWsExpression {
@@ -53,13 +52,13 @@ impl Expression for ConcatWsExpression {
             .collect::<Vec<_>>();
 
         let row_len = input.cardinality();
-        let mut builder = Utf8ArrayBuilder::new(row_len)?;
+        let mut builder = Utf8ArrayBuilder::new(row_len).map_err(ExprError::Array)?;
 
         for row_idx in 0..row_len {
             let sep = match sep_column.value_at(row_idx) {
                 Some(sep) => sep,
                 None => {
-                    builder.append(None)?;
+                    builder.append(None).map_err(ExprError::Array)?;
                     continue;
                 }
             };
@@ -69,21 +68,23 @@ impl Expression for ConcatWsExpression {
             let mut string_columns = string_columns_ref.iter();
             for string_column in string_columns.by_ref() {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(string)?;
+                    writer.write_ref(string).map_err(ExprError::Array)?;
                     break;
                 }
             }
 
             for string_column in string_columns {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(sep)?;
-                    writer.write_ref(string)?;
+                    writer.write_ref(sep).map_err(ExprError::Array)?;
+                    writer.write_ref(string).map_err(ExprError::Array)?;
                 }
             }
 
-            builder = writer.finish()?.into_inner();
+            builder = writer.finish().map_err(ExprError::Array)?.into_inner();
         }
-        Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
+        Ok(Arc::new(ArrayImpl::from(
+            builder.finish().map_err(ExprError::Array)?,
+        )))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
@@ -129,13 +130,15 @@ impl ConcatWsExpression {
 }
 
 impl<'a> TryFrom<&'a ExprNode> for ConcatWsExpression {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type()? == Type::ConcatWs);
+        ensure!(prost.get_expr_type().unwrap() == Type::ConcatWs);
 
-        let ret_type = DataType::from(prost.get_return_type()?);
-        let func_call_node = try_match_expand!(prost.get_rex_node().unwrap(), RexNode::FuncCall)?;
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
+            bail!("Expected RexNode::FuncCall");
+        };
 
         let children = &func_call_node.children;
         let sep_expr = expr_build_from_prost(&children[0])?;

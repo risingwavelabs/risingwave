@@ -25,10 +25,11 @@ use crate::error::PsqlError;
 use crate::pg_extended::{PgPortal, PgStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
-    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FeStartupMessage,
+    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FePasswordMessage,
+    FeStartupMessage,
 };
 use crate::pg_response::PgResponse;
-use crate::pg_server::{Session, SessionManager};
+use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -134,6 +135,15 @@ where
             FeMessage::Startup(msg) => {
                 if let Err(e) = self.process_startup_msg(msg) {
                     tracing::error!("failed to set up pg session: {}", e);
+                    self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(e)))?;
+                    self.flush().await?;
+                    return Ok(true);
+                }
+                self.state = PgProtocolState::Regular;
+            }
+            FeMessage::Password(msg) => {
+                if let Err(e) = self.process_password_msg(msg) {
+                    tracing::error!("failed to authenticate session: {}", e);
                     self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(e)))?;
                     self.flush().await?;
                     return Ok(true);
@@ -293,14 +303,39 @@ where
     }
 
     fn process_startup_msg(&mut self, msg: FeStartupMessage) -> Result<()> {
-        let db_name = {
-            match msg.config.get("database") {
-                None => "dev".to_string(),
-                Some(v) => v.to_string(),
+        let db_name = msg
+            .config
+            .get("database")
+            .cloned()
+            .unwrap_or_else(|| "dev".to_string());
+        let user_name = msg
+            .config
+            .get("user")
+            .cloned()
+            .unwrap_or_else(|| "root".to_string());
+
+        let session = self
+            .session_mgr
+            .connect(&db_name, &user_name)
+            .map_err(IoError::other)?;
+        match session.user_authenticator() {
+            UserAuthenticator::None => {
+                self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
+                self.write_parameter_status_msg_no_flush()?;
+                self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
             }
-        };
-        self.session = Some(self.session_mgr.connect(&db_name).map_err(IoError::other)?);
-        self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
+            UserAuthenticator::ClearText(_) => {
+                self.write_message_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
+            }
+            UserAuthenticator::MD5WithSalt { salt, .. } => {
+                self.write_message_no_flush(&BeMessage::AuthenticationMD5Password(salt))?;
+            }
+        }
+        self.session = Some(session);
+        Ok(())
+    }
+
+    fn write_parameter_status_msg_no_flush(&mut self) -> Result<()> {
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ClientEncoding("utf8"),
         ))?;
@@ -310,6 +345,16 @@ where
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ServerVersion("9.5.0"),
         ))?;
+        Ok(())
+    }
+
+    fn process_password_msg(&mut self, msg: FePasswordMessage) -> Result<()> {
+        let authenticator = self.session.as_ref().unwrap().user_authenticator();
+        if !authenticator.authenticate(&msg.password) {
+            return Err(IoError::new(ErrorKind::InvalidInput, "Invalid password"));
+        }
+        self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
+        self.write_parameter_status_msg_no_flush()?;
         self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }
