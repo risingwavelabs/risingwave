@@ -135,7 +135,8 @@ impl Sink for MySQLSink {
 
         let mut transaction = conn.start_transaction(TxOpts::default()).await?;
 
-        for (idx, op) in chunk.ops().iter().enumerate() {
+        let mut iter = chunk.ops().iter().enumerate();
+        while let Some((idx, op)) = iter.next() {
             // TODO(nanderstabel): Refactor
             let values = chunk
                 .columns()
@@ -145,12 +146,12 @@ impl Sink for MySQLSink {
 
             // Get SQL statement
             let stmt = match *op {
-                Insert | UpdateInsert => format!(
+                Insert => format!(
                     "INSERT INTO {} VALUES ({})",
                     self.table(),
                     join(values, ",")
                 ),
-                Delete | UpdateDelete => format!(
+                Delete => format!(
                     "DELETE FROM {} WHERE ({})",
                     self.table(),
                     join(
@@ -163,6 +164,36 @@ impl Sink for MySQLSink {
                         " AND "
                     )
                 ),
+                UpdateDelete => {
+                    if let Some((idx2, UpdateInsert)) = iter.next() {
+                        // TODO(nanderstabel): Refactor2
+                        let values2 = chunk
+                            .columns()
+                            .iter()
+                            .map(|x| {
+                                MySQLType::try_from(x.array_ref().datum_at(idx2).unwrap()).unwrap()
+                            })
+                            .collect_vec();
+
+                        format!(
+                            "UPDATE {} SET {} WHERE {}",
+                            self.table,
+                            join(values2, ","),
+                            join(
+                                schema
+                                    .names()
+                                    .iter()
+                                    .zip(values.iter())
+                                    .map(|(c, v)| format!("{}={}", c, v))
+                                    .collect::<Vec<String>>(),
+                                " AND "
+                            )
+                        )
+                    } else {
+                        panic!("UpdateDelete should always be followed by an UpdateInsert!")
+                    }
+                }
+                _ => panic!("UpdateInsert should always follow an UpdateDelete!"),
             };
             transaction.exec_drop(stmt, Params::Empty).await?;
         }
@@ -227,7 +258,6 @@ impl Sink for RedisSink {
 mod test {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 
-    // use futures::future::BoxFuture;
     use super::*;
 
     struct ConnectionParams<'a> {
@@ -238,6 +268,7 @@ mod test {
         pub password: &'a str,
     }
 
+    // Start connection with (already existing) database.
     async fn start_connection(params: &ConnectionParams<'_>) -> Result<Conn> {
         let builder = OptsBuilder::default()
             .user(Some(params.user))
@@ -267,7 +298,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_basic_async() -> Result<()> {
+    async fn test_basic() -> Result<()> {
         // Connection parameters for testing purposes.
         let params = ConnectionParams {
             endpoint: "127.0.0.1",
