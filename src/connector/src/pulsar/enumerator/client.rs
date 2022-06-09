@@ -41,8 +41,8 @@ impl PulsarSplitEnumerator {}
 
 #[async_trait]
 impl SplitEnumerator for PulsarSplitEnumerator {
-    type Properties = PulsarProperties;
     type Split = PulsarSplit;
+    type Properties = PulsarProperties;
 
     async fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
         let topic = properties.topic;
