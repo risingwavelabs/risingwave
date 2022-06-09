@@ -22,12 +22,13 @@ use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan, ToBatch, ToStream,
+    BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
+    ToBatch, ToStream,
 };
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
 use crate::session::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, ScanRange};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -131,6 +132,14 @@ impl LogicalScan {
             .collect()
     }
 
+    pub(super) fn order_names(&self) -> Vec<String> {
+        self.table_desc
+            .order_column_ids()
+            .iter()
+            .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect()
+    }
+
     pub fn table_name(&self) -> &str {
         &self.table_name
     }
@@ -211,10 +220,10 @@ impl LogicalScan {
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
-    fn predicate_pull_up(&self) -> PlanRef {
+    fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
         let mut predicate = self.predicate.clone();
         if predicate.always_true() {
-            return self.clone().into();
+            return (self.clone(), Condition::true_cond(), None);
         }
 
         let mut mapping =
@@ -230,12 +239,12 @@ impl LogicalScan {
             self.ctx(),
             Condition::true_cond(),
         );
-        let mut plan = LogicalFilter::create(scan_without_predicate.into(), predicate);
-        if self.required_col_idx != self.output_col_idx {
-            plan = LogicalProject::create(plan, self.output_idx_to_input_ref());
-        }
-        assert_eq!(self.schema(), plan.schema());
-        plan
+        let project_expr = if self.required_col_idx != self.output_col_idx {
+            Some(self.output_idx_to_input_ref())
+        } else {
+            None
+        };
+        (scan_without_predicate, predicate, project_expr)
     }
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
@@ -319,9 +328,25 @@ impl PredicatePushdown for LogicalScan {
 impl ToBatch for LogicalScan {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.predicate.always_true() {
-            Ok(BatchSeqScan::new(self.clone()).into())
+            Ok(BatchSeqScan::new(self.clone(), ScanRange::full_table_scan()).into())
         } else {
-            self.predicate_pull_up().to_batch()
+            let (scan_range, predicate) = self.predicate.clone().split_to_scan_range(
+                &self.table_desc.order_column_ids(),
+                self.table_desc.columns.len(),
+            );
+            let mut scan = self.clone();
+            scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
+            let (scan, predicate, project_expr) = scan.predicate_pull_up();
+
+            let mut plan: PlanRef = BatchSeqScan::new(scan, scan_range).into();
+            if !predicate.always_true() {
+                plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
+            }
+            if let Some(exprs) = project_expr {
+                plan = BatchProject::new(LogicalProject::new(plan, exprs)).into()
+            }
+            assert_eq!(plan.schema(), self.schema());
+            Ok(plan)
         }
     }
 }
@@ -331,7 +356,12 @@ impl ToStream for LogicalScan {
         if self.predicate.always_true() {
             Ok(StreamTableScan::new(self.clone()).into())
         } else {
-            self.predicate_pull_up().to_stream()
+            let (scan, predicate, project_expr) = self.predicate_pull_up();
+            let mut plan = LogicalFilter::create(scan.into(), predicate);
+            if let Some(exprs) = project_expr {
+                plan = LogicalProject::create(plan, exprs)
+            }
+            plan.to_stream()
         }
     }
 
