@@ -39,14 +39,8 @@ impl CompactionGroupClient {
     }
 
     /// Tries to get from local cache
-    pub async fn try_ger_compaction_group_id(
-        &self,
-        prefix: Prefix,
-    ) -> HummockResult<Option<CompactionGroupId>> {
-        if let Some(compaction_group_id) = self.inner.read().await.get(&prefix) {
-            return Ok(Some(compaction_group_id));
-        }
-        Ok(None)
+    pub async fn try_get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId> {
+        self.inner.read().await.get(&prefix)
     }
 
     /// Tries to get from meta service
