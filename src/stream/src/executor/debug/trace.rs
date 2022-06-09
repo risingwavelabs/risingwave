@@ -66,9 +66,14 @@ pub async fn trace(
 
 /// Streams wrapped by `metrics` will update actor metrics.
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn metrics(actor_id: ActorId, metrics: Arc<StreamingMetrics>, input: impl MessageStream) {
+pub async fn metrics(
+    actor_id: ActorId,
+    executor_id: u64,
+    metrics: Arc<StreamingMetrics>,
+    input: impl MessageStream,
+) {
     let actor_id_string = actor_id.to_string();
-
+    let executor_id_string = executor_id.to_string();
     pin_mut!(input);
 
     while let Some(message) = input.next().await.transpose()? {
@@ -76,7 +81,7 @@ pub async fn metrics(actor_id: ActorId, metrics: Arc<StreamingMetrics>, input: i
             if chunk.cardinality() > 0 {
                 metrics
                     .executor_row_count
-                    .with_label_values(&[&actor_id_string])
+                    .with_label_values(&[&actor_id_string, &executor_id_string])
                     .inc_by(chunk.cardinality() as u64);
             }
         }

@@ -13,11 +13,14 @@
 // limitations under the License.
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
-use risingwave_common::error::Result;
+
+use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn upper(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer.write_ref(&s.to_uppercase())
+    writer
+        .write_ref(&s.to_uppercase())
+        .map_err(ExprError::Array)
 }
 
 #[cfg(test)]
@@ -35,10 +38,10 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1)?;
+            let builder = Utf8ArrayBuilder::new(1).unwrap();
             let writer = builder.writer();
             let guard = upper(s, writer)?;
-            let array = guard.into_inner().finish()?;
+            let array = guard.into_inner().finish().unwrap();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

@@ -127,6 +127,7 @@ impl CompactStatus {
         } else {
             ret.split_ranges
         };
+
         let compact_task = CompactTask {
             input_ssts: vec![ret.select_level, ret.target_level],
             splits,
@@ -157,6 +158,7 @@ impl CompactStatus {
             task_status: false,
             vnode_mappings: vec![],
             compaction_group_id,
+            existing_table_ids: vec![],
         };
         Some(compact_task)
     }

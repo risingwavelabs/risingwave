@@ -115,17 +115,19 @@ impl StreamHashJoin {
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ type: {:?}, predicate: {} }}",
-            if self.is_delta {
-                "StreamDeltaHashJoin"
-            } else {
-                "StreamHashJoin"
-            },
-            self.logical.join_type(),
-            self.eq_join_predicate()
-        )
+        let mut builder = if self.is_delta {
+            f.debug_struct("StreamDeltaHashJoin")
+        } else {
+            f.debug_struct("StreamHashJoin")
+        };
+        builder
+            .field("type", &format_args!("{:?}", self.logical.join_type()))
+            .field("predicate", &format_args!("{}", self.eq_join_predicate()));
+
+        if self.append_only() {
+            builder.field("append_only", &format_args!("{}", true));
+        }
+        builder.finish()
     }
 }
 

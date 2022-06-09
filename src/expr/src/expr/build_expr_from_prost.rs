@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::ensure;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
@@ -31,15 +29,14 @@ use crate::expr::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
+use crate::{bail, ensure, Result};
 
 fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
-    let ret_type = DataType::from(prost.get_return_type()?);
-    if let RexNode::FuncCall(func_call) = prost.get_rex_node()? {
+    let ret_type = DataType::from(prost.get_return_type().unwrap());
+    if let RexNode::FuncCall(func_call) = prost.get_rex_node().unwrap() {
         Ok((func_call.get_children().to_vec(), ret_type))
     } else {
-        Err(RwError::from(ErrorCode::InternalError(
-            "expects a function call".to_string(),
-        )))
+        bail!("Expected RexNode::FuncCall");
     }
 }
 
@@ -47,7 +44,7 @@ pub fn build_unary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 1);
     let child_expr = expr_build_from_prost(&children[0])?;
-    new_unary_expr(prost.get_expr_type()?, ret_type, child_expr)
+    new_unary_expr(prost.get_expr_type().unwrap(), ret_type, child_expr)
 }
 
 pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
@@ -56,7 +53,7 @@ pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let left_expr = expr_build_from_prost(&children[0])?;
     let right_expr = expr_build_from_prost(&children[1])?;
     Ok(new_binary_expr(
-        prost.get_expr_type()?,
+        prost.get_expr_type().unwrap(),
         ret_type,
         left_expr,
         right_expr,
@@ -69,7 +66,7 @@ pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpress
     let left_expr = expr_build_from_prost(&children[0])?;
     let right_expr = expr_build_from_prost(&children[1])?;
     Ok(new_nullable_binary_expr(
-        prost.get_expr_type()?,
+        prost.get_expr_type().unwrap(),
         ret_type,
         left_expr,
         right_expr,
@@ -169,9 +166,7 @@ pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let else_clause = if len % 2 == 1 {
         let else_clause = expr_build_from_prost(&children[len - 1])?;
         if else_clause.return_type() != ret_type {
-            return Err(RwError::from(ErrorCode::ProtocolError(
-                "the return type of else and case not match".to_string(),
-            )));
+            bail!("Type mismatched between else and case.");
         }
         Some(else_clause)
     } else {
@@ -184,14 +179,10 @@ pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         let when_expr = expr_build_from_prost(&children[when_index])?;
         let then_expr = expr_build_from_prost(&children[then_index])?;
         if when_expr.return_type() != DataType::Boolean {
-            return Err(RwError::from(ErrorCode::ProtocolError(
-                "the return type of when clause and condition not match".to_string(),
-            )));
+            bail!("Type mismatched between when clause and condition");
         }
         if then_expr.return_type() != ret_type {
-            return Err(RwError::from(ErrorCode::ProtocolError(
-                "the return type of then clause and case not match".to_string(),
-            )));
+            bail!("Type mismatched between then clause and case");
         }
         let when_clause = WhenClause::new(when_expr, then_expr);
         when_clauses.push(when_clause);

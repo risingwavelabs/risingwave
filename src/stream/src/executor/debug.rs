@@ -94,7 +94,7 @@ impl DebugExecutor {
         stream: impl MessageStream + 'static,
     ) -> impl MessageStream + 'static {
         // Metrics
-        let stream = trace::metrics(extra.actor_id, extra.metrics, stream);
+        let stream = trace::metrics(extra.actor_id, extra.executor_id, extra.metrics, stream);
 
         // Epoch check
         let stream = epoch_check::epoch_check(info, stream);

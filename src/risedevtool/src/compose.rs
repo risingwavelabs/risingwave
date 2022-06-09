@@ -321,7 +321,11 @@ impl Compose for RedPandaConfig {
                 self.outside_port.to_string(),
             ],
             volumes: vec![format!("{}:/var/lib/redpanda/data", self.id)],
-            ports: vec![format!("{}:{}", self.outside_port, self.outside_port)],
+            ports: vec![
+                format!("{}:{}", self.outside_port, self.outside_port),
+                // Redpanda admin port
+                "9644:9644".to_string(),
+            ],
             ..Default::default()
         })
     }

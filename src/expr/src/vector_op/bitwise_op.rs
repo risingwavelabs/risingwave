@@ -17,10 +17,9 @@ use std::fmt::Debug;
 use std::ops::{BitAnd, BitOr, BitXor, Not};
 
 use num_traits::{CheckedShl, CheckedShr};
-use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
-use risingwave_common::error::{Result, RwError};
 
 use crate::vector_op::arithmetic_op::general_atm;
+use crate::{ExprError, Result};
 
 // Conscious decision for shl and shr is made here to diverge from PostgreSQL.
 // If overflow happens, instead of truncated to zero, we return overflow error as this is
@@ -34,8 +33,7 @@ where
     T2: TryInto<u32> + Debug,
 {
     general_shift(l, r, |a, b| {
-        a.checked_shl(b)
-            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
+        a.checked_shl(b).ok_or(ExprError::NumericOutOfRange)
     })
 }
 
@@ -46,8 +44,7 @@ where
     T2: TryInto<u32> + Debug,
 {
     general_shift(l, r, |a, b| {
-        a.checked_shr(b)
-            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
+        a.checked_shr(b).ok_or(ExprError::NumericOutOfRange)
     })
 }
 
@@ -59,13 +56,9 @@ where
     F: FnOnce(T1, u32) -> Result<T1>,
 {
     // TODO: We need to improve the error message
-    let r: u32 = r.try_into().map_err(|_| {
-        RwError::from(InternalError(format!(
-            "Can't convert {} to {}",
-            type_name::<T2>(),
-            type_name::<u32>()
-        )))
-    })?;
+    let r: u32 = r
+        .try_into()
+        .map_err(|_| ExprError::Cast(type_name::<T2>(), type_name::<u32>()))?;
     atm(l, r)
 }
 

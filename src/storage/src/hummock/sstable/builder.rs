@@ -108,7 +108,7 @@ impl SSTableBuilder {
         if self.block_builder.is_none() {
             self.last_full_key.clear();
             self.block_builder = Some(BlockBuilder::new(BlockBuilderOptions {
-                capacity: self.options.capacity,
+                capacity: self.options.block_capacity,
                 restart_interval: self.options.restart_interval,
                 compression_algorithm: self.options.compression_algorithm,
             }));

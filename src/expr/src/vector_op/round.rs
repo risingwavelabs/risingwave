@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::types::{Decimal, OrderedF64};
+
+use crate::Result;
 
 #[inline(always)]
 pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Result<Decimal> {

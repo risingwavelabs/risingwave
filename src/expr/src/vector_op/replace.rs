@@ -13,23 +13,26 @@
 // limitations under the License.
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
-use risingwave_common::error::Result;
+
+use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn replace(s: &str, from_str: &str, to_str: &str, writer: BytesWriter) -> Result<BytesGuard> {
     if from_str.is_empty() {
-        return writer.write_ref(s);
+        return writer.write_ref(s).map_err(ExprError::Array);
     }
     let mut last = 0;
     let mut writer = writer.begin();
     while let Some(mut start) = s[last..].find(from_str) {
         start += last;
-        writer.write_ref(&s[last..start])?;
-        writer.write_ref(to_str)?;
+        writer
+            .write_ref(&s[last..start])
+            .map_err(ExprError::Array)?;
+        writer.write_ref(to_str).map_err(ExprError::Array)?;
         last = start + from_str.len();
     }
-    writer.write_ref(&s[last..])?;
-    writer.finish()
+    writer.write_ref(&s[last..]).map_err(ExprError::Array)?;
+    writer.finish().map_err(ExprError::Array)
 }
 
 #[cfg(test)]
