@@ -14,9 +14,9 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
+// use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_connector::sink::{MySQLSink, Sink};
+use risingwave_connector::sink::Sink;
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, Message};
@@ -42,8 +42,8 @@ impl<S: Sink> SinkExecutor<S> {
         #[for_await]
         for msg in input {
             let msg = msg?;
-
-            self.external_sink.write_batch();
+            todo!();
+            // self.external_sink.write_batch();
         }
     }
 }
@@ -83,6 +83,7 @@ mod test {
     use crate::executor::test_utils::*;
     use crate::executor::{Barrier, Message, PkIndices, *};
     use crate::task::LocalBarrierManager;
+    use risingwave_connector::sink::MySQLSink;
 
     // TODO: This basic test for the most part is a copy-paste from the `MaterializeExecutor`
     // fn test_materialize_executor(). Should be replaced by a better test eventually
@@ -133,13 +134,13 @@ mod test {
             vec![0],
         ));
 
-        let mysqlsink = MySQLSink {
-            endpoint: String::from("127.0.0.1:3306"),
-            table: String::from("<table_name>"),
-            database: String::from("<database_name>"),
-            user: String::from("<user_name>"),
-            password: String::from("<password>"),
-        };
+        let mut mysqlsink = MySQLSink::new(
+            "127.0.0.1:3306".into(),
+            "<table_name>".into(),
+            Some("<database_name>".into()),
+            Some("<user_name>".into()),
+            Some("<password>".into()),
+        );
 
         let sink = Box::new(SinkExecutor::new(materialize_executor, mysqlsink));
 
