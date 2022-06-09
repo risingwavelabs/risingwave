@@ -26,7 +26,7 @@ use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::level_handler::LevelHandler;
 
-const MIN_COMPACTION_BYTES: u64 = 2 * 1024 * 1024; // 1MB
+const MIN_COMPACTION_BYTES: u64 = 2 * 1024 * 1024; // 2MB
 
 pub struct TierCompactionPicker {
     compact_task_id: u64,
@@ -69,8 +69,10 @@ impl CompactionPicker for TierCompactionPicker {
                 if level_handlers[0].is_pending_compact(&other.id) {
                     break;
                 }
-                // no need to trigger a bigger compaction
-                if compaction_bytes >= self.config.min_compaction_bytes {
+                if compaction_bytes >= self.config.max_compaction_bytes {
+                    break;
+                }
+                if other.file_size > self.config.min_compaction_bytes {
                     break;
                 }
                 compaction_bytes += other.file_size;
@@ -321,7 +323,7 @@ impl LevelCompactionPicker {
                         // we only extend L0 files when write-amplification does not increase.
                         let inc_compaction_size =
                             target_level_ssts.calc_inc_compaction_size(&tables);
-                        if select_compaction_bytes > 0
+                        if select_compaction_bytes > self.config.min_compaction_bytes
                             && (target_level_ssts.compaction_bytes + inc_compaction_size)
                                 / (select_compaction_bytes + other.file_size)
                                 > target_level_ssts.compaction_bytes / select_compaction_bytes

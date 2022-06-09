@@ -198,7 +198,7 @@ impl DynamicLevelSelector {
                 let score = idle_file_count * SCORE_BASE
                     / self.config.level0_tier_compact_file_number as u64;
                 ctx.score_levels.push((score, 0, 0));
-                let score = 2 * total_size * SCORE_BASE / self.config.max_bytes_for_level_base
+                let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base
                     + idle_file_count * SCORE_BASE / self.config.level0_tigger_file_numer as u64;
                 ctx.score_levels.push((score, 0, ctx.base_level));
             } else {

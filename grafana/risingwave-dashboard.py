@@ -201,7 +201,7 @@ def section_compaction(panels):
                 "version_size", "version size"
             ),
         ]),
-        panels.timeseries_bytes("GBs Read from Next Level", [
+        panels.timeseries_kilobytes("KBs Read from Next Level", [
             panels.target(
                 "histogram_quantile(0.5, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))", "L{{level_index}} read bytes p50"
             ),
@@ -209,7 +209,7 @@ def section_compaction(panels):
                 "histogram_quantile(0.99, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))", "L{{level_index}} read bytes p99"
             ),
         ]),
-        panels.timeseries_bytes("GBs Read from Current Level", [
+        panels.timeseries_kilobytes("KBs Read from Current Level", [
             panels.target(
                 "histogram_quantile(0.5, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))", "L{{level_index}} read bytes p50"
             ),
@@ -225,7 +225,7 @@ def section_compaction(panels):
                 "histogram_quantile(0.99, sum(rate(storage_level_compact_read_sstn_curr_bucket[1m])) by (le, level_index))", "L{{level_index}} p99"
             ),
         ]),
-        panels.timeseries_bytes("GBs Written to Next Level", [
+        panels.timeseries_kilobytes("KBs Written to Next Level", [
             panels.target(
                 "histogram_quantile(0.5, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))", "L{{level_index}} write bytes p50"
             ),
