@@ -37,6 +37,7 @@ use risingwave_storage::{Keyspace, StateStore};
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
+use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
@@ -44,6 +45,7 @@ use crate::executor::{Executor, PkDataTypes};
 
 mod agg_call;
 mod agg_state;
+mod approx_count_distinct;
 mod foldable;
 mod row_count;
 mod single_value;
@@ -135,6 +137,12 @@ pub fn create_streaming_agg_state(
                         Box::new(<$state_impl>::new())
                     }
                 )*
+                (AggKind::ApproxCountDistinct, _, DataType::Int64, Some(datum)) => {
+                    Box::new(StreamingApproxCountDistinct::new_with_datum(datum))
+                }
+                (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
+                    Box::new(StreamingApproxCountDistinct::new())
+                }
                 (other_agg, other_input, other_return, _) => panic!(
                     "streaming agg state not implemented: {:?} {:?} {:?}",
                     other_agg, other_input, other_return
@@ -403,7 +411,11 @@ pub fn get_key_len(agg_call: &AggCall) -> usize {
             }
         }
         // These agg call do not have keys besides group key.
-        AggKind::Sum | AggKind::Count | AggKind::SingleValue | AggKind::RowCount => 0,
+        AggKind::Sum
+        | AggKind::Count
+        | AggKind::SingleValue
+        | AggKind::RowCount
+        | AggKind::ApproxCountDistinct => 0,
         _ => unimplemented!("{:?} do not implemented!", agg_call.kind),
     }
 }
