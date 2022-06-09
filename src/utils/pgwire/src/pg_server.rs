@@ -165,8 +165,8 @@ mod tests {
                 .skip(1)
                 .map(|x| {
                     Some(
-                        x.trim_start_matches("\'")
-                            .trim_end_matches("\'")
+                        x.trim_start_matches('\'')
+                            .trim_end_matches('\'')
                             .to_string(),
                     )
                 })
