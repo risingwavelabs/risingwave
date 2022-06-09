@@ -40,7 +40,7 @@ pub struct StateTable<S: StateStore> {
     keyspace: Keyspace<S>,
 
     column_descs: Vec<ColumnDesc>,
-    // /// Ordering of primary key (for assertion)
+    /// Ordering of primary key (for assertion)
     order_types: Vec<OrderType>,
 
     /// buffer key/values
