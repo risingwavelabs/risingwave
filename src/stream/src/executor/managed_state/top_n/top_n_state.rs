@@ -291,7 +291,12 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         epoch: u64,
     ) -> Result<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
-        self.state_table.delete(&key.clone().into_row(), value)?;
+        match TOP_N_TYPE {
+            TOP_N_MIN => self.state_table.delete::<false>(&key.clone().into_row(), value)?,
+            TOP_N_MAX => self.state_table.delete::<true>(&key.clone().into_row(), value)?,
+            _ => unreachable!(),
+        }
+
         self.total_count -= 1;
         // If we have nothing in the cache, we have to scan from the storage.
         if self.top_n.is_empty() && self.total_count > 0 {

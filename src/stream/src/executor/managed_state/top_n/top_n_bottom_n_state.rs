@@ -215,7 +215,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     ) -> Result<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
-        self.state_table.delete(&key.clone().into_row(), value)?;
+        self.state_table.delete::<false>(&key.clone().into_row(), value)?;
         self.total_count -= 1;
         // If we have nothing in both caches, we have to scan from the storage.
         if self.top_n.is_empty() && self.bottom_n.is_empty() && self.total_count > 0 {

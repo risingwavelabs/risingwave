@@ -107,10 +107,15 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    pub fn delete(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
+    pub fn delete<const RVERSE: bool>(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        let pk_bytes =
-            serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()).map_err(err)?;
+        let pk_bytes = match RVERSE {
+            true => reverse_serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap())
+                .map_err(err)?,
+            false => serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap())
+                .map_err(err)?,
+        };
+        println!("delete write to storage pk_bytes = {:?}", pk_bytes);
         self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }

@@ -124,7 +124,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 self.state_table.insert::<false>(&arrange_row, row)?;
                             }
                             Delete | UpdateDelete => {
-                                self.state_table.delete(&arrange_row, row)?;
+                                self.state_table.delete::<false>(&arrange_row, row)?;
                             }
                         }
                     }
