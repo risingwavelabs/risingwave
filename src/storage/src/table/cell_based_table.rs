@@ -349,7 +349,7 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn iter_with_pk(
         &self,
         epoch: u64,
-        pk_descs: Vec<OrderedColumnDesc>,
+        pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<DedupPkCellBasedTableRowIter<S>> {
         DedupPkCellBasedTableRowIter::new(
             self.keyspace.clone(),
@@ -601,7 +601,7 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
-        pk_descs: Vec<OrderedColumnDesc>,
+        pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<Self> {
         let inner =
             CellBasedTableRowIter::new(&keyspace, table_descs.clone(), epoch, _stats).await?;

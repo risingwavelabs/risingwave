@@ -382,7 +382,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar(_) => DataType::Varchar,
+        AstDataType::Varchar(_) | AstDataType::String => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,

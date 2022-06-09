@@ -387,34 +387,6 @@ where
     }
 }
 
-impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
-where
-    A::OwnedItem: Ord,
-{
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub async fn iterate_store(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
-        let epoch = u64::MAX;
-        let all_data = self.keyspace.scan(None, epoch).await?;
-        let mut result = vec![];
-
-        for (raw_key, mut raw_value) in all_data {
-            // let mut deserializer = value_encoding::Deserializer::new(raw_value);
-            let value = deserialize_cell(&mut raw_value, &self.data_type)?;
-            let key = value.clone().map(|x| x.try_into().unwrap());
-            let pks = self.serializer.get_pk(&raw_key[..])?;
-            result.push((key, pks));
-        }
-        Ok(result)
-    }
-
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub async fn iterate_topn_cache(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
-        Ok(self.top_n.iter().map(|(k, _)| k.clone()).collect())
-    }
-}
-
 pub async fn create_streaming_extreme_state<S: StateStore>(
     agg_call: AggCall,
     keyspace: Keyspace<S>,
