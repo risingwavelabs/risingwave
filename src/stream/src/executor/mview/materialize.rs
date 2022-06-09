@@ -54,7 +54,12 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let arrange_columns_set: HashSet<usize> =
             keys.iter().map(|k| k.column_idx).collect::<HashSet<_>>();
         let dist_key_set = distribution_keys.iter().copied().collect::<HashSet<_>>();
-        assert!(dist_key_set.is_subset(&arrange_columns_set));
+        assert!(
+            dist_key_set.is_subset(&arrange_columns_set),
+            "dist_key_set={:?}, arrange_columns_set={:?}",
+            dist_key_set,
+            arrange_columns_set
+        );
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
         let column_descs = column_ids

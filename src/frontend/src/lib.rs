@@ -34,6 +34,8 @@
 #![feature(drain_filter)]
 #![feature(if_let_guard)]
 #![feature(assert_matches)]
+#![feature(map_first_last)]
+
 #[macro_use]
 pub mod catalog;
 pub mod binder;

@@ -476,8 +476,13 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
         { Float64, F64Array },
         { Float32, F32Array },
         { Decimal, DecimalArray },
+        { Date, NaiveDateArray },
         { Varchar, Utf8Array },
+        { Time, NaiveTimeArray },
+        { Timestamp, NaiveDateTimeArray },
         { Interval, IntervalArray },
+        { Struct { fields: _ }, StructArray },
+        { List { datatype: _ }, ListArray },
     )
 }
 

@@ -341,7 +341,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
             T::Varchar,
         );
     }
-    for e in [E::Length, E::Ascii] {
+    for e in [E::Length, E::Ascii, E::CharLength] {
         map.insert(FuncSign::new(e, vec![T::Varchar]), T::Int32);
     }
     map.insert(
