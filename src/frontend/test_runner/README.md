@@ -6,6 +6,9 @@ the logical operator tree if any, and the physical operator tree if any.
 
 The test data in YAML format is organized under `tests/testdata` folder.
 
+To be notice that `create materialized view` is not supported, since it is not needed.
+Because the test runner will generate stream plan regardless the input SQL is a batch query or a streaming query.
+
 ```yaml
 - sql: |
     select * from t
@@ -40,6 +43,8 @@ Firstly, we will need to create a placeholder in yaml testcases:
   batch_plan: ""
   stream_plan: ""
 ```
+
+Those plans followed the input SQL are expected outputs.
 
 You'll need to install [yq](https://github.com/mikefarah/yq). For macOS users,
 simply `brew install yq`. For Linux users, download yq 4.x from the
