@@ -19,12 +19,14 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::FunctionArg;
 
 use super::{Binder, Result};
+use crate::binder::FunctionType;
 use crate::expr::{align_types, Expr as _, ExprImpl, ExprType};
 
 #[derive(Debug, Clone)]
 pub struct BoundTableFunction {
     pub(crate) args: Vec<ExprImpl>,
     pub(crate) data_type: DataType,
+    pub(crate) func_type: FunctionType,
 }
 
 impl Binder {
@@ -69,6 +71,7 @@ impl Binder {
                 Ok(BoundTableFunction {
                     args: exprs,
                     data_type,
+                    func_type: FunctionType::Unnest,
                 })
             } else {
                 Err(ErrorCode::BindError(
@@ -119,6 +122,7 @@ impl Binder {
         Ok(BoundTableFunction {
             args: exprs,
             data_type,
+            func_type: FunctionType::Generate,
         })
     }
 

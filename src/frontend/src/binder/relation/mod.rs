@@ -43,8 +43,13 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    GenerateSeriesFunction(Box<BoundTableFunction>),
-    UnnestFunction(Box<BoundTableFunction>),
+    TableFunction(Box<BoundTableFunction>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FunctionType {
+    Generate,
+    Unnest,
 }
 
 impl Binder {
@@ -191,11 +196,11 @@ impl Binder {
                 } else {
                     let func_name = &name.0[0].value;
                     if func_name.eq_ignore_ascii_case("generate_series") {
-                        return Ok(Relation::GenerateSeriesFunction(Box::new(
+                        return Ok(Relation::TableFunction(Box::new(
                             self.bind_generate_series_function(args)?,
                         )));
                     } else if func_name.eq_ignore_ascii_case("unnest") {
-                        return Ok(Relation::UnnestFunction(Box::new(
+                        return Ok(Relation::TableFunction(Box::new(
                             self.bind_unnest_function(args)?,
                         )));
                     }

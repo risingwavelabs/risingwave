@@ -19,10 +19,12 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use crate::binder::FunctionType;
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::BatchTableFunction;
 use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
+
 /// `LogicalGenerateSeries` implements Hop Table Function.
 #[derive(Debug, Clone)]
 pub struct LogicalTableFunction {
@@ -30,12 +32,6 @@ pub struct LogicalTableFunction {
     pub(super) args: Vec<ExprImpl>,
     pub series_type: FunctionType,
     pub data_type: DataType,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum FunctionType {
-    Generate,
-    Unnest,
 }
 
 impl LogicalTableFunction {

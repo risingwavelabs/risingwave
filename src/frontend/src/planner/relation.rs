@@ -20,8 +20,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundTableFunction, BoundWindowTableFunction, Relation,
-    WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundTableFunction, BoundWindowTableFunction,
+    FunctionType, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -39,8 +39,10 @@ impl Planner {
             Relation::Join(join) => self.plan_join(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::GenerateSeriesFunction(gs) => self.plan_generate_series_function(*gs),
-            Relation::UnnestFunction(gs) => self.plan_unnest_function(*gs),
+            Relation::TableFunction(gs) => match gs.func_type {
+                FunctionType::Generate => self.plan_generate_series_function(*gs),
+                FunctionType::Unnest => self.plan_unnest_function(*gs),
+            },
         }
     }
 
