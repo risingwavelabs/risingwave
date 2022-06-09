@@ -13,16 +13,19 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use log::debug;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
 use risingwave_common::error::RwError;
+use risingwave_common::types::Datum;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -142,6 +145,7 @@ impl<S: StateStore> CellBasedTable<S> {
         ]
         .concat();
         let mut get_res = Vec::new();
+
         let sentinel_cell = self.keyspace.get(&sentinel_key, epoch).await?;
 
         if sentinel_cell.is_none() {
@@ -309,7 +313,7 @@ impl<S: StateStore> CellBasedTable<S> {
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&self, epoch: u64) -> StorageResult<CellBasedTableRowIter<S>> {
         CellBasedTableRowIter::new(
-            self.keyspace.clone(),
+            &self.keyspace,
             self.column_descs.clone(),
             epoch,
             self.stats.clone(),
@@ -328,6 +332,109 @@ impl<S: StateStore> CellBasedTable<S> {
             epoch,
             self.stats.clone(),
             pk_descs,
+        )
+        .await
+    }
+
+    fn serialize_pk_bound(
+        &self,
+        pk_prefix: &Row,
+        next_col_bound: Bound<&Datum>,
+        is_start_bound: bool,
+    ) -> StorageResult<Bound<Vec<u8>>> {
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
+        Ok(match next_col_bound {
+            Included(k) => {
+                let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                let mut key = pk_prefix.clone();
+                key.0.push(k.clone());
+                let serialized_key = serialize_pk(&key, &pk_prefix_serializer).map_err(err)?;
+                if is_start_bound {
+                    Included(
+                        self.keyspace
+                            .prefixed_key(&serialize_pk(&key, &pk_prefix_serializer).map_err(err)?),
+                    )
+                } else {
+                    // Should use excluded next key for end bound.
+                    // Otherwise keys starting with the bound is not included.
+                    Excluded(self.keyspace.prefixed_key(&next_key(&serialized_key)))
+                }
+            }
+            Excluded(k) => {
+                let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                let mut key = pk_prefix.clone();
+                key.0.push(k.clone());
+                let serialized_key = serialize_pk(&key, &pk_prefix_serializer).map_err(err)?;
+                if is_start_bound {
+                    // storage doesn't support excluded begin key yet, so transform it to included
+                    Included(self.keyspace.prefixed_key(&next_key(&serialized_key)))
+                } else {
+                    Excluded(self.keyspace.prefixed_key(&serialized_key))
+                }
+            }
+            Unbounded => {
+                let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+                let serialized_pk_prefix =
+                    serialize_pk(pk_prefix, &pk_prefix_serializer).map_err(err)?;
+                if is_start_bound {
+                    Included(self.keyspace.prefixed_key(&serialized_pk_prefix))
+                } else {
+                    Excluded(if pk_prefix.size() == 0 {
+                        next_key(self.keyspace.key())
+                    } else {
+                        self.keyspace.prefixed_key(&next_key(&serialized_pk_prefix))
+                    })
+                }
+            }
+        })
+    }
+
+    pub async fn iter_with_pk_bounds(
+        &self,
+        epoch: u64,
+        pk_prefix: Row,
+        next_col_bounds: impl RangeBounds<Datum>,
+    ) -> StorageResult<CellBasedTableRowIter<S>> {
+        let start_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.start_bound(), true)?;
+        let end_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.end_bound(), false)?;
+
+        debug!(
+            "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
+            start_key, end_key
+        );
+
+        CellBasedTableRowIter::new_with_bounds(
+            &self.keyspace,
+            self.column_descs.clone(),
+            (start_key, end_key),
+            epoch,
+            self.stats.clone(),
+        )
+        .await
+    }
+
+    pub async fn iter_with_pk_prefix(
+        &self,
+        epoch: u64,
+        pk_prefix: Row,
+    ) -> StorageResult<CellBasedTableRowIter<S>> {
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
+        let prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+        let serialized_pk_prefix = &serialize_pk(&pk_prefix, &prefix_serializer).map_err(err)?[..];
+        let start_key = Included(self.keyspace.prefixed_key(&serialized_pk_prefix));
+        let next_key = Excluded(self.keyspace.prefixed_key(next_key(serialized_pk_prefix)));
+
+        debug!(
+            "iter_with_pk_prefix: start_key: {:?}, next_key: {:?}",
+            start_key, next_key
+        );
+
+        CellBasedTableRowIter::new_with_bounds(
+            &self.keyspace,
+            self.column_descs.clone(),
+            (start_key, next_key),
+            epoch,
+            self.stats.clone(),
         )
         .await
     }
@@ -362,8 +469,8 @@ pub struct CellBasedTableRowIter<S: StateStore> {
 }
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
-    pub async fn new(
-        keyspace: Keyspace<S>,
+    pub(super) async fn new(
+        keyspace: &Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
@@ -374,6 +481,32 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
 
         let iter = keyspace.iter(epoch).await?;
 
+        let iter = Self {
+            iter,
+            cell_based_row_deserializer,
+            _stats,
+        };
+        Ok(iter)
+    }
+
+    async fn new_with_bounds<R, B>(
+        keyspace: &Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        serialized_pk_bounds: R,
+        epoch: u64,
+        _stats: Arc<StateStoreMetrics>,
+    ) -> StorageResult<Self>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        keyspace.state_store().wait_epoch(epoch).await?;
+
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
+
+        let iter = keyspace
+            .iter_with_range(serialized_pk_bounds, epoch)
+            .await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,
@@ -446,7 +579,7 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         pk_descs: Vec<OrderedColumnDesc>,
     ) -> StorageResult<Self> {
         let inner =
-            CellBasedTableRowIter::new(keyspace, table_descs.clone(), epoch, _stats).await?;
+            CellBasedTableRowIter::new(&keyspace, table_descs.clone(), epoch, _stats).await?;
 
         let (data_types, order_types) = pk_descs
             .iter()

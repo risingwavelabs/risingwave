@@ -160,6 +160,9 @@ impl Binder {
     pub fn check_struct_type(value: &StructValue, source: DataType, target: DataType) -> bool {
         match (source, target) {
             (DataType::Struct { fields: source }, DataType::Struct { fields: target }) => {
+                if source.len() != target.len() {
+                    return false;
+                }
                 for i in 0..value.fields().len() {
                     if let Some(ScalarImpl::Struct(v)) = &value.fields()[i] {
                         if !Self::check_struct_type(v, source[i].clone(), target[i].clone()) {
