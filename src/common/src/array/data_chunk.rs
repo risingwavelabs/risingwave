@@ -58,6 +58,13 @@ impl From<usize> for Vis {
 }
 
 impl Vis {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Vis::Bitmap(b) => b.is_empty(),
+            Vis::Compact(c) => *c == 0,
+        }
+    }
+
     pub fn len(&self) -> usize {
         match self {
             Vis::Bitmap(b) => b.len(),
