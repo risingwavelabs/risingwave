@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_expr::expr::build_from_prost;
-use risingwave_expr::ExprResult;
 
 use super::*;
 use crate::executor::ProjectExecutor;
@@ -28,11 +27,11 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Project)?;
-        let project_exprs = node
+        let project_exprs: Vec<_> = node
             .get_select_list()
             .iter()
             .map(build_from_prost)
-            .collect::<ExprResult<Vec<_>>>()?;
+            .try_collect()?;
 
         Ok(ProjectExecutor::new(
             params.input.remove(0),
