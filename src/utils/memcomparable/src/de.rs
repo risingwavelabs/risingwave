@@ -609,6 +609,14 @@ impl<B: Buf> Deserializer<B> {
         let nsecs = self.input.get_u32();
         Ok((secs, nsecs))
     }
+
+    /// Deserialize a NaiveDateTimeWrapper value. Returns `(secs, nsecs)`.
+    pub fn deserialize_struct_or_list(&mut self) -> Result<Vec<u8>> {
+        let len = self.input.get_u32();
+        let mut bytes = vec![0; len as usize];
+        self.input.copy_to_slice(&mut bytes);
+        Ok(bytes)
+    }
 }
 
 #[cfg(test)]
