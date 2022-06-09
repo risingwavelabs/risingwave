@@ -98,7 +98,7 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatExpression {
         ensure!(prost.get_expr_type().unwrap() == Type::Concat);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
-        assert_eq!(ret_type, DataType::Varchar);
+        ensure!(ret_type == DataType::Varchar);
 
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
             bail!("Expected RexNode::FuncCall");
