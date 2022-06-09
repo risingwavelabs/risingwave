@@ -68,7 +68,6 @@ message ExprNode {
     TO_CHAR = 223;
     MD5 = 224;
     CHAR_LENGTH = 225;
-    CONCAT = 226;
 
     // Boolean comparison
     IS_TRUE = 301;
