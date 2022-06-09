@@ -96,6 +96,12 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
+    #[error("Expr error: {0:?}")]
+    ExprError(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
     #[error("Stream error: {0:?}")]
     StreamError(
         #[backtrace]
@@ -316,6 +322,7 @@ impl ErrorCode {
             ErrorCode::ConnectorError(_) => 25,
             ErrorCode::InvalidParameterValue(_) => 26,
             ErrorCode::UnrecognizedConfigurationParameter(_) => 27,
+            ErrorCode::ExprError(_) => 28,
             ErrorCode::UnknownError(_) => 101,
         }
     }

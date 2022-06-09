@@ -147,7 +147,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().pk;
+        let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().order_key;
         let pk_descs: Vec<OrderedColumnDesc> = pk_descs_proto.iter().map(|d| d.into()).collect();
         let order_types: Vec<OrderType> = pk_descs.iter().map(|desc| desc.order).collect();
         let ordered_row_serializer = OrderedRowSerializer::new(order_types);
@@ -168,7 +168,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
-                let iter = table.iter_with_pk(source.epoch, pk_descs).await?;
+                let iter = table.iter_with_pk(source.epoch, &pk_descs).await?;
                 ScanType::TableScan(iter)
             } else if pk_prefix_value.size() == pk_descs.len() {
                 keyspace.state_store().wait_epoch(source.epoch).await?;

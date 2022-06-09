@@ -92,9 +92,15 @@ impl StreamTableScan {
         use risingwave_pb::stream_plan::*;
 
         let batch_plan_node = BatchPlanNode {
-            table_ref_id: Some(TableRefId {
-                table_id: self.logical.table_desc().table_id.table_id as i32,
-                schema_ref_id: Default::default(),
+            table_desc: Some(CellBasedTableDesc {
+                table_id: self.logical.table_desc().table_id.into(),
+                order_key: self
+                    .logical
+                    .table_desc()
+                    .order_desc
+                    .iter()
+                    .map(|v| v.into())
+                    .collect(),
             }),
             column_descs: self
                 .schema()
