@@ -89,7 +89,7 @@ impl StreamIndexScan {
         let batch_plan_node = BatchPlanNode {
             table_desc: Some(CellBasedTableDesc {
                 table_id: self.logical.table_desc().table_id.into(),
-                order_keys: self
+                order_key: self
                     .logical
                     .table_desc()
                     .order_desc

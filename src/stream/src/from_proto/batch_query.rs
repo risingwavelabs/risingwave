@@ -38,7 +38,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
         let table_id = node.table_desc.as_ref().unwrap().table_id.into();
 
-        let pk_descs_proto = &node.table_desc.as_ref().unwrap().order_keys;
+        let pk_descs_proto = &node.table_desc.as_ref().unwrap().order_key;
         let pk_descs = pk_descs_proto.iter().map(|d| d.into()).collect();
 
         let column_descs = node
