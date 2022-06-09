@@ -18,8 +18,9 @@ use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::consistent_hash::VirtualNode;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::hash::{HashCode, VirtualNode};
+use risingwave_common::hash::HashCode;
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
@@ -383,34 +384,6 @@ where
 
     fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         self.flush_inner(write_batch)
-    }
-}
-
-impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
-where
-    A::OwnedItem: Ord,
-{
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub async fn iterate_store(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
-        let epoch = u64::MAX;
-        let all_data = self.keyspace.scan(None, epoch).await?;
-        let mut result = vec![];
-
-        for (raw_key, mut raw_value) in all_data {
-            // let mut deserializer = value_encoding::Deserializer::new(raw_value);
-            let value = deserialize_cell(&mut raw_value, &self.data_type)?;
-            let key = value.clone().map(|x| x.try_into().unwrap());
-            let pks = self.serializer.get_pk(&raw_key[..])?;
-            result.push((key, pks));
-        }
-        Ok(result)
-    }
-
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub async fn iterate_topn_cache(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
-        Ok(self.top_n.iter().map(|(k, _)| k.clone()).collect())
     }
 }
 

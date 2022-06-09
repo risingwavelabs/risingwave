@@ -46,7 +46,12 @@ impl StreamExchange {
 
 impl fmt::Display for StreamExchange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "StreamExchange {{ dist: {:?} }}", self.base.dist)
+        let mut builder = f.debug_struct("StreamExchange");
+        builder.field("dist", &format_args!("{:?}", self.base.dist));
+        if self.append_only() {
+            builder.field("append_only", &format_args!("{}", true));
+        }
+        builder.finish()
     }
 }
 

@@ -19,13 +19,12 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue, Row,
 };
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Scalar};
-use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
+use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
 pub struct ArrayExpression {
@@ -56,11 +55,16 @@ impl Expression for ArrayExpression {
             ArrayMeta::List {
                 datatype: self.element_type.clone(),
             },
-        )?;
+        )
+        .map_err(ExprError::Array)?;
         chunk
             .rows()
-            .try_for_each(|row| builder.append_row_ref(row))?;
-        builder.finish().map(|a| Arc::new(ArrayImpl::List(a)))
+            .try_for_each(|row| builder.append_row_ref(row))
+            .map_err(ExprError::Array)?;
+        builder
+            .finish()
+            .map(|a| Arc::new(ArrayImpl::List(a)))
+            .map_err(ExprError::Array)
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
@@ -87,13 +91,15 @@ impl ArrayExpression {
 }
 
 impl<'a> TryFrom<&'a ExprNode> for ArrayExpression {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type()? == Type::Array);
+        ensure!(prost.get_expr_type().unwrap() == Type::Array);
 
-        let ret_type = DataType::from(prost.get_return_type()?);
-        let func_call_node = try_match_expand!(prost.get_rex_node().unwrap(), RexNode::FuncCall)?;
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
+            bail!("Expected RexNode::FuncCall");
+        };
         let elements = func_call_node
             .children
             .iter()
