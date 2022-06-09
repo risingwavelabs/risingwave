@@ -16,10 +16,9 @@
 
 use risingwave_common::error::ErrorCode::InvalidConfigValue;
 use risingwave_common::error::RwError;
+use risingwave_common::session_config::QUERY_MODE;
 
 use crate::config::QueryMode::{Distributed, Local};
-
-pub static QUERY_MODE: &str = "query_mode";
 
 #[derive(Debug, Clone)]
 pub enum QueryMode {
