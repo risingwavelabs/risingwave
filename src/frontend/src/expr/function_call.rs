@@ -124,6 +124,21 @@ impl FunctionCall {
                 }
                 align_types(inputs.iter_mut())
             }
+            ExprType::Concat => {
+                if inputs.is_empty() {
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `ConcatWs` takes at least {} arguments ({} given)",
+                        1, 0
+                    ))
+                    .into());
+                }
+
+                inputs = inputs
+                    .into_iter()
+                    .map(|input| input.cast_explicit(DataType::Varchar))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(DataType::Varchar)
+            }
             ExprType::ConcatWs => {
                 let expected = 2;
                 let actual = inputs.len();
