@@ -137,7 +137,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> JoinSide<K, S> {
-    // WARNING: Please do not call this until we implement it. 
+    // WARNING: Please do not call this until we implement it.
     fn is_dirty(&self) -> bool {
         false
     }
@@ -662,11 +662,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 v.remove(matched_pks.remove(0));
                             }
                             None => {
-                                side_update.ht.insert(key, pk, JoinRow::new(value, degree))?;
+                                side_update
+                                    .ht
+                                    .insert(key, pk, JoinRow::new(value, degree))?;
                             }
                         }
                     } else {
-                        side_update.ht.insert(key, pk, JoinRow::new(value, degree))?;
+                        side_update
+                            .ht
+                            .insert(key, pk, JoinRow::new(value, degree))?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {

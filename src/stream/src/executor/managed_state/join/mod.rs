@@ -93,9 +93,15 @@ impl JoinRow {
     /// Convert [`Row`] with last datum as degree to [`JoinRow`]
     pub fn from_row(row: Row) -> Self {
         let mut datums = row.0;
-        let degree_datum = datums.pop().expect("missing degree in JoinRow").expect("degree should not be null");
+        let degree_datum = datums
+            .pop()
+            .expect("missing degree in JoinRow")
+            .expect("degree should not be null");
         let degree = degree_datum.into_int64();
-        JoinRow { row: Row(datums), degree }
+        JoinRow {
+            row: Row(datums),
+            degree,
+        }
     }
 }
 
@@ -130,7 +136,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         target_cap: usize,
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
-        data_types: Vec<DataType>,
+        mut data_types: Vec<DataType>,
         keyspace: Keyspace<S>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
@@ -138,16 +144,21 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .iter()
             .map(|idx| data_types[*idx].clone())
             .collect_vec();
+
+        // Put the degree to the last column of the table.
+        data_types.push(DataType::Int64);
+
         let column_descs = data_types
             .iter()
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
+
         // Order type doesn't matter here. Arbitrarily choose one.
         let order_types = vec![OrderType::Descending; data_types.len()];
 
         let state_table = StateTable::new(
-            keyspace.clone(),
+            keyspace,
             column_descs,
             order_types,
             dist_key_indices,
@@ -182,61 +193,41 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
     #[allow(dead_code)]
-    pub async fn get(&mut self, key: &K) -> Option<&HashValueType> {
+    pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
             Some(_) => self.inner.get(key),
             None => {
                 let remote_state = self.fetch_cached_state(key).await.unwrap();
-                remote_state.map(|rv| {
-                    self.inner.put(key.clone(), rv);
-                    self.inner.get(key).unwrap()
-                })
+                self.inner.put(key.clone(), remote_state);
+                self.inner.get(key)
             }
         }
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
-    pub async fn get_mut(&mut self, key: &K) -> Option<&mut HashValueType> {
+    pub async fn get_mut<'a>(&'a mut self, key: &K) -> Option<&'a mut HashValueType> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
             Some(_) => self.inner.get_mut(key),
             None => {
                 let remote_state = self.fetch_cached_state(key).await.unwrap();
-                remote_state.map(|rv| {
-                    self.inner.put(key.clone(), rv);
-                    self.inner.get_mut(key).unwrap()
-                })
-            }
-        }
-    }
-
-    /// Returns true if the key in the memory or remote storage, otherwise false.
-    #[allow(dead_code)]
-    pub async fn contains(&mut self, key: &K) -> bool {
-        let contains = self.inner.contains(key);
-        if contains {
-            true
-        } else {
-            let remote_state = self.fetch_cached_state(key).await.unwrap();
-            match remote_state {
-                Some(rv) => {
-                    self.inner.put(key.clone(), rv);
-                    true
-                }
-                None => false,
+                self.inner.put(key.clone(), remote_state);
+                self.inner.get_mut(key)
             }
         }
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
-    async fn fetch_cached_state(&self, key: &K) -> RwResult<Option<JoinEntryState>> {
+    async fn fetch_cached_state(&self, key: &K) -> RwResult<JoinEntryState> {
         let key = key.clone().deserialize(self.join_key_data_types.iter())?;
-        
-        let table_iter = self.state_table.iter_with_pk_prefix(key, self.current_epoch)?;
+
+        let table_iter = self
+            .state_table
+            .iter_with_pk_prefix(key, self.current_epoch)?;
         pin_mut!(table_iter);
 
         let mut cached = BTreeMap::new();
@@ -247,30 +238,37 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             cached.insert(pk, JoinRow::from_row(row));
         }
-        Ok(Some(JoinEntryState::with_cached(cached)))
+        Ok(JoinEntryState::with_cached(cached))
     }
 
     pub async fn flush(&mut self) -> RwResult<()> {
-        self.state_table.commit_with_value_meta(self.current_epoch).await.map_err(|e| RwError::from(e))
+        self.state_table
+            .commit_with_value_meta(self.current_epoch)
+            .await
+            .map_err(RwError::from)
     }
 
     /// Insert a key
-    pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()>{
+    pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()> {
         if let Some(entry) = self.inner.get_mut(join_key) {
             entry.insert(pk, value.clone());
         }
-        let key = join_key.clone().deserialize(self.join_key_data_types.iter())?;
+        let key = join_key
+            .clone()
+            .deserialize(self.join_key_data_types.iter())?;
         // If no cache maintained, only update the flush buffer.
         self.state_table.insert(&key, value.into_row())?;
         Ok(())
     }
 
     /// Delete a key
-    pub fn delete(&mut self, join_key: &K, pk: Row, value: Row) -> RwResult<()>{
+    pub fn delete(&mut self, join_key: &K, pk: Row, value: Row) -> RwResult<()> {
         if let Some(entry) = self.inner.get_mut(join_key) {
             entry.remove(pk);
         }
-        let key = join_key.clone().deserialize(self.join_key_data_types.iter())?;
+        let key = join_key
+            .clone()
+            .deserialize(self.join_key_data_types.iter())?;
         // If no cache maintained, only update the flush buffer.
         self.state_table.delete(&key, value)?;
         Ok(())

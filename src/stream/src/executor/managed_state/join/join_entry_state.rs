@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use madsim::collections::{btree_map, BTreeMap};
 
 use super::*;
@@ -23,31 +22,29 @@ type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
 
 type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
-/// We manages a `BTreeMap` in memory for all entries belonging to a join key,
-/// since each `WriteBatch` is an ordered list of key-value pairs.
-/// When evicted, `BTreeMap` does not hold any entries.
+/// We manages a `BTreeMap` in memory for all entries belonging to a join key.
+/// When evicted, `cached` does not hold any entries.
+/// If a `JoinEntryState` exists for a join key, the all records under this
+/// join key will be presented in the cache.
 pub struct JoinEntryState {
     /// The full copy of the state. If evicted, it will be `None`.
     cached: BTreeMap<PkType, StateValueType>,
 }
 
 impl JoinEntryState {
-    pub fn with_cached(
-        cached: BTreeMap<PkType, StateValueType>
-    ) -> Self {
-        Self {
-            cached,
-        }
+    pub fn with_cached(cached: BTreeMap<PkType, StateValueType>) -> Self {
+        Self { cached }
     }
 
     /// If the cache is empty
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.cached.is_empty()
     }
 
     // Insert into the cache and flush buffer.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
-        self.cached.insert(key.clone(), value.clone());
+        self.cached.insert(key, value);
     }
 
     pub fn remove(&mut self, pk: PkType) {
@@ -97,10 +94,7 @@ mod tests {
             managed_state.insert(pk, join_row);
         }
 
-        for state in managed_state
-            .iter()
-            .zip_eq(col1.iter().zip_eq(col2.iter()))
-        {
+        for state in managed_state.iter().zip_eq(col1.iter().zip_eq(col2.iter())) {
             let ((key, value), (d1, d2)) = state;
             assert_eq!(key.0[0], Some(ScalarImpl::Int64(*d1)));
             assert_eq!(value.row[0], Some(ScalarImpl::Int64(*d1)));
