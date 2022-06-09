@@ -131,63 +131,55 @@ impl Sink for MySQLSink {
             .ip_or_hostname(self.endpoint())
             .db_name(self.database());
 
+        // Start transaction
         let mut conn = Conn::new(builder).await?;
-
         let mut transaction = conn.start_transaction(TxOpts::default()).await?;
 
-        let mut iter = chunk.ops().iter().enumerate();
-        while let Some((idx, op)) = iter.next() {
-            // TODO(nanderstabel): Refactor
-            let values = chunk
+        // 
+        // TODO(nanderstabel): Refactor
+        let values = |idx| {
+            chunk
                 .columns()
                 .iter()
                 .map(|x| MySQLType::try_from(x.array_ref().datum_at(idx).unwrap()).unwrap())
-                .collect_vec();
+                .collect_vec()
+        };
 
+        // Closure that builds a String containing WHERE conditions, i.e. 'v1=1 AND v2=2'.
+        // Perhaps better to replace this functionality with a new Sink trait method.
+        let conditions = |values: Vec<MySQLType>| {
+            join(
+                schema
+                    .names()
+                    .iter()
+                    .zip(values.iter())
+                    .map(|(c, v)| format!("{}={}", c, v))
+                    .collect::<Vec<String>>(),
+                " AND "
+            )
+        };
+
+        let mut iter = chunk.ops().iter().enumerate();
+        while let Some((idx, op)) = iter.next() {
             // Get SQL statement
             let stmt = match *op {
                 Insert => format!(
                     "INSERT INTO {} VALUES ({})",
                     self.table(),
-                    join(values, ",")
+                    join(values(idx), ",")
                 ),
                 Delete => format!(
                     "DELETE FROM {} WHERE ({})",
                     self.table(),
-                    join(
-                        schema
-                            .names()
-                            .iter()
-                            .zip(values.iter())
-                            .map(|(c, v)| format!("{}={}", c, v))
-                            .collect::<Vec<String>>(),
-                        " AND "
-                    )
+                    conditions(values(idx))
                 ),
                 UpdateDelete => {
                     if let Some((idx2, UpdateInsert)) = iter.next() {
-                        // TODO(nanderstabel): Refactor2
-                        let values2 = chunk
-                            .columns()
-                            .iter()
-                            .map(|x| {
-                                MySQLType::try_from(x.array_ref().datum_at(idx2).unwrap()).unwrap()
-                            })
-                            .collect_vec();
-
                         format!(
                             "UPDATE {} SET {} WHERE {}",
                             self.table,
-                            join(values2, ","),
-                            join(
-                                schema
-                                    .names()
-                                    .iter()
-                                    .zip(values.iter())
-                                    .map(|(c, v)| format!("{}={}", c, v))
-                                    .collect::<Vec<String>>(),
-                                " AND "
-                            )
+                            join(values(idx2), ","),
+                            conditions(values(idx))
                         )
                     } else {
                         panic!("UpdateDelete should always be followed by an UpdateInsert!")
