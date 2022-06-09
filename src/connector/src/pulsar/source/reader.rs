@@ -15,24 +15,21 @@
 use std::borrow::BorrowMut;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use async_trait::async_trait;
-use futures::future::try_join_all;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use itertools::Itertools;
-use pulsar::consumer::{InitialPosition, Message};
+use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::try_match_expand;
-use tokio::sync::{mpsc, oneshot};
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::base::{SourceMessage, SplitReader};
 use crate::pulsar::split::PulsarSplit;
 use crate::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::{Column, ConnectorState, SplitImpl};
 
-struct PulsarSingleSplitReader {
+pub struct PulsarSplitReader {
     pulsar: Pulsar<TokioExecutor>,
     consumer: Consumer<Vec<u8>, TokioExecutor>,
     split: PulsarSplit,
@@ -79,9 +76,26 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
     Ok(message_id)
 }
 
-impl PulsarSingleSplitReader {
-    async fn new(properties: &PulsarProperties, split: PulsarSplit) -> anyhow::Result<Self> {
-        let service_url = &properties.service_url;
+const PULSAR_MAX_FETCH_MESSAGES: usize = 1024;
+
+#[async_trait]
+impl SplitReader for PulsarSplitReader {
+    type Properties = PulsarProperties;
+
+    async fn new(
+        props: PulsarProperties,
+        state: ConnectorState,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let splits = state.ok_or_else(|| anyhow!("no default state for reader"))?;
+        ensure!(splits.len() == 1, "only support single split");
+        let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)
+            .map_err(|e| anyhow!(e))?;
+
+        let service_url = &props.service_url;
         let topic = split.topic.to_string();
 
         log::debug!("creating consumer for pulsar split topic {}", topic,);
@@ -116,13 +130,17 @@ impl PulsarSingleSplitReader {
                 ..Default::default()
             }),
 
-            PulsarEnumeratorOffset::Timestamp(_) => {
-                // todo: implement
-                builder
-            }
+            PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
 
         let consumer: Consumer<Vec<u8>, _> = builder.build().await.map_err(|e| anyhow!(e))?;
+        if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
+            // FIXME: Here we need pulsar-rs to support the send + sync consumer
+            // consumer
+            //     .seek(None, None, Some(ts as u64), pulsar.clone())
+            //     .await
+            //     .map_err(|e| anyhow!(e))?;
+        }
 
         Ok(Self {
             pulsar,
@@ -131,110 +149,24 @@ impl PulsarSingleSplitReader {
         })
     }
 
-    async fn run(
-        &mut self,
-        mut stop: oneshot::Receiver<()>,
-        output: mpsc::UnboundedSender<Message<Vec<u8>>>,
-    ) -> Result<()> {
-        loop {
-            tokio::select! {
-                chunk = self.consumer.try_next() => {
-                    let msg = match chunk.map_err(|e| anyhow!("consume from pulsar failed, err: {}", e.to_string()))? {
-                        None => return Ok(()),
-                        Some(msg) => msg,
-                    };
-
-                    output.send(msg).map_err(|e| anyhow!("send to output channel failed, err: {}", e.to_string()))?;
-                }
-                _ = stop.borrow_mut() => {
-                    break;
-                }
-            }
-        }
-
-        log::debug!("pulsar reader stopped");
-        Ok(())
-    }
-}
-
-pub struct PulsarSplitReader {
-    stop_chs: Option<Vec<oneshot::Sender<()>>>,
-    messages: UnboundedReceiverStream<Message<Vec<u8>>>,
-}
-
-const PULSAR_MAX_FETCH_MESSAGES: u32 = 1024;
-
-#[async_trait]
-impl SplitReader for PulsarSplitReader {
-    type Properties = PulsarProperties;
-
-    async fn new(
-        props: PulsarProperties,
-        state: ConnectorState,
-        _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let rx = UnboundedReceiverStream::from(rx);
-        let splits = state.unwrap();
-
-        let pulsar_splits: Vec<PulsarSplit> = splits
-            .into_iter()
-            .map(|split| try_match_expand!(split, SplitImpl::Pulsar).map_err(|e| anyhow!(e)))
-            .collect::<Result<Vec<PulsarSplit>>>()?;
-
-        let mut futures = vec![];
-        let mut stop_chs = vec![];
-
-        let readers = try_join_all(pulsar_splits.into_iter().map(|split| {
-            log::debug!("spawning pulsar split reader for split {:?}", split);
-            let props = props.clone();
-            async move { PulsarSingleSplitReader::new(&props, split).await }
-        }))
-        .await?;
-
-        for mut reader in readers {
-            let (stop_tx, stop_rx) = oneshot::channel();
-            let sender = tx.clone();
-            let handler = tokio::spawn(async move { reader.run(stop_rx, sender).await });
-            stop_chs.push(stop_tx);
-            futures.push(handler);
-        }
-
-        let _ = futures;
-
-        Ok(Self {
-            stop_chs: Some(stop_chs),
-            messages: rx,
-        })
-    }
-
-    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         let mut stream = self
-            .messages
+            .consumer
             .borrow_mut()
-            .ready_chunks(PULSAR_MAX_FETCH_MESSAGES as usize);
+            .ready_chunks(PULSAR_MAX_FETCH_MESSAGES);
 
-        let chunk: Vec<Message<Vec<u8>>> = match stream.next().await {
+        let chunk = match stream.next().await {
             None => return Ok(None),
             Some(chunk) => chunk,
         };
 
-        let ret = chunk.into_iter().map(SourceMessage::from).collect();
+        let mut ret = Vec::with_capacity(chunk.len());
+
+        for msg in chunk {
+            let msg = msg.map_err(|e| anyhow!(e))?;
+            ret.push(SourceMessage::from(msg));
+        }
 
         Ok(Some(ret))
-    }
-}
-
-impl PulsarSplitReader {}
-
-impl Drop for PulsarSplitReader {
-    fn drop(&mut self) {
-        let chs = self.stop_chs.take().unwrap();
-        for ch in chs {
-            let _ = ch.send(());
-        }
     }
 }
