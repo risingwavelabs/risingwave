@@ -715,11 +715,11 @@ impl ScalarImpl {
             Ty::Struct { fields: _ } => {
                 let bytes = de.deserialize_struct_or_list()?;
                 ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
-            },
+            }
             Ty::List { datatype: _ } => {
                 let bytes = de.deserialize_struct_or_list()?;
                 ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
-            },
+            }
         })
     }
 

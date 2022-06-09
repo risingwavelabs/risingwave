@@ -584,10 +584,7 @@ impl<B: BufMut> Serializer<B> {
         Ok(())
     }
 
-    /// Serialize a NaiveDateTimeWrapper value.
-    ///
-    /// - `secs`: From `chrono::naive::NaiveDateTime::timestamp()`.
-    /// - `nsecs`: From `chrono::naive::NaiveDateTime::timestamp_subsec_nanos()`.
+    /// Serialize bytes of ListValue or StructValue.
     pub fn serialize_struct_or_list(&mut self, bytes: Vec<u8>) -> Result<()> {
         self.output.put_u32(bytes.len() as u32);
         self.output.put_slice(bytes.as_slice());
