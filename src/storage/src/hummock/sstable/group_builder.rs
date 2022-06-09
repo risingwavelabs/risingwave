@@ -28,7 +28,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableBuilder, SstableMeta};
 
 pub type KeyValueGroupId = u64;
-const DEFAULT_KEY_VALUE_GROUP_ID: KeyValueGroupId = KeyValueGroupId::MAX;
+pub const DEFAULT_KEY_VALUE_GROUP_ID: KeyValueGroupId = KeyValueGroupId::MAX;
 
 /// [`KeyValueGroupingImpl`] defines strategies to group key values
 pub enum KeyValueGroupingImpl {
@@ -166,10 +166,14 @@ where
             .for_each(|(_k, v)| v.seal_current());
     }
 
-    pub fn finish(self) -> Vec<(u64, Bytes, SstableMeta, Vec<VNodeBitmap>)> {
+    pub fn finish(self) -> Vec<(u64, u64, Bytes, SstableMeta, Vec<VNodeBitmap>)> {
         self.builders
             .into_iter()
-            .flat_map(|(_k, v)| v.finish())
+            .flat_map(|(group_id, v)| {
+                let ret = v.finish();
+                ret.into_iter()
+                    .map(move |(id, data, meta, vnodes)| (id, group_id, data, meta, vnodes))
+            })
             .collect_vec()
     }
 }

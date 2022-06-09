@@ -28,6 +28,7 @@ use tracing::error;
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::group_builder::DEFAULT_KEY_VALUE_GROUP_ID;
 use crate::hummock::shared_buffer::{OrderIndex, OrderSortedUncommittedData};
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
@@ -198,7 +199,7 @@ impl SharedBufferUploader {
 
         let uploaded_sst_info: Vec<SstableInfo> = tables
             .into_iter()
-            .map(|(sst, vnode_bitmaps)| SstableInfo {
+            .map(|(sst, _, vnode_bitmaps)| SstableInfo {
                 id: sst.id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
                     left: sst.meta.smallest_key.clone(),
@@ -207,6 +208,7 @@ impl SharedBufferUploader {
                 }),
                 file_size: sst.meta.estimated_size as u64,
                 vnode_bitmaps,
+                unit_id: DEFAULT_KEY_VALUE_GROUP_ID,
             })
             .collect();
 

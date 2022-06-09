@@ -95,6 +95,7 @@ impl Sstable {
             }),
             file_size: self.meta.estimated_size as u64,
             vnode_bitmaps: vec![],
+            unit_id: u64::MAX,
         }
     }
 }

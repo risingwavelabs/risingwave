@@ -588,7 +588,11 @@ where
                         .flat_map(|v| v.snapshot_id.clone())
                         .fold(max_committed_epoch, std::cmp::min)
                 };
-                if compact_task.target_level != 0 {
+
+                // do not split units for a small compaction.
+                if compact_task.target_level != 0
+                    || compact_task.input_ssts[0].total_file_size > self.config.min_compaction_bytes
+                {
                     let table_ids = compact_task
                         .input_ssts
                         .iter()

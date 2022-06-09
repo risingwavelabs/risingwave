@@ -14,8 +14,6 @@
 
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
-use crate::HummockSSTableId;
-
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
 
@@ -37,12 +35,19 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     writeln!(s, "Compaction task status: {:?} ", compact_task.task_status).unwrap();
     s.push_str("Compaction SSTables structure: \n");
     for level_entry in &compact_task.input_ssts {
-        let tables: Vec<(HummockSSTableId, String)> = level_entry
+        let tables: Vec<String> = level_entry
             .table_infos
             .iter()
-            .map(|table| (table.id, format!("{}KB", table.file_size / 1024)))
+            .map(|table| {
+                format!(
+                    "[id: {}, unit: {}, {}KB]",
+                    table.id,
+                    table.unit_id,
+                    table.file_size / 1024
+                )
+            })
             .collect();
-        writeln!(s, "Level {:?}: {:?} ", level_entry.level_idx, tables).unwrap();
+        writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
     s.push_str("Compaction task output: \n");
     for sst in &compact_task.sorted_output_ssts {
@@ -66,8 +71,8 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     };
     writeln!(
         s,
-        "SstableInfo: id={:?}, KeyRange={:?}, size={:?}",
-        sstable_info.id, key_range_str, sstable_info.file_size
+        "SstableInfo: id={:?}, KeyRange={:?}, unit={:?}, size={:?}",
+        sstable_info.id, key_range_str, sstable_info.unit_id, sstable_info.file_size
     )
     .unwrap();
 }

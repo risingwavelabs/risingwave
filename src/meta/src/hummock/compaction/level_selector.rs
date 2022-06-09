@@ -93,7 +93,11 @@ impl DynamicLevelSelector {
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
-                Box::new(TierCompactionPicker::new(task_id, self.config.clone()))
+                Box::new(TierCompactionPicker::new(
+                    task_id,
+                    self.config.clone(),
+                    self.overlap_strategy.clone(),
+                ))
             } else {
                 Box::new(LevelCompactionPicker::new(
                     task_id,
@@ -198,8 +202,8 @@ impl DynamicLevelSelector {
                 let score = idle_file_count * SCORE_BASE
                     / self.config.level0_tier_compact_file_number as u64;
                 ctx.score_levels.push((score, 0, 0));
-                let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base
-                    + idle_file_count * SCORE_BASE / self.config.level0_tigger_file_numer as u64;
+                let score =
+                    total_size * SCORE_BASE / self.config.max_bytes_for_level_base + score / 2;
                 ctx.score_levels.push((score, 0, ctx.base_level));
             } else {
                 ctx.score_levels.push((

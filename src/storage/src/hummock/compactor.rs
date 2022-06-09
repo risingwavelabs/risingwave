@@ -102,7 +102,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, Vec<VNodeBitmap>)>);
+pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<VNodeBitmap>)>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -117,7 +117,7 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         payload: &UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
+    ) -> HummockResult<Vec<(Sstable, u64, Vec<VNodeBitmap>)>> {
         let mut start_user_keys = payload
             .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
@@ -218,7 +218,7 @@ impl Compactor {
             let mut level0 = Vec::with_capacity(parallelism);
 
             for (_, sst) in output_ssts {
-                for (table, _) in &sst {
+                for (table, _, _) in &sst {
                     compactor
                         .context
                         .stats
@@ -405,7 +405,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, vnode_bitmaps) in ssts {
+            for (sst, unit_id, vnode_bitmaps) in ssts {
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -415,6 +415,7 @@ impl Compactor {
                     }),
                     file_size: sst.meta.estimated_size as u64,
                     vnode_bitmaps,
+                    unit_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
@@ -499,10 +500,10 @@ impl Compactor {
         let mut pending_requests = vec![];
         let files = builder.finish();
         let file_count = files.len();
-        for (table_id, data, meta, vnode_bitmaps) in files {
+        for (table_id, group_id, data, meta, vnode_bitmaps) in files {
             let sst = Sstable { id: table_id, meta };
             let len = data.len();
-            ssts.push((sst.clone(), vnode_bitmaps));
+            ssts.push((sst.clone(), group_id, vnode_bitmaps));
             if file_count > 1 {
                 let sstable_store = self.context.sstable_store.clone();
                 let ret =
