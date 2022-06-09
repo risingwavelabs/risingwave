@@ -257,22 +257,22 @@
     select concat_ws() from t;
   binder_error: 'Bind error: Function `ConcatWs` takes at least 2 arguments (0 given)'
 - sql: |
-    create table t (v1 varchar);
-    select concat(v1, 1) as expr from t;
+    create table t (v1 varchar, v2 int, v3 float);
+    select concat(v1, v2, v3, 1) as expr from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Concat($0, 1:Int32::Varchar)] }
-        BatchScan { table: t, columns: [v1] }
+      BatchProject { exprs: [Concat($0, $1::Varchar, $2::Varchar, 1:Int32::Varchar)] }
+        BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
-      StreamProject { exprs: [Concat($0, 1:Int32::Varchar), $1] }
-        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
+      StreamProject { exprs: [Concat($0, $1::Varchar, $2::Varchar, 1:Int32::Varchar), $3] }
+        StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
-    create table t (v1 varchar);
-    select concat(v1, 1.2) from t;
+    create table t (v1 float);
+    select concat(v1) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Concat($0, 1.2:Decimal::Varchar)] }
+      BatchProject { exprs: [Concat($0::Varchar)] }
         BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 int);
