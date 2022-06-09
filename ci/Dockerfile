@@ -26,3 +26,9 @@ RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-so
 
 # pre-cache required crates
 RUN git clone https://github.com/singularity-data/risingwave && cd risingwave && cargo fetch && cd .. && rm -rf risingwave
+
+# add required rustup components
+RUN rustup component add rustfmt llvm-tools-preview clippy
+
+# install sqllogictest
+RUN cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin

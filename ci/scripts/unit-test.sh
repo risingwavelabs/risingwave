@@ -5,10 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
-echo "--- Install required tools"
-rustup default "$(cat ./rust-toolchain)" && rustup component add llvm-tools-preview clippy
-cargo install cargo-llvm-cov
-
 echo "--- Run clippy check"
 cargo clippy --all-targets --features failpoints --locked -- -D warnings
 

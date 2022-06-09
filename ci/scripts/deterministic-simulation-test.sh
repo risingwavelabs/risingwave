@@ -5,9 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
-echo "--- Install required tools"
-rustup default "$(cat ./rust-toolchain)"
-
 echo "--- Generate RiseDev CI config"
 cp risedev-components.ci.env risedev-components.user.env
 
