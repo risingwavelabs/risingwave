@@ -48,6 +48,8 @@ enum HummockErrorInner {
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
     #[error("CompactionExecutor error {0}.")]
     CompactionExecutor(String),
+    #[error("CompactionGroup error {0}.")]
+    CompactionGroup(String),
     #[error("Other error {0}.")]
     Other(String),
 }
@@ -111,6 +113,10 @@ impl HummockError {
 
     pub fn compaction_executor(error: impl ToString) -> HummockError {
         HummockErrorInner::CompactionExecutor(error.to_string()).into()
+    }
+
+    pub fn compaction_group(error: impl ToString) -> HummockError {
+        HummockErrorInner::CompactionGroup(error.to_string()).into()
     }
 
     pub fn other(error: impl ToString) -> HummockError {

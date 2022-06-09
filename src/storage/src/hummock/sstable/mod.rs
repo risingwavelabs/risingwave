@@ -30,7 +30,7 @@ use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 pub mod group_builder;
@@ -95,6 +95,7 @@ impl Sstable {
             }),
             file_size: self.meta.estimated_size as u64,
             vnode_bitmaps: vec![],
+            compaction_group_id: self.meta.compaction_group_id,
         }
     }
 }
@@ -143,6 +144,7 @@ pub struct SstableMeta {
     pub key_count: u32,
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
+    pub compaction_group_id: CompactionGroupId,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -170,6 +172,7 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count as u32);
         put_length_prefixed_slice(&mut buf, &self.smallest_key);
         put_length_prefixed_slice(&mut buf, &self.largest_key);
+        buf.put_u64_le(self.compaction_group_id);
         let checksum = xxhash64_checksum(&buf);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
@@ -207,6 +210,7 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
+        let compaction_group_id = buf.get_u64_le();
 
         Ok(Self {
             block_metas,
@@ -215,6 +219,7 @@ impl SstableMeta {
             key_count,
             smallest_key,
             largest_key,
+            compaction_group_id,
             version,
         })
     }
@@ -243,6 +248,8 @@ impl SstableMeta {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+
     use super::*;
 
     #[test]
@@ -265,6 +272,7 @@ mod tests {
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),
             largest_key: b"9-largest-key".to_vec(),
+            compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
             version: VERSION,
         };
         let buf = meta.encode_to_bytes();

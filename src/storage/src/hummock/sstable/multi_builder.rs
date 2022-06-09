@@ -14,7 +14,7 @@
 
 use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId};
 use risingwave_pb::common::VNodeBitmap;
 use tokio::task::JoinHandle;
 
@@ -45,6 +45,8 @@ pub struct CapacitySplitTableBuilder<B> {
     current_builder: Option<(HummockSSTableId, SSTableBuilder)>,
 
     sstable_store: SstableStoreRef,
+
+    compaction_group_id: CompactionGroupId,
 }
 
 impl<B, F> CapacitySplitTableBuilder<B>
@@ -53,12 +55,17 @@ where
     F: Future<Output = HummockResult<(HummockSSTableId, SSTableBuilder)>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(get_id_and_builder: B, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        get_id_and_builder: B,
+        sstable_store: SstableStoreRef,
+        compaction_group_id: CompactionGroupId,
+    ) -> Self {
         Self {
             get_id_and_builder,
             sealed_builders: Vec::new(),
             current_builder: None,
             sstable_store,
+            compaction_group_id,
         }
     }
 
@@ -124,7 +131,7 @@ where
     /// will be no-op.
     pub fn seal_current(&mut self) {
         if let Some((table_id, builder)) = self.current_builder.take() {
-            let (data, meta, vnode_bitmap) = builder.finish();
+            let (data, meta, vnode_bitmap) = builder.finish(self.compaction_group_id);
             let len = data.len();
             let sstable_store = self.sstable_store.clone();
             let meta_clone = meta.clone();
@@ -163,6 +170,7 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -187,7 +195,11 @@ mod tests {
                 }),
             ))
         };
-        let builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
+        let builder = CapacitySplitTableBuilder::new(
+            get_id_and_builder,
+            mock_sstable_store(),
+            StaticCompactionGroupId::SharedBuffer.into(),
+        );
         let results = builder.finish();
         assert!(results.is_empty());
     }
@@ -210,7 +222,11 @@ mod tests {
                 }),
             ))
         };
-        let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
+        let mut builder = CapacitySplitTableBuilder::new(
+            get_id_and_builder,
+            mock_sstable_store(),
+            StaticCompactionGroupId::SharedBuffer.into(),
+        );
 
         for i in 0..table_capacity {
             builder
@@ -239,6 +255,7 @@ mod tests {
                 ))
             },
             mock_sstable_store(),
+            StaticCompactionGroupId::SharedBuffer.into(),
         );
         let mut epoch = 100;
 
@@ -283,6 +300,7 @@ mod tests {
                 ))
             },
             mock_sstable_store(),
+            StaticCompactionGroupId::SharedBuffer.into(),
         );
 
         builder

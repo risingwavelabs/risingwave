@@ -454,6 +454,7 @@ impl Compactor {
                     }),
                     file_size: sst.meta.estimated_size as u64,
                     vnode_bitmaps,
+                    compaction_group_id: sst.meta.compaction_group_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
@@ -513,6 +514,7 @@ impl Compactor {
             },
             VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
             self.context.sstable_store.clone(),
+            None,
         );
 
         // Monitor time cost building shared buffer to SSTs.
@@ -543,6 +545,7 @@ impl Compactor {
             vnode_bitmaps,
             upload_join_handle,
             data_len,
+            ..
         } in sealed_builders
         {
             let sst = Sstable { id: table_id, meta };

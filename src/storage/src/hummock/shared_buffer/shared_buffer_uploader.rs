@@ -212,6 +212,7 @@ impl SharedBufferUploader {
                 }),
                 file_size: sst.meta.estimated_size as u64,
                 vnode_bitmaps,
+                compaction_group_id: sst.meta.compaction_group_id,
             })
             .collect();
 

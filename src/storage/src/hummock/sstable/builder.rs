@@ -18,6 +18,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::config::StorageConfig;
 use risingwave_common::hash::{VNODE_BITMAP_LEN, VNODE_BITS};
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::common::VNodeBitmap;
 
 use super::bloom::Bloom;
@@ -162,7 +163,10 @@ impl SSTableBuilder {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
+    pub fn finish(
+        mut self,
+        compaction_group_id: CompactionGroupId,
+    ) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.to_vec();
         self.build_block();
@@ -183,6 +187,7 @@ impl SSTableBuilder {
             key_count: self.key_count as u32,
             smallest_key,
             largest_key,
+            compaction_group_id,
             version: VERSION,
         };
 
@@ -230,6 +235,8 @@ impl SSTableBuilder {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
@@ -250,7 +257,7 @@ pub(super) mod tests {
 
         let b = SSTableBuilder::new(opt);
 
-        b.finish();
+        b.finish(StaticCompactionGroupId::SharedBuffer.into());
     }
 
     #[test]
@@ -261,7 +268,7 @@ pub(super) mod tests {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)));
         }
 
-        let (_, meta, _) = b.finish();
+        let (_, meta, _) = b.finish(StaticCompactionGroupId::SharedBuffer.into());
 
         assert_eq!(test_key_of(0), meta.smallest_key);
         assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), meta.largest_key);

@@ -63,14 +63,13 @@ impl From<&Prefix> for Vec<u8> {
     }
 }
 
-/// A compaction task's `StaticCompactionGroupId` indicates the compaction group that all its input
-/// SSTs belong to.
+/// A SST's `StaticCompactionGroupId` indicates which compaction group(s) its KVs belong to.
 pub enum StaticCompactionGroupId {
-    /// All shared buffer local compaction task goes to here.
+    /// A special logical compaction group. It means SST's KVs may belong to any compaction groups.
     SharedBuffer = 1,
-    /// All states goes to here by default.
+    /// A default compaction group.
     StateDefault = 2,
-    /// All MVs goes to here.
+    /// A compaction group for MVs.
     MaterializedView = 3,
 }
 

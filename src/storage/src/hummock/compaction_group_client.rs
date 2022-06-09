@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -24,27 +25,34 @@ use tokio::sync::RwLock;
 
 use crate::hummock::{HummockError, HummockResult};
 
+// TODO: `CompactionGroupClient` trait is merely for the convenience of tests. It leads to
+// unnecessary dyn. Remove this trait.
+#[async_trait]
+pub trait CompactionGroupClient {
+    /// Fast path
+    async fn try_get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId>;
+    /// Slow path
+    async fn get_compaction_group_id(
+        &self,
+        prefix: Prefix,
+    ) -> HummockResult<Option<CompactionGroupId>>;
+}
+
 /// `CompactionGroupClient` maintains compaction group metadata cache.
-pub struct CompactionGroupClient {
+pub struct CompactionGroupClientImpl {
     inner: RwLock<CompactionGroupClientInner>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
 
-impl CompactionGroupClient {
-    pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>) -> Self {
-        Self {
-            inner: Default::default(),
-            hummock_meta_client,
-        }
-    }
-
+#[async_trait]
+impl CompactionGroupClient for CompactionGroupClientImpl {
     /// Tries to get from local cache
-    pub async fn try_get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId> {
+    async fn try_get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId> {
         self.inner.read().await.get(&prefix)
     }
 
     /// Tries to get from meta service
-    pub async fn get_compaction_group_id(
+    async fn get_compaction_group_id(
         &self,
         prefix: Prefix,
     ) -> HummockResult<Option<CompactionGroupId>> {
@@ -59,6 +67,15 @@ impl CompactionGroupClient {
             .map_err(HummockError::meta_error)?;
         guard.set_index(compaction_groups);
         Ok(guard.get(&prefix))
+    }
+}
+
+impl CompactionGroupClientImpl {
+    pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>) -> Self {
+        Self {
+            inner: Default::default(),
+            hummock_meta_client,
+        }
     }
 }
 

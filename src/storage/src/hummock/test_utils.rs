@@ -19,6 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -84,6 +85,7 @@ pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>)
         }),
         file_size: batches.len() as u64,
         vnode_bitmaps: vec![],
+        compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
     }
 }
 
@@ -127,7 +129,7 @@ pub fn gen_test_sstable_data(
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }
-    b.finish()
+    b.finish(StaticCompactionGroupId::SharedBuffer.into())
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`

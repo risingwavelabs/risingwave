@@ -356,6 +356,7 @@ impl LevelCompactionPicker {
 #[cfg(test)]
 pub mod tests {
     use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::KeyRange;
 
     use super::*;
@@ -380,6 +381,7 @@ pub mod tests {
             }),
             file_size: (right - left + 1) as u64,
             vnode_bitmaps: vec![],
+            compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
         }
     }
 

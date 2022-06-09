@@ -110,6 +110,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
                     bitmap: vec![],
                 },
             ],
+            compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
         });
     }
     sst_info
