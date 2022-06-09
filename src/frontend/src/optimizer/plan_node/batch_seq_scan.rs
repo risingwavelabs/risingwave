@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::ops::Bound;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
@@ -24,7 +25,7 @@ use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::expr::Literal;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
-use crate::utils::ScanRange;
+use crate::utils::{is_full_range, ScanRange};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
@@ -39,6 +40,17 @@ impl BatchSeqScan {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+
+        {
+            // validate scan_range
+            let scan_pk_prefix_len = scan_range.eq_conds.len();
+            let order_len = logical.table_desc().order_column_ids().len();
+            assert!(
+                scan_pk_prefix_len < order_len
+                    || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
+                "invalid scan_range",
+            );
+        }
 
         Self {
             base,
@@ -70,22 +82,28 @@ impl_plan_tree_node_for_leaf! { BatchSeqScan }
 
 impl fmt::Display for BatchSeqScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fn lb_to_string(name: &str, lb: &(Literal, bool)) -> String {
-            format!("{} {} {:?}", name, if lb.1 { ">=" } else { ">" }, lb.0)
+        fn lb_to_string(name: &str, lb: &Bound<Literal>) -> String {
+            let (op, v) = match lb {
+                Bound::Included(v) => (">=", v),
+                Bound::Excluded(v) => (">", v),
+                Bound::Unbounded => unreachable!(),
+            };
+            format!("{} {} {:?}", name, op, v)
         }
-        fn ub_to_string(name: &str, ub: &(Literal, bool)) -> String {
-            format!("{} {} {:?}", name, if ub.1 { "<=" } else { "<" }, ub.0)
+        fn ub_to_string(name: &str, ub: &Bound<Literal>) -> String {
+            let (op, v) = match ub {
+                Bound::Included(v) => ("<=", v),
+                Bound::Excluded(v) => ("<", v),
+                Bound::Unbounded => unreachable!(),
+            };
+            format!("{} {} {:?}", name, op, v)
         }
-        #[allow(clippy::type_complexity)]
-        fn range_to_string(
-            name: &str,
-            range: &(Option<(Literal, bool)>, Option<(Literal, bool)>),
-        ) -> String {
-            match (range.0.as_ref(), range.1.as_ref()) {
-                (None, None) => unreachable!(),
-                (None, Some(ub)) => ub_to_string(name, ub),
-                (Some(lb), None) => lb_to_string(name, lb),
-                (Some(lb), Some(ub)) => {
+        fn range_to_string(name: &str, range: &(Bound<Literal>, Bound<Literal>)) -> String {
+            match (&range.0, &range.1) {
+                (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+                (Bound::Unbounded, ub) => ub_to_string(name, ub),
+                (lb, Bound::Unbounded) => lb_to_string(name, lb),
+                (lb, ub) => {
                     format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
                 }
             }
@@ -108,9 +126,9 @@ impl fmt::Display for BatchSeqScan {
                 .zip(order_names.iter())
                 .map(|(v, name)| format!("{} = {:?}", name, v))
                 .collect_vec();
-            if let Some(range) = &self.scan_range.range {
+            if !is_full_range(&self.scan_range.range) {
                 let i = self.scan_range.eq_conds.len();
-                range_str.push(range_to_string(&order_names[i], range))
+                range_str.push(range_to_string(&order_names[i], &self.scan_range.range))
             }
 
             write!(

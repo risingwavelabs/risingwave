@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::batch_plan::{scan_range, ScanRange as ScanRangeProst};
+use std::ops::{Bound, RangeBounds};
+
+use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
+use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
 use crate::expr::{Expr, Literal};
 
@@ -20,9 +23,21 @@ use crate::expr::{Expr, Literal};
 #[derive(Debug, Clone)]
 pub struct ScanRange {
     pub eq_conds: Vec<Literal>,
-    /// ((lb, inclusive), (ub, inclusive))
-    #[allow(clippy::type_complexity)]
-    pub range: Option<(Option<(Literal, bool)>, Option<(Literal, bool)>)>,
+    pub range: (Bound<Literal>, Bound<Literal>),
+}
+
+fn bound_to_proto(bound: &Bound<Literal>) -> Option<BoundProst> {
+    match bound {
+        Bound::Included(literal) => Some(BoundProst {
+            value: Some(literal.to_expr_proto()),
+            inclusive: true,
+        }),
+        Bound::Excluded(literal) => Some(BoundProst {
+            value: Some(literal.to_expr_proto()),
+            inclusive: false,
+        }),
+        Bound::Unbounded => None,
+    }
 }
 
 impl ScanRange {
@@ -33,31 +48,28 @@ impl ScanRange {
                 .iter()
                 .map(|lit| lit.to_expr_proto())
                 .collect(),
-            range: self.range.as_ref().map(|(lb, ub)| scan_range::Range {
-                lower_bound: lb
-                    .as_ref()
-                    .map(|(lit, inclusive)| scan_range::range::Bound {
-                        value: Some(lit.to_expr_proto()),
-                        inclusive: *inclusive,
-                    }),
-                upper_bound: ub
-                    .as_ref()
-                    .map(|(lit, inclusive)| scan_range::range::Bound {
-                        value: Some(lit.to_expr_proto()),
-                        inclusive: *inclusive,
-                    }),
-            }),
+            lower_bound: bound_to_proto(&self.range.0),
+            upper_bound: bound_to_proto(&self.range.1),
         }
     }
 
     pub fn is_full_table_scan(&self) -> bool {
-        self.eq_conds.is_empty() && self.range.is_none()
+        self.eq_conds.is_empty() && self.range == full_range()
     }
 
-    pub fn full_table_scan() -> Self {
+    pub const fn full_table_scan() -> Self {
         Self {
             eq_conds: vec![],
-            range: None,
+            range: full_range(),
         }
     }
+}
+
+pub const fn full_range<T>() -> (Bound<T>, Bound<T>) {
+    (Bound::Unbounded, Bound::Unbounded)
+}
+
+pub fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
+    matches!(bounds.start_bound(), Bound::Unbounded)
+        && matches!(bounds.end_bound(), Bound::Unbounded)
 }

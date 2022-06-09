@@ -469,7 +469,7 @@ pub struct CellBasedTableRowIter<S: StateStore> {
 }
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
-    pub async fn new(
+    pub(super) async fn new(
         keyspace: &Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,

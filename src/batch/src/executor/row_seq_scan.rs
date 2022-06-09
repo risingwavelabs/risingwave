@@ -86,17 +86,22 @@ impl RowSeqScanExecutorBuilder {
     pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 }
 
-fn get_scan_bound(scan_range: ScanRange) -> (Row, Option<impl RangeBounds<Datum>>) {
+fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
+    matches!(bounds.start_bound(), Bound::Unbounded)
+        && matches!(bounds.end_bound(), Bound::Unbounded)
+}
+
+fn get_scan_bound(scan_range: ScanRange) -> (Row, impl RangeBounds<Datum>) {
     let pk_prefix_value = Row(scan_range
         .eq_conds
         .iter()
         .map(|v| LiteralExpression::try_from(v).unwrap().literal())
         .collect_vec());
-    if scan_range.range.is_none() {
-        return (pk_prefix_value, None);
+    if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
+        return (pk_prefix_value, (Bound::Unbounded, Bound::Unbounded));
     }
 
-    let build_bound = |bound: &scan_range::range::Bound| -> Bound<Datum> {
+    let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
         let datum = LiteralExpression::try_from(bound.value.as_ref().unwrap())
             .unwrap()
             .literal();
@@ -107,18 +112,16 @@ fn get_scan_bound(scan_range: ScanRange) -> (Row, Option<impl RangeBounds<Datum>
         }
     };
 
-    let scan_range::Range {
-        lower_bound,
-        upper_bound,
-    } = scan_range.range.as_ref().unwrap();
-
-    let next_col_bounds: (Bound<Datum>, Bound<Datum>) = match (lower_bound, upper_bound) {
+    let next_col_bounds: (Bound<Datum>, Bound<Datum>) = match (
+        scan_range.lower_bound.as_ref(),
+        scan_range.upper_bound.as_ref(),
+    ) {
         (Some(lb), Some(ub)) => (build_bound(lb), build_bound(ub)),
         (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)),
         (Some(lb), None) => (build_bound(lb), Bound::Unbounded),
         (None, None) => unreachable!(),
     };
-    (pk_prefix_value, Some(next_col_bounds))
+    (pk_prefix_value, next_col_bounds)
 }
 
 #[async_trait::async_trait]
@@ -164,7 +167,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 None,
             );
 
-            let scan_type = if pk_prefix_value.size() == 0 && scan_range.range.is_none() {
+            let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
                 let iter = table.iter_with_pk(source.epoch, pk_descs).await?;
                 ScanType::TableScan(iter)
             } else if pk_prefix_value.size() == pk_descs.len() {
@@ -174,17 +177,14 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             } else {
                 assert!(pk_prefix_value.size() < pk_descs.len());
 
-                let iter = match next_col_bounds {
-                    None => {
-                        table
-                            .iter_with_pk_prefix(source.epoch, pk_prefix_value)
-                            .await?
-                    }
-                    Some(next_col_bounds) => {
-                        table
-                            .iter_with_pk_bounds(source.epoch, pk_prefix_value, next_col_bounds)
-                            .await?
-                    }
+                let iter = if is_full_range(&next_col_bounds) {
+                    table
+                        .iter_with_pk_prefix(source.epoch, pk_prefix_value)
+                        .await?
+                } else {
+                    table
+                        .iter_with_pk_bounds(source.epoch, pk_prefix_value, next_col_bounds)
+                        .await?
                 };
                 ScanType::RangeScan(iter)
             };

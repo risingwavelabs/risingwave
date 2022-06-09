@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::ops::Bound;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -288,11 +289,17 @@ impl Condition {
                 } else if let Some((input_ref, op, lit)) = expr.as_comparison_const() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     match op {
-                        ExprType::LessThan | ExprType::LessThanOrEqual => {
-                            ub.push((lit, op == ExprType::LessThanOrEqual, expr));
+                        ExprType::LessThan => {
+                            ub.push((Bound::Excluded(lit), expr));
                         }
-                        ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
-                            lb.push((lit, op == ExprType::GreaterThanOrEqual, expr));
+                        ExprType::LessThanOrEqual => {
+                            ub.push((Bound::Included(lit), expr));
+                        }
+                        ExprType::GreaterThan => {
+                            lb.push((Bound::Excluded(lit), expr));
+                        }
+                        ExprType::GreaterThanOrEqual => {
+                            lb.push((Bound::Included(lit), expr));
                         }
                         _ => unreachable!(),
                     }
@@ -305,28 +312,23 @@ impl Condition {
                 Some(lit) => {
                     scan_range.eq_conds.push(lit);
                     // TODO: simplify bounds
-                    other_conds.extend(
-                        lb.into_iter()
-                            .chain(ub.into_iter())
-                            .map(|(_, _, expr)| expr),
-                    );
+                    other_conds.extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
                 }
                 None => {
                     if lb.len() > 1 || ub.len() > 1 {
                         // TODO: simplify bounds
-                        other_conds.extend(
-                            lb.into_iter()
-                                .chain(ub.into_iter())
-                                .map(|(_, _, expr)| expr),
-                        );
+                        other_conds
+                            .extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
                         break;
                     } else if !lb.is_empty() || !ub.is_empty() {
-                        scan_range.range = Some((
+                        scan_range.range = (
                             lb.first()
-                                .map(|(bound, inclusive, _)| (bound.clone(), *inclusive)),
+                                .map(|(bound, _)| (bound.clone()))
+                                .unwrap_or(Bound::Unbounded),
                             ub.first()
-                                .map(|(bound, inclusive, _)| (bound.clone(), *inclusive)),
-                        ))
+                                .map(|(bound, _)| (bound.clone()))
+                                .unwrap_or(Bound::Unbounded),
+                        )
                     }
                 }
             }
