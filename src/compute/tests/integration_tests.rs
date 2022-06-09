@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
-    RowSeqScanExecutor,
+    RowSeqScanExecutor, ScanType,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema, TableId};
@@ -149,7 +149,6 @@ async fn test_table_v2_materialize() -> Result<()> {
         1,
         "SourceExecutor".to_string(),
         Arc::new(StreamingMetrics::unused()),
-        vec![],
         u64::MAX,
     )?;
 
@@ -220,9 +219,11 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table
-            .iter_with_pk(u64::MAX, ordered_column_descs.clone())
-            .await?,
+        ScanType::TableScan(
+            table
+                .iter_with_pk(u64::MAX, ordered_column_descs.clone())
+                .await?,
+        ),
         1024,
         true,
         "RowSeqExecutor2".to_string(),
@@ -281,9 +282,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table
-            .iter_with_pk(u64::MAX, ordered_column_descs.clone())
-            .await?,
+        ScanType::TableScan(
+            table
+                .iter_with_pk(u64::MAX, ordered_column_descs.clone())
+                .await?,
+        ),
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
@@ -351,9 +354,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table
-            .iter_with_pk(u64::MAX, ordered_column_descs.clone())
-            .await?,
+        ScanType::TableScan(
+            table
+                .iter_with_pk(u64::MAX, ordered_column_descs.clone())
+                .await?,
+        ),
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
@@ -436,7 +441,7 @@ async fn test_row_seq_scan() -> Result<()> {
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table.iter_with_pk(u64::MAX, pk_descs).await.unwrap(),
+        ScanType::TableScan(table.iter_with_pk(u64::MAX, pk_descs).await.unwrap()),
         1,
         true,
         "RowSeqScanExecutor2".to_string(),
