@@ -1,3 +1,6 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 query T
 select concat('a', 'b');
 ----
