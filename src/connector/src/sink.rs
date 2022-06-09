@@ -20,11 +20,11 @@ use mysql_async::prelude::*;
 use mysql_async::*;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::decimal::Decimal;
 use risingwave_common::types::{
-    DataType, IntervalUnit, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl,
+    IntervalUnit, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl,
 };
 
 #[async_trait]
@@ -49,7 +49,7 @@ pub struct MySQLSink {
 }
 
 impl MySQLSink {
-    fn new(
+    pub fn new(
         endpoint: String,
         table: String,
         database: Option<String>,
@@ -246,6 +246,8 @@ impl Sink for RedisSink {
 #[cfg(test)]
 mod test {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::types::DataType;
 
     use super::*;
 
