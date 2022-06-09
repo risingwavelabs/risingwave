@@ -77,7 +77,8 @@ impl MetaNodeService {
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
 
         cmd.arg("--object-store-url").arg(
-            gen_object_store_url(provide_minio, provide_aws_s3)?.unwrap_or("memory".to_string()),
+            gen_object_store_url(provide_minio, provide_aws_s3)?
+                .unwrap_or_else(|| "memory".to_string()),
         );
 
         if config.enable_dashboard_v2 {
