@@ -102,6 +102,7 @@ async fn test_failpoint_state_store_read_upload() {
 
     let result = hummock_storage.sync(Some(3)).await;
     assert!(result.is_err());
+    fail::remove(mem_upload_err);
     meta_client
         .commit_epoch(
             4,
@@ -114,7 +115,6 @@ async fn test_failpoint_state_store_read_upload() {
     local_version_manager
         .refresh_version(meta_client.as_ref())
         .await;
-    fail::remove(mem_upload_err);
 
     let value = hummock_storage.get(&anchor, 5).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111"));
