@@ -127,7 +127,7 @@ impl FunctionCall {
             ExprType::Concat => {
                 if inputs.is_empty() {
                     return Err(ErrorCode::BindError(format!(
-                        "Function `ConcatWs` takes at least {} arguments ({} given)",
+                        "Function `Concat` takes at least {} arguments ({} given)",
                         1, 0
                     ))
                     .into());
