@@ -16,21 +16,18 @@
 // use mysql::*;
 // use mysql::prelude::*;
 
+use std::fmt;
+
 use async_trait::async_trait;
-use itertools::Itertools;
+use itertools::{join, Itertools};
 use mysql_async::prelude::*;
 use mysql_async::*;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
-use risingwave_common::types::Datum;
-use risingwave_common::types::ScalarImpl;
-use itertools::join;
-use std::fmt;
 use risingwave_common::types::decimal::Decimal;
 use risingwave_common::types::{
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    DataType, Datum, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, ScalarImpl,
 };
 
 #[async_trait]
@@ -84,7 +81,7 @@ pub enum MySQLType {
     Decimal(Decimal),
     Varchar(String),
     Date(NaiveDateWrapper),
-    Time(NaiveTimeWrapper)
+    Time(NaiveTimeWrapper),
 }
 
 impl TryFrom<ScalarImpl> for MySQLType {
@@ -102,7 +99,7 @@ impl TryFrom<ScalarImpl> for MySQLType {
             ScalarImpl::Utf8(v) => Ok(MySQLType::Varchar(v)),
             ScalarImpl::NaiveDate(v) => Ok(MySQLType::Date(v)),
             ScalarImpl::NaiveTime(v) => Ok(MySQLType::Time(v)),
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 }
@@ -140,8 +137,7 @@ impl Sink for MySQLSink {
         let mut transaction = conn.start_transaction(TxOpts::default()).await?;
 
         for (idx, op) in chunk.ops().iter().enumerate() {
-
-            //TODO(nanderstabel): Refactor
+            // TODO(nanderstabel): Refactor
             let values = chunk
                 .columns()
                 .iter()
@@ -161,7 +157,26 @@ impl Sink for MySQLSink {
                         )
                         .await?
                 }
-                Delete | UpdateDelete => (),
+                Delete | UpdateDelete => {
+                    transaction
+                        .exec_drop(
+                            format!(
+                                "DELETE FROM {} WHERE ({})",
+                                self.table(),
+                                join(
+                                    schema
+                                        .names()
+                                        .iter()
+                                        .zip(values.iter())
+                                        .map(|(c, v)| format!("{}={}", c, v))
+                                        .collect::<Vec<String>>(),
+                                    " AND "
+                                )
+                            ),
+                            Params::Empty,
+                        )
+                        .await?
+                }
             }
         }
 
@@ -235,47 +250,74 @@ impl Sink for RedisSink {
 mod test {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 
+    // use futures::future::BoxFuture;
     use super::*;
+
+    struct ConnectionParams<'a> {
+        pub endpoint: &'a str,
+        pub table: &'a str,
+        pub database: &'a str,
+        pub user: &'a str,
+        pub password: &'a str,
+    }
+
+    async fn start_connection(params: &ConnectionParams<'_>) -> Result<Conn> {
+        let builder = OptsBuilder::default()
+            .user(Some(params.user))
+            .pass(Some(params.password))
+            .ip_or_hostname(params.endpoint)
+            .db_name(Some(params.database));
+        let conn = Conn::new(builder).await?;
+        Ok(conn)
+    }
 
     #[tokio::test]
     async fn test_basic_async() -> Result<()> {
+        // Connection parameters for testing purposes.
+        let params = ConnectionParams {
+            endpoint: "127.0.0.1",
+            table: "t",
+            database: "db1",
+            user: "nander",
+            password: "123",
+        };
+
+        // Initialize a sink using connection parameters.
         let mut sink = MySQLSink::new(
-            "127.0.0.1".into(),
-            "t".into(),
-            Some("db1".into()),
-            Some("nander".into()),
-            Some("123".into()),
+            params.endpoint.into(),
+            params.table.into(),
+            Some(params.database.into()),
+            Some(params.user.into()),
+            Some(params.password.into()),
         );
 
+        // Initialize streamchunk.
         let chunk = StreamChunk::from_pretty(
-            " i
-            + 55
-            + 44
-            + 33",
+            "  i  i
+            + 55 11
+            + 44 22
+            + 33 00
+            - 55 11",
         );
 
-        let schema = Schema::new(vec![Field {
-            data_type: DataType::Int32,
-            name: "v1".to_string(),
-            sub_fields: vec![],
-            type_name: "test".to_string(),
-        }]);
+        // Initialize schema of two Int32 columns.
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+        ]);
 
+        // TODO(nanderstabel): currently writing chunk, not batch..
         sink.write_batch(chunk, schema).await?;
 
-        let builder = OptsBuilder::default()
-            .user(sink.user())
-            .pass(sink.password())
-            .ip_or_hostname(sink.endpoint())
-            .db_name(sink.database());
-
-        let mut conn = Conn::new(builder).await?;
-        let select: Vec<i32> = conn
-            .query(format!("SELECT * FROM {};", sink.table()))
+        // Start a new connection using the same connection parameters and get the SELECT result.
+        let mut conn = start_connection(&params).await?;
+        let select: Vec<(i32, i32)> = conn
+            .query(format!("SELECT * FROM {};", params.table))
             .await?;
 
-        println!("{:?}", select);
+        assert_eq!(select, [(44, 22), (33, 00),]);
 
+        // Clean up the table and drop the connection.
         conn.query_drop("DELETE FROM t;").await?;
         drop(conn);
 
