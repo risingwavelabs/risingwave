@@ -6,12 +6,12 @@ ab
 query T
 select concat(NULL);
 ----
-(empty)
+
 
 query T
 select concat(NULL, NULL);
 ----
-(empty)
+
 
 query T
 select concat(1, 1.01);
