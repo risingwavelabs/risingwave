@@ -503,7 +503,6 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
-        // TODO(Yuanxin): pass vnode
         let iter = keyspace.iter(epoch).await?;
 
         let iter = Self {
@@ -721,7 +720,6 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         epoch: u64,
     ) -> StorageResult<Self> {
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
-        // TODO(Yuanxin): pass vnodes
         let iter = keyspace.iter(epoch).await?;
         let iter = Self {
             iter,
