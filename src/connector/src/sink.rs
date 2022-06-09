@@ -23,11 +23,12 @@ use itertools::{join, Itertools};
 use mysql_async::prelude::*;
 use mysql_async::*;
 use risingwave_common::array::Op::*;
-use risingwave_common::array::{Row, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::decimal::Decimal;
 use risingwave_common::types::{
-    DataType, Datum, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, ScalarImpl,
+    DataType, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
+    OrderedF64, ScalarImpl, IntervalUnit
 };
 
 #[async_trait]
@@ -69,8 +70,7 @@ impl MySQLSink {
     }
 }
 
-use risingwave_common::types::{OrderedF32, OrderedF64};
-
+// TODO(nanderstabel): Add DATETIME and TIMESTAMP
 pub enum MySQLType {
     SmallInt(i16),
     Int(i32),
@@ -82,6 +82,7 @@ pub enum MySQLType {
     Varchar(String),
     Date(NaiveDateWrapper),
     Time(NaiveTimeWrapper),
+    Interval(IntervalUnit)
 }
 
 impl TryFrom<ScalarImpl> for MySQLType {
@@ -99,6 +100,7 @@ impl TryFrom<ScalarImpl> for MySQLType {
             ScalarImpl::Utf8(v) => Ok(MySQLType::Varchar(v)),
             ScalarImpl::NaiveDate(v) => Ok(MySQLType::Date(v)),
             ScalarImpl::NaiveTime(v) => Ok(MySQLType::Time(v)),
+            ScalarImpl::Interval(v) => Ok(MySQLType::Interval(v)),
             _ => unimplemented!(),
         }
     }
@@ -115,8 +117,9 @@ impl fmt::Display for MySQLType {
             MySQLType::Bool(v) => write!(f, "{}", v)?,
             MySQLType::Decimal(v) => write!(f, "{}", v)?,
             MySQLType::Varchar(v) => write!(f, "{}", v)?,
-            MySQLType::Date(v) => write!(f, "{}", v)?,
-            MySQLType::Time(v) => write!(f, "{}", v)?,
+            MySQLType::Date(_v) => todo!(),
+            MySQLType::Time(_v) => todo!(),
+            MySQLType::Interval(_v) => todo!(),
         }
         Ok(())
     }
@@ -144,54 +147,32 @@ impl Sink for MySQLSink {
                 .map(|x| MySQLType::try_from(x.array_ref().datum_at(idx).unwrap()).unwrap())
                 .collect_vec();
 
-            match *op {
-                Insert | UpdateInsert => {
-                    transaction
-                        .exec_drop(
-                            format!(
-                                "INSERT INTO {} VALUES ({})",
-                                self.table(),
-                                join(values, ",")
-                            ),
-                            Params::Empty,
-                        )
-                        .await?
-                }
-                Delete | UpdateDelete => {
-                    transaction
-                        .exec_drop(
-                            format!(
-                                "DELETE FROM {} WHERE ({})",
-                                self.table(),
-                                join(
-                                    schema
-                                        .names()
-                                        .iter()
-                                        .zip(values.iter())
-                                        .map(|(c, v)| format!("{}={}", c, v))
-                                        .collect::<Vec<String>>(),
-                                    " AND "
-                                )
-                            ),
-                            Params::Empty,
-                        )
-                        .await?
-                }
-            }
+            // Get SQL statement
+            let stmt = match *op {
+                Insert | UpdateInsert => format!(
+                    "INSERT INTO {} VALUES ({})",
+                    self.table(),
+                    join(values, ",")
+                ),
+                Delete | UpdateDelete => format!(
+                    "DELETE FROM {} WHERE ({})",
+                    self.table(),
+                    join(
+                        schema
+                            .names()
+                            .iter()
+                            .zip(values.iter())
+                            .map(|(c, v)| format!("{}={}", c, v))
+                            .collect::<Vec<String>>(),
+                        " AND "
+                    )
+                ),
+            };
+            transaction.exec_drop(stmt, Params::Empty).await?;
         }
 
+        // Commit and drop the connection.
         transaction.commit().await?;
-
-        // // Save ints
-        // r"INSERT INTO t
-        // VALUES (:i)"
-        //     .with(chunk.ops().iter().map(|o| params! {
-        //         "Insert" => i.i,
-        //     }))
-        //     .batch(&mut conn)
-        //     .await?;
-
-        // Dropped connection will go to the pool
         drop(conn);
         Ok(())
     }
