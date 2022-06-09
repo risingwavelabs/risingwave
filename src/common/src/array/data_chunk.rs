@@ -595,8 +595,8 @@ impl DataChunkTestExt for DataChunk {
                     builder.append_datum(&v.to_owned_datum()).unwrap();
                     builder.append_null().unwrap();
                 }
-                let col = Column::new(builder.finish().unwrap().into());
-                col
+                
+                Column::new(builder.finish().unwrap().into())
             })
             .collect();
         let chunk = DataChunk::new(new_cols, Vis::Bitmap(new_vis.finish()));
