@@ -147,7 +147,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().pk;
+        let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().order_keys;
         let pk_descs: Vec<OrderedColumnDesc> = pk_descs_proto.iter().map(|d| d.into()).collect();
         let order_types: Vec<OrderType> = pk_descs.iter().map(|desc| desc.order).collect();
         let ordered_row_serializer = OrderedRowSerializer::new(order_types);

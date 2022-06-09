@@ -52,7 +52,7 @@ message ColumnCatalog {
 
 message CellBasedTableDesc {
   uint32 table_id = 1;
-  repeated OrderedColumnDesc pk = 2;
+  repeated OrderedColumnDesc order_keys = 2;
 }
 
 enum JoinType {
