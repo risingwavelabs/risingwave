@@ -34,9 +34,6 @@ pub struct ManagedValueState {
     /// state from memory.
     is_dirty: bool,
 
-    /// Primary key to look up in relational table. For value state, there is only one row.
-    /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
-    pk: Option<Row>,
 }
 
 impl ManagedValueState {
@@ -71,7 +68,6 @@ impl ManagedValueState {
                 data,
             )?,
             is_dirty: false,
-            pk: pk.cloned(),
         })
     }
 
@@ -112,7 +108,7 @@ impl ManagedValueState {
 
         // Persist value into relational table.
         let v = self.state.get_output()?;
-        state_table.insert(self.pk.as_ref().unwrap_or(&Row(vec![])), Row(vec![v]))?;
+        state_table.insert( Row(vec![v]))?;
 
         self.is_dirty = false;
         Ok(())

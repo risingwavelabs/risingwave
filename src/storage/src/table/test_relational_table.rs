@@ -55,34 +55,25 @@ async fn test_state_table() -> StorageResult<()> {
         StateTable::new(keyspace.clone(), column_descs, order_types, None, pk_index);
     let mut epoch: u64 = 0;
     state_table
-        .insert(
-            &Row(vec![Some(1_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state_table
-        .insert(
-            &Row(vec![Some(2_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
     state_table
-        .insert(
-            &Row(vec![Some(3_i32.into())]),
-            Row(vec![
-                Some(3_i32.into()),
-                Some(33_i32.into()),
-                Some(333_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]))
         .unwrap();
 
     // test read visibility
@@ -113,14 +104,11 @@ async fn test_state_table() -> StorageResult<()> {
     );
 
     state_table
-        .delete(
-            &Row(vec![Some(2_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
 
     let row2_delete = state_table
@@ -139,37 +127,21 @@ async fn test_state_table() -> StorageResult<()> {
 
     epoch += 1;
     state_table
-        .delete(
-            &Row(vec![Some(3_i32.into())]),
-            Row(vec![
-                Some(3_i32.into()),
-                Some(33_i32.into()),
-                Some(333_i32.into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]))
         .unwrap();
 
     state_table
-        .insert(
-            &Row(vec![Some(4_i32.into())]),
-            Row(vec![Some(4_i32.into()), None, None]),
-        )
+        .insert(Row(vec![Some(4_i32.into()), None, None]))
         .unwrap();
-    state_table
-        .insert(&Row(vec![Some(5_i32.into())]), Row(vec![None, None, None]))
-        .unwrap();
-
     let row4 = state_table
         .get_row(&Row(vec![Some(4_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(row4, Some(Row(vec![Some(4_i32.into()), None, None])));
-
-    let row5 = state_table
-        .get_row(&Row(vec![Some(5_i32.into())]), epoch)
-        .await
-        .unwrap();
-    assert_eq!(row5, Some(Row(vec![None, None, None])));
 
     let non_exist_row = state_table
         .get_row(&Row(vec![Some(0_i32.into())]), epoch)
@@ -178,10 +150,7 @@ async fn test_state_table() -> StorageResult<()> {
     assert_eq!(non_exist_row, None);
 
     state_table
-        .delete(
-            &Row(vec![Some(4_i32.into())]),
-            Row(vec![Some(4_i32.into()), None, None]),
-        )
+        .delete(Row(vec![Some(4_i32.into()), None, None]))
         .unwrap();
 
     state_table.commit(epoch).await.unwrap();
@@ -217,60 +186,57 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         StateTable::new(keyspace.clone(), column_descs, order_types, None, pk_index);
     let mut epoch: u64 = 0;
     state_table
-        .insert(
-            &Row(vec![Some(6_i32.into())]),
-            Row(vec![
-                Some(6_i32.into()),
-                Some(66_i32.into()),
-                Some(666_i32.into()),
-                Some(6666_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into()),
+            Some(6666_i32.into()),
+        ]))
         .unwrap();
 
     state_table
-        .insert(
-            &Row(vec![Some(7_i32.into())]),
-            Row(vec![Some(7_i32.into()), None, Some(777_i32.into()), None]),
-        )
+        .insert(Row(vec![
+            Some(7_i32.into()),
+            None,
+            Some(777_i32.into()),
+            None,
+        ]))
         .unwrap();
     state_table.commit(epoch).await.unwrap();
 
     epoch += 1;
     state_table
-        .delete(
-            &Row(vec![Some(6_i32.into())]),
-            Row(vec![
-                Some(6_i32.into()),
-                Some(66_i32.into()),
-                Some(666_i32.into()),
-                Some(6666_i32.into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into()),
+            Some(6666_i32.into()),
+        ]))
         .unwrap();
     state_table
-        .insert(
-            &Row(vec![Some(6_i32.into())]),
-            Row(vec![
-                Some(6666_i32.into()),
-                None,
-                None,
-                Some(6666_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(6_i32.into()),
+            None,
+            None,
+            Some(6666_i32.into()),
+        ]))
         .unwrap();
 
     state_table
-        .delete(
-            &Row(vec![Some(7_i32.into())]),
-            Row(vec![Some(7_i32.into()), None, Some(777_i32.into()), None]),
-        )
+        .delete(Row(vec![
+            Some(7_i32.into()),
+            None,
+            Some(777_i32.into()),
+            None,
+        ]))
         .unwrap();
     state_table
-        .insert(
-            &Row(vec![Some(7_i32.into())]),
-            Row(vec![None, Some(77_i32.into()), Some(7777_i32.into()), None]),
-        )
+        .insert(Row(vec![
+            Some(7_i32.into()),
+            Some(77_i32.into()),
+            Some(7777_i32.into()),
+            None,
+        ]))
         .unwrap();
     let row6 = state_table
         .get_row(&Row(vec![Some(6_i32.into())]), epoch)
@@ -279,7 +245,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     assert_eq!(
         row6,
         Some(Row(vec![
-            Some(6666_i32.into()),
+            Some(6_i32.into()),
             None,
             None,
             Some(6666_i32.into())
@@ -293,7 +259,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     assert_eq!(
         row7,
         Some(Row(vec![
-            None,
+            Some(7_i32.into()),
             Some(77_i32.into()),
             Some(7777_i32.into()),
             None
@@ -309,7 +275,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     assert_eq!(
         row6_commit,
         Some(Row(vec![
-            Some(6666_i32.into()),
+            Some(6_i32.into()),
             None,
             None,
             Some(6666_i32.into())
@@ -322,7 +288,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     assert_eq!(
         row7_commit,
         Some(Row(vec![
-            None,
+            Some(7_i32.into()),
             Some(77_i32.into()),
             Some(7777_i32.into()),
             None
@@ -332,50 +298,38 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     epoch += 1;
 
     state_table
-        .insert(
-            &Row(vec![Some(1_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(2_i32.into()),
-                Some(3_i32.into()),
-                Some(4_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(2_i32.into()),
+            Some(3_i32.into()),
+            Some(4_i32.into()),
+        ]))
         .unwrap();
     state_table.commit(epoch).await.unwrap();
     // one epoch: delete (1, 2, 3, 4), insert (5, 6, 7, None), delete(5, 6, 7, None)
     state_table
-        .delete(
-            &Row(vec![Some(1_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(2_i32.into()),
-                Some(3_i32.into()),
-                Some(4_i32.into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some(1_i32.into()),
+            Some(2_i32.into()),
+            Some(3_i32.into()),
+            Some(4_i32.into()),
+        ]))
         .unwrap();
     state_table
-        .insert(
-            &Row(vec![Some(1_i32.into())]),
-            Row(vec![
-                Some(5_i32.into()),
-                Some(6_i32.into()),
-                Some(7_i32.into()),
-                None,
-            ]),
-        )
+        .insert(Row(vec![
+            Some(5_i32.into()),
+            Some(6_i32.into()),
+            Some(7_i32.into()),
+            None,
+        ]))
         .unwrap();
     state_table
-        .delete(
-            &Row(vec![Some(1_i32.into())]),
-            Row(vec![
-                Some(5_i32.into()),
-                Some(6_i32.into()),
-                Some(7_i32.into()),
-                None,
-            ]),
-        )
+        .delete(Row(vec![
+            Some(5_i32.into()),
+            Some(6_i32.into()),
+            Some(7_i32.into()),
+            None,
+        ]))
         .unwrap();
 
     let row1 = state_table
@@ -415,67 +369,49 @@ async fn test_state_table_iter() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
     state
-        .delete(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
 
     state
-        .insert(
-            &Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-            Row(vec![
-                Some(3333_i32.into()),
-                Some(3333_i32.into()),
-                Some(3333_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(3333_i32.into()),
+        ]))
         .unwrap();
 
     state
-        .insert(
-            &Row(vec![Some(6_i32.into()), Some(66_i32.into())]),
-            Row(vec![
-                Some(6_i32.into()),
-                Some(66_i32.into()),
-                Some(666_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into()),
+        ]))
         .unwrap();
 
     state
-        .insert(
-            &Row(vec![Some(9_i32.into()), Some(99_i32.into())]),
-            Row(vec![
-                Some(9_i32.into()),
-                Some(99_i32.into()),
-                Some(999_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(9_i32.into()),
+            Some(99_i32.into()),
+            Some(999_i32.into()),
+        ]))
         .unwrap();
 
     {
@@ -496,8 +432,8 @@ async fn test_state_table_iter() {
         let res = iter.next().await.unwrap().unwrap();
         assert_eq!(
             &Row(vec![
-                Some(3333_i32.into()),
-                Some(3333_i32.into()),
+                Some(3_i32.into()),
+                Some(33_i32.into()),
                 Some(3333_i32.into())
             ]),
             res.as_ref()
@@ -519,71 +455,53 @@ async fn test_state_table_iter() {
     let epoch = u64::MAX;
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
-    // [3333, 3333, 3333], [6, 66, 666], [9, 99, 999] exists in
+    // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
     // cell_based_table
 
     state
-        .delete(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-            Row(vec![
-                Some(3_i32.into()),
-                Some(33_i32.into()),
-                Some(333_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]))
         .unwrap();
 
     state
-        .insert(
-            &Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
-            Row(vec![
-                Some(4_i32.into()),
-                Some(44_i32.into()),
-                Some(444_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(4_i32.into()),
+            Some(44_i32.into()),
+            Some(444_i32.into()),
+        ]))
         .unwrap();
 
     state
-        .insert(
-            &Row(vec![Some(5_i32.into()), Some(55_i32.into())]),
-            Row(vec![
-                Some(5_i32.into()),
-                Some(55_i32.into()),
-                Some(555_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(5_i32.into()),
+            Some(55_i32.into()),
+            Some(555_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(7_i32.into()), Some(77_i32.into())]),
-            Row(vec![
-                Some(7_i32.into()),
-                Some(77_i32.into()),
-                Some(777_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(7_i32.into()),
+            Some(77_i32.into()),
+            Some(777_i32.into()),
+        ]))
         .unwrap();
 
     state
-        .insert(
-            &Row(vec![Some(8_i32.into()), Some(88_i32.into())]),
-            Row(vec![
-                Some(8_i32.into()),
-                Some(88_i32.into()),
-                Some(888_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(8_i32.into()),
+            Some(88_i32.into()),
+            Some(888_i32.into()),
+        ]))
         .unwrap();
 
     let iter = state.iter(epoch).await.unwrap();
@@ -713,74 +631,47 @@ async fn test_multi_state_table_iter() {
     );
 
     state_1
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state_1
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
     state_1
-        .delete(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
 
     state_2
-        .insert(
-            &Row(vec![
-                Some("1".to_string().into()),
-                Some("11".to_string().into()),
-            ]),
-            Row(vec![
-                Some("1".to_string().into()),
-                Some("11".to_string().into()),
-                Some("111".to_string().into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some("1".to_string().into()),
+            Some("11".to_string().into()),
+            Some("111".to_string().into()),
+        ]))
         .unwrap();
     state_2
-        .insert(
-            &Row(vec![
-                Some("2".to_string().into()),
-                Some("22".to_string().into()),
-            ]),
-            Row(vec![
-                Some("2".to_string().into()),
-                Some("22".to_string().into()),
-                Some("222".to_string().into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some("2".to_string().into()),
+            Some("22".to_string().into()),
+            Some("222".to_string().into()),
+        ]))
         .unwrap();
     state_2
-        .delete(
-            &Row(vec![
-                Some("2".to_string().into()),
-                Some("22".to_string().into()),
-            ]),
-            Row(vec![
-                Some("2".to_string().into()),
-                Some("22".to_string().into()),
-                Some("222".to_string().into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some("2".to_string().into()),
+            Some("22".to_string().into()),
+            Some("222".to_string().into()),
+        ]))
         .unwrap();
 
     {
@@ -841,36 +732,24 @@ async fn test_cell_based_get_row_by_scan() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![Some(1_i32.into()), None, None]),
-        )
+        .insert(Row(vec![Some(1_i32.into()), None, None]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
-        )
+        .insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-            Row(vec![Some(3_i32.into()), None, None]),
-        )
+        .insert(Row(vec![Some(3_i32.into()), None, None]))
         .unwrap();
 
     state
-        .delete(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
-        )
+        .delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]))
         .unwrap();
     state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
 
     let get_row1_res = table
-        .get_row_by_scan(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
+        .get_row_by_scan(&Row(vec![Some(1_i32.into()), None]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -879,13 +758,13 @@ async fn test_cell_based_get_row_by_scan() {
     );
 
     let get_row2_res = table
-        .get_row_by_scan(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
+        .get_row_by_scan(&Row(vec![Some(2_i32.into()), None]), epoch)
         .await
         .unwrap();
     assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
-        .get_row_by_scan(&Row(vec![Some(3_i32.into()), Some(33_i32.into())]), epoch)
+        .get_row_by_scan(&Row(vec![Some(3_i32.into()),None]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -924,42 +803,24 @@ async fn test_cell_based_get_row_by_muti_get() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![Some(1_i32.into()), None, None]),
-        )
+        .insert(Row(vec![Some(1_i32.into()), None, None]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
-        )
+        .insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-            Row(vec![Some(3_i32.into()), None, None]),
-        )
-        .unwrap();
-    state
-        .insert(
-            &Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
-            Row(vec![None, None, None]),
-        )
+        .insert(Row(vec![Some(3_i32.into()), None, None]))
         .unwrap();
 
     state
-        .delete(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
-        )
+        .delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]))
         .unwrap();
     state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
 
     let get_row1_res = table
-        .get_row(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
+        .get_row(&Row(vec![Some(1_i32.into()), None]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -968,13 +829,13 @@ async fn test_cell_based_get_row_by_muti_get() {
     );
 
     let get_row2_res = table
-        .get_row(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
+        .get_row(&Row(vec![Some(2_i32.into()), None]), epoch)
         .await
         .unwrap();
     assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
-        .get_row(&Row(vec![Some(3_i32.into()), Some(33_i32.into())]), epoch)
+        .get_row(&Row(vec![Some(3_i32.into()), None]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -982,11 +843,6 @@ async fn test_cell_based_get_row_by_muti_get() {
         Some(Row(vec![Some(3_i32.into()), None, None]))
     );
 
-    let get_row4_res = table
-        .get_row(&Row(vec![Some(4_i32.into()), Some(44_i32.into())]), epoch)
-        .await
-        .unwrap();
-    assert_eq!(get_row4_res, Some(Row(vec![None, None, None])));
 
     let get_no_exist_res = table
         .get_row(&Row(vec![Some(0_i32.into()), Some(00_i32.into())]), epoch)
@@ -1018,43 +874,25 @@ async fn test_cell_based_get_row_for_string() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![
-                Some("1".to_string().into()),
-                Some("11".to_string().into()),
-            ]),
-            Row(vec![
-                Some("1".to_string().into()),
-                Some("11".to_string().into()),
-                Some("111".to_string().into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some("1".to_string().into()),
+            Some("11".to_string().into()),
+            Some("111".to_string().into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![
-                Some("4".to_string().into()),
-                Some("44".to_string().into()),
-            ]),
-            Row(vec![
-                Some("4".to_string().into()),
-                Some("44".to_string().into()),
-                Some("444".to_string().into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some("4".to_string().into()),
+            Some("44".to_string().into()),
+            Some("444".to_string().into()),
+        ]))
         .unwrap();
     state
-        .delete(
-            &Row(vec![
-                Some("4".to_string().into()),
-                Some("44".to_string().into()),
-            ]),
-            Row(vec![
-                Some("4".to_string().into()),
-                Some("44".to_string().into()),
-                Some("444".to_string().into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some("4".to_string().into()),
+            Some("44".to_string().into()),
+            Some("444".to_string().into()),
+        ]))
         .unwrap();
     state.commit(epoch).await.unwrap();
 
@@ -1115,42 +953,24 @@ async fn test_shuffled_column_id_for_get_row() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![Some(1_i32.into()), None, None]),
-        )
+        .insert(Row(vec![Some(1_i32.into()), None, None]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
-        )
+        .insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-            Row(vec![Some(3_i32.into()), None, None]),
-        )
-        .unwrap();
-    state
-        .insert(
-            &Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
-            Row(vec![None, None, None]),
-        )
+        .insert(Row(vec![Some(3_i32.into()), None, None]))
         .unwrap();
 
     state
-        .delete(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
-        )
+        .delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]))
         .unwrap();
     state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
 
     let get_row1_res = table
-        .get_row(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
+        .get_row(&Row(vec![Some(1_i32.into()),None]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -1159,13 +979,13 @@ async fn test_shuffled_column_id_for_get_row() {
     );
 
     let get_row2_res = table
-        .get_row(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
+        .get_row(&Row(vec![Some(2_i32.into()),None]), epoch)
         .await
         .unwrap();
     assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
-        .get_row(&Row(vec![Some(3_i32.into()), Some(33_i32.into())]), epoch)
+        .get_row(&Row(vec![Some(3_i32.into()),None]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -1173,11 +993,7 @@ async fn test_shuffled_column_id_for_get_row() {
         Some(Row(vec![Some(3_i32.into()), None, None]))
     );
 
-    let get_row4_res = table
-        .get_row(&Row(vec![Some(4_i32.into()), Some(44_i32.into())]), epoch)
-        .await
-        .unwrap();
-    assert_eq!(get_row4_res, Some(Row(vec![None, None, None])));
+
 
     let get_no_exist_res = table
         .get_row(&Row(vec![Some(0_i32.into()), Some(00_i32.into())]), epoch)
@@ -1189,7 +1005,6 @@ async fn test_shuffled_column_id_for_get_row() {
 #[tokio::test]
 async fn test_cell_based_table_iter() {
     let state_store = MemoryStateStore::new();
-    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -1210,34 +1025,25 @@ async fn test_cell_based_table_iter() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
     state
-        .delete(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
     state.commit(epoch).await.unwrap();
 
@@ -1301,74 +1107,47 @@ async fn test_multi_cell_based_table_iter() {
     let table_2 = CellBasedTable::new_for_test(keyspace_2.clone(), column_descs_2, order_types);
 
     state_1
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state_1
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
     state_1
-        .delete(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
 
     state_2
-        .insert(
-            &Row(vec![
-                Some("1".to_string().into()),
-                Some("11".to_string().into()),
-            ]),
-            Row(vec![
-                Some("1".to_string().into()),
-                Some("11".to_string().into()),
-                Some("111".to_string().into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some("1".to_string().into()),
+            Some("11".to_string().into()),
+            Some("111".to_string().into()),
+        ]))
         .unwrap();
     state_2
-        .insert(
-            &Row(vec![
-                Some("2".to_string().into()),
-                Some("22".to_string().into()),
-            ]),
-            Row(vec![
-                Some("2".to_string().into()),
-                Some("22".to_string().into()),
-                Some("222".to_string().into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some("2".to_string().into()),
+            Some("22".to_string().into()),
+            Some("222".to_string().into()),
+        ]))
         .unwrap();
     state_2
-        .delete(
-            &Row(vec![
-                Some("2".to_string().into()),
-                Some("22".to_string().into()),
-            ]),
-            Row(vec![
-                Some("2".to_string().into()),
-                Some("22".to_string().into()),
-                Some("222".to_string().into()),
-            ]),
-        )
+        .delete(Row(vec![
+            Some("2".to_string().into()),
+            Some("22".to_string().into()),
+            Some("222".to_string().into()),
+        ]))
         .unwrap();
 
     state_1.commit(epoch).await.unwrap();
@@ -1566,24 +1345,18 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
     state.commit(epoch).await.unwrap();
 
@@ -1620,85 +1393,61 @@ async fn test_state_table_iter_with_bounds() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-            Row(vec![
-                Some(3_i32.into()),
-                Some(33_i32.into()),
-                Some(333_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(5_i32.into()), Some(55_i32.into())]),
-            Row(vec![
-                Some(5_i32.into()),
-                Some(55_i32.into()),
-                Some(555_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(5_i32.into()),
+            Some(55_i32.into()),
+            Some(555_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(7_i32.into()), Some(77_i32.into())]),
-            Row(vec![
-                Some(7_i32.into()),
-                Some(77_i32.into()),
-                Some(777_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(7_i32.into()),
+            Some(77_i32.into()),
+            Some(777_i32.into()),
+        ]))
         .unwrap();
     state.commit(epoch).await.unwrap();
     state
-        .insert(
-            &Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
-            Row(vec![
-                Some(4_i32.into()),
-                Some(44_i32.into()),
-                Some(444_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(4_i32.into()),
+            Some(44_i32.into()),
+            Some(444_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(5_i32.into()), Some(55_i32.into())]),
-            Row(vec![
-                Some(5555_i32.into()),
-                Some(5555_i32.into()),
-                Some(5555_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(5_i32.into()),
+            Some(55_i32.into()),
+            Some(5555_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(6_i32.into()), Some(66_i32.into())]),
-            Row(vec![
-                Some(6_i32.into()),
-                Some(66_i32.into()),
-                Some(666_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into()),
+        ]))
         .unwrap();
     let epoch = u64::MAX;
     let pk_bounds = Row(vec![Some(2_i32.into()), Some(22_i32.into())])
@@ -1740,8 +1489,8 @@ async fn test_state_table_iter_with_bounds() {
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
         &Row(vec![
-            Some(5555_i32.into()),
-            Some(5555_i32.into()),
+            Some(5_i32.into()),
+            Some(55_i32.into()),
             Some(5555_i32.into())
         ]),
         res.as_ref()
@@ -1774,85 +1523,61 @@ async fn test_state_table_iter_with_unbounded_range() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-            Row(vec![
-                Some(3_i32.into()),
-                Some(33_i32.into()),
-                Some(333_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(5_i32.into()), Some(55_i32.into())]),
-            Row(vec![
-                Some(5_i32.into()),
-                Some(55_i32.into()),
-                Some(555_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(5_i32.into()),
+            Some(55_i32.into()),
+            Some(555_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(7_i32.into()), Some(77_i32.into())]),
-            Row(vec![
-                Some(7_i32.into()),
-                Some(77_i32.into()),
-                Some(777_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(7_i32.into()),
+            Some(77_i32.into()),
+            Some(777_i32.into()),
+        ]))
         .unwrap();
     state.commit(epoch).await.unwrap();
     state
-        .insert(
-            &Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
-            Row(vec![
-                Some(4_i32.into()),
-                Some(44_i32.into()),
-                Some(444_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(4_i32.into()),
+            Some(44_i32.into()),
+            Some(444_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(5_i32.into()), Some(55_i32.into())]),
-            Row(vec![
-                Some(5555_i32.into()),
-                Some(5555_i32.into()),
-                Some(5555_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(5_i32.into()),
+            Some(55_i32.into()),
+            Some(5555_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(6_i32.into()), Some(66_i32.into())]),
-            Row(vec![
-                Some(6_i32.into()),
-                Some(66_i32.into()),
-                Some(666_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into()),
+        ]))
         .unwrap();
     let epoch = u64::MAX;
     let pk_bounds = Row(vec![Some(3_i32.into()), Some(33_i32.into())])..;
@@ -1883,8 +1608,8 @@ async fn test_state_table_iter_with_unbounded_range() {
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
         &Row(vec![
-            Some(5555_i32.into()),
-            Some(5555_i32.into()),
+            Some(5_i32.into()),
+            Some(55_i32.into()),
             Some(5555_i32.into())
         ]),
         res.as_ref()
@@ -1940,78 +1665,57 @@ async fn test_state_table_iter_with_prefix() {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(11_i32.into()),
-                Some(111_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(22_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(22_i32.into()),
-                Some(222_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
         .unwrap();
 
     state
-        .insert(
-            &Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
-            Row(vec![
-                Some(4_i32.into()),
-                Some(44_i32.into()),
-                Some(444_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(4_i32.into()),
+            Some(44_i32.into()),
+            Some(444_i32.into()),
+        ]))
         .unwrap();
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(55_i32.into())]),
-            Row(vec![
-                Some(5_i32.into()),
-                Some(55_i32.into()),
-                Some(555_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(55_i32.into()),
+            Some(555_i32.into()),
+        ]))
         .unwrap();
     state.commit(epoch).await.unwrap();
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(33_i32.into())]),
-            Row(vec![
-                Some(3_i32.into()),
-                Some(33_i32.into()),
-                Some(333_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(1_i32.into()), Some(55_i32.into())]),
-            Row(vec![
-                Some(5555_i32.into()),
-                Some(5555_i32.into()),
-                Some(5555_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(55_i32.into()),
+            Some(5555_i32.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(6_i32.into()), Some(66_i32.into())]),
-            Row(vec![
-                Some(6_i32.into()),
-                Some(66_i32.into()),
-                Some(666_i32.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into()),
+        ]))
         .unwrap();
     let epoch = u64::MAX;
     let pk_prefix = Row(vec![Some(1_i32.into())]);
@@ -2026,8 +1730,8 @@ async fn test_state_table_iter_with_prefix() {
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
         &Row(vec![
-            Some(5555_i32.into()),
-            Some(5555_i32.into()),
+            Some(1_i32.into()),
+            Some(55_i32.into()),
             Some(5555_i32.into())
         ]),
         res.as_ref()
@@ -2037,7 +1741,7 @@ async fn test_state_table_iter_with_prefix() {
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
         &Row(vec![
-            Some(3_i32.into()),
+            Some(1_i32.into()),
             Some(33_i32.into()),
             Some(333_i32.into())
         ]),
@@ -2048,7 +1752,7 @@ async fn test_state_table_iter_with_prefix() {
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
         &Row(vec![
-            Some(2_i32.into()),
+            Some(1_i32.into()),
             Some(22_i32.into()),
             Some(222_i32.into())
         ]),
