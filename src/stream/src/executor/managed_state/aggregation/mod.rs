@@ -103,7 +103,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.flush(state_table).await,
+            Self::Value(state) => state.flush(write_batch, state_table).await,
             Self::Table(state) => state.flush(write_batch, state_table),
         }
     }
@@ -142,6 +142,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                             Some(1024),
                             pk_data_types,
                             key_hash_code,
+                            pk,
                         )
                         .await?,
                     ))

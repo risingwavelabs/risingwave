@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::marker::PhantomData;
-
-use std::sync::{Arc};
+use std::sync::Arc;
 
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;

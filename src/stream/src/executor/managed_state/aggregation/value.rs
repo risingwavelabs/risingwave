@@ -17,7 +17,7 @@ use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::state_table::StateTable;
-
+use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
@@ -103,7 +103,11 @@ impl ManagedValueState {
     }
 
     /// Flush the internal state to a write batch.
-    pub async fn flush<S: StateStore>(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+    pub async fn flush<S: StateStore>(
+        &mut self,
+        _write_batch: &mut WriteBatch<S>,
+        state_table: &mut StateTable<S>,
+    ) -> StreamExecutorResult<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.
         debug_assert!(self.is_dirty());
