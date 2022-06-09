@@ -75,6 +75,12 @@ impl OrderedRowSerializer {
         Self { order_types }
     }
 
+    pub fn prefix(&self, len: usize) -> Self {
+        Self {
+            order_types: self.order_types[..len].to_vec(),
+        }
+    }
+
     pub fn serialize(&self, row: &Row, append_to: &mut Vec<u8>) {
         self.serialize_datums(row.values(), append_to)
     }
