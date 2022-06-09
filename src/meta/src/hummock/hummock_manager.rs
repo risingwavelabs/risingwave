@@ -51,6 +51,7 @@ use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
+use crate::stream::FragmentManagerRef;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -72,6 +73,9 @@ pub struct HummockManager<S: MetaStore> {
     compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
     // TODO: refactor to remove this field
     config: Arc<CompactionConfig>,
+
+    // for compaction to get some info (e.g. existing_table_ids)
+    fragment_manager: FragmentManagerRef<S>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -161,6 +165,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> Result<HummockManager<S>> {
         let config = compaction_group_manager.config().clone();
         let instance = HummockManager {
@@ -172,6 +177,7 @@ where
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
             config: Arc::new(config),
+            fragment_manager,
         };
 
         instance.load_meta_store_state().await?;
@@ -573,6 +579,7 @@ where
             task_id as HummockCompactionTaskId,
             compaction_group_id,
         );
+        let existing_table_ids_from_meta = self.fragment_manager.existing_table_ids().await?;
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
@@ -590,22 +597,28 @@ where
                         .flat_map(|v| v.snapshot_id.clone())
                         .fold(max_committed_epoch, std::cmp::min)
                 };
+
+                // to get all relational table_id from sst_info
+                let table_ids = compact_task
+                    .input_ssts
+                    .iter()
+                    .flat_map(|level| {
+                        level
+                            .table_infos
+                            .iter()
+                            .flat_map(|sst_info| {
+                                sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
+                            })
+                            .collect_vec()
+                    })
+                    .collect::<HashSet<u32>>();
+
                 if compact_task.target_level != 0 {
-                    let table_ids = compact_task
-                        .input_ssts
-                        .iter()
-                        .flat_map(|level| {
-                            level
-                                .table_infos
-                                .iter()
-                                .flat_map(|sst_info| {
-                                    sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
-                                })
-                                .collect_vec()
-                        })
-                        .collect::<HashSet<u32>>();
                     compact_task.vnode_mappings.reserve_exact(table_ids.len());
-                    for table_id in table_ids {
+                }
+
+                for table_id in table_ids {
+                    if compact_task.target_level != 0 {
                         if let Some(vnode_mapping) = self
                             .env
                             .hash_mapping_manager()
@@ -619,6 +632,11 @@ where
                             };
                             compact_task.vnode_mappings.push(compressed_mapping);
                         }
+                    }
+
+                    // to found exist table_id from
+                    if existing_table_ids_from_meta.contains(&table_id) {
+                        compact_task.existing_table_ids.push(table_id);
                     }
                 }
 

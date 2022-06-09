@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::convert::From;
 use std::any::type_name;
 use std::fmt::Debug;
 
 use risingwave_common::array::{ListRef, StructRef};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+
+use crate::{ExprError, Result};
 
 fn general_cmp<T1, T2, T3, F>(l: T1, r: T2, cmp: F) -> Result<bool>
 where
@@ -28,20 +27,12 @@ where
     F: FnOnce(T3, T3) -> bool,
 {
     // TODO: We need to improve the error message
-    let l: T3 = l.try_into().map_err(|_| {
-        RwError::from(InternalError(format!(
-            "Can't convert {} to {}",
-            type_name::<T1>(),
-            type_name::<T3>()
-        )))
-    })?;
-    let r: T3 = r.try_into().map_err(|_| {
-        RwError::from(InternalError(format!(
-            "Can't convert {} to {}",
-            type_name::<T2>(),
-            type_name::<T3>()
-        )))
-    })?;
+    let l: T3 = l
+        .try_into()
+        .map_err(|_| ExprError::Cast(type_name::<T1>(), type_name::<T3>()))?;
+    let r: T3 = r
+        .try_into()
+        .map_err(|_| ExprError::Cast(type_name::<T2>(), type_name::<T3>()))?;
     Ok(cmp(l, r))
 }
 

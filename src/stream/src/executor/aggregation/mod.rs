@@ -23,7 +23,8 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DecimalArray, F32Array,
-    F64Array, I16Array, I32Array, I64Array, Row, Utf8Array,
+    F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
+    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -160,6 +161,17 @@ pub fn create_streaming_agg_state(
                     (Count, decimal, int64, StreamingCountAgg::<DecimalArray>),
                     (Count, boolean, int64, StreamingCountAgg::<BoolArray>),
                     (Count, varchar, int64, StreamingCountAgg::<Utf8Array>),
+                    (Count, interval, int64, StreamingCountAgg::<IntervalArray>),
+                    (Count, date, int64, StreamingCountAgg::<NaiveDateArray>),
+                    (
+                        Count,
+                        timestamp,
+                        int64,
+                        StreamingCountAgg::<NaiveDateTimeArray>
+                    ),
+                    (Count, time, int64, StreamingCountAgg::<NaiveTimeArray>),
+                    (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
+                    (Count, list, int64, StreamingCountAgg::<ListArray>),
                     // Sum
                     (Sum, int64, int64, StreamingSumAgg::<I64Array, I64Array>),
                     (

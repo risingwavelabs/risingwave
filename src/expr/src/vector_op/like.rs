@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use crate::Result;
 
 #[inline(always)]
 pub fn like_default(s: &str, p: &str) -> Result<bool> {
