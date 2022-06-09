@@ -24,6 +24,14 @@ use risingwave_common::array::Op::*;
 use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::types::Datum;
+use risingwave_common::types::ScalarImpl;
+use itertools::join;
+use std::fmt;
+use risingwave_common::types::decimal::Decimal;
+use risingwave_common::types::{
+    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+};
 
 #[async_trait]
 pub trait Sink {
@@ -64,6 +72,59 @@ impl MySQLSink {
     }
 }
 
+use risingwave_common::types::{OrderedF32, OrderedF64};
+
+pub enum MySQLType {
+    SmallInt(i16),
+    Int(i32),
+    BigInt(i64),
+    Float(OrderedF32),
+    Double(OrderedF64),
+    Bool(bool),
+    Decimal(Decimal),
+    Varchar(String),
+    Date(NaiveDateWrapper),
+    Time(NaiveTimeWrapper)
+}
+
+impl TryFrom<ScalarImpl> for MySQLType {
+    type Error = Error;
+
+    fn try_from(s: ScalarImpl) -> Result<Self> {
+        match s {
+            ScalarImpl::Int16(v) => Ok(MySQLType::SmallInt(v)),
+            ScalarImpl::Int32(v) => Ok(MySQLType::Int(v)),
+            ScalarImpl::Int64(v) => Ok(MySQLType::BigInt(v)),
+            ScalarImpl::Float32(v) => Ok(MySQLType::Float(v)),
+            ScalarImpl::Float64(v) => Ok(MySQLType::Double(v)),
+            ScalarImpl::Bool(v) => Ok(MySQLType::Bool(v)),
+            ScalarImpl::Decimal(v) => Ok(MySQLType::Decimal(v)),
+            ScalarImpl::Utf8(v) => Ok(MySQLType::Varchar(v)),
+            ScalarImpl::NaiveDate(v) => Ok(MySQLType::Date(v)),
+            ScalarImpl::NaiveTime(v) => Ok(MySQLType::Time(v)),
+            _ => unimplemented!()
+        }
+    }
+}
+
+impl fmt::Display for MySQLType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MySQLType::SmallInt(v) => write!(f, "{}", v)?,
+            MySQLType::Int(v) => write!(f, "{}", v)?,
+            MySQLType::BigInt(v) => write!(f, "{}", v)?,
+            MySQLType::Float(v) => write!(f, "{}", v)?,
+            MySQLType::Double(v) => write!(f, "{}", v)?,
+            MySQLType::Bool(v) => write!(f, "{}", v)?,
+            MySQLType::Decimal(v) => write!(f, "{}", v)?,
+            MySQLType::Varchar(v) => write!(f, "{}", v)?,
+            MySQLType::Date(v) => write!(f, "{}", v)?,
+            MySQLType::Time(v) => write!(f, "{}", v)?,
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl Sink for MySQLSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: Schema) -> Result<()> {
@@ -79,11 +140,13 @@ impl Sink for MySQLSink {
         let mut transaction = conn.start_transaction(TxOpts::default()).await?;
 
         for (idx, op) in chunk.ops().iter().enumerate() {
-            let row = Row(chunk
+
+            //TODO(nanderstabel): Refactor
+            let values = chunk
                 .columns()
                 .iter()
-                .map(|x| x.array_ref().datum_at(idx))
-                .collect_vec());
+                .map(|x| MySQLType::try_from(x.array_ref().datum_at(idx).unwrap()).unwrap())
+                .collect_vec();
 
             match *op {
                 Insert | UpdateInsert => {
@@ -92,7 +155,7 @@ impl Sink for MySQLSink {
                             format!(
                                 "INSERT INTO {} VALUES ({})",
                                 self.table(),
-                                row.0[0].clone().unwrap().as_int32()
+                                join(values, ",")
                             ),
                             Params::Empty,
                         )
@@ -166,11 +229,6 @@ impl Sink for RedisSink {
     fn password(&self) -> Option<String> {
         todo!();
     }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-struct Int {
-    i: i32,
 }
 
 #[cfg(test)]
