@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -19,6 +20,7 @@ use enum_as_inner::EnumAsInner;
 use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
+use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
@@ -102,6 +104,7 @@ pub use union::UnionExecutor;
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
+
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
 /// The maximum chunk length produced by executor at a time.
@@ -163,11 +166,17 @@ pub const INVALID_EPOCH: u64 = 0;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct AddOutput {
+    map: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
+    splits: HashMap<ActorId, Vec<SplitImpl>>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
     UpdateOutputs(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
-    AddOutput(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
+    AddOutput(AddOutput),
     SourceChangeSplit(HashMap<ActorId, ConnectorState>),
 }
 
@@ -259,7 +268,7 @@ impl Barrier {
     pub fn is_to_add_output(&self, actor_id: ActorId) -> bool {
         matches!(
             self.mutation.as_deref(),
-            Some(Mutation::AddOutput(map)) if map
+            Some(Mutation::AddOutput(map)) if map.map
                 .values()
                 .flatten()
                 .any(|info| info.actor_id == actor_id)
@@ -312,6 +321,7 @@ impl Barrier {
                 }
                 Some(Mutation::AddOutput(adds)) => Some(ProstMutation::Add(AddMutation {
                     mutations: adds
+                        .map
                         .iter()
                         .map(|(&(actor_id, dispatcher_id), actors)| DispatcherMutation {
                             actor_id,
@@ -319,6 +329,7 @@ impl Barrier {
                             info: actors.clone(),
                         })
                         .collect(),
+                    splits: vec![],
                 })),
                 Some(Mutation::SourceChangeSplit(changes)) => {
                     Some(ProstMutation::Splits(SourceChangeSplitMutation {
@@ -369,8 +380,9 @@ impl Barrier {
                 .into(),
             ),
             ProstMutation::Add(adds) => Some(
-                Mutation::AddOutput(
-                    adds.mutations
+                Mutation::AddOutput(AddOutput {
+                    map: adds
+                        .mutations
                         .iter()
                         .map(|mutation| {
                             (
@@ -379,7 +391,27 @@ impl Barrier {
                             )
                         })
                         .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
-                )
+                    splits: adds
+                        .splits
+                        .iter()
+                        .map(|split| {
+                            (
+                                split.actor_id,
+                                split
+                                    .source_splits
+                                    .iter()
+                                    .map(|s| {
+                                        SplitImpl::restore_from_bytes(
+                                            split.borrow().split_type.clone(),
+                                            s,
+                                        )
+                                        .unwrap()
+                                    })
+                                    .collect_vec(),
+                            )
+                        })
+                        .collect(),
+                })
                 .into(),
             ),
             ProstMutation::Splits(s) => {

@@ -16,17 +16,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
 use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
-use crate::hummock::compaction::CompactionConfig;
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
+use crate::stream::FragmentManager;
 
 pub async fn add_test_tables<S>(
     hummock_manager: &HummockManager<S>,
@@ -50,7 +53,11 @@ where
     // Current state: {v0: [], v1: [test_tables]}
 
     // Simulate a compaction and increase version by 1.
-    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
     hummock_manager
         .assign_compaction_task(&compact_task, context_id, async { true })
         .await
@@ -150,19 +157,29 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
-    let config = CompactionConfig {
-        level0_tigger_file_numer: 2,
-        level0_tier_compact_file_number: 1,
-        min_compaction_bytes: 1,
-        max_bytes_for_level_base: 1,
-        ..Default::default()
-    };
+    let config = CompactionConfigBuilder::new()
+        .level0_tigger_file_numer(2)
+        .level0_tier_compact_file_number(1)
+        .min_compaction_bytes(1)
+        .max_bytes_for_level_base(1)
+        .build();
+    let compaction_group_manager = Arc::new(
+        CompactionGroupManager::new_with_config(env.clone(), config.clone())
+            .await
+            .unwrap(),
+    );
+    let fragment_manager = Arc::new(
+        FragmentManager::new(env.clone(), compaction_group_manager.clone())
+            .await
+            .unwrap(),
+    );
     let hummock_manager = Arc::new(
-        HummockManager::new_with_config(
+        HummockManager::new(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
-            config,
+            compaction_group_manager,
+            fragment_manager.clone(),
         )
         .await
         .unwrap(),

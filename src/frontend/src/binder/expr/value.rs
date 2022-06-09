@@ -71,33 +71,41 @@ impl Binder {
         // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-INTERVAL-INPUT
         let unit = leading_field.unwrap_or(DateTimeField::Second);
         use DateTimeField::*;
-        let interval = (|| match unit {
+        let tokens = parse_interval(&s)?;
+        // Todo: support more syntax
+        if tokens.len() > 2 {
+            return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+        }
+        let num = match tokens.get(0) {
+            Some(TimeStrToken::Num(num)) => *num,
+            _ => {
+                return Err(
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
+                );
+            }
+        };
+        let interval_unit = match tokens.get(1) {
+            Some(TimeStrToken::TimeUnit(unit)) => unit,
+            _ => &unit,
+        };
+
+        let interval = (|| match interval_unit {
             Year => {
-                let years = s.parse::<i32>().ok()?;
-                let months = years.checked_mul(12)?;
-                Some(IntervalUnit::from_month(months))
+                let months = num.checked_mul(12)?;
+                Some(IntervalUnit::from_month(months as i32))
             }
-            Month => {
-                let months = s.parse::<i32>().ok()?;
-                Some(IntervalUnit::from_month(months))
-            }
-            Day => {
-                let days = s.parse::<i32>().ok()?;
-                Some(IntervalUnit::from_days(days))
-            }
+            Month => Some(IntervalUnit::from_month(num as i32)),
+            Day => Some(IntervalUnit::from_days(num as i32)),
             Hour => {
-                let hours = s.parse::<i64>().ok()?;
-                let ms = hours.checked_mul(3600 * 1000)?;
+                let ms = num.checked_mul(3600 * 1000)?;
                 Some(IntervalUnit::from_millis(ms))
             }
             Minute => {
-                let minutes = s.parse::<i64>().ok()?;
-                let ms = minutes.checked_mul(60 * 1000)?;
+                let ms = num.checked_mul(60 * 1000)?;
                 Some(IntervalUnit::from_millis(ms))
             }
             Second => {
-                let seconds = s.parse::<i64>().ok()?;
-                let ms = seconds.checked_mul(1000)?;
+                let ms = num.checked_mul(1000)?;
                 Some(IntervalUnit::from_millis(ms))
             }
         })()
@@ -153,9 +161,75 @@ impl Binder {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TimeStrToken {
+    Num(i64),
+    TimeUnit(DateTimeField),
+}
+
+fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+    if !c.is_empty() {
+        match c.parse::<i64>() {
+            Ok(num) => {
+                t.push(TimeStrToken::Num(num));
+            }
+            Err(_) => {
+                return Err(
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", c)).into(),
+                );
+            }
+        }
+        c.clear();
+    }
+    Ok(())
+}
+
+fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+    if !c.is_empty() {
+        t.push(TimeStrToken::TimeUnit(c.parse()?));
+        c.clear();
+    }
+    Ok(())
+}
+
+pub fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
+    let s = s.trim();
+    let mut tokens = Vec::new();
+    let mut num_buf = "".to_string();
+    let mut char_buf = "".to_string();
+    for (i, c) in s.chars().enumerate() {
+        match c {
+            '-' => {
+                num_buf.push(c);
+            }
+            c if c.is_ascii_digit() => {
+                convert_unit(&mut char_buf, &mut tokens)?;
+                num_buf.push(c);
+            }
+            c if c.is_ascii_alphabetic() => {
+                convert_digit(&mut num_buf, &mut tokens)?;
+                char_buf.push(c);
+            }
+            chr if chr.is_ascii_whitespace() => {
+                convert_unit(&mut char_buf, &mut tokens)?;
+                convert_digit(&mut num_buf, &mut tokens)?;
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
+                    i, s, c
+                )).into());
+            }
+        }
+    }
+    convert_digit(&mut num_buf, &mut tokens)?;
+    convert_unit(&mut char_buf, &mut tokens)?;
+
+    Ok(tokens)
+}
+
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
 
@@ -247,5 +321,57 @@ mod tests {
         let expr_pb = expr.to_expr_proto();
         let expr = build_from_prost(&expr_pb).unwrap();
         assert_eq!(expr.return_type(), DataType::Int32);
+    }
+
+    #[test]
+    fn test_bind_interval() {
+        use super::*;
+
+        let mut binder = mock_binder();
+        let values = vec![
+            "1 hour",
+            "1 h",
+            "1 year",
+            "6 second",
+            "2 minutes",
+            "1 month",
+        ];
+        let data = vec![
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_ymd(1, 0, 0))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_millis(6 * 1000))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(2))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_month(1))),
+                DataType::Interval,
+            )),
+        ];
+
+        for i in 0..values.len() {
+            let value = Value::Interval {
+                value: values[i].to_string(),
+                leading_field: None,
+                leading_precision: None,
+                last_field: None,
+                fractional_seconds_precision: None,
+            };
+            assert_eq!(binder.bind_value(value), data[i]);
+        }
     }
 }

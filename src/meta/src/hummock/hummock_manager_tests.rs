@@ -18,6 +18,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
@@ -170,7 +171,10 @@ async fn test_hummock_compaction_task() {
     }
 
     // No compaction task available.
-    let task = hummock_manager.get_compact_task().await.unwrap();
+    let task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap();
     assert_eq!(task, None);
 
     // Add some sstables and commit.
@@ -195,7 +199,11 @@ async fn test_hummock_compaction_task() {
     assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
 
     // Get a compaction task.
-    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
     hummock_manager
         .assign_compaction_task(&compact_task, context_id, async { true })
         .await
@@ -241,7 +249,11 @@ async fn test_hummock_compaction_task() {
     assert_eq!(INVALID_EPOCH, hummock_version2.safe_epoch);
 
     // Get a compaction task.
-    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
     hummock_manager
         .assign_compaction_task(&compact_task, context_id, async { true })
         .await
@@ -840,7 +852,11 @@ async fn test_print_compact_task() {
         .unwrap();
 
     // Get a compaction task.
-    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         compact_task
             .get_input_ssts()

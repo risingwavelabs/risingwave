@@ -97,6 +97,12 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
+    #[error("Expr error: {0:?}")]
+    ExprError(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
     #[error("Stream error: {0:?}")]
     StreamError(
         #[backtrace]
@@ -139,6 +145,9 @@ pub enum ErrorCode {
     /// node. Currently we don't support re-register, and the worker node need a full restart.
     #[error("Unknown worker")]
     UnknownWorker,
+
+    #[error("unrecognized configuration parameter \"{0}\"")]
+    UnrecognizedConfigurationParameter(String),
 
     /// `Eof` represents an upstream node will not generate new data. This error is rare in our
     /// system, currently only used in the `BatchQueryExecutor` as an ephemeral solution.
@@ -321,7 +330,9 @@ impl ErrorCode {
             ErrorCode::UnknownWorker => 24,
             ErrorCode::ConnectorError(_) => 25,
             ErrorCode::InvalidParameterValue(_) => 26,
-            ErrorCode::MySQLError(_) => 27,
+            ErrorCode::UnrecognizedConfigurationParameter(_) => 27,
+            ErrorCode::ExprError(_) => 28,
+            ErrorCode::MySQLError(_) => 29,
             ErrorCode::UnknownError(_) => 101,
         }
     }

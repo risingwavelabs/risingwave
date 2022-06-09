@@ -327,7 +327,7 @@ macro_rules! impl_fold_agg {
             }
 
             fn get_output(&self) -> Result<Datum> {
-                Ok(self.result.map(Scalar::to_scalar_value))
+                Ok(self.result.clone().map(Scalar::to_scalar_value))
             }
 
             fn new_builder(&self) -> ArrayBuilderImpl {
@@ -342,21 +342,37 @@ macro_rules! impl_fold_agg {
 }
 
 // Implement all supported combination of input and output for `StreamingFoldAgg`.
-impl_fold_agg! { I16Array, Int16, I16Array }
-impl_fold_agg! { I32Array, Int32, I32Array }
-impl_fold_agg! { I64Array, Int64, I64Array }
-impl_fold_agg! { F32Array, Float32, F32Array }
-impl_fold_agg! { F64Array, Float64, F64Array }
-impl_fold_agg! { F64Array, Float64, F32Array }
+// count
+impl_fold_agg! { I64Array, Int64, I64Array } // max/min
 impl_fold_agg! { I64Array, Int64, F64Array }
 impl_fold_agg! { I64Array, Int64, F32Array }
-impl_fold_agg! { I64Array, Int64, I32Array }
-impl_fold_agg! { I64Array, Int64, I16Array }
+impl_fold_agg! { I64Array, Int64, I32Array } // sum
+impl_fold_agg! { I64Array, Int64, I16Array } // sum
 impl_fold_agg! { I64Array, Int64, BoolArray }
 impl_fold_agg! { I64Array, Int64, Utf8Array }
 impl_fold_agg! { I64Array, Int64, DecimalArray }
-impl_fold_agg! { DecimalArray, Decimal, I64Array }
+impl_fold_agg! { I64Array, Int64, StructArray }
+impl_fold_agg! { I64Array, Int64, ListArray }
+impl_fold_agg! { I64Array, Int64, IntervalArray }
+impl_fold_agg! { I64Array, Int64, NaiveTimeArray }
+impl_fold_agg! { I64Array, Int64, NaiveDateArray }
+impl_fold_agg! { I64Array, Int64, NaiveDateTimeArray }
+// max/min
+impl_fold_agg! { I16Array, Int16, I16Array }
+impl_fold_agg! { I32Array, Int32, I32Array }
+impl_fold_agg! { F32Array, Float32, F32Array }
+impl_fold_agg! { F64Array, Float64, F64Array }
 impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
+impl_fold_agg! { Utf8Array, Utf8, Utf8Array }
+impl_fold_agg! { StructArray, Struct, StructArray }
+impl_fold_agg! { IntervalArray, Interval, IntervalArray }
+impl_fold_agg! { NaiveTimeArray, NaiveTime, NaiveTimeArray }
+impl_fold_agg! { NaiveDateArray, NaiveDate, NaiveDateArray }
+impl_fold_agg! { NaiveDateTimeArray, NaiveDateTime, NaiveDateTimeArray }
+// sum
+impl_fold_agg! { DecimalArray, Decimal, I64Array }
+// avg
+impl_fold_agg! { F64Array, Float64, F32Array }
 
 #[cfg(test)]
 mod tests {

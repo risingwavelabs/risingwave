@@ -16,10 +16,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
-    VacuumTask,
+    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableInfo,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tonic::Streaming;
@@ -45,7 +46,7 @@ impl MockHummockMetaClient {
 
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
-            .get_compact_task()
+            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
             .await
             .unwrap_or(None)
     }
@@ -132,6 +133,10 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> Result<()> {
         Ok(())
+    }
+
+    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+        todo!()
     }
 }
 

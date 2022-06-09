@@ -39,16 +39,16 @@ pub use agg::AggKind;
 pub use expr_input_ref::InputRefExpression;
 pub use expr_literal::*;
 use risingwave_common::array::{ArrayRef, DataChunk, Row};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
+use super::Result;
 use crate::expr::build_expr_from_prost::*;
 use crate::expr::expr_array::ArrayExpression;
 use crate::expr::expr_coalesce::CoalesceExpression;
 use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
+use crate::ExprError;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
@@ -63,6 +63,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// * `input` - input data of the Project Executor
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
 
+    /// Evaluate the expression in row-based execution.
     fn eval_row(&self, input: &Row) -> Result<Datum>;
 
     fn boxed(self) -> BoxedExpression
@@ -78,9 +79,9 @@ pub type BoxedExpression = Box<dyn Expression>;
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
-    match prost.get_expr_type()? {
+    match prost.get_expr_type().unwrap() {
         Cast | Upper | Lower | Md5 | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot => {
+        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot | CharLength => {
             build_unary_expr_prost(prost)
         }
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
@@ -107,16 +108,15 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         In => build_in_expr(prost),
         Field => FieldExpression::try_from(prost).map(Expression::boxed),
         Array => ArrayExpression::try_from(prost).map(Expression::boxed),
-        _ => Err(InternalError(format!(
-            "Unsupported expression type: {:?}",
+        _ => Err(ExprError::UnsupportedFunction(format!(
+            "{:?}",
             prost.get_expr_type()
-        ))
-        .into()),
+        ))),
     }
 }
 
-#[derive(Debug)]
 /// Simply wrap a row level expression as an array level expression
+#[derive(Debug)]
 pub struct RowExpression {
     expr: BoxedExpression,
 }
@@ -127,7 +127,8 @@ impl RowExpression {
     }
 
     pub fn eval(&mut self, row: &Row, data_types: &[DataType]) -> Result<ArrayRef> {
-        let input = DataChunk::from_rows(slice::from_ref(row), data_types)?;
+        let input =
+            DataChunk::from_rows(slice::from_ref(row), data_types).map_err(ExprError::Array)?;
         self.expr.eval(&input)
     }
 

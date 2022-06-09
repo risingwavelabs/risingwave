@@ -18,12 +18,11 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::{KeyRange, Level, LevelType, SstableInfo};
+use risingwave_pb::hummock::{CompactionConfig, KeyRange, Level, LevelType, SstableInfo};
 
 use super::SearchResult;
 use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::level_handler::LevelHandler;
 
 const MIN_COMPACTION_BYTES: u64 = 2 * 1024 * 1024; // 1MB
@@ -82,7 +81,8 @@ impl CompactionPicker for TierCompactionPicker {
             // files.
             while let Some(first) = select_level_inputs.first() {
                 if first.file_size * 2 > compaction_bytes
-                    && select_level_inputs.len() >= self.config.level0_tier_compact_file_number
+                    && select_level_inputs.len()
+                        >= self.config.level0_tier_compact_file_number as usize
                     && compaction_bytes > MIN_COMPACTION_BYTES
                 {
                     compaction_bytes -= first.file_size;
@@ -92,7 +92,7 @@ impl CompactionPicker for TierCompactionPicker {
                 }
             }
 
-            if select_level_inputs.len() < self.config.level0_tier_compact_file_number {
+            if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize {
                 idx = next_offset;
                 continue;
             }
@@ -359,6 +359,7 @@ pub mod tests {
     use risingwave_pb::hummock::KeyRange;
 
     use super::*;
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::CompactionMode;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
@@ -383,11 +384,12 @@ pub mod tests {
     }
 
     fn create_compaction_picker_for_test() -> LevelCompactionPicker {
-        let config = Arc::new(CompactionConfig {
-            level0_tier_compact_file_number: 2,
-            min_compaction_bytes: 0,
-            ..Default::default()
-        });
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .min_compaction_bytes(0)
+                .build(),
+        );
         LevelCompactionPicker::new(0, 1, config, Arc::new(RangeOverlapStrategy::default()))
     }
 
@@ -447,7 +449,7 @@ pub mod tests {
         let picker = LevelCompactionPicker::new(
             1,
             1,
-            Arc::new(CompactionConfig::default()),
+            Arc::new(CompactionConfigBuilder::new().build()),
             Arc::new(RangeOverlapStrategy::default()),
         );
         levels[0]
@@ -457,10 +459,9 @@ pub mod tests {
         assert!(ret.is_none());
 
         // compact L0 to L0
-        let config = CompactionConfig {
-            level0_tier_compact_file_number: 2,
-            ..Default::default()
-        };
+        let config = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(2)
+            .build();
         let picker = TierCompactionPicker::new(2, Arc::new(config));
         levels[0]
             .table_infos
@@ -492,13 +493,13 @@ pub mod tests {
     #[test]
     fn test_selecting_key_range_overlap() {
         // When picking L0->L1, all L1 files overlapped with selecting_key_range should be picked.
-
-        let config = Arc::new(CompactionConfig {
-            level0_tier_compact_file_number: 2,
-            min_compaction_bytes: 0,
-            compaction_mode: CompactionMode::RangeMode,
-            ..Default::default()
-        });
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .min_compaction_bytes(0)
+                .compaction_mode(CompactionMode::Range as i32)
+                .build(),
+        );
         let picker =
             LevelCompactionPicker::new(0, 1, config, Arc::new(RangeOverlapStrategy::default()));
 

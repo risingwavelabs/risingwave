@@ -29,7 +29,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
-    fn connect(&self, database: &str) -> Result<Arc<Self::Session>, BoxedError>;
+    fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -37,6 +37,33 @@ pub trait SessionManager: Send + Sync + 'static {
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
     async fn run_statement(self: Arc<Self>, sql: &str) -> Result<PgResponse, BoxedError>;
+
+    fn user_authenticator(&self) -> &UserAuthenticator;
+}
+
+#[derive(Debug, Clone)]
+pub enum UserAuthenticator {
+    // No need to authenticate.
+    None,
+    // raw password in clear-text form.
+    ClearText(Vec<u8>),
+    // password encrypted with random salt.
+    MD5WithSalt {
+        encrypted_password: Vec<u8>,
+        salt: [u8; 4],
+    },
+}
+
+impl UserAuthenticator {
+    pub fn authenticate(&self, password: &[u8]) -> bool {
+        match self {
+            UserAuthenticator::None => true,
+            UserAuthenticator::ClearText(text) => password == text,
+            UserAuthenticator::MD5WithSalt {
+                encrypted_password, ..
+            } => encrypted_password == password,
+        }
+    }
 }
 
 /// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
@@ -66,9 +93,21 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
 
 async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>) {
     let mut pg_proto = PgProtocol::new(socket, session_mgr);
-    let mut unnamed_query_string = bytes::Bytes::new();
+
+    let mut unnamed_statement = Default::default();
+    let mut unnamed_portal = Default::default();
+    let mut named_statements = Default::default();
+    let mut named_portals = Default::default();
+
     loop {
-        let terminate = pg_proto.process(&mut unnamed_query_string).await;
+        let terminate = pg_proto
+            .process(
+                &mut unnamed_statement,
+                &mut unnamed_portal,
+                &mut named_statements,
+                &mut named_portals,
+            )
+            .await;
         match terminate {
             Ok(is_ter) => {
                 if is_ter {
@@ -92,11 +131,11 @@ mod tests {
     use std::error::Error;
     use std::sync::Arc;
 
+    use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
-    use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
-    use crate::pg_server::{pg_serve, Session, SessionManager};
+    use crate::pg_server::{pg_serve, Session, SessionManager, UserAuthenticator};
     use crate::types::Row;
 
     struct MockSessionManager {}
@@ -107,6 +146,7 @@ mod tests {
         fn connect(
             &self,
             _database: &str,
+            _user_name: &str,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
         }
@@ -118,28 +158,41 @@ mod tests {
     impl Session for MockSession {
         async fn run_statement(
             self: Arc<Self>,
-            _sql: &str,
+            sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
+            let res: Vec<Option<String>> = sql
+                .split(&[' ', ',', ';'])
+                .skip(1)
+                .map(|x| Some(x.to_string()))
+                .collect();
+
             Ok(PgResponse::new(
                 StatementType::SELECT,
                 1,
-                vec![Row::new(vec![Some("Hello, World".to_owned())])],
-                vec![PgFieldDescriptor::new(
-                    "VARCHAR".to_owned(),
-                    TypeOid::Varchar,
-                )],
+                vec![Row::new(res)],
+                // NOTE: Extended mode don't need.
+                vec![],
             ))
+        }
+
+        fn user_authenticator(&self) -> &UserAuthenticator {
+            &UserAuthenticator::None
         }
     }
 
+    // test_psql_extended_mode_explicit_simple
+    // constrain:
+    // - Only support simple SELECT statement.
+    // - Must provide all type description of the generic types.
+    // - Input description(params description) should include all the generic params description we
+    //   need.
     #[tokio::test]
-    /// The test below is copied from tokio-postgres doc.
-    async fn test_psql_extended_mode_connect() {
+    async fn test_psql_extended_mode_exlicit_simple() {
         let session_mgr = Arc::new(MockSessionManager {});
         tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
 
         // Connect to the database.
-        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
+        let (mut client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
             .await
             .unwrap();
 
@@ -151,15 +204,113 @@ mod tests {
             }
         });
 
-        // Now we can execute a simple statement that just returns its parameter.
-        let rows = client.query("SELECT 'Hello, World'", &[]).await.unwrap();
-        // FIXME: Enable this after handle prepared statement.
-        // let rows = client
-        //     .query("SELECT $1::TEXT", &[&"hello world"])
-        //     .await
-        //     .unwrap();
+        // explicit parameter (test pre_statement)
+        {
+            let statement = client
+                .prepare_typed("SELECT $1;", &[Type::VARCHAR])
+                .await
+                .unwrap();
 
-        let value: &str = rows[0].get(0);
-        assert_eq!(value, "Hello, World");
+            let rows = client.query(&statement, &[&"AA"]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "AA");
+
+            let rows = client.query(&statement, &[&"BB"]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "BB");
+        }
+        // explict parameter (test portal)
+        {
+            let transaction = client.transaction().await.unwrap();
+            let statement = transaction
+                .prepare_typed("SELECT $1;", &[Type::VARCHAR])
+                .await
+                .unwrap();
+            let portal1 = transaction.bind(&statement, &[&"AA"]).await.unwrap();
+            let portal2 = transaction.bind(&statement, &[&"BB"]).await.unwrap();
+            let rows = transaction.query_portal(&portal1, 0).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "AA");
+            let rows = transaction.query_portal(&portal2, 0).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "BB");
+            transaction.rollback().await.unwrap();
+        }
+        // mix parameter
+        {
+            let statement = client
+                .prepare_typed("SELECT $1,$2;", &[Type::VARCHAR, Type::VARCHAR])
+                .await
+                .unwrap();
+            let rows = client.query(&statement, &[&"AA", &"BB"]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "AA");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "BB");
+
+            let statement = client
+                .prepare_typed("SELECT $1,$1;", &[Type::VARCHAR])
+                .await
+                .unwrap();
+            let rows = client.query(&statement, &[&"AA"]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "AA");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "AA");
+
+            let statement = client
+                .prepare_typed(
+                    "SELECT $2,$3,$1,$3,$2;",
+                    &[Type::VARCHAR, Type::VARCHAR, Type::VARCHAR],
+                )
+                .await
+                .unwrap();
+            let rows = client
+                .query(&statement, &[&"AA", &"BB", &"CC"])
+                .await
+                .unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "BB");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "CC");
+            let value: &str = rows[0].get(2);
+            assert_eq!(value, "AA");
+            let value: &str = rows[0].get(3);
+            assert_eq!(value, "CC");
+            let value: &str = rows[0].get(4);
+            assert_eq!(value, "BB");
+
+            let statement = client
+                .prepare_typed(
+                    "SELECT $3,$1;",
+                    &[Type::VARCHAR, Type::VARCHAR, Type::VARCHAR],
+                )
+                .await
+                .unwrap();
+            let rows = client
+                .query(&statement, &[&"AA", &"BB", &"CC"])
+                .await
+                .unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "CC");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "AA");
+
+            let statement = client
+                .prepare_typed(
+                    "SELECT $2,$1;",
+                    &[Type::VARCHAR, Type::VARCHAR, Type::VARCHAR],
+                )
+                .await
+                .unwrap();
+            let rows = client
+                .query(&statement, &[&"AA", &"BB", &"CC"])
+                .await
+                .unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "BB");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "AA");
+        }
     }
 }

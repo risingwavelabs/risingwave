@@ -14,8 +14,9 @@
 
 use aho_corasick::AhoCorasickBuilder;
 use risingwave_common::array::{BytesGuard, BytesWriter};
-use risingwave_common::error::Result;
 use risingwave_common::types::NaiveDateTimeWrapper;
+
+use crate::{ExprError, Result};
 
 /// Compile the pg pattern to chrono pattern.
 // TODO: Chrono can not fully support the pg format, so consider using other implementations later.
@@ -50,5 +51,5 @@ pub fn to_char_timestamp(
 ) -> Result<BytesGuard> {
     let chrono_tmpl = compile_pattern_to_chrono(tmpl);
     let res = data.0.format(&chrono_tmpl).to_string();
-    dst.write_ref(&res)
+    dst.write_ref(&res).map_err(ExprError::Array)
 }
