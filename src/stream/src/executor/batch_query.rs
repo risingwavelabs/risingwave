@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{OrderedColumnDesc, Schema};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::cell_based_table::{CellBasedTable, CellTableChunkIter};
 use risingwave_storage::StateStore;
