@@ -299,7 +299,7 @@ impl BlockBuilder {
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 encoder
-                    .write(&self.buf[..])
+                    .write_all(&self.buf[..])
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 let (writer, result) = encoder.finish();
@@ -312,7 +312,7 @@ impl BlockBuilder {
                         .map_err(HummockError::encode_error)
                         .unwrap();
                 encoder
-                    .write(&self.buf[..])
+                    .write_all(&self.buf[..])
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 let writer = encoder
