@@ -105,13 +105,13 @@ impl StreamMaterialize {
             }
         }
         let mut out_name_iter = out_names.into_iter();
-        let mut columns = schema
+        let columns = schema
             .fields()
             .iter()
             .enumerate()
             .map(|(i, field)| {
                 let mut c = ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_without_column_id(field),
+                    column_desc: ColumnDesc::from_field_with_column_id(field, i as i32),
                     is_hidden: !user_cols.contains(i),
                 };
                 c.column_desc.name = if !c.is_hidden {
@@ -129,10 +129,6 @@ impl StreamMaterialize {
                 c
             })
             .collect_vec();
-
-        // Since the `field.into()` only generate same ColumnId,
-        // so rewrite ColumnId for each `column_desc` and `column_desc.field_desc`.
-        ColumnCatalog::generate_increment_id(&mut columns);
 
         let mut in_order = FixedBitSet::with_capacity(schema.len());
         let mut order_desc = vec![];
