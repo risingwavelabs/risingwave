@@ -654,18 +654,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
 
                     if append_only_optimize {
-                        match matched_rows {
-                            Some(v) => {
-                                // Since join key contains pk and pk is unique, there should be only
-                                // one row if matched
-                                debug_assert!(1 == matched_pks.len());
-                                v.remove(matched_pks.remove(0));
-                            }
-                            None => {
-                                side_update
+                        if let Some(v) = matched_rows && !v.is_empty() {
+                            // Since join key contains pk and pk is unique, there should be only
+                            // one row if matched
+                            debug_assert!(1 == matched_pks.len());
+                            v.remove(matched_pks.remove(0));
+                        } else {
+                            side_update
                                     .ht
                                     .insert(key, pk, JoinRow::new(value, degree))?;
-                            }
                         }
                     } else {
                         side_update
