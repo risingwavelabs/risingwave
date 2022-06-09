@@ -36,27 +36,27 @@ echo "--- Generate RiseDev CI config"
 cp risedev-components.ci.env risedev-components.user.env
 
 echo "--- Prepare RiseDev playground"
-~/cargo-make/makers pre-start-playground
-~/cargo-make/makers link-all-in-one-binaries
+cargo make pre-start-playground
+cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-3cn-1fe, streaming"
-~/cargo-make/makers ci-start default
+cargo make ci-start default
 timeout 5m sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' -j 8
 
 echo "--- Kill cluster"
-~/cargo-make/makers ci-kill
+cargo make ci-kill
 
 echo "--- e2e, ci-3cn-1fe, delta join"
-~/cargo-make/makers ci-start default
+cargo make ci-start default
 timeout 3m sqllogictest -p 4566 -d dev './e2e_test/streaming_delta_join/**/*.slt'
 
 echo "--- Kill cluster"
-~/cargo-make/makers ci-kill
+cargo make ci-kill
 
 echo "--- e2e, ci-3cn-1fe, batch distributed"
-~/cargo-make/makers ci-start default
+cargo make ci-start default
 timeout 2m sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt'
 timeout 2m sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt' -j 8
 
 echo "--- Kill cluster"
-~/cargo-make/makers ci-kill
+cargo make ci-kill
