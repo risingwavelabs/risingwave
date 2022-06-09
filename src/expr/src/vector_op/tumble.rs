@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use chrono::NaiveDateTime;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
 use super::cast::date_to_timestamp;
+use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn tumble_start_date(
@@ -35,9 +34,10 @@ pub fn tumble_start_date_time(
 ) -> Result<NaiveDateTimeWrapper> {
     let diff = time.0.timestamp();
     if window.get_months() != 0 {
-        return Err(RwError::from(InternalError(
-            "unimplemented: tumble_start only support days or milliseconds".to_string(),
-        )));
+        return Err(ExprError::InvalidParam {
+            name: "window",
+            reason: "unimplemented: tumble_start only support days or milliseconds".to_string(),
+        });
     }
     let window = window.get_days() as i64 * 24 * 60 * 60 + window.get_ms() / 1000;
     let offset = diff / window;

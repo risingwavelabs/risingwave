@@ -1,3 +1,6 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 query I
 select 42 where true;
 ----

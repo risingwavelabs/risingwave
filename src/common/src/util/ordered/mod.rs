@@ -49,15 +49,18 @@ impl OrderedRow {
         )
     }
 
-    pub fn into_row(self) -> Row {
-        Row(self
-            .0
+    pub fn into_vec(self) -> Vec<Datum> {
+        self.0
             .into_iter()
             .map(|ordered_datum| match ordered_datum {
                 NormalOrder(datum) => datum,
                 ReversedOrder(datum) => datum.0,
             })
-            .collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    }
+
+    pub fn into_row(self) -> Row {
+        Row(self.into_vec())
     }
 
     /// Serialize the row into a memcomparable bytes.

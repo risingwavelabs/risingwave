@@ -16,11 +16,11 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::executor::block_on;
+use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
@@ -222,10 +222,7 @@ async fn test_vnode_filter() {
         .get_with_vnode_set(
             &Bytes::from(&b"t\0\0\0\0"[..]),
             epoch,
-            Some(VNodeBitmap {
-                table_id: 0,
-                bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
-            }),
+            Some(VNodeBitmap::new(0, [1; VNODE_BITMAP_LEN].to_vec())),
         )
         .await
         .unwrap();
@@ -235,10 +232,7 @@ async fn test_vnode_filter() {
         .get_with_vnode_set(
             &Bytes::from(&b"t\0\0\0\0"[..]),
             epoch,
-            Some(VNodeBitmap {
-                table_id: 0,
-                bitmap: [0; VNODE_BITMAP_LEN].to_vec(),
-            }),
+            Some(VNodeBitmap::new(0, [0; VNODE_BITMAP_LEN].to_vec())),
         )
         .await
         .unwrap();
@@ -248,10 +242,7 @@ async fn test_vnode_filter() {
         .get_with_vnode_set(
             &Bytes::from(&b"t\0\0\0\0"[..]),
             epoch,
-            Some(VNodeBitmap {
-                table_id: 5,
-                bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
-            }),
+            Some(VNodeBitmap::new(5, [1; VNODE_BITMAP_LEN].to_vec())),
         )
         .await
         .unwrap();

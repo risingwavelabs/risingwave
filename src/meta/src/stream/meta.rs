@@ -501,4 +501,21 @@ where
         }
         Ok(())
     }
+
+    // existing_table_ids include the table_ref_id (source and materialized_view) +
+    // internal_table_id (stateful executor)
+    pub async fn existing_table_ids(&self) -> Result<HashSet<u32>> {
+        let mut result_set = HashSet::default();
+        let map = &self.core.read().await.table_fragments;
+
+        for (k, v) in map {
+            result_set.insert(k.table_id());
+
+            for internal_table_id in v.internal_table_ids() {
+                result_set.insert(internal_table_id);
+            }
+        }
+
+        Ok(result_set)
+    }
 }

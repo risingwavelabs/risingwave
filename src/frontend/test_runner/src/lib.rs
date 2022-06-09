@@ -178,7 +178,7 @@ impl TestCase {
 
         if let Some(ref config_map) = self.with_config_map {
             for (key, val) in config_map {
-                session.set_config(key, val);
+                session.set_config(key, val).unwrap();
             }
         }
 

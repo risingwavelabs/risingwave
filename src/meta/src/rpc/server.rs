@@ -134,6 +134,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             cluster_manager.clone(),
             meta_metrics.clone(),
             compaction_group_manager.clone(),
+            fragment_manager.clone(),
         )
         .await
         .unwrap(),
