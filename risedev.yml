@@ -441,6 +441,9 @@ template:
     # Etcd used by this Prometheus instance
     provide-etcd: "etcd*"
 
+    # Redpanda used by this Prometheus instance
+    provide-redpanda: "redpanda*"
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"

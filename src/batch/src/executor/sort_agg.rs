@@ -64,22 +64,22 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             NodeBody::SortAgg
         )?;
 
-        let agg_states = sort_agg_node
+        let agg_states: Vec<_> = sort_agg_node
             .get_agg_calls()
             .iter()
             .map(|x| AggStateFactory::new(x)?.create_agg_state())
-            .collect::<Result<Vec<BoxedAggState>>>()?;
+            .try_collect()?;
 
-        let group_keys = sort_agg_node
+        let group_keys: Vec<_> = sort_agg_node
             .get_group_keys()
             .iter()
             .map(build_from_prost)
-            .collect::<Result<Vec<BoxedExpression>>>()?;
+            .try_collect()?;
 
-        let sorted_groupers = group_keys
+        let sorted_groupers: Vec<_> = group_keys
             .iter()
             .map(|e| create_sorted_grouper(e.return_type()))
-            .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
+            .try_collect()?;
 
         let fields = group_keys
             .iter()
@@ -124,11 +124,11 @@ impl SortAggExecutor {
         #[for_await]
         for child_chunk in self.child.execute() {
             let child_chunk = child_chunk?.compact()?;
-            let group_columns = self
+            let group_columns: Vec<_> = self
                 .group_keys
                 .iter_mut()
                 .map(|expr| expr.eval(&child_chunk))
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
 
             let groups = self
                 .sorted_groupers
@@ -416,7 +416,7 @@ mod tests {
         };
 
         let count_star = AggStateFactory::new(&prost)?.create_agg_state()?;
-        let group_exprs = (1..=2)
+        let group_exprs: Vec<_> = (1..=2)
             .map(|idx| {
                 build_from_prost(&ExprNode {
                     expr_type: InputRef as i32,
@@ -427,7 +427,7 @@ mod tests {
                     rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
                 })
             })
-            .collect::<Result<Vec<BoxedExpression>>>()?;
+            .try_collect()?;
 
         let sorted_groupers = group_exprs
             .iter()
@@ -628,7 +628,7 @@ mod tests {
         };
 
         let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
-        let group_exprs = (1..=2)
+        let group_exprs: Vec<_> = (1..=2)
             .map(|idx| {
                 build_from_prost(&ExprNode {
                     expr_type: InputRef as i32,
@@ -639,12 +639,12 @@ mod tests {
                     rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
                 })
             })
-            .collect::<Result<Vec<BoxedExpression>>>()?;
+            .try_collect()?;
 
-        let sorted_groupers = group_exprs
+        let sorted_groupers: Vec<_> = group_exprs
             .iter()
             .map(|e| create_sorted_grouper(e.return_type()))
-            .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
+            .try_collect()?;
 
         let agg_states = vec![sum_agg];
 
@@ -751,7 +751,7 @@ mod tests {
         };
 
         let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
-        let group_exprs = (1..=2)
+        let group_exprs: Vec<_> = (1..=2)
             .map(|idx| {
                 build_from_prost(&ExprNode {
                     expr_type: InputRef as i32,
@@ -762,7 +762,7 @@ mod tests {
                     rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
                 })
             })
-            .collect::<Result<Vec<BoxedExpression>>>()?;
+            .try_collect()?;
 
         let sorted_groupers = group_exprs
             .iter()

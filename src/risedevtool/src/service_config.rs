@@ -162,6 +162,7 @@ pub struct PrometheusConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub provide_etcd: Option<Vec<EtcdConfig>>,
+    pub provide_redpanda: Option<Vec<RedPandaConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
