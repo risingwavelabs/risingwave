@@ -74,6 +74,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
+risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
 [features]

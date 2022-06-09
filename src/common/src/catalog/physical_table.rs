@@ -49,4 +49,11 @@ impl TableDesc {
             })
             .collect()
     }
+
+    pub fn order_column_ids(&self) -> Vec<usize> {
+        self.order_desc
+            .iter()
+            .map(|col| (col.column_desc.column_id.get_id() as usize))
+            .collect()
+    }
 }

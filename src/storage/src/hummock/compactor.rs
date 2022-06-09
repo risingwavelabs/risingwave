@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -26,7 +26,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
+use risingwave_hummock_sdk::key::{get_epoch, get_table_id, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
 use risingwave_pb::common::VNodeBitmap;
@@ -90,6 +90,38 @@ pub struct CompactorContext {
     pub sstable_id_generator: SstableIdGenerator,
 
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
+}
+
+trait CompactionFilter {
+    fn filter(&self, _: &[u8]) -> bool {
+        true
+    }
+}
+
+pub struct DummyCompactionFilter;
+impl CompactionFilter for DummyCompactionFilter {}
+
+#[derive(Clone)]
+pub struct StateCleanUpCompactionFilter {
+    existing_table_ids: HashSet<u32>,
+}
+
+impl StateCleanUpCompactionFilter {
+    fn new(table_id_set: HashSet<u32>) -> Self {
+        StateCleanUpCompactionFilter {
+            existing_table_ids: table_id_set,
+        }
+    }
+}
+
+impl CompactionFilter for StateCleanUpCompactionFilter {
+    fn filter(&self, key: &[u8]) -> bool {
+        let table_id_option = get_table_id(key);
+        match table_id_option {
+            None => true,
+            Some(table_id) => self.existing_table_ids.contains(&table_id),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -161,6 +193,7 @@ impl Compactor {
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
+            existing_table_ids: vec![],
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -187,6 +220,7 @@ impl Compactor {
             .await? as BoxedForwardHummockIterator;
             let vnode2unit = vnode2unit.clone();
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
+
             let split_task = async move {
                 compactor
                     .compact_key_range(split_index, iter, vnode2unit)
@@ -347,14 +381,18 @@ impl Compactor {
             );
         }
 
+        let compaction_filter =
+            StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
+
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let vnode2unit = vnode2unit.clone();
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
+            let filter = compaction_filter.clone();
             let split_task = async move {
                 let merge_iter = compactor.build_sst_iter().await?;
                 compactor
-                    .compact_key_range(split_index, merge_iter, vnode2unit)
+                    .compact_key_range_with_filter(split_index, merge_iter, vnode2unit, filter)
                     .await
             };
             let rx = match Compactor::request_execution(compaction_executor, split_task) {
@@ -447,11 +485,12 @@ impl Compactor {
 
     /// Compact the given key range and merge iterator.
     /// Upon a successful return, the built SSTs are already uploaded to object store.
-    async fn compact_key_range(
+    async fn compact_key_range_impl(
         &self,
         split_index: usize,
         iter: BoxedForwardHummockIterator,
         vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
+        compaction_filter: impl CompactionFilter,
     ) -> HummockResult<CompactOutput> {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
@@ -482,12 +521,14 @@ impl Compactor {
         } else {
             self.context.stats.compact_sst_duration.start_timer()
         };
+
         Compactor::compact_and_build_sst(
             &mut builder,
             kr,
             iter,
             !self.compact_task.is_target_ultimate_and_leveling,
             self.compact_task.watermark,
+            compaction_filter,
         )
         .await?;
         let builder_len = builder.len();
@@ -536,6 +577,28 @@ impl Compactor {
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
         Ok((split_index, ssts))
+    }
+
+    async fn compact_key_range(
+        &self,
+        split_index: usize,
+        iter: BoxedForwardHummockIterator,
+        vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
+    ) -> HummockResult<CompactOutput> {
+        let dummy_compaction_filter = DummyCompactionFilter {};
+        self.compact_key_range_impl(split_index, iter, vnode2unit, dummy_compaction_filter)
+            .await
+    }
+
+    async fn compact_key_range_with_filter(
+        &self,
+        split_index: usize,
+        iter: BoxedForwardHummockIterator,
+        vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
+        compaction_filter: impl CompactionFilter,
+    ) -> HummockResult<CompactOutput> {
+        self.compact_key_range_impl(split_index, iter, vnode2unit, compaction_filter)
+            .await
     }
 
     /// Build the merge iterator based on the given input ssts.
@@ -722,6 +785,7 @@ impl Compactor {
         mut iter: BoxedForwardHummockIterator,
         has_user_key_overlap: bool,
         watermark: Epoch,
+        compaction_filter: impl CompactionFilter,
     ) -> HummockResult<()>
     where
         B: Clone + Fn() -> F,
@@ -767,12 +831,23 @@ impl Compactor {
 
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
             // and the latest key which satisfies `epoch` < `watermark`
+            let mut drop = false;
             if epoch < watermark {
                 skip_key = BytesMut::from(iter_key);
                 if iter.value().is_delete() && !has_user_key_overlap {
-                    iter.next().await?;
-                    continue;
+                    drop = true;
                 }
+            }
+
+            // in our design, frontend avoid to access keys which had be deleted, so we dont need to
+            // consider the epoch when the compaction_filter match (it means that mv had drop)
+            if !drop && !compaction_filter.filter(iter_key) {
+                drop = true;
+            }
+
+            if drop {
+                iter.next().await?;
+                continue;
             }
 
             // Don't allow two SSTs to share same user key
