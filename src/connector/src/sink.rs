@@ -141,7 +141,7 @@ impl Sink for MySQLSink {
             schema
                 .names()
                 .iter()
-                .zip(values.iter())
+                .zip_eq(values.iter())
                 .map(|(c, v)| format!("{}={}", c, v))
                 .collect::<Vec<String>>()
         };
