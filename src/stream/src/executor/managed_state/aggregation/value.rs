@@ -112,7 +112,7 @@ impl ManagedValueState {
 
         // Persist value into relational table.
         let v = self.state.get_output()?;
-        state_table.insert(self.pk.as_ref().unwrap_or(&Row(vec![])), Row(vec![v]))?;
+        state_table.insert::<false>(self.pk.as_ref().unwrap_or(&Row(vec![])), Row(vec![v]))?;
 
         self.is_dirty = false;
         Ok(())

@@ -219,6 +219,13 @@ pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Result<Vec<u
     Ok(result)
 }
 
+pub fn reverse_serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Result<Vec<u8>> {
+    let mut result = vec![];
+    serializer.serialize(pk, &mut result);
+    result.iter_mut().for_each(|byte| *byte = !*byte);
+    Ok(result)
+}
+
 pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
     use serde::Serialize;
     let mut serializer = memcomparable::Serializer::new(Vec::with_capacity(4));

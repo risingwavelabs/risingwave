@@ -14,6 +14,7 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::ops::Index;
 
 use futures::pin_mut;
 use futures::stream::StreamExt;
@@ -83,7 +84,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = StateTable::new(keyspace.clone(), column_descs, order_type, None, pk_indices);
+        let state_table =
+            StateTable::new(keyspace.clone(), column_descs, order_type, None, pk_indices);
         Self {
             top_n: BTreeMap::new(),
             state_table,
@@ -184,8 +186,16 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // we cannot insert `key` into cache. Instead, we have to flush it onto the storage.
         // This is because other keys may be more qualified to stay in cache.
         // TODO: This needs to be changed when transaction on Hummock is implemented.
-        self.state_table
-            .insert(&key.clone().into_row(), value.clone())?;
+
+        match TOP_N_TYPE {
+            TOP_N_MIN => self
+                .state_table
+                .insert::<false>(&key.clone().into_row(), value.clone())?,
+            TOP_N_MAX => self
+                .state_table
+                .insert::<true>(&key.clone().into_row(), value.clone())?,
+            _ => unreachable!(),
+        }
         if !need_to_flush {
             self.top_n.insert(key, value);
         }
@@ -210,7 +220,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // This `order` is defined by the order between two `OrderedRow`.
         // We have to scan all because the top n on the storage may have been deleted by the flush
         // buffer.
-
+        println!("\n-------------scan_and_merge-----------\n");
         match TOP_N_TYPE {
             TOP_N_MIN => {
                 let state_table_iter = self.state_table.iter(epoch).await?;
@@ -223,16 +233,17 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                     match state_table_iter.next().await {
                         Some(next_res) => {
                             let row = next_res.unwrap().into_owned();
-                            let mut pk_bytes = vec![];
+                            let mut datums = vec![];
                             for pk_indice in &self.state_table.pk_indices {
-                                pk_bytes.append(&mut row.serialize_datum(*pk_indice).unwrap());
+                                let a = row.index(*pk_indice).clone();
+                                datums.push(a);
                             }
-                            let pk = deserialize_pk::<TOP_N_TYPE>(
-                                &mut pk_bytes.clone(),
-                                &mut self.ordered_row_deserializer,
-                            )?;
+                            let pk = Row::new(datums);
                             println!("\n*** scan and merge的时候, top_n_type= TOP_N_MIN , insert pk = {:?}",pk);
-                            self.top_n.insert(pk, row);
+                            let pk_ordered =
+                                OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+
+                            self.top_n.insert(pk_ordered, row);
                         }
                         None => {
                             break;
@@ -251,16 +262,16 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                     match state_table_iter.next().await {
                         Some(next_res) => {
                             let row = next_res.unwrap().into_owned();
-                            let mut pk_bytes = vec![];
+                            let mut datums = vec![];
                             for pk_indice in &self.state_table.pk_indices {
-                                pk_bytes.append(&mut row.serialize_datum(*pk_indice).unwrap());
+                                let a = row.index(*pk_indice).clone();
+                                datums.push(a);
                             }
-                            let pk = deserialize_pk::<TOP_N_TYPE>(
-                                &mut pk_bytes.clone(),
-                                &mut self.ordered_row_deserializer,
-                            )?;
-                            println!("\n*** scan and merge的时候, top_n_type= TOP_N_MAX , insert pk = {:?}",pk);
-                            self.top_n.insert(pk, row);
+                            let pk = Row::new(datums);
+                            println!("\n*** scan and merge的时候, top_n_type= TOP_N_MAX, insert pk = {:?}",pk);
+                            let pk_ordered =
+                                OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+                            self.top_n.insert(pk_ordered, row);
                         }
                         None => {
                             break;
@@ -302,13 +313,23 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         pin_mut!(state_table_iter);
         while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
-            let mut pk_bytes = vec![];
+            println!("\nfill in cache res = {:?}", row);
+            println!(
+                "\nself.state_table.pk_indices = {:?}",
+                self.state_table.pk_indices
+            );
+            let mut datums = vec![];
             for pk_indice in &self.state_table.pk_indices {
-                pk_bytes.append(&mut row.serialize_datum(*pk_indice).unwrap());
+                let a = row.index(*pk_indice).clone();
+                datums.push(a);
             }
-            let pk =
-                deserialize_pk::<TOP_N_TYPE>(&mut pk_bytes, &mut self.ordered_row_deserializer)?;
-            let prev_row = self.top_n.insert(pk, row.clone());
+            let pk = Row::new(datums);
+            let pk_ordered = OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+            // let mut pk_bytes = pk.serialize_with_order(
+            // &self.ordered_row_deserializer.order_types).unwrap(); println!("fill in
+            // cache pk_bytes = {:?}", pk_bytes); let pk =
+            //     deserialize_pk::<TOP_N_TYPE>(&mut pk_bytes, &mut self.ordered_row_deserializer)?;
+            let prev_row = self.top_n.insert(pk_ordered, row.clone());
             if let Some(prev_row) = prev_row {
                 debug_assert_eq!(prev_row, row);
             }
@@ -319,35 +340,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         Ok(())
     }
 
-    async fn flush_inner(
-        &mut self,
-        iterator: impl Iterator<Item = (OrderedRow, FlushStatus<Row>)>,
-        epoch: u64,
-    ) -> Result<()> {
-        let mut write_batch = self.keyspace.state_store().start_write_batch();
-        let mut local = write_batch.prefixify(&self.keyspace);
-        for (pk, cells) in iterator {
-            let row = cells.into_option();
-            let pk_buf = match TOP_N_TYPE {
-                TOP_N_MIN => pk.serialize(),
-                TOP_N_MAX => pk.reverse_serialize(),
-                _ => unreachable!(),
-            }?;
-            let column_ids = (0..self.data_types.len() as i32)
-                .map(ColumnId::from)
-                .collect::<Vec<_>>();
-            let bytes = serialize_pk_and_row_state(&pk_buf, &row, &column_ids)?;
-            for (key, value) in bytes {
-                match value {
-                    // TODO(Yuanxin): Implement value meta
-                    Some(val) => local.put(key, StorageValue::new_default_put(val)),
-                    None => local.delete(key),
-                }
-            }
-        }
-        write_batch.ingest(epoch).await.unwrap();
-        Ok(())
-    }
+   
 
     /// `Flush` can be called by the executor when it receives a barrier and thus needs to
     /// checkpoint.

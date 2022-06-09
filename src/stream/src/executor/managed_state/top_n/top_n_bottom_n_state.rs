@@ -16,23 +16,25 @@
 #![allow(dead_code)]
 
 use std::vec::Drain;
+
 use futures::pin_mut;
 use futures::stream::StreamExt;
 use madsim::collections::BTreeMap;
-use risingwave_common::{array::Row, catalog::ColumnDesc};
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::array::Row;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::{cell_based_row_deserializer::CellBasedRowDeserializer, table::state_table::StateTable};
+use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
-
-use crate::executor::{PkIndices, managed_state::top_n::deserialize_pk};
 
 use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::variants::TOP_N_MIN;
 use super::PkAndRowIterator;
+use crate::executor::managed_state::top_n::deserialize_pk;
+use crate::executor::PkIndices;
 
 /// This state is used for `[offset, offset+limit)` part in the `TopNExecutor`.
 ///
@@ -81,7 +83,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = StateTable::new(keyspace.clone(), column_descs, order_type, None, pk_indices);
+        let state_table =
+            StateTable::new(keyspace.clone(), column_descs, order_type, None, pk_indices);
         Self {
             top_n: BTreeMap::new(),
             bottom_n: BTreeMap::new(),
@@ -138,7 +141,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             };
             let key = cache_to_pop.last_key_value().unwrap().0.clone();
             let old_value = cache_to_pop.last_key_value().unwrap().1.clone();
-            let value = self.delete(&key, old_value,epoch).await?;
+            let value = self.delete(&key, old_value, epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
@@ -154,7 +157,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             };
             let key = cache_to_pop.first_key_value().unwrap().0.clone();
             let old_value = cache_to_pop.last_key_value().unwrap().1.clone();
-            let value = self.delete(&key, old_value,epoch).await?;
+            let value = self.delete(&key, old_value, epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
@@ -199,12 +202,17 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         };
         insert_to_cache.insert(key.clone(), value.clone());
         self.state_table
-            .insert(&key.clone().into_row(), value.clone())
+            .insert::<false>(&key.clone().into_row(), value.clone())
             .unwrap();
         self.total_count += 1;
     }
 
-    pub async fn delete(&mut self, key: &OrderedRow,value:Row, epoch: u64) -> Result<Option<Row>> {
+    pub async fn delete(
+        &mut self,
+        key: &OrderedRow,
+        value: Row,
+        epoch: u64,
+    ) -> Result<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
         self.state_table.delete(&key.clone().into_row(), value)?;
@@ -245,7 +253,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 }
             }
         }
-       
+
         // The reason we can split the `kv_pairs` without caring whether the key to be inserted is
         // already in the top_n or bottom_n is that we would only trigger `scan_and_merge` when both
         // caches are empty.

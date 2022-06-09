@@ -383,7 +383,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     {
                         // The current element in in the range of `[offset, offset+limit)`
                         self.managed_middle_state
-                            .delete(&ordered_pk_row, row.clone(),epoch)
+                            .delete(&ordered_pk_row, row.clone(), epoch)
                             .await
                             .map_err(StreamExecutorError::top_n_state_error)?;
                         new_ops.push(Op::Delete);
