@@ -41,22 +41,22 @@ cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start default
-timeout 5m sqllogictest -p 4566 -d dev -u root'./e2e_test/streaming/**/*.slt' -j 8
+timeout 5m sqllogictest -p 4566 -d dev -u root './e2e_test/streaming/**/*.slt' -j 8
 
 echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-3cn-1fe, delta join"
 cargo make ci-start default
-timeout 3m sqllogictest -p 4566 -d dev -u root'./e2e_test/streaming_delta_join/**/*.slt'
+timeout 3m sqllogictest -p 4566 -d dev -u root './e2e_test/streaming_delta_join/**/*.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-3cn-1fe, batch distributed"
 cargo make ci-start default
-timeout 2m sqllogictest -p 4566 -d dev -u root'./e2e_test/ddl/**/*.slt'
-timeout 2m sqllogictest -p 4566 -d dev -u root'./e2e_test/batch/**/*.slt' -j 8
+timeout 2m sqllogictest -p 4566 -d dev -u root './e2e_test/ddl/**/*.slt'
+timeout 2m sqllogictest -p 4566 -d dev -u root './e2e_test/batch/**/*.slt' -j 8
 
 echo "--- Kill cluster"
 cargo make ci-kill
