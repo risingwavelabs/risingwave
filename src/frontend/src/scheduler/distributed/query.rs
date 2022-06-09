@@ -448,6 +448,7 @@ mod tests {
                     },
                 ],
                 distribution_keys: vec![],
+                appendonly: false,
             }),
             vec![],
             ctx,

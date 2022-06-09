@@ -35,6 +35,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
         profile:
@@ -50,6 +51,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
         profile:
@@ -64,6 +66,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
 
   - label: "unit test"

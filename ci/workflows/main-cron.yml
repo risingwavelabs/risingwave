@@ -17,6 +17,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
 
   - label: "end-to-end source test"
@@ -27,6 +28,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
 
   - label: "unit test"
