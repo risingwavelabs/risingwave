@@ -48,15 +48,14 @@ mod tests {
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
-        let storage = HummockStorage::with_default_stats(
+        HummockStorage::with_default_stats(
             options.clone(),
             sstable_store,
             hummock_meta_client.clone(),
             Arc::new(StateStoreMetrics::unused()),
         )
         .await
-        .unwrap();
-        storage
+        .unwrap()
     }
 
     #[tokio::test]

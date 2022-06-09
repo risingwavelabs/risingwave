@@ -291,7 +291,7 @@ mod tests {
             .map(|(ord, idx)| OrderPair::new(idx, ord))
             .collect::<Vec<_>>();
         let sort_key_serializer = OrderedArraysSerializer::new(order_pairs);
-        let managed_state = ManagedStringAggState::new(
+        ManagedStringAggState::new(
             keyspace.clone(),
             row_count,
             sort_key_indices,
@@ -300,8 +300,7 @@ mod tests {
             sort_key_serializer,
         )
         .await
-        .unwrap();
-        managed_state
+        .unwrap()
     }
 
     #[tokio::test]
