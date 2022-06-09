@@ -67,7 +67,10 @@ impl Binder {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case
                 }
-                "concat" => ExprType::Concat,
+                "concat" => {
+                    inputs.insert(0, ExprImpl::literal_varchar("".to_string()));
+                    ExprType::ConcatWs
+                }
                 "concat_ws" => ExprType::ConcatWs,
                 "split_part" => ExprType::SplitPart,
                 "coalesce" => ExprType::Coalesce,
