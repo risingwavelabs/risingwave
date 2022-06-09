@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -139,6 +139,16 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .unregister(&to_unregister, self.env.meta_store())
             .await
     }
+
+    async fn get_internal_table_ids_by_compation_group_id(
+        &self,
+        compaction_group_id: u64,
+    ) -> HashSet<u32> {
+        let inner = self.inner.read().await;
+        let prefix_vec = inner.get_prefixs_by_compaction_group_id(compaction_group_id);
+
+        HashSet::from_iter(prefix_vec.into_iter().map(|prefix| u32::from(prefix)))
+    }
 }
 
 #[derive(Default)]
@@ -242,6 +252,14 @@ impl CompactionGroupManagerInner {
             self.index.remove(prefix);
         }
         Ok(())
+    }
+
+    fn get_prefixs_by_compaction_group_id(&self, compaction_group_id: u64) -> Vec<Prefix> {
+        self.index
+            .iter()
+            .filter(|item| return item.1 == &compaction_group_id)
+            .map(|item| item.0.clone())
+            .collect_vec()
     }
 }
 
