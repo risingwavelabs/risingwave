@@ -46,8 +46,6 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
-        // println!("keyspace table_root!");
-        // dbg!(&id.table_id);
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -64,8 +62,6 @@ impl<S: StateStore> Keyspace<S> {
     /// Creates a root [`Keyspace`] for a table with default vnode (i.e. only no.1 vnode is
     /// present). This is used for singleton stateful executor.
     pub fn table_root_with_default_vnodes(store: S, id: &TableId) -> Self {
-        // println!("keyspace table_root_with_default_vnodes!");
-        // dbg!(&id.table_id);
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -83,8 +79,6 @@ impl<S: StateStore> Keyspace<S> {
     /// Creates a root [`Keyspace`] for a table with specific vnodes. This is used for non-singleton
     /// stateful executor.
     pub fn table_root_with_vnodes(store: S, id: &TableId, bitmap_inner: Vec<u8>) -> Self {
-        // println!("keyspace table_root_with_vnodes!");
-        // dbg!(&id.table_id);
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -143,21 +137,27 @@ impl<S: StateStore> Keyspace<S> {
         self.store.get(&self.prefixed_key(key), epoch, None).await
     }
 
-    /// Current only works for streaming.
     pub async fn get_with_vnode(
         &self,
         key: impl AsRef<[u8]>,
         epoch: u64,
         vnode: VirtualNode,
     ) -> StorageResult<Option<Bytes>> {
-        assert!(self.vnode_bitmap.is_some());
-        let vnode_bitmap = VNodeBitmap::new_with_single_vnode(
-            self.vnode_bitmap.as_ref().unwrap().table_id(),
-            vnode,
-        );
-        self.store
-            .get(&self.prefixed_key(key), epoch, Some(&vnode_bitmap))
-            .await
+        if self.vnode_bitmap.is_some() {
+            let vnode_bitmap = VNodeBitmap::new_with_single_vnode(
+                self.vnode_bitmap.as_ref().unwrap().table_id(),
+                vnode,
+            );
+            self.store
+                .get(&self.prefixed_key(key), epoch, Some(&vnode_bitmap))
+                .await
+        } else {
+            // FIXME(Yuanxin): Due to some limitations, we have to take into consideration the
+            // situation where `self.vnode_bitmap` is None. We should assert
+            // `self.vnode_bitmap.is_some()` later when all stateful executors (as well as batch)
+            // pass in their vnodes.
+            self.store.get(&self.prefixed_key(key), epoch, None).await
+        }
     }
 
     /// Scans `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
