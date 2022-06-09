@@ -19,7 +19,8 @@ use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServic
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
-use crate::hummock::{CompactorManager, HummockManagerRef, VacuumTrigger};
+use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
+use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumTrigger};
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
 
@@ -28,8 +29,9 @@ where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: Arc<CompactorManager>,
+    compactor_manager: CompactorManagerRef,
     vacuum_trigger: Arc<VacuumTrigger<S>>,
+    compaction_group_manager: CompactionGroupManagerRef<S>,
 }
 
 impl<S> HummockServiceImpl<S>
@@ -38,13 +40,15 @@ where
 {
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: Arc<CompactorManager>,
+        compactor_manager: CompactorManagerRef,
         vacuum_trigger: Arc<VacuumTrigger<S>>,
+        compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
             compactor_manager,
             vacuum_trigger,
+            compaction_group_manager,
         }
     }
 }
@@ -203,5 +207,22 @@ where
                 .map_err(tonic_err)?;
         }
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
+    }
+
+    async fn get_compaction_groups(
+        &self,
+        _request: Request<GetCompactionGroupsRequest>,
+    ) -> Result<Response<GetCompactionGroupsResponse>, Status> {
+        let resp = GetCompactionGroupsResponse {
+            status: None,
+            compaction_groups: self
+                .compaction_group_manager
+                .compaction_groups()
+                .await
+                .iter()
+                .map(|cg| cg.into())
+                .collect(),
+        };
+        Ok(Response::new(resp))
     }
 }
