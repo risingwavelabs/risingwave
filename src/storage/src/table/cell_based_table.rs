@@ -489,7 +489,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         Ok(iter)
     }
 
-    pub async fn new_with_bounds<R, B>(
+    async fn new_with_bounds<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         serialized_pk_bounds: R,
