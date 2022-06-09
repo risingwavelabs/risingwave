@@ -15,13 +15,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_PASSWORD};
+use risingwave_common::catalog::DEFAULT_SUPPER_USER;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
-use risingwave_pb::user::{AuthInfo, GrantPrivilege, UserInfo};
+use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 
 use crate::manager::{MetaSrvEnv, NotificationVersion};
@@ -62,10 +61,6 @@ impl<S: MetaStore> UserManager<S> {
                 is_supper: true,
                 can_create_db: true,
                 can_login: true,
-                auth_info: Some(AuthInfo {
-                    encryption_type: EncryptionType::Plaintext as i32,
-                    encrypted_value: Vec::from(DEFAULT_SUPPER_USER_PASSWORD.as_bytes()),
-                }),
                 ..Default::default()
             };
 

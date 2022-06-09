@@ -263,8 +263,13 @@ impl TestCase {
                     }
                     result = Some(ret);
                 }
-                Statement::CreateTable { name, columns, .. } => {
-                    create_table::handle_create_table(context, name, columns).await?;
+                Statement::CreateTable {
+                    name,
+                    columns,
+                    with_options,
+                    ..
+                } => {
+                    create_table::handle_create_table(context, name, columns, with_options).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,

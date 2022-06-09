@@ -154,15 +154,17 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
 
+        let table_pk_indices = [join_key_indices, pk_indices.clone()].concat();
+
         // Order type doesn't matter here. Arbitrarily choose one.
-        let order_types = vec![OrderType::Descending; data_types.len()];
+        let order_types = vec![OrderType::Descending; table_pk_indices.len()];
 
         let state_table = StateTable::new(
             keyspace,
             column_descs,
             order_types,
             dist_key_indices,
-            pk_indices.clone(),
+            table_pk_indices,
         );
         let alloc = StatsAlloc::new(Global).shared();
         Self {
@@ -248,29 +250,35 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .map_err(RwError::from)
     }
 
+    fn get_table_pk(&self, join_key: &K, pk: Row) -> RwResult<Row> {
+        let mut key = join_key
+            .clone()
+            .deserialize(self.join_key_data_types.iter())?;
+        key.0.extend(pk.0);
+        Ok(key)
+    }
+
     /// Insert a key
     pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()> {
         if let Some(entry) = self.inner.get_mut(join_key) {
-            entry.insert(pk, value.clone());
+            entry.insert(pk.clone(), value.clone());
         }
-        let key = join_key
-            .clone()
-            .deserialize(self.join_key_data_types.iter())?;
+
+        let table_pk = self.get_table_pk(join_key, pk)?;
         // If no cache maintained, only update the flush buffer.
-        self.state_table.insert(&key, value.into_row())?;
+        self.state_table.insert(&table_pk, value.into_row())?;
         Ok(())
     }
 
     /// Delete a key
-    pub fn delete(&mut self, join_key: &K, pk: Row, value: Row) -> RwResult<()> {
+    pub fn delete(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()> {
         if let Some(entry) = self.inner.get_mut(join_key) {
-            entry.remove(pk);
+            entry.remove(pk.clone());
         }
-        let key = join_key
-            .clone()
-            .deserialize(self.join_key_data_types.iter())?;
+
+        let table_pk = self.get_table_pk(join_key, pk)?;
         // If no cache maintained, only update the flush buffer.
-        self.state_table.delete(&key, value)?;
+        self.state_table.delete(&table_pk, value.into_row())?;
         Ok(())
     }
 }

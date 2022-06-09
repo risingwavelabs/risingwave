@@ -24,10 +24,6 @@ while getopts 't:p:' opt; do
 done
 shift $((OPTIND -1))
 
-echo "--- Install required tools"
-rustup default "$(cat ./rust-toolchain)" && rustup component add rustfmt
-cargo install cargo-sort cargo-hakari
-
 echo "--- Rust cargo-sort check"
 cargo sort -c -w
 

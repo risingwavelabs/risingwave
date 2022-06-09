@@ -47,6 +47,10 @@ pub struct TableCatalog {
 
     /// If set to Some(TableId), then this table is an index on another table.
     pub is_index_on: Option<TableId>,
+
+    /// The appendonly attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
+    /// on this to derive an append-only stream plan
+    pub appendonly: bool,
 }
 
 impl TableCatalog {
@@ -79,6 +83,7 @@ impl TableCatalog {
             pks: self.pks.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_keys: self.distribution_keys.clone(),
+            appendonly: self.appendonly,
         }
     }
 
@@ -123,6 +128,7 @@ impl TableCatalog {
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
+            appendonly: self.appendonly,
         }
     }
 }
@@ -180,6 +186,7 @@ impl From<ProstTable> for TableCatalog {
                 .map(|k| *k as usize)
                 .collect_vec(),
             pks: tb.pk.iter().map(|x| *x as _).collect(),
+            appendonly: tb.appendonly,
         }
     }
 }
@@ -248,6 +255,7 @@ mod tests {
             distribution_keys: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
+            appendonly: false,
         }
         .into();
 
@@ -294,6 +302,7 @@ mod tests {
                     order: OrderType::Ascending
                 }],
                 distribution_keys: vec![],
+                appendonly: false
             }
         );
     }

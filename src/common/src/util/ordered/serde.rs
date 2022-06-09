@@ -75,6 +75,12 @@ impl OrderedRowSerializer {
         Self { order_types }
     }
 
+    pub fn prefix(&self, len: usize) -> Self {
+        Self {
+            order_types: self.order_types[..len].to_vec(),
+        }
+    }
+
     pub fn serialize(&self, row: &Row, append_to: &mut Vec<u8>) {
         self.serialize_datums(row.values(), append_to)
     }
@@ -217,10 +223,10 @@ pub fn serialize_pk_and_row_state(
     }
 }
 
-pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Result<Vec<u8>> {
+pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
     let mut result = vec![];
     serializer.serialize(pk, &mut result);
-    Ok(result)
+    result
 }
 
 pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {

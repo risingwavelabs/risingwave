@@ -674,13 +674,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    side_update.ht.delete(key, pk, value)?;
-
+                    let mut degree = 0;
                     if let Some(matched_rows) = matched_rows {
-                        let mut matched = false;
                         for matched_row in matched_rows.values_mut() {
                             if check_join_condition(&row, &matched_row.row)? {
-                                matched = true;
+                                degree += 1;
                                 matched_row.dec_degree()?;
                                 if !forward_exactly_once(T, SIDE) {
                                     if let Some(chunk) = hashjoin_chunk_builder
@@ -691,7 +689,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 }
                             }
                         }
-                        if !matched {
+                        if degree == 0 {
                             if let Some(chunk) =
                                 hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
                             {
@@ -707,6 +705,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     {
                         yield Message::Chunk(chunk);
                     }
+                    side_update
+                        .ht
+                        .delete(key, pk, JoinRow::new(value, degree))?;
                 }
             }
         }
