@@ -49,7 +49,7 @@ impl fmt::Display for StreamExchange {
         let mut builder = f.debug_struct("StreamExchange");
         builder.field("dist", &format_args!("{:?}", self.base.dist));
         if self.append_only() {
-            builder.field("appendonly", &format_args!("{}", true));
+            builder.field("append_only", &format_args!("{}", true));
         }
         builder.finish()
     }

@@ -71,7 +71,7 @@ impl fmt::Display for StreamHashAgg {
             .field("aggs", &self.agg_calls());
 
         if self.base.append_only {
-            builder.field("appendonly", &format_args!("{}", true));
+            builder.field("append_only", &format_args!("{}", true));
         }
         builder.finish()
     }

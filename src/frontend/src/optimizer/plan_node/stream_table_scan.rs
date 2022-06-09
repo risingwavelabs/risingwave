@@ -80,7 +80,7 @@ impl fmt::Display for StreamTableScan {
             .field("pk_indices", &format_args!("{:?}", self.base.pk_indices));
 
         if self.append_only() {
-            builder.field("appendonly", &format_args!("{}", true));
+            builder.field("append_only", &format_args!("{}", true));
         }
         builder.finish()
     }

@@ -221,7 +221,7 @@ impl fmt::Display for StreamMaterialize {
         }
 
         if self.append_only() {
-            builder.field("appendonly", &format_args!("{}", true));
+            builder.field("append_only", &format_args!("{}", true));
         }
         builder.finish()
     }
