@@ -723,9 +723,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitvec"
-version = "0.22.3"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5237f00a8c86130a0cc317830e558b966dd7850d48a953d998c813f01a41b527"
+checksum = "1489fcb93a5bb47da0462ca93ad252ad6af2145cce58d10d46a83931ba9f016b"
 dependencies = [
  "funty",
  "radium",
@@ -753,12 +753,6 @@ dependencies = [
  "regex-automata",
  "serde",
 ]
-
-[[package]]
-name = "bufstream"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40e38929add23cdf8a366df9b0e088953150724bcbe5fc330b0d8eb3b328eec8"
 
 [[package]]
 name = "bumpalo"
@@ -1726,9 +1720,9 @@ checksum = "2022715d62ab30faffd124d40b76f4134a550a87792276512b18d63272333394"
 
 [[package]]
 name = "funty"
-version = "1.2.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1847abb9cb65d566acd5942e94aea9c8f547ad02c98e1649326fc0e8910b8b1e"
+checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
@@ -2185,18 +2179,6 @@ name = "integer-encoding"
 version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e85a1509a128c855368e135cffcde7eac17d8e1083f41e2b98c58bc1a5074be"
-
-[[package]]
-name = "io-enum"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03e3306b0f260aad2872563eb0d5d1a59f2420fad270a661dce59a01e92d806b"
-dependencies = [
- "autocfg",
- "derive_utils",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "isahc"
@@ -2741,37 +2723,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 
 [[package]]
-name = "mysql"
-version = "22.1.0"
+name = "mysql_async"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e6f8658d54e3c294d94a741a5f414c21431f56f253b5dc2e2582941d834b3a9"
+checksum = "456207bb9636a0fdade67a64cea7bdebe6730c3c16ee5e34f2c481838ee5a39e"
 dependencies = [
- "bufstream",
  "bytes",
  "crossbeam",
  "flate2",
- "io-enum",
- "libc",
- "lru",
+ "futures-core",
+ "futures-sink",
+ "futures-util",
+ "lazy_static",
+ "lru 0.7.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mio",
  "mysql_common",
- "named_pipe",
  "native-tls",
- "nix",
  "once_cell",
  "pem",
  "percent-encoding",
+ "pin-project",
  "serde",
  "serde_json",
  "socket2",
+ "thiserror",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-util",
  "twox-hash",
  "url",
 ]
 
 [[package]]
 name = "mysql_common"
-version = "0.28.2"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4140827f2d12750de1e8755442577e4292a835f26ff2f659f0a380d1d71020b0"
+checksum = "20ce6fdcef94a8e87fea3f9402de4d7e403f10e8c20b6e2bd207e6b6f8a4eab0"
 dependencies = [
  "base64",
  "bigdecimal",
@@ -2801,7 +2788,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "time 0.3.9",
- "uuid 0.8.2",
+ "uuid 1.1.1",
 ]
 
 [[package]]
@@ -2809,15 +2796,6 @@ name = "naive-timer"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "034a0ad7deebf0c2abcf2435950a6666c3c15ea9d8fad0c0f48efa8a7f843fed"
-
-[[package]]
-name = "named_pipe"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad9c443cce91fc3e12f017290db75dde490d685cdaaf508d7159d7cf41f0eb2b"
-dependencies = [
- "winapi",
-]
 
 [[package]]
 name = "native-tls"
@@ -2835,19 +2813,6 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
-]
-
-[[package]]
-name = "nix"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f866317acbd3a240710c63f065ffb1e4fd466259045ccb504130b7f668f35c6"
-dependencies = [
- "bitflags",
- "cc",
- "cfg-if 1.0.0",
- "libc",
- "memoffset 0.6.5",
 ]
 
 [[package]]
@@ -3684,9 +3649,9 @@ dependencies = [
 
 [[package]]
 name = "radium"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "643f8f41a8ebc4c5dc4515c82bb8abd397b527fc20fd681b7c011c2aee5d44fb"
+checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rand"
@@ -4194,7 +4159,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "memcomparable",
- "mysql",
+ "mysql_async",
  "num-traits",
  "parse_duration",
  "paste",
@@ -6163,9 +6128,9 @@ dependencies = [
 
 [[package]]
 name = "wyz"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "129e027ad65ce1453680623c3fb5163cbf7107bfe1aa32257e7d0e63f9ced188"
+checksum = "30b31594f29d27036c383b53b59ed3476874d518f0efb151b27a4c275141390e"
 dependencies = [
  "tap",
 ]
