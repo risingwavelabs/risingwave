@@ -38,6 +38,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
+use crate::hummock::compaction::level_selector::HashMappingSelector;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
@@ -188,7 +189,14 @@ where
         let compaction_statuses = CompactStatus::list(self.env.meta_store())
             .await?
             .into_iter()
-            .map(|cg| (cg.compaction_group_id(), cg))
+            .map(|mut cg| {
+                (cg.compaction_group_id(), {
+                    cg.compaction_selectors.push(Arc::new(HashMappingSelector {
+                        hash_mapping_manager: self.env.hash_mapping_manager_ref(),
+                    }));
+                    cg
+                })
+            })
             .collect::<BTreeMap<CompactionGroupId, CompactStatus>>();
         if !compaction_statuses.is_empty() {
             compaction_guard.compaction_statuses = compaction_statuses;
@@ -200,6 +208,7 @@ where
                 let compact_status = CompactStatus::new(
                     compaction_group.group_id(),
                     Arc::new(compaction_group.compaction_config().clone()),
+                    self.env.hash_mapping_manager_ref(),
                 );
                 compaction_statuses.insert(compact_status.compaction_group_id(), compact_status);
             }
@@ -581,7 +590,6 @@ where
             &current_version.levels,
             task_id as HummockCompactionTaskId,
             compaction_group_id,
-            Some(self.env.hash_mapping_manager()),
         );
         let existing_table_ids_from_meta = self.fragment_manager.existing_table_ids().await?;
         let ret = match compact_task {

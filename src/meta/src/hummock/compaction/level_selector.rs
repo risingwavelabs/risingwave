@@ -30,24 +30,18 @@ use crate::hummock::compaction::tier_compaction_picker::{
 };
 use crate::hummock::compaction::{create_overlap_strategy, SearchResult};
 use crate::hummock::level_handler::LevelHandler;
-use crate::manager::HashMappingManager;
+use crate::manager::HashMappingManagerRef;
 
 const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
-    fn need_compaction(
-        &self,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
-        hash_mapping_manager: Option<&HashMappingManager>,
-    ) -> bool;
+    fn need_compaction(&self, levels: &[Level], level_handlers: &mut [LevelHandler]) -> bool;
 
     fn pick_compaction(
         &self,
         task_id: HummockCompactionTaskId,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
-        hash_mapping_manager: Option<&HashMappingManager>,
     ) -> Option<SearchResult>;
 
     fn name(&self) -> &'static str;
@@ -219,21 +213,12 @@ impl DynamicLevelSelector {
 }
 
 impl LevelSelector for DynamicLevelSelector {
-    fn need_compaction(
-        &self,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
-        hash_mapping_manager: Option<&HashMappingManager>,
-    ) -> bool {
-        if hash_mapping_manager.is_some() {
-            true
-        } else {
-            let ctx = self.get_priority_levels(levels, level_handlers);
-            ctx.score_levels
-                .first()
-                .map(|(score, _, _)| *score > SCORE_BASE)
-                .unwrap_or(false)
-        }
+    fn need_compaction(&self, levels: &[Level], level_handlers: &mut [LevelHandler]) -> bool {
+        let ctx = self.get_priority_levels(levels, level_handlers);
+        ctx.score_levels
+            .first()
+            .map(|(score, _, _)| *score > SCORE_BASE)
+            .unwrap_or(false)
     }
 
     fn pick_compaction(
@@ -241,41 +226,10 @@ impl LevelSelector for DynamicLevelSelector {
         task_id: HummockCompactionTaskId,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
-        hash_mapping_manager: Option<&HashMappingManager>,
     ) -> Option<SearchResult> {
         let ctx = self.get_priority_levels(levels, level_handlers);
         for (score, select_level, target_level) in ctx.score_levels {
             if score <= SCORE_BASE {
-                if let Some(hash_mapping_manager) = hash_mapping_manager {
-                    for level in levels.iter().rev() {
-                        let level_idx = level.level_idx as usize;
-                        for table in &level.table_infos {
-                            if !level_handlers[level_idx].is_pending_compact(&table.id)
-                                && hash_mapping_manager
-                                    .check_sst_deprecated(table.get_vnode_bitmaps())
-                            {
-                                let select_input_ssts = vec![table.clone()];
-                                level_handlers[level_idx]
-                                    .add_pending_task(task_id, &select_input_ssts);
-                                return Some(SearchResult {
-                                    select_level: Level {
-                                        level_idx: level_idx as u32,
-                                        level_type: levels[level_idx].level_type,
-                                        table_infos: select_input_ssts,
-                                        total_file_size: 0,
-                                    },
-                                    target_level: Level {
-                                        level_idx: level_idx as u32,
-                                        level_type: levels[level_idx].level_type,
-                                        table_infos: vec![],
-                                        total_file_size: 0,
-                                    },
-                                    split_ranges: vec![],
-                                });
-                            }
-                        }
-                    }
-                }
                 return None;
             }
             let picker = self.create_compaction_picker(select_level, target_level, task_id);
@@ -288,6 +242,57 @@ impl LevelSelector for DynamicLevelSelector {
 
     fn name(&self) -> &'static str {
         "DynamicLevelSelector"
+    }
+}
+
+pub struct HashMappingSelector {
+    pub hash_mapping_manager: HashMappingManagerRef,
+}
+
+impl LevelSelector for HashMappingSelector {
+    fn need_compaction(&self, _: &[Level], _: &mut [LevelHandler]) -> bool {
+        true
+    }
+
+    fn pick_compaction(
+        &self,
+        task_id: HummockCompactionTaskId,
+        levels: &[Level],
+        level_handlers: &mut [LevelHandler],
+    ) -> Option<SearchResult> {
+        for level in levels.iter().rev() {
+            let level_idx = level.level_idx as usize;
+            for table in &level.table_infos {
+                if !level_handlers[level_idx].is_pending_compact(&table.id)
+                    && self
+                        .hash_mapping_manager
+                        .check_sst_deprecated(table.get_vnode_bitmaps())
+                {
+                    let select_input_ssts = vec![table.clone()];
+                    level_handlers[level_idx].add_pending_task(task_id, &select_input_ssts);
+                    return Some(SearchResult {
+                        select_level: Level {
+                            level_idx: level_idx as u32,
+                            level_type: levels[level_idx].level_type,
+                            table_infos: select_input_ssts,
+                            total_file_size: 0,
+                        },
+                        target_level: Level {
+                            level_idx: level_idx as u32,
+                            level_type: levels[level_idx].level_type,
+                            table_infos: vec![],
+                            total_file_size: 0,
+                        },
+                        split_ranges: vec![],
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    fn name(&self) -> &'static str {
+        "HashMappingSelector"
     }
 }
 
@@ -441,7 +446,7 @@ pub mod tests {
         );
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
         let compaction = selector
-            .pick_compaction(1, &levels, &mut levels_handlers, None)
+            .pick_compaction(1, &levels, &mut levels_handlers)
             .unwrap();
         assert_eq!(compaction.select_level.level_idx, 0);
         assert_eq!(compaction.target_level.level_idx, 0);
@@ -457,7 +462,7 @@ pub mod tests {
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
         let compaction = selector
-            .pick_compaction(1, &levels, &mut levels_handlers, None)
+            .pick_compaction(1, &levels, &mut levels_handlers)
             .unwrap();
         assert_eq!(compaction.select_level.level_idx, 0);
         assert_eq!(compaction.target_level.level_idx, 2);
@@ -469,7 +474,7 @@ pub mod tests {
         levels[0].table_infos.clear();
         levels[2].table_infos = generate_tables(20..30, 0..1000, 3, 10);
         let compaction = selector
-            .pick_compaction(2, &levels, &mut levels_handlers, None)
+            .pick_compaction(2, &levels, &mut levels_handlers)
             .unwrap();
         assert_eq!(compaction.select_level.level_idx, 3);
         assert_eq!(compaction.target_level.level_idx, 4);
@@ -478,7 +483,7 @@ pub mod tests {
 
         // no compaction need to be scheduled because we do not calculate the size of pending files
         // to score.
-        let compaction = selector.pick_compaction(2, &levels, &mut levels_handlers, None);
+        let compaction = selector.pick_compaction(2, &levels, &mut levels_handlers);
         assert!(compaction.is_none());
     }
 }

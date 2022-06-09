@@ -74,7 +74,7 @@ impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
             compaction_group_id: status.compaction_group_id,
             level_handlers: status.level_handlers.iter().map_into().collect(),
             compaction_config,
-            compaction_selector: Arc::new(compaction_selector),
+            compaction_selectors: vec![Arc::new(compaction_selector)],
         }
     }
 }
