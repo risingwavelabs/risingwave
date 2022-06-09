@@ -27,13 +27,12 @@ use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
 pub struct ConcatExpression {
-    return_type: DataType,
     string_exprs: Vec<BoxedExpression>,
 }
 
 impl Expression for ConcatExpression {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Varchar
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
@@ -87,11 +86,8 @@ impl Expression for ConcatExpression {
 }
 
 impl ConcatExpression {
-    pub fn new(return_type: DataType, string_exprs: Vec<BoxedExpression>) -> Self {
-        ConcatExpression {
-            return_type,
-            string_exprs,
-        }
+    pub fn new(string_exprs: Vec<BoxedExpression>) -> Self {
+        ConcatExpression { string_exprs }
     }
 }
 
@@ -102,6 +98,8 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatExpression {
         ensure!(prost.get_expr_type().unwrap() == Type::Concat);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
+        assert_eq!(ret_type, DataType::Varchar);
+
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
             bail!("Expected RexNode::FuncCall");
         };
@@ -111,7 +109,7 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatExpression {
             .iter()
             .map(expr_build_from_prost)
             .collect::<Result<Vec<_>>>()?;
-        Ok(ConcatExpression::new(ret_type, string_exprs))
+        Ok(ConcatExpression::new(string_exprs))
     }
 }
 
@@ -130,11 +128,11 @@ mod tests {
     use crate::expr::test_utils::make_input_ref;
     use crate::expr::Expression;
 
-    pub fn make_concat_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
+    pub fn make_concat_function(children: Vec<ExprNode>) -> ExprNode {
         ExprNode {
             expr_type: Concat as i32,
             return_type: Some(ProstDataType {
-                type_name: ret as i32,
+                type_name: TypeName::Varchar as i32,
                 ..Default::default()
             }),
             rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
@@ -146,10 +144,11 @@ mod tests {
         let input_node1 = make_input_ref(0, TypeName::Varchar);
         let input_node2 = make_input_ref(1, TypeName::Varchar);
         let input_node3 = make_input_ref(2, TypeName::Varchar);
-        let concat_expr = ConcatExpression::try_from(&make_concat_function(
-            vec![input_node1, input_node2, input_node3],
-            TypeName::Varchar,
-        ))
+        let concat_expr = ConcatExpression::try_from(&make_concat_function(vec![
+            input_node1,
+            input_node2,
+            input_node3,
+        ]))
         .unwrap();
 
         let chunk = DataChunk::from_pretty(
@@ -177,10 +176,11 @@ mod tests {
         let input_node1 = make_input_ref(0, TypeName::Varchar);
         let input_node2 = make_input_ref(1, TypeName::Varchar);
         let input_node3 = make_input_ref(2, TypeName::Varchar);
-        let concat_expr = ConcatExpression::try_from(&make_concat_function(
-            vec![input_node1, input_node2, input_node3],
-            TypeName::Varchar,
-        ))
+        let concat_expr = ConcatExpression::try_from(&make_concat_function(vec![
+            input_node1,
+            input_node2,
+            input_node3,
+        ]))
         .unwrap();
 
         let chunk = DataChunk::from_pretty(
