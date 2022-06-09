@@ -107,7 +107,7 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatExpression {
         };
 
         let children = &func_call_node.children;
-        let string_exprs = children[1..]
+        let string_exprs = children
             .iter()
             .map(expr_build_from_prost)
             .collect::<Result<Vec<_>>>()?;
@@ -144,8 +144,8 @@ mod tests {
     #[test]
     fn test_eval_concat_expr() {
         let input_node1 = make_input_ref(0, TypeName::Varchar);
-        let input_node2 = make_input_ref(1, TypeName::Int64);
-        let input_node3 = make_input_ref(2, TypeName::Double);
+        let input_node2 = make_input_ref(1, TypeName::Varchar);
+        let input_node3 = make_input_ref(2, TypeName::Varchar);
         let concat_expr = ConcatExpression::try_from(&make_concat_function(
             vec![input_node1, input_node2, input_node3],
             TypeName::Varchar,
@@ -154,7 +154,7 @@ mod tests {
 
         let chunk = DataChunk::from_pretty(
             "
-            T I F
+            T T T
             a 1 2.01
             . 1 2.01
             . . 2.01
@@ -185,7 +185,7 @@ mod tests {
 
         let chunk = DataChunk::from_pretty(
             "
-            T I F
+            T T T
             a 1 2.01
             . 1 2.01
             . . 2.01
