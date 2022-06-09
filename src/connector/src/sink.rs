@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// use risingwave_common::error::{Result, RwError};
-// use mysql::*;
-// use mysql::prelude::*;
-
 use std::fmt;
 
 use async_trait::async_trait;
@@ -27,8 +23,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::decimal::Decimal;
 use risingwave_common::types::{
-    DataType, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
-    OrderedF64, ScalarImpl, IntervalUnit
+    DataType, IntervalUnit, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl,
 };
 
 #[async_trait]
@@ -82,7 +77,7 @@ pub enum MySQLType {
     Varchar(String),
     Date(NaiveDateWrapper),
     Time(NaiveTimeWrapper),
-    Interval(IntervalUnit)
+    Interval(IntervalUnit),
 }
 
 impl TryFrom<ScalarImpl> for MySQLType {
@@ -252,6 +247,24 @@ mod test {
         Ok(conn)
     }
 
+    async fn create_table(params: &ConnectionParams<'_>, schema: &Schema) -> Result<()> {
+        let mut conn = start_connection(params).await?;
+        conn.query_drop(format!(
+            "CREATE TABLE {} ({});",
+            params.table,
+            join(
+                schema
+                    .names()
+                    .iter()
+                    .map(|n| format!("{} int", n))
+                    .collect::<Vec<String>>(),
+                ","
+            )
+        ))
+        .await?;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_basic_async() -> Result<()> {
         // Connection parameters for testing purposes.
@@ -287,6 +300,10 @@ mod test {
             Field::with_name(DataType::Int32, "v2"),
         ]);
 
+        // Create table using connection parameters and table schema.
+        // Beware: currently only works for 'int' type columns.
+        create_table(&params, &schema).await?;
+
         // TODO(nanderstabel): currently writing chunk, not batch..
         sink.write_batch(chunk, schema).await?;
 
@@ -299,7 +316,8 @@ mod test {
         assert_eq!(select, [(44, 22), (33, 00),]);
 
         // Clean up the table and drop the connection.
-        conn.query_drop("DELETE FROM t;").await?;
+        conn.query_drop(format!("DROP TABLE {};", params.table))
+            .await?;
         drop(conn);
 
         Ok(())
