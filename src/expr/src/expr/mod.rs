@@ -21,6 +21,7 @@ pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
 mod expr_case;
 mod expr_coalesce;
+mod expr_concat;
 mod expr_concat_ws;
 mod expr_field;
 mod expr_in;
@@ -46,6 +47,7 @@ use super::Result;
 use crate::expr::build_expr_from_prost::*;
 use crate::expr::expr_array::ArrayExpression;
 use crate::expr::expr_coalesce::CoalesceExpression;
+use crate::expr::expr_concat::ConcatExpression;
 use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
 use crate::ExprError;
@@ -99,6 +101,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
+        Concat => ConcatExpression::try_from(prost).map(Expression::boxed),
         ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
         SplitPart => build_split_part_expr(prost),
         ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),
