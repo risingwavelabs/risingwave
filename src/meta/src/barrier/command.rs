@@ -219,7 +219,7 @@ where
                 table_fragments,
                 dispatches,
                 table_sink_map,
-                source_state: _source_state,
+                source_state: _,
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {

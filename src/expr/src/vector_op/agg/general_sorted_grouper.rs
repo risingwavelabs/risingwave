@@ -111,7 +111,7 @@ impl EqGroups {
         use std::collections::BinaryHeap;
         let mut heap = BinaryHeap::new();
         for (ci, column) in columns.iter().enumerate() {
-            if let Some(ri) = column.starting_indices().get(0) {
+            if let Some(ri) = column.starting_indices().first() {
                 heap.push(Reverse((ri, ci, 0)));
             }
         }

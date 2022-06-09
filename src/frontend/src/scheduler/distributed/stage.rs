@@ -393,7 +393,7 @@ impl StageRunner {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(&*e, task_id))
+                    .map(|e| self.convert_plan_node(e, task_id))
                     .collect();
 
                 PlanNodeProst {
