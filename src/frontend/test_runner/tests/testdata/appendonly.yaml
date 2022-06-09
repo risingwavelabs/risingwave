@@ -3,8 +3,8 @@
     create table t1 (v1 int, v2 int) with ('appendonly' = true);
     select v1, max(v2) as mx2 from t1 group by v1;
   stream_plan: |
-    StreamMaterialize { columns: [v1, agg#0(hidden), mx2], pk_columns: [v1], appendonly: true }
-      StreamHashAgg { group_keys: [$0], aggs: [count, max($1)], appendonly: true }
+    StreamMaterialize { columns: [v1, agg#0(hidden), mx2], pk_columns: [v1] }
+      StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
         StreamExchange { dist: HashShard([0]), appendonly: true }
           StreamTableScan { table: t1, columns: [v1, v2, _row_id], pk_indices: [2], appendonly: true }
 - sql: |

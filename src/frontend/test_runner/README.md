@@ -5,6 +5,7 @@ Given a sequence of SQL queries as the input, the test runner will check
 the logical operator tree if any, and the physical operator tree if any.
 
 The test data in YAML format is organized under `tests/testdata` folder.
+
 To be notice that `create materialized view` is not supported, since it is not needed.
 Because the test runner will generate stream plan regardless the input SQL is a batch query or a streaming query.
 

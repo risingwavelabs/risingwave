@@ -42,13 +42,7 @@ impl StreamHashAgg {
             Distribution::SomeShard => Distribution::SomeShard,
         };
         // Hash agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            pk_indices,
-            dist,
-            input.append_only(),
-        );
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
         StreamHashAgg { base, logical }
     }
 
