@@ -41,3 +41,6 @@ query T
 select concat(v1, v2, v3, v4, v5, v6, v7) from t;
 ----
 123.0145.01true
+
+statement ok
+drop table t;
