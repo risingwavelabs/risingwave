@@ -29,7 +29,7 @@ use risingwave_common::types::{
 
 #[async_trait]
 pub trait Sink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: Schema) -> Result<()>;
+    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
 
     fn endpoint(&self) -> String;
     fn table(&self) -> String;
@@ -121,22 +121,12 @@ impl fmt::Display for MySQLType {
     }
 }
 
+// TODO(nanderstabel): currently writing chunk, not batch..
 #[async_trait]
 impl Sink for MySQLSink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: Schema) -> Result<()> {
-        // TODO(nanderstabel): fix, currently defaults to port 3306
-        let builder = OptsBuilder::default()
-            .user(self.user())
-            .pass(self.password())
-            .ip_or_hostname(self.endpoint())
-            .db_name(self.database());
-
-        // Start transaction
-        let mut conn = Conn::new(builder).await?;
-        let mut transaction = conn.start_transaction(TxOpts::default()).await?;
-
-        // 
-        // TODO(nanderstabel): Refactor
+    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+        // Closure that takes an idx to create a vector of MySQLTypes from a StreamChunk 'row'.
+        // TODO(nanderstabel): Refactor + Should probably be implemented using FromIterator trait.
         let values = |idx| {
             chunk
                 .columns()
@@ -148,16 +138,23 @@ impl Sink for MySQLSink {
         // Closure that builds a String containing WHERE conditions, i.e. 'v1=1 AND v2=2'.
         // Perhaps better to replace this functionality with a new Sink trait method.
         let conditions = |values: Vec<MySQLType>| {
-            join(
-                schema
-                    .names()
-                    .iter()
-                    .zip(values.iter())
-                    .map(|(c, v)| format!("{}={}", c, v))
-                    .collect::<Vec<String>>(),
-                " AND "
-            )
+            schema
+                .names()
+                .iter()
+                .zip(values.iter())
+                .map(|(c, v)| format!("{}={}", c, v))
+                .collect::<Vec<String>>()
         };
+
+        // Build a connection and start transaction
+        // TODO(nanderstabel): fix, currently defaults to port 3306
+        let builder = OptsBuilder::default()
+            .user(self.user())
+            .pass(self.password())
+            .ip_or_hostname(self.endpoint())
+            .db_name(self.database());
+        let mut conn = Conn::new(builder).await?;
+        let mut transaction = conn.start_transaction(TxOpts::default()).await?;
 
         let mut iter = chunk.ops().iter().enumerate();
         while let Some((idx, op)) = iter.next() {
@@ -171,15 +168,15 @@ impl Sink for MySQLSink {
                 Delete => format!(
                     "DELETE FROM {} WHERE ({})",
                     self.table(),
-                    conditions(values(idx))
+                    join(conditions(values(idx)), " AND ")
                 ),
                 UpdateDelete => {
                     if let Some((idx2, UpdateInsert)) = iter.next() {
                         format!(
                             "UPDATE {} SET {} WHERE {}",
                             self.table,
-                            join(values(idx2), ","),
-                            conditions(values(idx))
+                            join(conditions(values(idx2)), ","),
+                            join(conditions(values(idx)), " AND ")
                         )
                     } else {
                         panic!("UpdateDelete should always be followed by an UpdateInsert!")
@@ -221,7 +218,7 @@ pub struct RedisSink;
 
 #[async_trait]
 impl Sink for RedisSink {
-    async fn write_batch(&mut self, _chunk: StreamChunk, _schema: Schema) -> Result<()> {
+    async fn write_batch(&mut self, _chunk: StreamChunk, _schema: &Schema) -> Result<()> {
         todo!();
     }
 
@@ -309,15 +306,6 @@ mod test {
             Some(params.password.into()),
         );
 
-        // Initialize streamchunk.
-        let chunk = StreamChunk::from_pretty(
-            "  i  i
-            + 55 11
-            + 44 22
-            + 33 00
-            - 55 11",
-        );
-
         // Initialize schema of two Int32 columns.
         let schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "v1"),
@@ -328,8 +316,16 @@ mod test {
         // Beware: currently only works for 'int' type columns.
         create_table(&params, &schema).await?;
 
-        // TODO(nanderstabel): currently writing chunk, not batch..
-        sink.write_batch(chunk, schema).await?;
+        // Initialize streamchunk.
+        let chunk = StreamChunk::from_pretty(
+            "  i  i
+            + 55 11
+            + 44 22
+            + 33 00
+            - 55 11",
+        );
+
+        sink.write_batch(chunk, &schema).await?;
 
         // Start a new connection using the same connection parameters and get the SELECT result.
         let mut conn = start_connection(&params).await?;
@@ -338,6 +334,22 @@ mod test {
             .await?;
 
         assert_eq!(select, [(44, 22), (33, 00),]);
+
+        // Initialize streamchunk with UpdateDelete and UpdateInsert.
+        let chunk = StreamChunk::from_pretty(
+            "   i  i
+            U- 44 22
+            U+ 44 42",
+        );
+
+        sink.write_batch(chunk, &schema).await?;
+
+        let mut conn = start_connection(&params).await?;
+        let select: Vec<(i32, i32)> = conn
+            .query(format!("SELECT * FROM {};", params.table))
+            .await?;
+
+        assert_eq!(select, [(44, 42), (33, 00),]);
 
         // Clean up the table and drop the connection.
         conn.query_drop(format!("DROP TABLE {};", params.table))
