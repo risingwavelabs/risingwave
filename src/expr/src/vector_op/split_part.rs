@@ -107,7 +107,7 @@ mod tests {
 
             match actual {
                 Ok(guard) => {
-                    let expected = expected.clone().unwrap();
+                    let expected = expected.unwrap();
 
                     let array = guard.into_inner().finish().unwrap();
                     let actual = array.value_at(0).unwrap();
