@@ -49,7 +49,7 @@ where
     T: Array,
     S: Array,
     T::OwnedItem: PartialOrd<T::OwnedItem>,
-    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
+    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn eval(self) {
@@ -70,7 +70,9 @@ where
                     break;
                 }
                 builder.append(Some(cur.as_scalar_ref())).unwrap();
-                cur = cur.checked_add(step.as_scalar_ref())?;
+                cur = cur
+                    .checked_add(step.as_scalar_ref())
+                    .ok_or(ErrorCode::NumericValueOutOfRange)?;
             }
 
             let arr = builder.finish()?;
