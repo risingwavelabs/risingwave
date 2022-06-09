@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use crate::Result;
 
 #[inline(always)]
 pub fn ascii(s: &str) -> Result<i32> {
@@ -22,11 +22,12 @@ pub fn ascii(s: &str) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_ascii() {
         let cases = [("hello", 104), ("你好", 228), ("", 0)];
         for (s, expected) in cases {
-            assert_eq!(ascii(s), Ok(expected))
+            assert_eq!(ascii(s).unwrap(), expected)
         }
     }
 }

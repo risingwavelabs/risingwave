@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::session_config::DELTA_JOIN;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
@@ -42,8 +43,6 @@ pub struct StreamHashJoin {
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
 }
-
-pub static DELTA_JOIN: &str = "RW_FORCE_DELTA_JOIN";
 
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {

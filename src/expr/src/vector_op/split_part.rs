@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+
+use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn split_part(
@@ -23,9 +24,10 @@ pub fn split_part(
     writer: BytesWriter,
 ) -> Result<BytesGuard> {
     if nth_expr == 0 {
-        return Err(RwError::from(ErrorCode::InvalidParameterValue(
-            "field position must not be zero".into(),
-        )));
+        return Err(ExprError::InvalidParam {
+            name: "data",
+            reason: "can't be zero".to_string(),
+        });
     };
 
     let mut split = string_expr.split(delimiter_expr);
@@ -42,12 +44,7 @@ pub fn split_part(
         }
     } else {
         match nth_expr.cmp(&0) {
-            std::cmp::Ordering::Equal => {
-                return Err(RwError::from(ErrorCode::InternalError(
-                    "Impossible happened, field position must not be zero already had been checked."
-                        .into(),
-                )));
-            }
+            std::cmp::Ordering::Equal => unreachable!(),
 
             // Since `nth_expr` can not be 0, so the `abs()` of it can not be smaller than 1
             // (that's `abs(1)` or `abs(-1)`).  Hence the result of sub 1 can not be less than 0.
@@ -65,48 +62,40 @@ pub fn split_part(
         }
     };
 
-    writer.write_ref(nth_val)
+    writer.write_ref(nth_val).map_err(ExprError::Array)
 }
 
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-    use risingwave_common::error::{ErrorCode, Result, RwError};
 
     use super::split_part;
 
     #[test]
     fn test_split_part() {
-        let cases: Vec<(&str, &str, i32, Result<&str>)> = vec![
+        let cases: Vec<(&str, &str, i32, Option<&str>)> = vec![
             // postgres cases
-            ("", "@", 1, Ok("")),
-            ("", "@", -1, Ok("")),
-            ("joeuser@mydatabase", "", 1, Ok("joeuser@mydatabase")),
-            ("joeuser@mydatabase", "", 2, Ok("")),
-            ("joeuser@mydatabase", "", -1, Ok("joeuser@mydatabase")),
-            ("joeuser@mydatabase", "", -2, Ok("")),
-            (
-                "joeuser@mydatabase",
-                "@",
-                0,
-                Err(RwError::from(ErrorCode::InvalidParameterValue(
-                    "field position must not be zero".into(),
-                ))),
-            ),
-            ("joeuser@mydatabase", "@@", 1, Ok("joeuser@mydatabase")),
-            ("joeuser@mydatabase", "@@", 2, Ok("")),
-            ("joeuser@mydatabase", "@", 1, Ok("joeuser")),
-            ("joeuser@mydatabase", "@", 2, Ok("mydatabase")),
-            ("joeuser@mydatabase", "@", 3, Ok("")),
-            ("@joeuser@mydatabase@", "@", 2, Ok("joeuser")),
-            ("joeuser@mydatabase", "@", -1, Ok("mydatabase")),
-            ("joeuser@mydatabase", "@", -2, Ok("joeuser")),
-            ("joeuser@mydatabase", "@", -3, Ok("")),
-            ("@joeuser@mydatabase@", "@", -2, Ok("mydatabase")),
+            ("", "@", 1, Some("")),
+            ("", "@", -1, Some("")),
+            ("joeuser@mydatabase", "", 1, Some("joeuser@mydatabase")),
+            ("joeuser@mydatabase", "", 2, Some("")),
+            ("joeuser@mydatabase", "", -1, Some("joeuser@mydatabase")),
+            ("joeuser@mydatabase", "", -2, Some("")),
+            ("joeuser@mydatabase", "@", 0, None),
+            ("joeuser@mydatabase", "@@", 1, Some("joeuser@mydatabase")),
+            ("joeuser@mydatabase", "@@", 2, Some("")),
+            ("joeuser@mydatabase", "@", 1, Some("joeuser")),
+            ("joeuser@mydatabase", "@", 2, Some("mydatabase")),
+            ("joeuser@mydatabase", "@", 3, Some("")),
+            ("@joeuser@mydatabase@", "@", 2, Some("joeuser")),
+            ("joeuser@mydatabase", "@", -1, Some("mydatabase")),
+            ("joeuser@mydatabase", "@", -2, Some("joeuser")),
+            ("joeuser@mydatabase", "@", -3, Some("")),
+            ("@joeuser@mydatabase@", "@", -2, Some("mydatabase")),
             // other cases
 
             // makes sure that `rsplit` is not used internally when `nth` is negative
-            ("@@@", "@@", -1, Ok("@")),
+            ("@@@", "@@", -1, Some("@")),
         ];
 
         for (i, case @ (string_expr, delimiter_expr, nth_expr, expected)) in
@@ -118,17 +107,15 @@ mod tests {
 
             match actual {
                 Ok(guard) => {
-                    let expected = expected.clone().unwrap();
+                    let expected = expected.unwrap();
 
                     let array = guard.into_inner().finish().unwrap();
                     let actual = array.value_at(0).unwrap();
 
                     assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)
                 }
-                Err(err) => {
-                    let expected = expected.clone().unwrap_err().to_string();
-                    let actual = err.to_string();
-                    assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)
+                Err(_err) => {
+                    assert!(expected.is_none());
                 }
             };
         }
