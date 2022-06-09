@@ -46,6 +46,8 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
+        // println!("keyspace table_root!");
+        // dbg!(&id.table_id);
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -62,6 +64,8 @@ impl<S: StateStore> Keyspace<S> {
     /// Creates a root [`Keyspace`] for a table with default vnode (i.e. only no.1 vnode is
     /// present). This is used for singleton stateful executor.
     pub fn table_root_with_default_vnodes(store: S, id: &TableId) -> Self {
+        // println!("keyspace table_root_with_default_vnodes!");
+        // dbg!(&id.table_id);
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -79,6 +83,8 @@ impl<S: StateStore> Keyspace<S> {
     /// Creates a root [`Keyspace`] for a table with specific vnodes. This is used for non-singleton
     /// stateful executor.
     pub fn table_root_with_vnodes(store: S, id: &TableId, bitmap_inner: Vec<u8>) -> Self {
+        // println!("keyspace table_root_with_vnodes!");
+        // dbg!(&id.table_id);
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
