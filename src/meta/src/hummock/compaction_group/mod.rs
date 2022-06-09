@@ -15,6 +15,7 @@
 pub mod manager;
 
 use std::borrow::Borrow;
+use std::collections::HashSet;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::Prefix;
@@ -26,7 +27,7 @@ use crate::model::MetadataModel;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
     group_id: CompactionGroupId,
-    member_prefixes: Vec<Prefix>,
+    member_prefixes: HashSet<Prefix>,
     compaction_config: CompactionConfig,
 }
 
@@ -34,7 +35,7 @@ impl CompactionGroup {
     pub fn new(group_id: CompactionGroupId, compaction_config: CompactionConfig) -> Self {
         Self {
             group_id,
-            member_prefixes: vec![],
+            member_prefixes: Default::default(),
             compaction_config,
         }
     }
@@ -43,7 +44,7 @@ impl CompactionGroup {
         self.group_id
     }
 
-    pub fn member_prefixes(&self) -> &Vec<Prefix> {
+    pub fn member_prefixes(&self) -> &HashSet<Prefix> {
         &self.member_prefixes
     }
 
