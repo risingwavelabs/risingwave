@@ -163,7 +163,7 @@ fn main() -> Result<()> {
                         log_buffer,
                         "-- Frontend --\nAccess inside cluster: {}\ntpch-bench args: {}\n",
                         style(format!(
-                            "psql -d dev -h {} -p {} -U risingwave",
+                            "psql -d dev -h {} -p {} -U root",
                             c.address, c.port
                         ))
                         .green(),

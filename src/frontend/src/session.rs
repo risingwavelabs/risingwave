@@ -25,6 +25,8 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
+#[cfg(test)]
+use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::{DELTA_JOIN, IMPLICIT_FLUSH, QUERY_MODE};
@@ -371,8 +373,8 @@ impl SessionImpl {
     pub fn mock() -> Self {
         Self {
             env: FrontendEnv::mock(),
-            database: "dev".to_string(),
-            user_name: "risingwave".to_string(),
+            database: DEFAULT_DATABASE_NAME.to_string(),
+            user_name: DEFAULT_SUPPER_USER.to_string(),
             user_authenticator: UserAuthenticator::None,
             config_map: Self::init_config_map(),
         }
@@ -487,7 +489,7 @@ impl SessionManager for SessionManagerImpl {
         } else {
             Err(Box::new(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Not found user name: {}", user_name),
+                format!("Role {} does not exist", user_name),
             )))
         }
     }

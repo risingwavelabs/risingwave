@@ -30,4 +30,4 @@ echo "--- e2e test w/ Rust frontend - source with kafka"
 ~/cargo-make/makers clean-data
 ~/cargo-make/makers ci-start ci-kafka
 ./scripts/source/prepare_ci_kafka.sh
-timeout 2m sqllogictest -p 4566 -d dev -u risingwave './e2e_test/source/**/*.slt'
+timeout 2m sqllogictest -p 4566 -d dev -u root './e2e_test/source/**/*.slt'

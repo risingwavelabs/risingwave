@@ -41,22 +41,22 @@ echo "--- Prepare RiseDev playground"
 
 echo "--- e2e, ci-3cn-1fe, streaming"
 ~/cargo-make/makers ci-start default
-timeout 5m sqllogictest -p 4566 -d dev -u risingwave './e2e_test/streaming/**/*.slt' -j 8
+timeout 5m sqllogictest -p 4566 -d dev -u root './e2e_test/streaming/**/*.slt' -j 8
 
 echo "--- Kill cluster"
 ~/cargo-make/makers ci-kill
 
 echo "--- e2e, ci-3cn-1fe, delta join"
 ~/cargo-make/makers ci-start default
-timeout 3m sqllogictest -p 4566 -d dev -u risingwave './e2e_test/streaming_delta_join/**/*.slt'
+timeout 3m sqllogictest -p 4566 -d dev -u root './e2e_test/streaming_delta_join/**/*.slt'
 
 echo "--- Kill cluster"
 ~/cargo-make/makers ci-kill
 
 echo "--- e2e, ci-3cn-1fe, batch distributed"
 ~/cargo-make/makers ci-start default
-timeout 2m sqllogictest -p 4566 -d dev -u risingwave './e2e_test/ddl/**/*.slt'
-timeout 2m sqllogictest -p 4566 -d dev -u risingwave './e2e_test/batch/**/*.slt' -j 8
+timeout 2m sqllogictest -p 4566 -d dev -u root './e2e_test/ddl/**/*.slt'
+timeout 2m sqllogictest -p 4566 -d dev -u root './e2e_test/batch/**/*.slt' -j 8
 
 echo "--- Kill cluster"
 ~/cargo-make/makers ci-kill

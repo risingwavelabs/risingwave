@@ -312,7 +312,7 @@ where
             .config
             .get("user")
             .cloned()
-            .unwrap_or_else(|| "risingwave".to_string());
+            .unwrap_or_else(|| "root".to_string());
 
         let session = self
             .session_mgr
