@@ -101,7 +101,6 @@ mod tests {
              abc",
         )
         .with_invisible_holes();
-        dbg!(&data_chunk);
         let res = search_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Bool(true)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Bool(false)));

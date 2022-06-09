@@ -59,10 +59,6 @@ macro_rules! gen_eval {
                 let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity()).map_err($crate::ExprError::Array)?;
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
-                        $(
-                            dbg!([<arr_ $arg:lower>].len());
-                        )*
-                        dbg!(bitmap.len());
                         for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
                             if !visible {
                                 continue;
