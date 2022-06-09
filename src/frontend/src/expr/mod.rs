@@ -210,6 +210,69 @@ impl ExprImpl {
         visitor.visit_expr(self);
         !visitor.has
     }
+
+    /// Returns the `InputRefs` of an Equality predicate if it matches
+    /// ordered by the canonical ordering (lower, higher), else returns None
+    pub fn as_eq_cond(&self) -> Option<(InputRef, InputRef)> {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::Equal
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+        {
+            if x.index() < y.index() {
+                Some((*x, *y))
+            } else {
+                Some((*y, *x))
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_eq_const(&self) -> Option<(InputRef, Literal)> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+        function_call.get_expr_type() == ExprType::Equal{
+            match function_call.clone().decompose_as_binary() {
+                (_, ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, *y)),
+                (_, ExprImpl::Literal(x), ExprImpl::InputRef(y)) => Some((*y, *x)),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_comparison_const(&self) -> Option<(InputRef, ExprType, Literal)> {
+        fn reverse_comparison(comparison: ExprType) -> ExprType {
+            match comparison {
+                ExprType::LessThan => ExprType::GreaterThan,
+                ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
+                ExprType::GreaterThan => ExprType::LessThan,
+                ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+                _ => unreachable!(),
+            }
+        }
+
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    match (op1, op2) {
+                        (ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, ty, *y)),
+                        (ExprImpl::Literal(x), ExprImpl::InputRef(y)) => {
+                            Some((*y, reverse_comparison(ty), *x))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
 }
 
 impl Expr for ExprImpl {

@@ -31,6 +31,7 @@ mod update_check;
 struct DebugExtraInfo {
     input_pos: usize,
     actor_id: ActorId,
+    executor_id: u64,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -46,6 +47,7 @@ impl DebugExecutor {
         input: BoxedExecutor,
         input_pos: usize,
         actor_id: ActorId,
+        executor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
@@ -53,6 +55,7 @@ impl DebugExecutor {
             extra: DebugExtraInfo {
                 input_pos,
                 actor_id,
+                executor_id,
                 metrics,
             },
         }
@@ -69,6 +72,7 @@ impl DebugExecutor {
             info.clone(),
             extra.input_pos,
             extra.actor_id,
+            extra.executor_id,
             extra.metrics,
             stream,
         );
