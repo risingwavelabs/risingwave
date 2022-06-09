@@ -4026,6 +4026,7 @@ dependencies = [
  "madsim-tonic",
  "memcomparable",
  "more-asserts",
+ "mysql_async",
  "num-traits",
  "paste",
  "prometheus",

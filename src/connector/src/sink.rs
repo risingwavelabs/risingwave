@@ -21,6 +21,7 @@ use mysql_async::*;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::decimal::Decimal;
 use risingwave_common::types::{
     DataType, IntervalUnit, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl,
@@ -81,7 +82,7 @@ pub enum MySQLType {
 }
 
 impl TryFrom<ScalarImpl> for MySQLType {
-    type Error = Error;
+    type Error = RwError;
 
     fn try_from(s: ScalarImpl) -> Result<Self> {
         match s {

@@ -21,6 +21,7 @@ use std::io::Error as IoError;
 use std::sync::Arc;
 
 use memcomparable::Error as MemComparableError;
+use mysql_async::Error as MySQLError;
 use prost::Message;
 use risingwave_pb::common::Status;
 use risingwave_pb::ProstFieldNotFound;
@@ -131,6 +132,8 @@ pub enum ErrorCode {
     },
     #[error("Invalid Parameter Value: {0}")]
     InvalidParameterValue(String),
+    #[error("MySQL error: {0}")]
+    MySQLError(MySQLError),
 
     /// This error occurs when the meta node receives heartbeat from a previous removed worker
     /// node. Currently we don't support re-register, and the worker node need a full restart.
@@ -237,6 +240,12 @@ impl From<ValueEncodingError> for RwError {
     }
 }
 
+impl From<MySQLError> for RwError {
+    fn from(mysql_error: MySQLError) -> Self {
+        ErrorCode::MySQLError(mysql_error).into()
+    }
+}
+
 impl From<std::io::Error> for RwError {
     fn from(io_err: IoError) -> Self {
         ErrorCode::IoError(io_err).into()
@@ -312,6 +321,7 @@ impl ErrorCode {
             ErrorCode::UnknownWorker => 24,
             ErrorCode::ConnectorError(_) => 25,
             ErrorCode::InvalidParameterValue(_) => 26,
+            ErrorCode::MySQLError(_) => 27,
             ErrorCode::UnknownError(_) => 101,
         }
     }
