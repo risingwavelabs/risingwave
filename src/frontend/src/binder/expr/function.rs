@@ -68,7 +68,7 @@ impl Binder {
                     ExprType::Case
                 }
                 "concat" => {
-                    inputs.insert(0, ExprImpl::literal_varchar("".to_string()));
+                    Self::rewrite_concat_to_concat_ws(&mut inputs)?;
                     ExprType::ConcatWs
                 }
                 "concat_ws" => ExprType::ConcatWs,
@@ -116,6 +116,15 @@ impl Binder {
                 112.into(),
             )
             .into())
+        }
+    }
+
+    fn rewrite_concat_to_concat_ws(inputs: &mut Vec<ExprImpl>) -> Result<()> {
+        if inputs.is_empty() {
+            Err(ErrorCode::BindError("Function `Concat` takes at least 1 arguments (0 given)".to_string()).into())
+        } else {
+            inputs.insert(0, ExprImpl::literal_varchar("".to_string()));
+            Ok(())
         }
     }
 

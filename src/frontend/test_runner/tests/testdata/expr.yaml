@@ -277,4 +277,4 @@
 - sql: |
     create table t (v1 int);
     select concat() from t;
-  binder_error: 'Bind error: Function `ConcatWs` takes at least 2 arguments (1 given)'
+  binder_error: 'Bind error: Function `Concat` takes at least 1 arguments (0 given)'
