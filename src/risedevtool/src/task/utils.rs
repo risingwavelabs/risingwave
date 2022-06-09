@@ -47,26 +47,32 @@ pub fn add_storage_backend(
     provide_aws_s3: &[AwsS3Config],
     cmd: &mut Command,
 ) -> Result<()> {
-    match (provide_minio, provide_aws_s3) {
-        ([], []) => return Err(anyhow!(
+    match gen_object_store_url(provide_minio, provide_aws_s3)? {
+        None => Err(anyhow!(
             "{} is not compatible with in-memory state backend. Need to enable either minio or aws-s3.", id
         )),
-        ([minio], []) => {
-            cmd.arg("--state-store").arg(format!(
-                "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
-                hummock_user = minio.root_user,
-                hummock_password = minio.root_password,
-                hummock_bucket = minio.hummock_bucket,
-                minio_addr = minio.address,
-                minio_port = minio.port,
-            ));
-            true
+        Some(url) => {
+            cmd.arg("--state-store").arg("hummock+".to_string() + &url);
+            Ok(())
         }
-        ([], [aws_s3]) => {
-            cmd.arg("--state-store")
-                .arg(format!("hummock+s3://{}", aws_s3.bucket));
-            true
-        }
+    }
+}
+
+pub fn gen_object_store_url(
+    provide_minio: &[MinioConfig],
+    provide_aws_s3: &[AwsS3Config],
+) -> Result<Option<String>> {
+    match (provide_minio, provide_aws_s3) {
+        ([], []) => Ok(None),
+        ([minio], []) => Ok(Some(format!(
+            "minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
+            hummock_user = minio.root_user,
+            hummock_password = minio.root_password,
+            hummock_bucket = minio.hummock_bucket,
+            minio_addr = minio.address,
+            minio_port = minio.port,
+        ))),
+        ([], [aws_s3]) => Ok(Some(format!("s3://{}", aws_s3.bucket))),
         (other_minio, other_s3) => {
             return Err(anyhow!(
                 "{} minio and {} s3 instance found in config, but only 1 is needed",
@@ -74,7 +80,5 @@ pub fn add_storage_backend(
                 other_s3.len()
             ))
         }
-    };
-
-    Ok(())
+    }
 }

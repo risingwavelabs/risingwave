@@ -56,6 +56,8 @@ pub struct MetaNodeConfig {
     pub user_managed: bool,
 
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
+    pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_aws_s3: Option<Vec<AwsS3Config>>,
 
     pub enable_dashboard_v2: bool,
     pub unsafe_disable_recovery: bool,

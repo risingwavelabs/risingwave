@@ -19,7 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
-use crate::MetaNodeConfig;
+use crate::{gen_object_store_url, MetaNodeConfig};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -72,6 +72,13 @@ impl MetaNodeService {
                 ))
             }
         }
+
+        let provide_minio = config.provide_minio.as_ref().unwrap();
+        let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+
+        cmd.arg("--object-store-url").arg(
+            gen_object_store_url(provide_minio, provide_aws_s3)?.unwrap_or("memory".to_string()),
+        );
 
         if config.enable_dashboard_v2 {
             cmd.arg("--dashboard-ui-path")

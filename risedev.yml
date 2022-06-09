@@ -401,6 +401,12 @@ template:
     # Etcd backend config
     provide-etcd-backend: "etcd*"
 
+    # Minio instances used by this meta node
+    provide-minio: "minio*"
+
+    # AWS s3 bucket used by this meta node
+    provide-aws-s3: "aws-s3*"
+
     # Whether to enable dashboard-v2
     enable-dashboard-v2: false
 
