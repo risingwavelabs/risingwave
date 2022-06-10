@@ -16,7 +16,7 @@ use aho_corasick::AhoCorasickBuilder;
 use risingwave_common::array::{BytesGuard, BytesWriter};
 use risingwave_common::types::NaiveDateTimeWrapper;
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// Compile the pg pattern to chrono pattern.
 // TODO: Chrono can not fully support the pg format, so consider using other implementations later.

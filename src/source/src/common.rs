@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;

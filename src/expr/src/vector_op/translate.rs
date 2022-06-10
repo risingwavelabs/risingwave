@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn translate(

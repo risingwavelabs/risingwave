@@ -21,7 +21,7 @@ use auto_enums::auto_enum;
 use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
-use super::{ArrayError, ArrayResult};
+use super::ArrayResult;
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{Row, RowRef};
 use crate::array::ArrayBuilderImpl;

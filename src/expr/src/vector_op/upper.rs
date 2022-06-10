@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn upper(s: &str, writer: BytesWriter) -> Result<BytesGuard> {

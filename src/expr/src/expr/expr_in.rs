@@ -20,7 +20,7 @@ use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChu
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[derive(Debug)]
 pub(crate) struct InExpression {

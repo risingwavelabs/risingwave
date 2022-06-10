@@ -19,7 +19,6 @@ use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
 use risingwave_pb::data::Array as ProstArray;
 
-use super::error::ArrayError;
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, IntervalArrayBuilder,
@@ -100,7 +99,7 @@ fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTime
     }
 }
 
-pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
+pub fn read_interval_unit(_cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
     // let iu = try {
     //     let months = cursor.read_i32::<BigEndian>()?;
     //     let days = cursor.read_i32::<BigEndian>()?;

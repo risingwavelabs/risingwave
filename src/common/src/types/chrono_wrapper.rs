@@ -21,7 +21,6 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 use super::{CheckedAdd, IntervalUnit};
 use crate::array::ArrayResult;
-use crate::error::ErrorCode::{InternalError, IoError};
 use crate::error::{Result, RwError};
 use crate::util::value_encoding::error::ValueEncodingError;
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.

@@ -17,10 +17,9 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use prost::DecodeError;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
-use super::{ArrayError, ArrayResult};
+use super::ArrayResult;
 use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
 use crate::buffer::Bitmap;

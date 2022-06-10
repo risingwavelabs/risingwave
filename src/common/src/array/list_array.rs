@@ -24,8 +24,8 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, List
 use risingwave_pb::expr::ListValue as ProstListValue;
 
 use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayIterator, ArrayMeta,
-    ArrayResult, RowRef, NULL_VAL_FOR_HASH,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
+    RowRef, NULL_VAL_FOR_HASH,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{

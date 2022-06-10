@@ -20,7 +20,7 @@ use risingwave_common::array::{
 use risingwave_common::types::{DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct IsNullExpression {

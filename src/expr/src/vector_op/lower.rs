@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn lower(s: &str, writer: BytesWriter) -> Result<BytesGuard> {

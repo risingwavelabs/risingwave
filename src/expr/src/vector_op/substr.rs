@@ -16,7 +16,7 @@ use std::cmp::{max, min};
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
-use crate::{bail, ExprError, Result};
+use crate::{bail, Result};
 
 #[inline(always)]
 pub fn substr_start(s: &str, start: i32, writer: BytesWriter) -> Result<BytesGuard> {

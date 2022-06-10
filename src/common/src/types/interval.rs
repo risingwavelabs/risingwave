@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use super::*;
-use crate::error::ErrorCode::IoError;
 
 /// Every interval can be represented by a `IntervalUnit`.
 /// Note that the difference between Interval and Instant.

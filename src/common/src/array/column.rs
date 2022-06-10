@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_pb::data::Column as ProstColumn;
 
-use super::{Array, ArrayError, ArrayResult};
+use super::{Array, ArrayResult};
 use crate::array::{ArrayImpl, ArrayRef};
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array

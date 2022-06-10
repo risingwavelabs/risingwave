@@ -15,7 +15,7 @@
 use md5 as lib_md5;
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn md5(s: &str, writer: BytesWriter) -> Result<BytesGuard> {

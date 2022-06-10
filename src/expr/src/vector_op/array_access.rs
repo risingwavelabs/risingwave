@@ -15,7 +15,7 @@
 use risingwave_common::array::ListRef;
 use risingwave_common::types::{Scalar, ToOwnedDatum};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn array_access<T: Scalar>(l: Option<ListRef>, r: Option<i32>) -> Result<Option<T>> {

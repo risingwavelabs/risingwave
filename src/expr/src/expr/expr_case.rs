@@ -17,7 +17,7 @@ use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ScalarRefImpl, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct WhenClause {

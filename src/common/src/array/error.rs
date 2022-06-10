@@ -17,7 +17,6 @@ use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 
 use crate::error::{ErrorCode, RwError};
-use crate::types::DataType;
 
 #[derive(Error, Debug)]
 pub enum ArrayError {

@@ -18,7 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, ArrayError, ArrayResult, DataChunk, RowRef};
+use crate::array::{ArrayBuilderImpl, ArrayResult, DataChunk, RowRef};
 use crate::types::{DataType, Datum, DatumRef};
 
 pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;
