@@ -24,7 +24,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::decimal::Decimal;
 use risingwave_common::types::{
-    IntervalUnit, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl,
+    IntervalUnit, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, Datum
 };
 
 #[async_trait]
@@ -67,7 +67,7 @@ impl MySQLSink {
 }
 
 // TODO(nanderstabel): Add DATETIME and TIMESTAMP
-pub enum MySQLType {
+pub enum MySQLValue {
     SmallInt(i16),
     Int(i32),
     BigInt(i64),
@@ -79,43 +79,46 @@ pub enum MySQLType {
     Date(NaiveDateWrapper),
     Time(NaiveTimeWrapper),
     Interval(IntervalUnit),
+    Null
 }
 
-impl TryFrom<ScalarImpl> for MySQLType {
+impl TryFrom<Datum> for MySQLValue {
     type Error = RwError;
 
-    fn try_from(s: ScalarImpl) -> Result<Self> {
+    fn try_from(s: Datum) -> Result<Self> {
         match s {
-            ScalarImpl::Int16(v) => Ok(MySQLType::SmallInt(v)),
-            ScalarImpl::Int32(v) => Ok(MySQLType::Int(v)),
-            ScalarImpl::Int64(v) => Ok(MySQLType::BigInt(v)),
-            ScalarImpl::Float32(v) => Ok(MySQLType::Float(v)),
-            ScalarImpl::Float64(v) => Ok(MySQLType::Double(v)),
-            ScalarImpl::Bool(v) => Ok(MySQLType::Bool(v)),
-            ScalarImpl::Decimal(v) => Ok(MySQLType::Decimal(v)),
-            ScalarImpl::Utf8(v) => Ok(MySQLType::Varchar(v)),
-            ScalarImpl::NaiveDate(v) => Ok(MySQLType::Date(v)),
-            ScalarImpl::NaiveTime(v) => Ok(MySQLType::Time(v)),
-            ScalarImpl::Interval(v) => Ok(MySQLType::Interval(v)),
-            _ => unimplemented!(),
+            Some(ScalarImpl::Int16(v)) => Ok(MySQLValue::SmallInt(v)),
+            Some(ScalarImpl::Int32(v)) => Ok(MySQLValue::Int(v)),
+            Some(ScalarImpl::Int64(v)) => Ok(MySQLValue::BigInt(v)),
+            Some(ScalarImpl::Float32(v)) => Ok(MySQLValue::Float(v)),
+            Some(ScalarImpl::Float64(v)) => Ok(MySQLValue::Double(v)),
+            Some(ScalarImpl::Bool(v)) => Ok(MySQLValue::Bool(v)),
+            Some(ScalarImpl::Decimal(v)) => Ok(MySQLValue::Decimal(v)),
+            Some(ScalarImpl::Utf8(v)) => Ok(MySQLValue::Varchar(v)),
+            Some(ScalarImpl::NaiveDate(v)) => Ok(MySQLValue::Date(v)),
+            Some(ScalarImpl::NaiveTime(v)) => Ok(MySQLValue::Time(v)),
+            Some(ScalarImpl::Interval(v)) => Ok(MySQLValue::Interval(v)),
+            Some(_) => unimplemented!(),
+            None => Ok(MySQLValue::Null),
         }
     }
 }
 
-impl fmt::Display for MySQLType {
+impl fmt::Display for MySQLValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            MySQLType::SmallInt(v) => write!(f, "{}", v)?,
-            MySQLType::Int(v) => write!(f, "{}", v)?,
-            MySQLType::BigInt(v) => write!(f, "{}", v)?,
-            MySQLType::Float(v) => write!(f, "{}", v)?,
-            MySQLType::Double(v) => write!(f, "{}", v)?,
-            MySQLType::Bool(v) => write!(f, "{}", v)?,
-            MySQLType::Decimal(v) => write!(f, "{}", v)?,
-            MySQLType::Varchar(v) => write!(f, "{}", v)?,
-            MySQLType::Date(_v) => todo!(),
-            MySQLType::Time(_v) => todo!(),
-            MySQLType::Interval(_v) => todo!(),
+            MySQLValue::SmallInt(v) => write!(f, "{}", v)?,
+            MySQLValue::Int(v) => write!(f, "{}", v)?,
+            MySQLValue::BigInt(v) => write!(f, "{}", v)?,
+            MySQLValue::Float(v) => write!(f, "{}", v)?,
+            MySQLValue::Double(v) => write!(f, "{}", v)?,
+            MySQLValue::Bool(v) => write!(f, "{}", v)?,
+            MySQLValue::Decimal(v) => write!(f, "{}", v)?,
+            MySQLValue::Varchar(v) => write!(f, "{}", v)?,
+            MySQLValue::Date(_v) => todo!(),
+            MySQLValue::Time(_v) => todo!(),
+            MySQLValue::Interval(_v) => todo!(),
+            MySQLValue::Null => write!(f, "NULL")?,
         }
         Ok(())
     }
@@ -125,19 +128,20 @@ impl fmt::Display for MySQLType {
 #[async_trait]
 impl Sink for MySQLSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
-        // Closure that takes an idx to create a vector of MySQLTypes from a StreamChunk 'row'.
-        // TODO(nanderstabel): Refactor + Should probably be implemented using FromIterator trait.
-        let values = |idx| {
+        // Closure that takes an idx to create a vector of MySQLValues from a StreamChunk 'row'.
+        let values = |idx| -> Result<Vec<MySQLValue>> {
             chunk
                 .columns()
                 .iter()
-                .map(|x| MySQLType::try_from(x.array_ref().datum_at(idx).unwrap()).unwrap())
+                .map(|x| MySQLValue::try_from(x.array_ref().datum_at(idx)))
                 .collect_vec()
+                .into_iter()
+                .collect()  
         };
 
         // Closure that builds a String containing WHERE conditions, i.e. 'v1=1 AND v2=2'.
         // Perhaps better to replace this functionality with a new Sink trait method.
-        let conditions = |values: Vec<MySQLType>| {
+        let conditions = |values: Vec<MySQLValue>| {
             schema
                 .names()
                 .iter()
@@ -163,20 +167,20 @@ impl Sink for MySQLSink {
                 Insert => format!(
                     "INSERT INTO {} VALUES ({});",
                     self.table(),
-                    join(values(idx), ",")
+                    join(values(idx)?, ",")
                 ),
                 Delete => format!(
                     "DELETE FROM {} WHERE ({});",
                     self.table(),
-                    join(conditions(values(idx)), " AND ")
+                    join(conditions(values(idx)?), " AND ")
                 ),
                 UpdateDelete => {
                     if let Some((idx2, UpdateInsert)) = iter.next() {
                         format!(
                             "UPDATE {} SET {} WHERE {};",
                             self.table,
-                            join(conditions(values(idx2)), ","),
-                            join(conditions(values(idx)), " AND ")
+                            join(conditions(values(idx2)?), ","),
+                            join(conditions(values(idx)?), " AND ")
                         )
                     } else {
                         panic!("UpdateDelete should always be followed by an UpdateInsert!")
