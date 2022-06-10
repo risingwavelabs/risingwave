@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub use anyhow::anyhow;
+use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use thiserror::Error;
@@ -39,57 +40,14 @@ pub enum ExprError {
     InvalidParam { name: &'static str, reason: String },
 
     #[error("Array error: {0}")]
-    Array(
-        #[backtrace]
-        #[source]
-        RwError,
-    ),
+    Array(#[from] ArrayError),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
-}
-
-#[macro_export]
-macro_rules! ensure {
-    ($cond:expr $(,)?) => {
-        if !$cond {
-            return Err($crate::ExprError::Internal($crate::error::anyhow!(
-                stringify!($cond)
-            )));
-        }
-    };
-    ($cond:expr, $msg:literal $(,)?) => {
-        if !$cond {
-            return Err($crate::ExprError::Internal($crate::error::anyhow!($msg)));
-        }
-    };
-    ($cond:expr, $err:expr $(,)?) => {
-        if !$cond {
-            return Err($crate::ExprError::Internal($crate::error::anyhow!$err));
-        }
-    };
-    ($cond:expr, $fmt:expr, $($arg:tt)*) => {
-        if !$cond {
-            return Err($crate::ExprError::Internal($crate::error::anyhow!($fmt, $($arg)*)));
-        }
-    };
 }
 
 impl From<ExprError> for RwError {
     fn from(s: ExprError) -> Self {
         ErrorCode::ExprError(Box::new(s)).into()
     }
-}
-
-#[macro_export]
-macro_rules! bail {
-    ($msg:literal $(,)?) => {
-        return Err($crate::ExprError::Internal($crate::error::anyhow!($msg)))
-    };
-    ($err:expr $(,)?) => {
-        return Err($crate::ExprError::Internal($crate::error::anyhow!($err)))
-    };
-    ($fmt:expr, $($arg:tt)*) => {
-        return Err($crate::ExprError::Internal($crate::error::anyhow!($fmt, $($arg)*)))
-    };
 }

@@ -15,13 +15,13 @@
 use md5 as lib_md5;
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn md5(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
     writer
         .write_ref(&format!("{:x}", lib_md5::compute(s)))
-        .map_err(ExprError::Array)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]

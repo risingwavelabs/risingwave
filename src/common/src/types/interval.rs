@@ -16,6 +16,7 @@ use std::fmt::{Display, Formatter};
 use std::io::Write;
 use std::ops::{Add, Sub};
 
+use anyhow::anyhow;
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedSub};
@@ -24,7 +25,6 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use super::*;
-use crate::error::ErrorCode::IoError;
 
 /// Every interval can be represented by a `IntervalUnit`.
 /// Note that the difference between Interval and Instant.
@@ -66,23 +66,23 @@ impl IntervalUnit {
         self.ms
     }
 
-    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> Result<Self> {
+    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> ArrayResult<Self> {
         // TODO: remove IntervalType later.
         match ty {
             // the unit is months
             Year | YearToMonth | Month => {
-                let bytes = bytes.try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
-                })?;
+                let bytes = bytes
+                    .try_into()
+                    .map_err(|e| anyhow!("Failed to deserialize i32: {:?}", e))?;
                 let mouths = i32::from_be_bytes(bytes);
                 Ok(IntervalUnit::from_month(mouths))
             }
             // the unit is ms
             Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
             | Minute | MinuteToSecond | Second => {
-                let bytes = bytes.try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
-                })?;
+                let bytes = bytes
+                    .try_into()
+                    .map_err(|e| anyhow!("Failed to deserialize i64: {:?}", e))?;
                 let ms = i64::from_be_bytes(bytes);
                 Ok(IntervalUnit::from_millis(ms))
             }
@@ -151,14 +151,11 @@ impl IntervalUnit {
         writer.into_inner().to_vec()
     }
 
-    pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        {
-            output.write_i32::<BigEndian>(self.months)?;
-            output.write_i32::<BigEndian>(self.days)?;
-            output.write_i64::<BigEndian>(self.ms)?;
-            Ok(16)
-        }
-        .map_err(|e| RwError::from(IoError(e)))
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write_i32::<BigEndian>(self.months)?;
+        output.write_i32::<BigEndian>(self.days)?;
+        output.write_i64::<BigEndian>(self.ms)?;
+        Ok(16)
     }
 
     /// Multiple [`IntervalUnit`] by an integer with overflow check.

@@ -55,16 +55,14 @@ impl Expression for ArrayExpression {
             ArrayMeta::List {
                 datatype: self.element_type.clone(),
             },
-        )
-        .map_err(ExprError::Array)?;
+        )?;
         chunk
             .rows()
-            .try_for_each(|row| builder.append_row_ref(row))
-            .map_err(ExprError::Array)?;
+            .try_for_each(|row| builder.append_row_ref(row))?;
         builder
             .finish()
             .map(|a| Arc::new(ArrayImpl::List(a)))
-            .map_err(ExprError::Array)
+            .map_err(Into::into)
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

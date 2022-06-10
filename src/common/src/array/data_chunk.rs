@@ -21,11 +21,11 @@ use auto_enums::auto_enum;
 use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
+use super::ArrayResult;
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{Row, RowRef};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::error::{Result, RwError};
 use crate::hash::HashCode;
 use crate::types::{DataType, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
@@ -72,7 +72,7 @@ impl Vis {
         }
     }
 
-    pub fn is_set(&self, idx: usize) -> Result<bool> {
+    pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
         match self {
             Vis::Bitmap(b) => b.is_set(idx),
             Vis::Compact(c) => {
@@ -116,11 +116,11 @@ impl DataChunk {
     }
 
     /// Build a `DataChunk` with rows.
-    pub fn from_rows(rows: &[Row], data_types: &[DataType]) -> Result<Self> {
+    pub fn from_rows(rows: &[Row], data_types: &[DataType]) -> ArrayResult<Self> {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<ArrayResult<Vec<_>>>()?;
 
         for row in rows {
             for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
@@ -131,7 +131,7 @@ impl DataChunk {
         let new_arrays = array_builders
             .into_iter()
             .map(|builder| builder.finish())
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<ArrayResult<Vec<_>>>()?;
 
         let new_columns = new_arrays
             .into_iter()
@@ -232,7 +232,7 @@ impl DataChunk {
 
     /// `compact` will convert the chunk to compact format.
     /// Compact format means that `visibility == None`.
-    pub fn compact(self) -> Result<Self> {
+    pub fn compact(self) -> ArrayResult<Self> {
         match &self.vis2 {
             Vis::Compact(_) => Ok(self),
             Vis::Bitmap(visibility) => {
@@ -248,13 +248,13 @@ impl DataChunk {
                             .compact(visibility, cardinality)
                             .map(|array| Column::new(Arc::new(array)))
                     })
-                    .collect::<Result<Vec<_>>>()?;
+                    .collect::<ArrayResult<Vec<_>>>()?;
                 Ok(Self::new(columns, cardinality))
             }
         }
     }
 
-    pub fn from_protobuf(proto: &ProstDataChunk) -> Result<Self> {
+    pub fn from_protobuf(proto: &ProstDataChunk) -> ArrayResult<Self> {
         let mut columns = vec![];
         for any_col in proto.get_columns() {
             let cardinality = proto.get_cardinality() as usize;
@@ -271,7 +271,7 @@ impl DataChunk {
     ///
     /// Currently, `rechunk` would ignore visibility map. May or may not support it later depending
     /// on the demand
-    pub fn rechunk(chunks: &[DataChunk], each_size_limit: usize) -> Result<Vec<DataChunk>> {
+    pub fn rechunk(chunks: &[DataChunk], each_size_limit: usize) -> ArrayResult<Vec<DataChunk>> {
         assert!(each_size_limit > 0);
         // Corner case: one of the `chunks` may have 0 length
         // remove the chunks with zero physical length here,
@@ -334,10 +334,7 @@ impl DataChunk {
             if new_chunk_require == 0 {
                 let new_columns: Vec<Column> = array_builders
                     .drain(..)
-                    .map(|builder| {
-                        let array = builder.finish()?;
-                        Ok::<_, RwError>(Column::new(Arc::new(array)))
-                    })
+                    .map(|builder| builder.finish().map(Into::into))
                     .try_collect()?;
 
                 array_builders = new_columns
@@ -360,7 +357,7 @@ impl DataChunk {
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
-    ) -> Result<Vec<HashCode>> {
+    ) -> ArrayResult<Vec<HashCode>> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
@@ -378,7 +375,7 @@ impl DataChunk {
     /// * `pos` - Index of look up tuple
     /// * `RowRef` - Reference of data tuple
     /// * bool - whether this tuple is visible
-    pub fn row_at(&self, pos: usize) -> Result<(RowRef<'_>, bool)> {
+    pub fn row_at(&self, pos: usize) -> ArrayResult<(RowRef<'_>, bool)> {
         let row = self.row_at_unchecked_vis(pos);
         let vis = match &self.vis2 {
             Vis::Bitmap(bitmap) => bitmap.is_set(pos)?,
@@ -503,7 +500,7 @@ impl DataChunkTestExt for DataChunk {
                 _ => todo!("unsupported type: {c:?}"),
             })
             .map(|ty| ty.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()
+            .collect::<ArrayResult<Vec<_>>>()
             .unwrap();
         let mut visibility = vec![];
         for mut line in lines {
