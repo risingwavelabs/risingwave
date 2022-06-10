@@ -22,9 +22,9 @@ pub fn array_access<T: Scalar>(l: Option<ListRef>, r: Option<i32>) -> Result<Opt
     match (l, r) {
         // index must be greater than 0 following a one-based numbering convention for arrays
         (Some(list), Some(index)) if index > 0 => {
-            let datumref = list.value_at(index as usize).map_err(ExprError::Array)?;
+            let datumref = list.value_at(index as usize)?;
             if let Some(scalar) = datumref.to_owned_datum() {
-                Ok(Some(scalar.try_into().map_err(ExprError::Array)?))
+                Ok(Some(scalar.try_into()?))
             } else {
                 Ok(None)
             }

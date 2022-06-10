@@ -58,15 +58,12 @@ impl Expression for InExpression {
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let input_array = self.left.eval(input)?;
-        let mut output_array =
-            BoolArrayBuilder::new(input_array.len()).map_err(ExprError::Array)?;
+        let mut output_array = BoolArrayBuilder::new(input_array.len())?;
         for data in input_array.iter() {
             let ret = self.exists(&data.to_owned_datum());
-            output_array.append(Some(ret)).map_err(ExprError::Array)?;
+            output_array.append(Some(ret))?;
         }
-        Ok(Arc::new(
-            output_array.finish().map_err(ExprError::Array)?.into(),
-        ))
+        Ok(Arc::new(output_array.finish()?.into()))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

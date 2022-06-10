@@ -51,5 +51,5 @@ pub fn to_char_timestamp(
 ) -> Result<BytesGuard> {
     let chrono_tmpl = compile_pattern_to_chrono(tmpl);
     let res = data.0.format(&chrono_tmpl).to_string();
-    dst.write_ref(&res).map_err(ExprError::Array)
+    dst.write_ref(&res).map_err(Into::into)
 }

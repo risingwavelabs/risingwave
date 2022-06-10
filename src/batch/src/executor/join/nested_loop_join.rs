@@ -156,10 +156,10 @@ impl NestedLoopJoinExecutor {
         num_tuples: usize,
         data_types: &[DataType],
     ) -> Result<DataChunk> {
-        let mut output_array_builders = data_types
+        let mut output_array_builders: Vec<_> = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(num_tuples))
-            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+            .try_collect()?;
         for _i in 0..num_tuples {
             for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
                 builder.append_datum_ref(*datum_ref)?;
@@ -170,7 +170,7 @@ impl NestedLoopJoinExecutor {
         let result_columns = output_array_builders
             .into_iter()
             .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .collect::<Result<Vec<Column>>>()?;
+            .try_collect()?;
 
         Ok(DataChunk::new(result_columns, num_tuples))
     }

@@ -29,6 +29,7 @@ use tokio::task::JoinError;
 use tonic::metadata::{MetadataMap, MetadataValue};
 use tonic::Code;
 
+use crate::array::ArrayError;
 use crate::util::value_encoding::error::ValueEncodingError;
 
 /// Header used to store serialized [`RwError`] in grpc status.
@@ -98,6 +99,12 @@ pub enum ErrorCode {
     ),
     #[error("Expr error: {0:?}")]
     ExprError(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
+    #[error("Array error: {0:?}")]
+    ArrayError(
         #[backtrace]
         #[source]
         BoxedError,
@@ -323,6 +330,7 @@ impl ErrorCode {
             ErrorCode::InvalidParameterValue(_) => 26,
             ErrorCode::UnrecognizedConfigurationParameter(_) => 27,
             ErrorCode::ExprError(_) => 28,
+            ErrorCode::ArrayError(_) => 29,
             ErrorCode::UnknownError(_) => 101,
         }
     }
@@ -505,6 +513,56 @@ macro_rules! ensure_eq {
                 }
             }
         }
+    };
+}
+
+#[macro_export]
+macro_rules! ensure_anyhow {
+    ($cond:expr $(,)?) => {
+        if !$cond {
+            return Err(::anyhow::anyhow!(stringify!($cond)).into());
+        }
+    };
+    ($cond:expr, $msg:literal $(,)?) => {
+        if !$cond {
+            return Err(::anyhow::anyhow!($msg).into());
+        }
+    };
+    ($cond:expr, $err:expr $(,)?) => {
+        if !$cond {
+            return Err(::anyhow::anyhow!$err.into());
+        }
+    };
+    ($cond:expr, $fmt:expr, $($arg:tt)*) => {
+        if !$cond {
+            return Err(::anyhow::anyhow!($fmt, $($arg)*).into());
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! bail_anyhow {
+    ($msg:literal $(,)?) => {
+        return Err(::anyhow::anyhow!($msg).into())
+    };
+    ($err:expr $(,)?) => {
+        return Err(::anyhow::anyhow!($err).into())
+    };
+    ($fmt:expr, $($arg:tt)*) => {
+        return Err(::anyhow::anyhow!($fmt, $($arg)*).into())
+    };
+}
+
+#[macro_export]
+macro_rules! internal_anyhow {
+    ($msg:literal $(,)?) => {
+        ::anyhow::anyhow!($msg).into()
+    };
+    ($err:expr $(,)?) => {
+        ::anyhow::anyhow!($err).into()
+    };
+    ($fmt:expr, $($arg:tt)*) => {
+        ::anyhow::anyhow!($fmt, $($arg)*).into()
     };
 }
 

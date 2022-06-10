@@ -20,10 +20,9 @@ use std::mem::size_of;
 use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
-use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayError, ArrayIterator, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::error::Result;
 use crate::for_all_native_types;
 use crate::types::interval::IntervalUnit;
 use crate::types::{
@@ -49,10 +48,10 @@ where
     /// Returns array type of the primitive array
     fn array_type() -> ArrayType;
     /// Creates an `ArrayBuilder` for this primitive type
-    fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl>;
+    fn create_array_builder(capacity: usize) -> ArrayResult<ArrayBuilderImpl>;
 
     // item methods
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize>;
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize>;
     fn hash_wrapper<H: Hasher>(&self, state: &mut H);
 }
 
@@ -80,7 +79,7 @@ macro_rules! impl_array_methods {
             ArrayType::$array_type_pb
         }
 
-        fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
+        fn create_array_builder(capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
             let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity)?;
             Ok(ArrayBuilderImpl::$array_impl_variant(array_builder))
         }
@@ -93,8 +92,8 @@ macro_rules! impl_primitive_for_native_types {
             impl PrimitiveArrayItemType for $naive_type {
                 impl_array_methods!($naive_type, $scalar_type, $scalar_type);
 
-                fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-                    NativeType::to_protobuf(self, output)
+                fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+                    NativeType::to_protobuf(self, output).map_err(ArrayError::Decode)
                 }
 
                 fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
@@ -114,7 +113,7 @@ macro_rules! impl_primitive_for_others {
             impl PrimitiveArrayItemType for $scalar_type {
                 impl_array_methods!($scalar_type, $array_type_pb, $array_impl_variant);
 
-                fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
+                fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
                     <$scalar_type>::to_protobuf(self, output)
                 }
 
@@ -141,7 +140,7 @@ pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
 }
 
 impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
-    pub fn from_slice(data: &[Option<T>]) -> Result<Self> {
+    pub fn from_slice(data: &[Option<T>]) -> ArrayResult<Self> {
         let mut builder = <Self as Array>::Builder::new(data.len())?;
         for i in data {
             builder.append(*i)?;
@@ -222,7 +221,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
         T::create_array_builder(capacity)
     }
 }
@@ -237,14 +236,14 @@ pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> ArrayResult<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         })
     }
 
-    fn append(&mut self, value: Option<T>) -> Result<()> {
+    fn append(&mut self, value: Option<T>) -> ArrayResult<()> {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -258,7 +257,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         Ok(())
     }
 
-    fn append_array(&mut self, other: &PrimitiveArray<T>) -> Result<()> {
+    fn append_array(&mut self, other: &PrimitiveArray<T>) -> ArrayResult<()> {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -266,7 +265,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         Ok(())
     }
 
-    fn finish(self) -> Result<PrimitiveArray<T>> {
+    fn finish(self) -> ArrayResult<PrimitiveArray<T>> {
         Ok(PrimitiveArray {
             bitmap: self.bitmap.finish(),
             data: self.data,
@@ -281,7 +280,7 @@ mod tests {
 
     fn helper_test_builder<T: PrimitiveArrayItemType>(
         data: Vec<Option<T>>,
-    ) -> Result<PrimitiveArray<T>> {
+    ) -> ArrayResult<PrimitiveArray<T>> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len())?;
         for d in data {
             builder.append(d)?;

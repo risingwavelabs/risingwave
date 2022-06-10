@@ -20,10 +20,10 @@ use itertools::Itertools;
 use prost::DecodeError;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
+use super::{ArrayError, ArrayResult};
 use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
 use crate::buffer::Bitmap;
-use crate::error::{ErrorCode, Result, RwError};
 use crate::types::{DataType, NaiveDateTimeWrapper};
 use crate::util::hash_util::finalize_hashers;
 
@@ -51,17 +51,13 @@ impl Op {
         }
     }
 
-    pub fn from_protobuf(prost: &i32) -> Result<Op> {
+    pub fn from_protobuf(prost: &i32) -> ArrayResult<Op> {
         let op = match ProstOp::from_i32(*prost) {
             Some(ProstOp::Insert) => Op::Insert,
             Some(ProstOp::Delete) => Op::Delete,
             Some(ProstOp::UpdateInsert) => Op::UpdateInsert,
             Some(ProstOp::UpdateDelete) => Op::UpdateDelete,
-            None => {
-                return Err(RwError::from(ErrorCode::ProstError(DecodeError::new(
-                    "No such op type",
-                ))))
-            }
+            None => bail_anyhow!("No such op type"),
         };
         Ok(op)
     }
@@ -106,11 +102,11 @@ impl StreamChunk {
 
     /// Build a `StreamChunk` from rows.
     // TODO: introducing something like `StreamChunkBuilder` maybe better.
-    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> Result<Self> {
+    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> ArrayResult<Self> {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(rows.len()))
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<ArrayResult<Vec<_>>>()?;
         let mut ops = vec![];
 
         for (op, row) in rows {
@@ -123,7 +119,7 @@ impl StreamChunk {
         let new_arrays = array_builders
             .into_iter()
             .map(|builder| builder.finish())
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<ArrayResult<Vec<_>>>()?;
 
         let new_columns = new_arrays
             .into_iter()
@@ -151,7 +147,7 @@ impl StreamChunk {
     }
 
     /// compact the `StreamChunk` with its visibility map
-    pub fn compact(self) -> Result<Self> {
+    pub fn compact(self) -> ArrayResult<Self> {
         if self.visibility().is_none() {
             return Ok(self);
         }
@@ -170,7 +166,7 @@ impl StreamChunk {
                     .compact(&visibility, cardinality)
                     .map(|array| Column::new(Arc::new(array)))
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<ArrayResult<Vec<_>>>()?;
         let mut new_ops = Vec::with_capacity(cardinality);
         for (op, visible) in ops.into_iter().zip_eq(visibility.iter()) {
             if visible {
@@ -210,7 +206,7 @@ impl StreamChunk {
         }
     }
 
-    pub fn from_protobuf(prost: &ProstStreamChunk) -> Result<Self> {
+    pub fn from_protobuf(prost: &ProstStreamChunk) -> ArrayResult<Self> {
         let cardinality = prost.get_cardinality() as usize;
         let mut ops = Vec::with_capacity(cardinality);
         for op in prost.get_ops() {
@@ -235,7 +231,7 @@ impl StreamChunk {
         &self,
         keys: &[usize],
         hasher_builder: H,
-    ) -> Result<Vec<u64>> {
+    ) -> ArrayResult<Vec<u64>> {
         let mut states = vec![];
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for key in keys {
@@ -357,7 +353,7 @@ impl StreamChunkTestExt for StreamChunk {
                 _ => todo!("unsupported type: {c:?}"),
             })
             .map(|ty| ty.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()
+            .collect::<ArrayResult<Vec<_>>>()
             .unwrap();
         let mut visibility = vec![];
         for mut line in lines {

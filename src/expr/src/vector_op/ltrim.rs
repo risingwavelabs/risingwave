@@ -21,7 +21,7 @@ use crate::{ExprError, Result};
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[inline(always)]
 pub fn ltrim(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer.write_ref(s.trim_start()).map_err(ExprError::Array)
+    writer.write_ref(s.trim_start()).map_err(Into::into)
 }
 
 #[cfg(test)]

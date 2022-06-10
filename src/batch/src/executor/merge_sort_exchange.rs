@@ -136,7 +136,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
             // we may run out of input data chunks from sources.
             let mut want_to_produce = K_PROCESSING_WINDOW_SIZE;
 
-            let mut builders = self
+            let mut builders: Vec<_> = self
                 .schema()
                 .fields
                 .iter()
@@ -145,7 +145,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
                         .data_type
                         .create_array_builder(K_PROCESSING_WINDOW_SIZE)
                 })
-                .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+                .try_collect()?;
             let mut array_len = 0;
             while want_to_produce > 0 && !self.min_heap.is_empty() {
                 let top_elem = self.min_heap.pop().unwrap();

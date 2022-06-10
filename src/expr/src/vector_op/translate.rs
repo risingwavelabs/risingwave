@@ -45,7 +45,7 @@ pub fn translate(
         None => Some(c),
     });
 
-    writer.write_from_char_iter(iter).map_err(ExprError::Array)
+    writer.write_from_char_iter(iter).map_err(Into::into)
 }
 
 #[cfg(test)]

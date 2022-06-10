@@ -21,13 +21,13 @@ use crate::{bail, ExprError, Result};
 #[inline(always)]
 pub fn substr_start(s: &str, start: i32, writer: BytesWriter) -> Result<BytesGuard> {
     let start = min(max(start - 1, 0) as usize, s.len());
-    writer.write_ref(&s[start..]).map_err(ExprError::Array)
+    writer.write_ref(&s[start..]).map_err(Into::into)
 }
 
 #[inline(always)]
 pub fn substr_for(s: &str, count: i32, writer: BytesWriter) -> Result<BytesGuard> {
     let end = min(count as usize, s.len());
-    writer.write_ref(&s[..end]).map_err(ExprError::Array)
+    writer.write_ref(&s[..end]).map_err(Into::into)
 }
 
 #[inline(always)]
@@ -42,7 +42,7 @@ pub fn substr_start_for(
     }
     let begin = max(start - 1, 0) as usize;
     let end = min(max(start - 1 + count, 0) as usize, s.len());
-    writer.write_ref(&s[begin..end]).map_err(ExprError::Array)
+    writer.write_ref(&s[begin..end]).map_err(Into::into)
 }
 
 #[cfg(test)]

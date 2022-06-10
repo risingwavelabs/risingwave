@@ -123,7 +123,7 @@ impl UpdateExecutor {
             let columns = builders
                 .into_iter()
                 .map(|b| b.finish().map(|a| a.into()))
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
 
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()

@@ -40,8 +40,8 @@ use itertools::Itertools;
 use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::Buffer as ProstBuffer;
 
-use crate::array::{Array, BoolArray};
-use crate::error::{Result, RwError};
+use crate::array::error::ArrayError;
+use crate::array::{Array, ArrayResult, BoolArray};
 use crate::util::bit_util;
 
 #[derive(Default, Debug)]
@@ -129,7 +129,7 @@ impl std::fmt::Debug for Bitmap {
 }
 
 impl Bitmap {
-    pub fn new(num_bits: usize) -> Result<Self> {
+    pub fn new(num_bits: usize) -> ArrayResult<Self> {
         let len = Self::num_of_bytes(num_bits);
         Ok(Self {
             bits: vec![0; len].into(),
@@ -206,7 +206,7 @@ impl Bitmap {
         bit_util::get_bit_raw(self.bits.as_ptr(), idx)
     }
 
-    pub fn is_set(&self, idx: usize) -> Result<bool> {
+    pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
         self.check_idx(idx)?;
 
         // Justification
@@ -231,7 +231,7 @@ impl Bitmap {
     }
 
     /// Returns an iterator which starts from `offset`.
-    pub fn iter_from(&self, offset: usize) -> Result<BitmapIter<'_>> {
+    pub fn iter_from(&self, offset: usize) -> ArrayResult<BitmapIter<'_>> {
         self.check_idx(offset)?;
         Ok(BitmapIter {
             bits: &self.bits,
@@ -240,16 +240,16 @@ impl Bitmap {
         })
     }
 
-    fn check_idx(&self, idx: usize) -> Result<()> {
-        ensure!(idx < self.len());
+    fn check_idx(&self, idx: usize) -> ArrayResult<()> {
+        ensure_anyhow!(idx < self.len());
         Ok(())
     }
 }
 
 impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
-    type Output = Result<Bitmap>;
+    type Output = ArrayResult<Bitmap>;
 
-    fn bitand(self, rhs: &'b Bitmap) -> Result<Bitmap> {
+    fn bitand(self, rhs: &'b Bitmap) -> ArrayResult<Bitmap> {
         assert_eq!(self.num_bits, rhs.num_bits);
         let bits = self
             .bits
@@ -262,9 +262,9 @@ impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
 }
 
 impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
-    type Output = Result<Bitmap>;
+    type Output = ArrayResult<Bitmap>;
 
-    fn bitor(self, rhs: &'b Bitmap) -> Result<Bitmap> {
+    fn bitor(self, rhs: &'b Bitmap) -> ArrayResult<Bitmap> {
         assert_eq!(self.num_bits, rhs.num_bits);
         let bits = self
             .bits
@@ -277,9 +277,9 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
 }
 
 impl TryFrom<&BoolArray> for Bitmap {
-    type Error = RwError;
+    type Error = ArrayError;
 
-    fn try_from(bools: &BoolArray) -> Result<Bitmap> {
+    fn try_from(bools: &BoolArray) -> ArrayResult<Bitmap> {
         let mut builder = BitmapBuilder::default();
         bools.iter().for_each(|e| {
             builder.append(e.unwrap_or(false));
@@ -289,9 +289,9 @@ impl TryFrom<&BoolArray> for Bitmap {
 }
 
 impl TryFrom<Vec<bool>> for Bitmap {
-    type Error = RwError;
+    type Error = ArrayError;
 
-    fn try_from(bools: Vec<bool>) -> Result<Bitmap> {
+    fn try_from(bools: Vec<bool>) -> ArrayResult<Bitmap> {
         let mut builder = BitmapBuilder::default();
         bools.iter().for_each(|e| {
             builder.append(*e);
@@ -316,9 +316,9 @@ impl Bitmap {
 }
 
 impl TryFrom<&ProstBuffer> for Bitmap {
-    type Error = RwError;
+    type Error = ArrayError;
 
-    fn try_from(buf: &ProstBuffer) -> Result<Bitmap> {
+    fn try_from(buf: &ProstBuffer) -> ArrayResult<Bitmap> {
         let last_byte_num_bits = u8::from_be_bytes(buf.body[..1].try_into().unwrap());
         let bits = Bytes::copy_from_slice(&buf.body[1..]); // TODO: avoid this allocation
         let num_bits = (bits.len() << 3) - ((8 - last_byte_num_bits) % 8) as usize;
@@ -346,17 +346,6 @@ pub struct BitmapIter<'a> {
     bits: &'a Bytes,
     idx: usize,
     num_bits: usize,
-}
-
-impl<'a> BitmapIter<'a> {
-    pub fn try_from(value: &'a Bytes, num_bits: usize) -> Result<Self> {
-        ensure!(value.len() >= Bitmap::num_of_bytes(num_bits));
-        Ok(Self {
-            bits: value,
-            idx: 0,
-            num_bits,
-        })
-    }
 }
 
 impl<'a> std::iter::Iterator for BitmapIter<'a> {
@@ -469,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bitmap_iter() -> Result<()> {
+    fn test_bitmap_iter() -> ArrayResult<()> {
         {
             let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b01001010]));
             let mut booleans = vec![];

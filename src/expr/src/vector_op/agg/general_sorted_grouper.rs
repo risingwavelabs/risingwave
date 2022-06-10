@@ -243,7 +243,9 @@ where
     }
 
     pub fn output_concrete(&self, builder: &mut T::Builder) -> Result<()> {
-        builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))
+        builder
+            .append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))
+            .map_err(Into::into)
     }
 }
 

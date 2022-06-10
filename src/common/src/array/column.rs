@@ -16,9 +16,8 @@ use std::sync::Arc;
 
 use risingwave_pb::data::Column as ProstColumn;
 
-use super::Array;
+use super::{Array, ArrayError, ArrayResult};
 use crate::array::{ArrayImpl, ArrayRef};
-use crate::error::Result;
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
 /// implementation.
@@ -37,7 +36,7 @@ impl Column {
         ProstColumn { array: Some(array) }
     }
 
-    pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> Result<Self> {
+    pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> ArrayResult<Self> {
         Ok(Column {
             array: Arc::new(ArrayImpl::from_protobuf(col.get_array()?, cardinality)?),
         })

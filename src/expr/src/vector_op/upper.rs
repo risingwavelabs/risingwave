@@ -18,9 +18,7 @@ use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn upper(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer
-        .write_ref(&s.to_uppercase())
-        .map_err(ExprError::Array)
+    writer.write_ref(&s.to_uppercase()).map_err(Into::into)
 }
 
 #[cfg(test)]

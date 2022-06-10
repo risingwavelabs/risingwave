@@ -28,10 +28,10 @@ pub(crate) trait SourceChunkBuilder {
         column_descs: &[SourceColumnDesc],
         rows: &[Vec<Datum>],
     ) -> Result<Vec<Column>> {
-        let mut builders = column_descs
+        let mut builders: Vec<_> = column_descs
             .iter()
             .map(|k| k.data_type.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
-            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+            .try_collect()?;
 
         for row in rows {
             row.iter()
@@ -42,7 +42,8 @@ pub(crate) trait SourceChunkBuilder {
         builders
             .into_iter()
             .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .collect::<Result<Vec<Column>>>()
+            .try_collect()
+            .map_err(Into::into)
     }
 
     fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {

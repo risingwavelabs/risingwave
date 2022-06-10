@@ -38,4 +38,5 @@ pub mod expr;
 pub mod vector_op;
 
 pub use error::ExprError;
+pub use risingwave_common::{bail_anyhow as bail, ensure_anyhow as ensure};
 pub type Result<T> = std::result::Result<T, ExprError>;
