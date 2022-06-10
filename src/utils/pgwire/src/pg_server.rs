@@ -160,10 +160,19 @@ mod tests {
             self: Arc<Self>,
             sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
+            // split a statement and trim \' around the intput param to construct result.
+            // Ex:
+            //    SELECT 'a','b' -> result: a , b
             let res: Vec<Option<String>> = sql
                 .split(&[' ', ',', ';'])
                 .skip(1)
-                .map(|x| Some(x.to_string()))
+                .map(|x| {
+                    Some(
+                        x.trim_start_matches('\'')
+                            .trim_end_matches('\'')
+                            .to_string(),
+                    )
+                })
                 .collect();
 
             Ok(PgResponse::new(

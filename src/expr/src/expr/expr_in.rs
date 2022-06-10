@@ -16,7 +16,6 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 
@@ -59,26 +58,12 @@ impl Expression for InExpression {
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let input_array = self.left.eval(input)?;
-        let visibility = input.visibility();
         let mut output_array =
-            BoolArrayBuilder::new(input.cardinality()).map_err(ExprError::Array)?;
-        match visibility {
-            Some(bitmap) => {
-                for (data, vis) in input_array.iter().zip_eq(bitmap.iter()) {
-                    if !vis {
-                        continue;
-                    }
-                    let ret = self.exists(&data.to_owned_datum());
-                    output_array.append(Some(ret)).map_err(ExprError::Array)?;
-                }
-            }
-            None => {
-                for data in input_array.iter() {
-                    let ret = self.exists(&data.to_owned_datum());
-                    output_array.append(Some(ret)).map_err(ExprError::Array)?;
-                }
-            }
-        };
+            BoolArrayBuilder::new(input_array.len()).map_err(ExprError::Array)?;
+        for data in input_array.iter() {
+            let ret = self.exists(&data.to_owned_datum());
+            output_array.append(Some(ret)).map_err(ExprError::Array)?;
+        }
         Ok(Arc::new(
             output_array.finish().map_err(ExprError::Array)?.into(),
         ))
@@ -114,7 +99,8 @@ mod tests {
              a
              def
              abc",
-        );
+        )
+        .with_invisible_holes();
         let res = search_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Bool(true)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Bool(false)));
