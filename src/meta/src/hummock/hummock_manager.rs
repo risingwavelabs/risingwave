@@ -51,7 +51,6 @@ use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::FragmentManagerRef;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -71,8 +70,6 @@ pub struct HummockManager<S: MetaStore> {
 
     // `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
     compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
-    // for compaction to get some info (e.g. existing_table_ids)
-    fragment_manager: FragmentManagerRef<S>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -161,7 +158,6 @@ where
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
     ) -> Result<HummockManager<S>> {
         let instance = HummockManager {
             env,
@@ -171,7 +167,6 @@ where
             cluster_manager,
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
-            fragment_manager,
         };
 
         instance.load_meta_store_state().await?;
@@ -582,7 +577,10 @@ where
             task_id as HummockCompactionTaskId,
             compaction_group_id,
         );
-        let existing_table_ids_from_meta = self.fragment_manager.existing_table_ids().await?;
+        let existing_table_ids_from_meta = self
+            .compaction_group_manager
+            .internal_table_ids_by_compation_group_id(compaction_group_id)
+            .await?;
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {

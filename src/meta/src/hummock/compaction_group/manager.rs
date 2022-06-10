@@ -73,6 +73,8 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     pub async fn register_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
         let mut pairs = vec![];
         // MV or source
+        // existing_table_ids include the table_ref_id (source and materialized_view) +
+        // internal_table_id (stateful executor)
         pairs.push((
             Prefix::from(table_fragments.table_id().table_id),
             CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
@@ -140,14 +142,14 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .await
     }
 
-    async fn get_internal_table_ids_by_compation_group_id(
+    pub async fn internal_table_ids_by_compation_group_id(
         &self,
         compaction_group_id: u64,
-    ) -> HashSet<u32> {
+    ) -> Result<HashSet<u32>> {
         let inner = self.inner.read().await;
-        let prefix_vec = inner.get_prefixs_by_compaction_group_id(compaction_group_id);
+        let prefix_set = inner.get_prefixs_by_compaction_group_id(compaction_group_id)?;
 
-        HashSet::from_iter(prefix_vec.into_iter().map(|prefix| u32::from(prefix)))
+        Ok(prefix_set.into_iter().map(u32::from).collect())
     }
 }
 
@@ -254,12 +256,15 @@ impl CompactionGroupManagerInner {
         Ok(())
     }
 
-    fn get_prefixs_by_compaction_group_id(&self, compaction_group_id: u64) -> Vec<Prefix> {
-        self.index
-            .iter()
-            .filter(|item| return item.1 == &compaction_group_id)
-            .map(|item| item.0.clone())
-            .collect_vec()
+    fn get_prefixs_by_compaction_group_id(
+        &self,
+        compaction_group_id: u64,
+    ) -> Result<HashSet<Prefix>> {
+        match self.compaction_groups.get(&compaction_group_id) {
+            Some(compaction_group) => Ok(compaction_group.member_prefixes.clone()),
+
+            None => Err(Error::InvalidCompactionGroup(compaction_group_id)),
+        }
     }
 }
 
