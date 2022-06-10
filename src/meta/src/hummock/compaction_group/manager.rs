@@ -147,7 +147,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         compaction_group_id: u64,
     ) -> Result<HashSet<u32>> {
         let inner = self.inner.read().await;
-        let prefix_set = inner.get_prefixs_by_compaction_group_id(compaction_group_id)?;
+        let prefix_set = inner.prefixs_by_compaction_group_id(compaction_group_id)?;
 
         Ok(prefix_set.into_iter().map(u32::from).collect())
     }
@@ -256,10 +256,7 @@ impl CompactionGroupManagerInner {
         Ok(())
     }
 
-    fn get_prefixs_by_compaction_group_id(
-        &self,
-        compaction_group_id: u64,
-    ) -> Result<HashSet<Prefix>> {
+    fn prefixs_by_compaction_group_id(&self, compaction_group_id: u64) -> Result<HashSet<Prefix>> {
         match self.compaction_groups.get(&compaction_group_id) {
             Some(compaction_group) => Ok(compaction_group.member_prefixes.clone()),
 
