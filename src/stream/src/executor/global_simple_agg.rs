@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::StateTable;
@@ -27,8 +27,8 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::*;
 use crate::executor::aggregation::{
-    agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, get_key_len, AggCall,
-    AggState,
+    agg_input_array_refs, generate_agg_schema, generate_column_descs, generate_managed_agg_state,
+    get_key_len, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
@@ -111,10 +111,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
             let state_table = StateTable::new(
                 ks.clone(),
-                vec![ColumnDesc::unnamed(
-                    ColumnId::new(0),
-                    agg_call.return_type.clone(),
-                )],
+                generate_column_descs(agg_call, &key_indices, &pk_indices, &schema, input.as_ref()),
                 // Primary key do not includes group key.
                 vec![OrderType::Descending; get_key_len(agg_call)],
                 None,
