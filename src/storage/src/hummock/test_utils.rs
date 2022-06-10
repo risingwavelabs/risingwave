@@ -84,6 +84,7 @@ pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>)
         }),
         file_size: batches.len() as u64,
         vnode_bitmaps: vec![],
+        unit_id: u64::MAX,
     }
 }
 
@@ -127,7 +128,8 @@ pub fn gen_test_sstable_data(
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }
-    b.finish()
+    let (_, data, meta, vnodes) = b.finish();
+    (data, meta, vnodes)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`

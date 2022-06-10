@@ -97,8 +97,7 @@ impl KeyValueGrouping for VirtualNodeGrouping {
         } else {
             None
         };
-        let group_key = group.unwrap_or(u64::MAX);
-        group_key
+        group.unwrap_or(u64::MAX)
     }
 }
 
@@ -163,7 +162,7 @@ where
             .into_iter()
             .flat_map(|(k, v)| {
                 v.finish().into_iter().map(move |mut builder| {
-                    builder.unit_id = k.clone();
+                    builder.unit_id = k;
                     builder
                 })
             })
@@ -191,18 +190,15 @@ mod tests {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let get_id_and_builder = || async {
-            Ok((
+            Ok(SSTableBuilder::new(
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(
-                    0,
-                    SSTableBuilderOptions {
-                        capacity: table_capacity,
-                        block_capacity: block_size,
-                        restart_interval: DEFAULT_RESTART_INTERVAL,
-                        bloom_false_positive: 0.1,
-                        compression_algorithm: CompressionAlgorithm::None,
-                    },
-                ),
+                SSTableBuilderOptions {
+                    capacity: table_capacity,
+                    block_capacity: block_size,
+                    restart_interval: DEFAULT_RESTART_INTERVAL,
+                    bloom_false_positive: 0.1,
+                    compression_algorithm: CompressionAlgorithm::None,
+                },
             ))
         };
         let prefix = b"\x01\x02\x03\x04".as_slice().get_u32();
@@ -251,18 +247,15 @@ mod tests {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let get_id_and_builder = || async {
-            Ok((
+            Ok(SSTableBuilder::new(
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(
-                    0,
-                    SSTableBuilderOptions {
-                        capacity: table_capacity,
-                        block_capacity: block_size,
-                        restart_interval: DEFAULT_RESTART_INTERVAL,
-                        bloom_false_positive: 0.1,
-                        compression_algorithm: CompressionAlgorithm::None,
-                    },
-                ),
+                SSTableBuilderOptions {
+                    capacity: table_capacity,
+                    block_capacity: block_size,
+                    restart_interval: DEFAULT_RESTART_INTERVAL,
+                    bloom_false_positive: 0.1,
+                    compression_algorithm: CompressionAlgorithm::None,
+                },
             ))
         };
         let table_id = 1u32;

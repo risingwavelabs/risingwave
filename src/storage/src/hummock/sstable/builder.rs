@@ -152,10 +152,6 @@ impl SSTableBuilder {
         self.key_count += 1;
     }
 
-    pub fn get_sstable_id(&self) -> u64 {
-        self.sstable_id
-    }
-
     /// Finish building sst.
     ///
     /// Unlike most LSM-Tree implementations, sstable meta and data are encoded separately.
@@ -168,7 +164,7 @@ impl SSTableBuilder {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
+    pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<VNodeBitmap>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.to_vec();
         self.build_block();
@@ -193,6 +189,7 @@ impl SSTableBuilder {
         };
 
         (
+            self.sstable_id,
             self.buf.freeze(),
             meta,
             self.vnode_bitmaps
@@ -267,7 +264,7 @@ pub(super) mod tests {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)));
         }
 
-        let (_, meta, _) = b.finish();
+        let (_, _, meta, _) = b.finish();
 
         assert_eq!(test_key_of(0), meta.smallest_key);
         assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), meta.largest_key);
