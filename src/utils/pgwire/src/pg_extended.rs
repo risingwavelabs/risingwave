@@ -20,20 +20,16 @@ use regex::Regex;
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_protocol::cstr_to_str;
 
-fn replace_params(query_string: String, generic_params: &[usize], params: &[String]) -> String {
-    let mut tmp = query_string;
-    tmp.push(' ');
-    for &i in generic_params.iter() {
-        let pattern = Regex::new(format!(r"(?P<x>\${})(?P<y>[,;\s]+)", i).as_str()).unwrap();
-        let param = &params[i.sub(1)];
-        tmp = pattern
-            .replace_all(&tmp, format!("{}$y", param))
-            .to_string();
-    }
-    tmp.pop();
-    tmp
-}
-
+/// Parse params accoring the type description.
+///
+/// # Example
+///
+/// ```ignore
+/// let raw_params = vec!["A".into(), "B".into(), "C".into()];
+/// let type_description = vec![TypeOid::Varchar; 3];
+/// let params = parse_params(&type_description, &raw_params);
+/// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
+/// ```
 fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Vec<String> {
     assert!(type_description.len() == raw_params.len());
 
@@ -43,7 +39,7 @@ fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Vec<Strin
         .map(|(i, param)| {
             let oid = type_description[i];
             match oid {
-                TypeOid::Varchar => format!("\'{}\'", cstr_to_str(param).unwrap()),
+                TypeOid::Varchar => format!("'{}'", cstr_to_str(param).unwrap()),
                 TypeOid::Boolean => todo!(),
                 TypeOid::BigInt => todo!(),
                 TypeOid::SmallInt => todo!(),
@@ -59,6 +55,31 @@ fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Vec<Strin
             }
         })
         .collect()
+}
+
+/// Replace generic params in query into real params.
+///
+/// # Example
+///
+/// ```ignore
+/// let raw_params = vec!["A".into(), "B".into(), "C".into()];
+/// let type_description = vec![TypeOid::Varchar; 3];
+/// let params = parse_params(&type_description, &raw_params);
+/// let res = replace_params("SELECT $3,$2,$1".to_string(), &[1, 2, 3], &params);
+/// assert_eq!(res, "SELECT 'C','B','A'");
+/// ```
+fn replace_params(query_string: String, generic_params: &[usize], params: &[String]) -> String {
+    let mut tmp = query_string;
+
+    for &param_idx in generic_params {
+        let pattern =
+            Regex::new(format!(r"(?P<x>\${0})(?P<y>[,;\s]+)|\${0}$", param_idx).as_str()).unwrap();
+        let param = &params[param_idx.sub(1)];
+        tmp = pattern
+            .replace_all(&tmp, format!("{}$y", param))
+            .to_string();
+    }
+    tmp
 }
 
 #[derive(Default)]
@@ -119,12 +140,13 @@ impl PgStatement {
             })
             .collect();
 
-        // 2. parse params
+        // 2. parse params.
         let params = parse_params(&self.type_description, params);
-        // 2. replace params
+
+        // 3. replace params.
         let instance_query_string = replace_params(statement, &generic_params, &params);
 
-        // 3. Create a new portal.
+        // 4. Create a new portal.
         PgPortal {
             name,
             query_string: Bytes::from(instance_query_string),
@@ -162,19 +184,18 @@ mod tests {
     fn test_replace_params() {
         {
             let raw_params = vec!["A".into(), "B".into(), "C".into()];
-            let type_description = vec![TypeOid::as_type(1043).unwrap(); 3];
+            let type_description = vec![TypeOid::Varchar; 3];
             let params = parse_params(&type_description, &raw_params);
 
             let res = replace_params("SELECT $3,$2,$1".to_string(), &[1, 2, 3], &params);
-            println!("{}", res);
-            assert!(res == "SELECT \'C\',\'B\',\'A\'");
+            assert!(res == "SELECT 'C','B','A'");
 
             let res = replace_params(
                 "SELECT $2,$3,$1  ,$3 ,$2 ,$1     ;".to_string(),
                 &[1, 2, 3],
                 &params,
             );
-            assert!(res == "SELECT \'B\',\'C\',\'A\'  ,\'C\' ,\'B\' ,\'A\'     ;");
+            assert!(res == "SELECT 'B','C','A'  ,'C' ,'B' ,'A'     ;");
         }
 
         {
@@ -191,7 +212,7 @@ mod tests {
                 "J".into(),
                 "K".into(),
             ];
-            let type_description = vec![TypeOid::as_type(1043).unwrap(); 11];
+            let type_description = vec![TypeOid::Varchar; 11];
             let params = parse_params(&type_description, &raw_params);
 
             let res = replace_params(
@@ -199,7 +220,7 @@ mod tests {
                 &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
                 &params,
             );
-            assert!(res == "SELECT \'K\',\'B\',\'A\';");
+            assert!(res == "SELECT 'K','B','A';");
         }
 
         {
@@ -217,22 +238,22 @@ mod tests {
                 "K".into(),
                 "L".into(),
             ];
-            let type_description = vec![TypeOid::as_type(1043).unwrap(); 12];
+            let type_description = vec![TypeOid::Varchar; 12];
             let params = parse_params(&type_description, &raw_params);
 
             let res = replace_params(
-                "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  \'He1ll2o\',1;".to_string(),
+                "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  'He1ll2o',1;".to_string(),
                 &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
                 &params,
             );
-            assert!(res == "SELECT \'B\',\'A\',\'K\',\'J\' ,\'K\', \'A\',\'L\' , \'B\',  \'He1ll2o\',1;");
+            assert!(res == "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;");
 
             let res = replace_params(
-                "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  \'He1ll2o\',1;".to_string(),
+                "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  'He1ll2o',1;".to_string(),
                 &[2, 1, 11, 10, 12, 9, 7, 8, 5, 6, 4, 3],
                 &params,
             );
-            assert!(res == "SELECT \'B\',\'A\',\'K\',\'J\' ,\'K\', \'A\',\'L\' , \'B\',  \'He1ll2o\',1;");
+            assert!(res == "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;");
         }
     }
 }

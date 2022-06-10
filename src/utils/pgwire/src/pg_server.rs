@@ -160,6 +160,9 @@ mod tests {
             self: Arc<Self>,
             sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
+            // split a statement and trim \' around the intput param to construct result.
+            // Ex:
+            //    SELECT 'a','b' -> result: a , b
             let res: Vec<Option<String>> = sql
                 .split(&[' ', ',', ';'])
                 .skip(1)
