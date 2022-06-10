@@ -301,7 +301,6 @@ pub mod tests {
             max_bytes_for_level_multiplier: 5,
             max_compaction_bytes: 0,
             min_compaction_bytes: 1,
-            level0_tigger_file_numer: 1,
             level0_tier_compact_file_number: 2,
             compaction_mode: RangeMode,
         };
@@ -383,7 +382,6 @@ pub mod tests {
             max_bytes_for_level_multiplier: 5,
             max_compaction_bytes: 10000,
             min_compaction_bytes: 200,
-            level0_tigger_file_numer: 8,
             level0_tier_compact_file_number: 4,
             compaction_mode: RangeMode,
         };
@@ -411,7 +409,6 @@ pub mod tests {
 
         config.min_compaction_bytes = 1;
         config.max_bytes_for_level_base = 100;
-        config.level0_tigger_file_numer = 8;
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();

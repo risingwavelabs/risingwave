@@ -152,7 +152,6 @@ pub async fn setup_compute_env(
             .unwrap(),
     );
     let config = CompactionConfig {
-        level0_tigger_file_numer: 2,
         level0_tier_compact_file_number: 1,
         min_compaction_bytes: 1,
         max_bytes_for_level_base: 1,
