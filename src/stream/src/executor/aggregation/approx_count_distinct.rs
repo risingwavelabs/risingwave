@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 
 use super::StreamingAggStateImpl;
@@ -56,24 +56,25 @@ impl RegisterBucket {
         }
     }
 
-    fn get_register(&self, register: usize) -> u32 {
+    fn get_register(&self, register: usize) -> Result<u32> {
+        if !(1..=64).contains(&register) {
+            return Err(ErrorCode::InternalError("Invalid register index".into()).into());
+        }
+
         if register >= 22 {
-            return self.count_22_to_64[register - 22] as u32;
+            return Ok(self.count_22_to_64[register - 22] as u32);
         }
 
         if register >= 6 {
-            return self.count_6_to_21[register - 6] as u32;
+            return Ok(self.count_6_to_21[register - 6] as u32);
         }
 
-        if register >= 1 {
-            return self.count_1_to_5[register - 1];
-        }
-
-        0
+        Ok(self.count_1_to_5[register - 1])
     }
 
-    fn add_to_register(&mut self, register: usize, is_insert: bool) {
-        let count = self.get_register(register);
+    /// Increments or decrements the given register depending on the state of `is_insert`
+    fn update_register(&mut self, register: usize, is_insert: bool) {
+        let count = self.get_register(register).unwrap();
         if is_insert {
             self.set_register(register, count + 1);
         } else {
@@ -81,10 +82,10 @@ impl RegisterBucket {
         }
     }
 
-    /// Gets the max bucket such that the count in the register is greatert than zero
+    /// Gets the number of the maximum register which has a count greater than zero.
     fn get_max(&self) -> u8 {
         for i in (1..65).rev() {
-            if self.get_register(i) > 0 {
+            if self.get_register(i).unwrap() > 0 {
                 return i as u8;
             }
         }
@@ -125,7 +126,7 @@ impl StreamingApproxCountDistinct {
     }
 
     /// Adds the count of the datum's hash into the register, if it is greater than the existing
-    /// count at the register
+    /// count at the register.
     fn update_registers(&mut self, datum_ref: DatumRef, is_insert: bool) {
         if datum_ref.is_none() {
             return;
@@ -137,7 +138,7 @@ impl StreamingApproxCountDistinct {
         let index = (hash as usize) & (INDICES - 1); // Index is based on last few bits
         let count = self.count_hash(hash) as usize;
 
-        self.registers[index].add_to_register(count, is_insert);
+        self.registers[index].update_register(count, is_insert);
     }
 
     /// Calculate the hash of the `scalar_impl` using Rust's default hasher
@@ -148,7 +149,7 @@ impl StreamingApproxCountDistinct {
         hasher.finish()
     }
 
-    /// Counts the number of trailing zeroes plus 1 in the non-index bits of the hash
+    /// Counts the number of trailing zeroes plus 1 in the non-index bits of the hash.
     fn count_hash(&self, mut hash: u64) -> u8 {
         let mut count = 1;
 
