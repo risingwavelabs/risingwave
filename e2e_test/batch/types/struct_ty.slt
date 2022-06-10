@@ -16,9 +16,6 @@ select Row(null);
 ----
 (NULL)
 
-statement error
-select Row();
-
 statement ok
 create table t (v1 int);
 
