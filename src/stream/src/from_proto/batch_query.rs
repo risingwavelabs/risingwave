@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
@@ -36,7 +36,11 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
-        let table_id = TableId::from(&node.table_ref_id);
+        let table_id = node.table_desc.as_ref().unwrap().table_id.into();
+
+        let pk_descs_proto = &node.table_desc.as_ref().unwrap().order_key;
+        let pk_descs = pk_descs_proto.iter().map(|d| d.into()).collect();
+
         let column_descs = node
             .column_descs
             .iter()
@@ -78,6 +82,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             },
             key_indices,
             hash_filter,
+            pk_descs,
         );
 
         Ok(executor.boxed())

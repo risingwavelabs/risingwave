@@ -17,10 +17,10 @@ use std::sync::Arc;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayRef, BoolArrayBuilder, DataChunk, Row,
 };
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
+use crate::{ExprError, Result};
 
 #[derive(Debug)]
 pub struct IsNullExpression {
@@ -58,14 +58,17 @@ impl Expression for IsNullExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut builder = BoolArrayBuilder::new(input.cardinality())?;
+        let mut builder = BoolArrayBuilder::new(input.cardinality()).map_err(ExprError::Array)?;
         self.child
             .eval(input)?
             .null_bitmap()
             .iter()
-            .try_for_each(|b| builder.append(Some(!b)))?;
+            .try_for_each(|b| builder.append(Some(!b)))
+            .map_err(ExprError::Array)?;
 
-        Ok(Arc::new(ArrayImpl::Bool(builder.finish()?)))
+        Ok(Arc::new(ArrayImpl::Bool(
+            builder.finish().map_err(ExprError::Array)?,
+        )))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
@@ -81,14 +84,17 @@ impl Expression for IsNotNullExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut builder = BoolArrayBuilder::new(input.cardinality())?;
+        let mut builder = BoolArrayBuilder::new(input.cardinality()).map_err(ExprError::Array)?;
         self.child
             .eval(input)?
             .null_bitmap()
             .iter()
-            .try_for_each(|b| builder.append(Some(b)))?;
+            .try_for_each(|b| builder.append(Some(b)))
+            .map_err(ExprError::Array)?;
 
-        Ok(Arc::new(ArrayImpl::Bool(builder.finish()?)))
+        Ok(Arc::new(ArrayImpl::Bool(
+            builder.finish().map_err(ExprError::Array)?,
+        )))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

@@ -16,26 +16,23 @@ use std::any::type_name;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
-use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
-use risingwave_common::error::{Result, RwError};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
 use risingwave_common::types::{
-    CheckedAdd as NaiveDateTimeCheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper,
-    NaiveDateWrapper,
+    CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
 };
 
 use super::cast::date_to_timestamp;
+use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
-    T3: CheckedAdd,
+    T3: CheckedAdd<Output = T3>,
 {
     general_atm(l, r, |a, b| {
-        a.checked_add(&b)
-            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
+        a.checked_add(b).ok_or(ExprError::NumericOutOfRange)
     })
 }
 
@@ -47,8 +44,7 @@ where
     T3: CheckedSub,
 {
     general_atm(l, r, |a, b| {
-        a.checked_sub(&b)
-            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
+        a.checked_sub(&b).ok_or(ExprError::NumericOutOfRange)
     })
 }
 
@@ -60,8 +56,7 @@ where
     T3: CheckedMul,
 {
     general_atm(l, r, |a, b| {
-        a.checked_mul(&b)
-            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
+        a.checked_mul(&b).ok_or(ExprError::NumericOutOfRange)
     })
 }
 
@@ -73,8 +68,7 @@ where
     T3: CheckedDiv,
 {
     general_atm(l, r, |a, b| {
-        a.checked_div(&b)
-            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
+        a.checked_div(&b).ok_or(ExprError::NumericOutOfRange)
     })
 }
 
@@ -86,15 +80,13 @@ where
     T3: CheckedRem,
 {
     general_atm(l, r, |a, b| {
-        a.checked_rem(&b)
-            .ok_or_else(|| RwError::from(NumericValueOutOfRange))
+        a.checked_rem(&b).ok_or(ExprError::NumericOutOfRange)
     })
 }
 
 #[inline(always)]
 pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
-    expr.checked_neg()
-        .ok_or_else(|| RwError::from(NumericValueOutOfRange))
+    expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -118,20 +110,12 @@ where
     F: FnOnce(T3, T3) -> Result<T3>,
 {
     // TODO: We need to improve the error message
-    let l: T3 = l.try_into().map_err(|_| {
-        RwError::from(InternalError(format!(
-            "Can't convert {} to {}",
-            type_name::<T1>(),
-            type_name::<T3>()
-        )))
-    })?;
-    let r: T3 = r.try_into().map_err(|_| {
-        RwError::from(InternalError(format!(
-            "Can't convert {} to {}",
-            type_name::<T2>(),
-            type_name::<T3>()
-        )))
-    })?;
+    let l: T3 = l
+        .try_into()
+        .map_err(|_| ExprError::Cast(type_name::<T1>(), type_name::<T3>()))?;
+    let r: T3 = r
+        .try_into()
+        .map_err(|_| ExprError::Cast(type_name::<T2>(), type_name::<T3>()))?;
     atm(l, r)
 }
 
@@ -154,7 +138,7 @@ pub fn interval_timestamp_add<T1, T2, T3>(
     l: IntervalUnit,
     r: NaiveDateTimeWrapper,
 ) -> Result<NaiveDateTimeWrapper> {
-    r.checked_add(l)
+    r.checked_add(l).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -202,8 +186,7 @@ pub fn interval_int_mul<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUn
 where
     T2: TryInto<i32> + Debug,
 {
-    l.checked_mul_int(r)
-        .ok_or_else(|| NumericValueOutOfRange.into())
+    l.checked_mul_int(r).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]

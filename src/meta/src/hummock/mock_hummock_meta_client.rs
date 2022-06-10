@@ -19,8 +19,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
-    VacuumTask,
+    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableInfo,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tonic::Streaming;
@@ -133,6 +133,10 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> Result<()> {
         Ok(())
+    }
+
+    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+        todo!()
     }
 }
 

@@ -35,6 +35,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
         profile:
@@ -50,6 +51,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
         profile:
@@ -64,6 +66,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
 
   - label: "unit test"
@@ -98,3 +101,20 @@ steps:
       - shellcheck#v1.2.0:
           files: ./**/*.sh
     timeout_in_minutes: 10
+
+  - label: "release"
+    command: "ci/scripts/release.sh"
+    if: build.tag != null
+    depends_on: "build"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - GITHUB_TOKEN
+            - BUILDKITE_TAG
+    timeout_in_minutes: 5
