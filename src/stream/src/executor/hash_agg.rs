@@ -177,7 +177,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for (row_idx, (key, hash_code)) in keys.iter().zip_eq(key_hash_codes.iter()).enumerate() {
             // if the visibility map has already shadowed this row,
             // then we pass
-            if let Some(vis_map) = visibility && !vis_map.is_set(row_idx).map_err(StreamExecutorError::eval_error)? {
+            if let Some(vis_map) = visibility && !vis_map.is_set(row_idx)? {
                 continue;
             }
             let vis_map = key_to_vis_maps.entry(key).or_insert_with(|| {
@@ -219,9 +219,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let (data_chunk, ops) = chunk.into_parts();
 
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
-        let hash_codes = data_chunk
-            .get_hash_values(key_indices, CRC32FastBuilder)
-            .map_err(StreamExecutorError::eval_error)?;
+        let hash_codes = data_chunk.get_hash_values(key_indices, CRC32FastBuilder)?;
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone())
             .map_err(StreamExecutorError::eval_error)?;
         let (columns, vis) = data_chunk.into_parts();

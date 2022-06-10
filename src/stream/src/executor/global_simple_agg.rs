@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -233,9 +231,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         // --- Create array builders ---
         // As the datatype is retrieved from schema, it contains both group key and aggregation
         // state outputs.
-        let mut builders = schema
-            .create_array_builders(2)
-            .map_err(StreamExecutorError::eval_error)?;
+        let mut builders = schema.create_array_builders(2)?;
         let mut new_ops = Vec::with_capacity(2);
 
         // --- Retrieve modified states and put the changes into the builders ---
@@ -245,9 +241,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         let columns: Vec<Column> = builders
             .into_iter()
-            .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
-            .try_collect()
-            .map_err(StreamExecutorError::eval_error)?;
+            .map(|builder| builder.finish().map(Into::into))
+            .try_collect()?;
 
         let chunk = StreamChunk::new(new_ops, columns, None);
 

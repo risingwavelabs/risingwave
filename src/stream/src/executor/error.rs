@@ -34,9 +34,6 @@ enum StreamExecutorErrorInner {
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
 
-    #[error("Executor v1 error: {0}")]
-    ExecutorV1(RwError),
-
     #[error("Chunk operation error: {0}")]
     EvalError(BoxedError),
 
@@ -44,15 +41,15 @@ enum StreamExecutorErrorInner {
     #[error("Serialize/deserialize error: {0}")]
     SerdeError(BoxedError),
 
-    #[error("Input error: {0}")]
-    InputError(RwError),
-
+    // TODO: remove this
     #[error("TopN state error: {0}")]
     TopNStateError(RwError),
 
+    // TODO: remove this
     #[error("Hash join error: {0}")]
     HashJoinError(RwError),
 
+    // TODO: remove this
     #[error("Source error: {0}")]
     SourceError(RwError),
 
@@ -74,20 +71,12 @@ impl StreamExecutorError {
         StreamExecutorErrorInner::Storage(error.into()).into()
     }
 
-    pub fn executor_v1(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::ExecutorV1(error.into()).into()
-    }
-
     pub fn eval_error(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         StreamExecutorErrorInner::EvalError(error.into()).into()
     }
 
     pub fn serde_error(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
-    }
-
-    pub fn input_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::InputError(error.into()).into()
     }
 
     pub fn top_n_state_error(error: impl Into<RwError>) -> Self {
@@ -190,7 +179,7 @@ mod tests {
     use super::*;
 
     fn func_return_error() -> StreamExecutorResult<()> {
-        Err(ErrorCode::InternalError("test_error".into())).map_err(StreamExecutorError::executor_v1)
+        Err(ErrorCode::InternalError("test_error".into())).map_err(StreamExecutorError::eval_error)
     }
 
     #[test]
