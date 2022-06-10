@@ -41,11 +41,13 @@ use tokio::{select, time};
 use crate::barrier::BarrierManagerRef;
 use crate::cluster::ClusterManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
-use crate::model::{ActorId, FragmentId};
-use crate::storage::MetaStore;
+use crate::model::{ActorId, FragmentId, MetadataModel};
+use crate::storage::{MetaStore, Transaction};
 use crate::stream::FragmentManagerRef;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
+
+const SOURCE_CF_NAME: &str = "cf/source";
 
 #[allow(dead_code)]
 pub struct SourceManager<S: MetaStore> {
@@ -140,8 +142,8 @@ pub struct SourceManagerCore<S: MetaStore> {
 }
 
 impl<S> SourceManagerCore<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
         Self {
@@ -220,13 +222,13 @@ where
 
     pub async fn patch_diff(
         &mut self,
-        source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
-        actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
-    ) -> Result<()> {
+        source_fragments: &Option<HashMap<SourceId, Vec<FragmentId>>>,
+        actor_splits: &Option<HashMap<ActorId, Vec<SplitImpl>>>,
+    ) {
         if let Some(source_fragments) = source_fragments {
             for (source_id, mut fragment_ids) in source_fragments {
                 self.source_fragments
-                    .entry(source_id)
+                    .entry(source_id.clone())
                     .or_insert(vec![])
                     .append(&mut fragment_ids);
             }
@@ -234,12 +236,9 @@ where
 
         if let Some(actor_splits) = actor_splits {
             for (actor_id, splits) in actor_splits {
-                self.actor_splits.insert(actor_id, splits);
-                // TODO store state
+                self.actor_splits.insert(actor_id.clone(), splits.clone());
             }
         }
-
-        Ok(())
     }
 }
 
@@ -290,8 +289,8 @@ fn diff_splits(
 }
 
 impl<S> SourceManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -315,10 +314,24 @@ where
         &self,
         source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
-    ) {
-        let mut core = self.core.lock().await;
-        let _ = core.patch_diff(source_fragments, actor_splits).await;
+    ) -> Result<()> {
+        {
+            let mut core = self.core.lock().await;
+            core.patch_diff(&source_fragments, &actor_splits).await;
+        }
+
+        let mut trx = Transaction::default();
+        if let Some(actor_splits) = actor_splits {
+            for (actor_id, splits) in actor_splits {
+                let value = serde_json::to_vec(&splits).unwrap();
+                let key = actor_id.to_string();
+                trx.put(SOURCE_CF_NAME.to_string(), key.into_bytes(), value);
+            }
+        }
+
+        self.env.meta_store().txn(trx).await.map_err(|e| internal_error(e.to_string()))
     }
+
 
     pub async fn pre_allocate_splits(
         &self,
@@ -369,7 +382,7 @@ where
         Ok(assigned)
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -384,8 +397,8 @@ where
                 .iter()
                 .map(|worker| self.env.stream_client_pool().get(worker)),
         )
-        .await?
-        .into_iter();
+            .await?
+            .into_iter();
 
         Ok(all_stream_clients)
     }

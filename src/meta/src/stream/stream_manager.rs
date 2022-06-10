@@ -614,7 +614,7 @@ where
         } else {
             self.source_manager
                 .patch_update(Some(source_fragments), Some(init_split_assignment))
-                .await;
+                .await?;
         }
 
         Ok(())
