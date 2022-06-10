@@ -387,7 +387,7 @@ mod tests {
             .is_err());
 
         let users = user_manager.list_users().await?;
-        assert_eq!(users.len(), 2);
+        assert_eq!(users.len(), 3);
 
         let object = Object::TableId(0);
         // Grant Select/Insert without grant option.
