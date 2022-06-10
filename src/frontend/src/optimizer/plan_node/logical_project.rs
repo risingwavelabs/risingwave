@@ -132,9 +132,8 @@ impl LogicalProject {
         let i2o = Self::i2o_col_mapping_inner(input_schema.len(), exprs);
         input_pk
             .iter()
-            .map(|pk_col| i2o.try_map(*pk_col))
-            .collect::<Option<Vec<_>>>()
-            .unwrap_or_default()
+            .filter_map(|pk_col| i2o.try_map(*pk_col))
+            .collect::<Vec<_>>()
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {
