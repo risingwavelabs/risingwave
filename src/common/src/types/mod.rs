@@ -652,6 +652,12 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
+            &Self::Struct(StructRef::ValueRef { val }) => {
+                ser.serialize_struct_or_list(val.to_protobuf_owned())?
+            }
+            &Self::List(ListRef::ValueRef { val }) => {
+                ser.serialize_struct_or_list(val.to_protobuf_owned())?
+            }
             _ => {
                 panic!("Type is unable to be serialized.")
             }
@@ -706,8 +712,13 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::with_days(days)?
             }),
-            _ => {
-                panic!("Type is unable to be deserialized.")
+            Ty::Struct { fields: _ } => {
+                let bytes = de.deserialize_struct_or_list()?;
+                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
+            }
+            Ty::List { datatype: _ } => {
+                let bytes = de.deserialize_struct_or_list()?;
+                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
             }
         })
     }
