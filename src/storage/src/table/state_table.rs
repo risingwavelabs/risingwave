@@ -323,10 +323,9 @@ impl<S: StateStore> StateTableRowIter<S> {
                         }
                     }
                 }
-                (Some(_), Some(_)) => {
+                (Some(Err(_)), Some(_)) => {
                     // Throw the error.
                     cell_based_table_iter.next().await.unwrap()?;
-                    mem_table_iter.next().unwrap();
 
                     unreachable!()
                 }
