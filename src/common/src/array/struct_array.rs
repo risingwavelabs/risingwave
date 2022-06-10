@@ -210,7 +210,7 @@ impl Array for StructArray {
 
 impl StructArray {
     pub fn from_protobuf(array: &ProstArray) -> ArrayResult<ArrayImpl> {
-        ensure_anyhow!(
+        ensure!(
             array.values.is_empty(),
             "Must have no buffer in a struct array"
         );

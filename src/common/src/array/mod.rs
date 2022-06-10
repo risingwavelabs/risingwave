@@ -401,7 +401,7 @@ macro_rules! impl_array_builder {
                     None => self.append_null(),
                     Some(ref scalar) => match (self, scalar) {
                         $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
-                        _ => bail_anyhow!("Invalid datum type".to_string()),
+                        _ => bail!("Invalid datum type".to_string()),
                     },
                 }
             }
@@ -412,7 +412,7 @@ macro_rules! impl_array_builder {
                     None => self.append_null(),
                     Some(scalar_ref) => match (self, scalar_ref) {
                         $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
-                        (this_builder, this_scalar_ref) => bail_anyhow!(
+                        (this_builder, this_scalar_ref) => bail!(
                             "Failed to append datum, array builder type: {}, scalar ref type: {}",
                             this_builder.get_ident(),
                             this_scalar_ref.get_ident()

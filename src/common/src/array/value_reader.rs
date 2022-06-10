@@ -40,7 +40,7 @@ macro_rules! impl_numeric_value_reader {
             fn read(cur: &mut Cursor<&[u8]>) -> ArrayResult<$value_type> {
                 match cur.$read_fn::<BigEndian>() {
                     Ok(v) => Ok(v.into()),
-                    Err(e) => bail_anyhow!("Failed to read value from buffer: {}", e),
+                    Err(e) => bail!("Failed to read value from buffer: {}", e),
                 }
             }
         }
@@ -63,7 +63,7 @@ impl VarSizedValueReader<Utf8ArrayBuilder> for Utf8ValueReader {
     fn read(buf: &[u8]) -> ArrayResult<&str> {
         match from_utf8(buf) {
             Ok(s) => Ok(s),
-            Err(e) => bail_anyhow!("failed to read utf8 string from bytes: {}", e),
+            Err(e) => bail!("failed to read utf8 string from bytes: {}", e),
         }
     }
 }
@@ -74,7 +74,7 @@ impl VarSizedValueReader<DecimalArrayBuilder> for DecimalValueReader {
     fn read(buf: &[u8]) -> ArrayResult<Decimal> {
         match Decimal::from_str(Utf8ValueReader::read(buf)?) {
             Ok(d) => Ok(d),
-            Err(e) => bail_anyhow!("failed to read decimal from string: {}", e),
+            Err(e) => bail!("failed to read decimal from string: {}", e),
         }
     }
 }

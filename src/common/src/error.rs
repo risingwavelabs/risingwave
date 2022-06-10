@@ -35,6 +35,7 @@ use crate::util::value_encoding::error::ValueEncodingError;
 pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
 pub type BoxedError = Box<dyn Error + Send + Sync>;
+pub use anyhow::anyhow as anyhow_error;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrackingIssue(Option<u32>);
@@ -264,6 +265,12 @@ impl From<std::net::AddrParseError> for RwError {
     }
 }
 
+impl From<anyhow::Error> for RwError {
+    fn from(e: anyhow::Error) -> Self {
+        ErrorCode::InternalError(e.to_error_str()).into()
+    }
+}
+
 impl From<Infallible> for RwError {
     fn from(x: Infallible) -> Self {
         match x {}
@@ -367,13 +374,6 @@ pub fn tonic_err(err: impl Into<RwError>) -> tonic::Status {
 
 pub type Result<T> = std::result::Result<T, RwError>;
 
-#[macro_export]
-macro_rules! gen_error {
-    ($error_code:expr) => {
-        return std::result::Result::Err($crate::error::RwError::from($error_code));
-    };
-}
-
 /// A helper to convert a third-party error to string.
 pub trait ToErrorStr {
     fn to_error_str(self) -> String;
@@ -437,7 +437,7 @@ impl ToErrorStr for anyhow::Error {
 /// ```
 /// This will generate following error:
 /// ```ignore
-/// RwError(ErrorCode::InternalError("a < 0"))
+/// anyhow!("a < 0").into()
 /// ```
 ///
 /// # Case 2: Error message only.
@@ -446,7 +446,7 @@ impl ToErrorStr for anyhow::Error {
 /// ```
 /// This will generate following error:
 /// ```ignore
-/// RwError(ErrorCode::InternalError("a should not be negative!"));
+/// anyhow!("a should not be negative!").into();
 /// ```
 ///
 /// # Case 3: Error message with argument.
@@ -455,7 +455,7 @@ impl ToErrorStr for anyhow::Error {
 /// ```
 /// This will generate following error:
 /// ```ignore
-/// RwError(ErrorCode::InternalError("a should not be negative, value: 1"));
+/// anyhow!("a should not be negative, value: 1").into();
 /// ```
 ///
 /// # Case 4: Error code.
@@ -464,33 +464,30 @@ impl ToErrorStr for anyhow::Error {
 /// ```
 /// This will generate following error:
 /// ```ignore
-/// RwError(ErrorCode::MemoryError { layout });
+/// ErrorCode::MemoryError { layout }.into();
 /// ```
 #[macro_export]
 macro_rules! ensure {
-    ($cond:expr) => {
+    ($cond:expr $(,)?) => {
         if !$cond {
-            let msg = stringify!($cond).to_string();
-            $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
+            return Err($crate::error::anyhow_error!(stringify!($cond)).into());
         }
     };
-    ($cond:expr, $msg:literal) => {
+    ($cond:expr, $msg:literal $(,)?) => {
         if !$cond {
-            let msg = $msg.to_string();
-            $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
+            return Err($crate::error::anyhow_error!($msg).into());
         }
     };
-    ($cond:expr, $fmt:literal, $($arg:expr)*) => {
+    ($cond:expr, $fmt:expr, $($arg:tt)*) => {
         if !$cond {
-            let msg = format!($fmt, $($arg)*);
-            $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
+            return Err($crate::error::anyhow_error!($fmt, $($arg)*).into());
         }
     };
     ($cond:expr, $error_code:expr) => {
         if !$cond {
-            $crate::gen_error!($error_code);
+            return Err($error_code.into());
         }
-    }
+    };
 }
 
 /// Util macro to generate error when the two arguments are not equal.
@@ -500,7 +497,7 @@ macro_rules! ensure_eq {
         match (&$left, &$right) {
             (left_val, right_val) => {
                 if !(left_val == right_val) {
-                    $crate::gen_error!($crate::error::ErrorCode::InternalError(format!(
+                    $crate::bail!(
                         "{} == {} assertion failed ({} is {}, {} is {})",
                         stringify!($left),
                         stringify!($right),
@@ -508,7 +505,7 @@ macro_rules! ensure_eq {
                         &*left_val,
                         stringify!($right),
                         &*right_val,
-                    )));
+                    );
                 }
             }
         }
@@ -516,52 +513,15 @@ macro_rules! ensure_eq {
 }
 
 #[macro_export]
-macro_rules! ensure_anyhow {
-    ($cond:expr $(,)?) => {
-        if !$cond {
-            return Err(::anyhow::anyhow!(stringify!($cond)).into());
-        }
-    };
-    ($cond:expr, $msg:literal $(,)?) => {
-        if !$cond {
-            return Err(::anyhow::anyhow!($msg).into());
-        }
-    };
-    ($cond:expr, $err:expr $(,)?) => {
-        if !$cond {
-            return Err(::anyhow::anyhow!$err.into());
-        }
-    };
-    ($cond:expr, $fmt:expr, $($arg:tt)*) => {
-        if !$cond {
-            return Err(::anyhow::anyhow!($fmt, $($arg)*).into());
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! bail_anyhow {
+macro_rules! bail {
     ($msg:literal $(,)?) => {
-        return Err(::anyhow::anyhow!($msg).into())
+        return Err($crate::error::anyhow_error!($msg).into())
     };
     ($err:expr $(,)?) => {
-        return Err(::anyhow::anyhow!($err).into())
+        return Err($crate::error::anyhow_error!($err).into())
     };
     ($fmt:expr, $($arg:tt)*) => {
-        return Err(::anyhow::anyhow!($fmt, $($arg)*).into())
-    };
-}
-
-#[macro_export]
-macro_rules! internal_anyhow {
-    ($msg:literal $(,)?) => {
-        ::anyhow::anyhow!($msg).into()
-    };
-    ($err:expr $(,)?) => {
-        ::anyhow::anyhow!($err).into()
-    };
-    ($fmt:expr, $($arg:tt)*) => {
-        ::anyhow::anyhow!($fmt, $($arg)*).into()
+        return Err($crate::error::anyhow_error!($fmt, $($arg)*).into())
     };
 }
 

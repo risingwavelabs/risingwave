@@ -310,7 +310,7 @@ impl Row {
             let datum = self.0.get(*idx);
             match datum {
                 Some(datum) => datum.hash(&mut hasher),
-                None => bail_anyhow!("index {} out of row bound", idx),
+                None => bail!("index {} out of row bound", idx),
             }
         }
         Ok(HashCode(hasher.finish()))

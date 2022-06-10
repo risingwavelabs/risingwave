@@ -241,7 +241,7 @@ impl Bitmap {
     }
 
     fn check_idx(&self, idx: usize) -> ArrayResult<()> {
-        ensure_anyhow!(idx < self.len());
+        ensure!(idx < self.len());
         Ok(())
     }
 }

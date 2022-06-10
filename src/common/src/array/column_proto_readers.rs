@@ -36,14 +36,14 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
     array: &ProstArray,
     cardinality: usize,
 ) -> ArrayResult<ArrayImpl> {
-    ensure_anyhow!(
+    ensure!(
         array.get_values().len() == 1,
         "Must have only 1 buffer in a numeric array"
     );
 
     let buf = array.get_values()[0].get_body().as_slice();
     let value_size = std::mem::size_of::<T>();
-    ensure_anyhow!(
+    ensure!(
         buf.len() % value_size == 0,
         "Unexpected memory layout of numeric array"
     );
@@ -64,7 +64,7 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
 }
 
 pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
-    ensure_anyhow!(
+    ensure!(
         array.get_values().len() == 1,
         "Must have only 1 buffer in a bool array"
     );
@@ -81,21 +81,21 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
 fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateWrapper> {
     match cursor.read_i32::<BigEndian>() {
         Ok(days) => NaiveDateWrapper::from_protobuf(days),
-        Err(e) => bail_anyhow!("Failed to read i32 from NaiveDate buffer: {}", e),
+        Err(e) => bail!("Failed to read i32 from NaiveDate buffer: {}", e),
     }
 }
 
 fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveTimeWrapper> {
     match cursor.read_i64::<BigEndian>() {
         Ok(t) => NaiveTimeWrapper::from_protobuf(t),
-        Err(e) => bail_anyhow!("Failed to read i64 from NaiveTime buffer: {}", e),
+        Err(e) => bail!("Failed to read i64 from NaiveTime buffer: {}", e),
     }
 }
 
 fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTimeWrapper> {
     match cursor.read_i64::<BigEndian>() {
         Ok(t) => NaiveDateTimeWrapper::from_protobuf(t),
-        Err(e) => bail_anyhow!("Failed to read i64 from NaiveDateTime buffer: {}", e),
+        Err(e) => bail!("Failed to read i64 from NaiveDateTime buffer: {}", e),
     }
 }
 
@@ -110,7 +110,7 @@ pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUni
 
     match read() {
         Ok(iu) => Ok(iu),
-        Err(e) => bail_anyhow!("Failed to read IntervalUnit from buffer: {}", e),
+        Err(e) => bail!("Failed to read IntervalUnit from buffer: {}", e),
     }
 }
 
@@ -119,7 +119,7 @@ macro_rules! read_one_value_array {
         paste! {
             $(
             pub fn [<read_ $type:snake _array>](array: &ProstArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
-                ensure_anyhow!(
+                ensure!(
                     array.get_values().len() == 1,
                     "Must have only 1 buffer in a {} array", stringify!($type)
                 );
@@ -154,7 +154,7 @@ read_one_value_array! {
 fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {
     match offset_cursor.read_i64::<BigEndian>() {
         Ok(offset) => Ok(offset),
-        Err(e) => bail_anyhow!("failed to read i64 from offset buffer: {}", e),
+        Err(e) => bail!("failed to read i64 from offset buffer: {}", e),
     }
 }
 
@@ -162,7 +162,7 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     array: &ProstArray,
     cardinality: usize,
 ) -> ArrayResult<ArrayImpl> {
-    ensure_anyhow!(
+    ensure!(
         array.get_values().len() == 2,
         "Must have exactly 2 buffers in a string array"
     );

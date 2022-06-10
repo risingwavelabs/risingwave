@@ -76,7 +76,7 @@ impl Vis {
         match self {
             Vis::Bitmap(b) => b.is_set(idx),
             Vis::Compact(c) => {
-                ensure_anyhow!(idx <= *c);
+                ensure!(idx <= *c);
                 Ok(true)
             }
         }

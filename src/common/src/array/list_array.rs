@@ -220,7 +220,7 @@ impl Array for ListArray {
 
 impl ListArray {
     pub fn from_protobuf(array: &ProstArray) -> ArrayResult<ArrayImpl> {
-        ensure_anyhow!(
+        ensure!(
             array.values.is_empty(),
             "Must have no buffer in a list array"
         );

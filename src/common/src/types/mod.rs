@@ -465,7 +465,7 @@ macro_rules! impl_convert {
                 fn try_from(val: ScalarImpl) -> ArrayResult<Self> {
                     match val {
                         ScalarImpl::$variant_name(scalar) => Ok(scalar),
-                        other_scalar => bail_anyhow!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident()),
+                        other_scalar => bail!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident()),
                     }
                 }
             }
@@ -482,7 +482,7 @@ macro_rules! impl_convert {
                 fn try_from(val: ScalarRefImpl<'scalar>) -> ArrayResult<Self> {
                     match val {
                         ScalarRefImpl::$variant_name(scalar_ref) => Ok(scalar_ref),
-                        other_scalar => bail_anyhow!("cannot convert ScalarRefImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name)),
+                        other_scalar => bail!("cannot convert ScalarRefImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name)),
                     }
                 }
             }
@@ -817,7 +817,7 @@ impl ScalarImpl {
                     .collect::<ArrayResult<Vec<Datum>>>()?;
                 ScalarImpl::List(ListValue::new(fields))
             }
-            _ => bail_anyhow!("Unrecognized type name: {:?}", data_type.get_type_name()),
+            _ => bail!("Unrecognized type name: {:?}", data_type.get_type_name()),
         };
         Ok(value)
     }

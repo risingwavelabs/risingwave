@@ -56,7 +56,7 @@ impl Op {
             Some(ProstOp::Delete) => Op::Delete,
             Some(ProstOp::UpdateInsert) => Op::UpdateInsert,
             Some(ProstOp::UpdateDelete) => Op::UpdateDelete,
-            None => bail_anyhow!("No such op type"),
+            None => bail!("No such op type"),
         };
         Ok(op)
     }

@@ -68,7 +68,7 @@ impl DataChunkBuilder {
                 .map(|data_type| data_type.create_array_builder(self.batch_size))
                 .collect::<ArrayResult<Vec<ArrayBuilderImpl>>>()?;
 
-            ensure_anyhow!(self.buffered_count == 0);
+            ensure!(self.buffered_count == 0);
         }
 
         Ok(())
@@ -116,7 +116,7 @@ impl DataChunkBuilder {
             }
         }
 
-        ensure_anyhow!(self.buffered_count <= self.batch_size);
+        ensure!(self.buffered_count <= self.batch_size);
 
         let returned_input_chunk = if input_chunk.data_chunk.capacity() > new_return_offset {
             Some(input_chunk.with_new_offset_checked(new_return_offset)?)
@@ -182,7 +182,7 @@ impl DataChunkBuilder {
         &mut self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,
     ) -> ArrayResult<Option<DataChunk>> {
-        ensure_anyhow!(self.buffered_count < self.batch_size);
+        ensure!(self.buffered_count < self.batch_size);
         self.ensure_builders()?;
 
         self.do_append_one_row_from_datum_refs(datum_refs)?;
@@ -205,7 +205,7 @@ impl DataChunkBuilder {
         &mut self,
         datums: impl Iterator<Item = &'a Datum>,
     ) -> ArrayResult<Option<DataChunk>> {
-        ensure_anyhow!(self.buffered_count < self.batch_size);
+        ensure!(self.buffered_count < self.batch_size);
         self.ensure_builders()?;
 
         self.do_append_one_row_from_datums(datums)?;
@@ -245,7 +245,7 @@ impl SlicedDataChunk {
     }
 
     pub fn with_offset_checked(data_chunk: DataChunk, offset: usize) -> ArrayResult<Self> {
-        ensure_anyhow!(offset < data_chunk.capacity());
+        ensure!(offset < data_chunk.capacity());
         Ok(Self { data_chunk, offset })
     }
 
