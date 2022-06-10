@@ -658,6 +658,7 @@ mod tests {
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::meta::CollectOverRequest;
     use risingwave_pb::plan_common::TableRefId;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
@@ -690,6 +691,7 @@ mod tests {
 
     struct FakeStreamService {
         inner: Arc<FakeFragmentState>,
+        barrier_manager: BarrierManagerRef<MemStore>,
     }
 
     #[async_trait::async_trait]
@@ -750,9 +752,17 @@ mod tests {
 
         async fn inject_barrier(
             &self,
-            _request: Request<InjectBarrierRequest>,
+            request: Request<InjectBarrierRequest>,
         ) -> std::result::Result<Response<InjectBarrierResponse>, Status> {
-            //tokio::spawn()
+            let barrier_manager = self.barrier_manager.clone();
+            let collect_request = CollectOverRequest {
+                create_mview_progress: Default::default(),
+                sycned_sstables: Default::default(),
+                node_id: request.into_inner().node_id,
+            };
+            tokio::spawn(async move {
+                barrier_manager.collect_over(collect_request).await;
+            });
             Ok(Response::new(InjectBarrierResponse::default()))
         }
 
@@ -801,19 +811,7 @@ mod tests {
                 actor_ids: Mutex::new(HashSet::new()),
                 actor_infos: Mutex::new(HashMap::new()),
             });
-            let fake_service = FakeStreamService {
-                inner: state.clone(),
-            };
 
-            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-            let stream_srv = StreamServiceServer::new(fake_service);
-            let join_handle = tokio::spawn(async move {
-                tonic::transport::Server::builder()
-                    .add_service(stream_srv)
-                    .serve_with_shutdown(addr, async move { shutdown_rx.await.unwrap() })
-                    .await
-                    .unwrap();
-            });
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
@@ -870,6 +868,21 @@ mod tests {
                 source_manager.clone(),
             )
             .await?;
+
+            let fake_service = FakeStreamService {
+                inner: state.clone(),
+                barrier_manager: barrier_manager.clone(),
+            };
+
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+            let stream_srv = StreamServiceServer::new(fake_service);
+            let join_handle = tokio::spawn(async move {
+                tonic::transport::Server::builder()
+                    .add_service(stream_srv)
+                    .serve_with_shutdown(addr, async move { shutdown_rx.await.unwrap() })
+                    .await
+                    .unwrap();
+            });
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
 
@@ -992,7 +1005,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_drop_materialized_view() -> Result<()> {
         let services = MockServices::start("127.0.0.1", 12334).await?;
 

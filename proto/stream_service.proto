@@ -66,6 +66,7 @@ message InjectBarrierRequest {
   data.Barrier barrier = 2;
   repeated uint32 actor_ids_to_send = 3;
   repeated uint32 actor_ids_to_collect = 4;
+  uint32 node_id = 5;
 }
 
 message InjectBarrierResponse {

@@ -164,7 +164,7 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     collect_word_node_map: Arc<RwLock<HashMap<WorkerId, Option<CollectOverRequest>>>>,
 
-    collect_over_sender: Arc<RwLock<Option<Sender<()>>>>,
+    collect_over_sender: Arc<RwLock<Option<Sender<Vec<CollectOverRequest>>>>>,
 }
 
 impl<S> GlobalBarrierManager<S>
@@ -364,71 +364,64 @@ where
     ) -> Result<Vec<CollectOverRequest>> {
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info;
-        let mut collect_word_node_map_guard = self.collect_word_node_map.write().await;
-        collect_word_node_map_guard.clear();
         let (tx, rx) = oneshot::channel();
-        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-            let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
-            let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
-            collect_word_node_map_guard.insert(*node_id, None);
-            if actor_ids_to_collect.is_empty() {
-                // No need to send or collect barrier for this node.
-                assert!(actor_ids_to_send.is_empty());
-                None
-            } else {
-                let mutation = mutation.clone();
-                let request_id = Uuid::new_v4().to_string();
-                let barrier = Barrier {
-                    epoch: Some(risingwave_pb::data::Epoch {
-                        curr: command_context.curr_epoch.0,
-                        prev: command_context.prev_epoch.0,
-                    }),
-                    mutation: Some(mutation),
-                    // TODO(chi): add distributed tracing
-                    span: vec![],
-                };
-
-                async move {
-                    let mut client = self.env.stream_client_pool().get(node).await?;
-
-                    let request = InjectBarrierRequest {
-                        request_id,
-                        barrier: Some(barrier),
-                        actor_ids_to_send,
-                        actor_ids_to_collect,
+        {
+            let mut collect_word_node_map_guard = self.collect_word_node_map.write().await;
+            collect_word_node_map_guard.clear();
+            let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
+                let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+                let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
+                collect_word_node_map_guard.insert(*node_id, None);
+                if actor_ids_to_collect.is_empty() {
+                    // No need to send or collect barrier for this node.
+                    assert!(actor_ids_to_send.is_empty());
+                    None
+                } else {
+                    let mutation = mutation.clone();
+                    let request_id = Uuid::new_v4().to_string();
+                    let barrier = Barrier {
+                        epoch: Some(risingwave_pb::data::Epoch {
+                            curr: command_context.curr_epoch.0,
+                            prev: command_context.prev_epoch.0,
+                        }),
+                        mutation: Some(mutation),
+                        // TODO(chi): add distributed tracing
+                        span: vec![],
                     };
-                    tracing::trace!(
-                        target: "events::meta::barrier::inject_barrier",
-                        "inject barrier request: {:?}", request
-                    );
 
-                    // This RPC returns only if this worker node has collected this barrier.
-                    client
-                        .inject_barrier(request)
-                        .await
-                        .map(tonic::Response::<_>::into_inner)
-                        .to_rw_result()
+                    async move {
+                        let mut client = self.env.stream_client_pool().get(node).await?;
+
+                        let request = InjectBarrierRequest {
+                            request_id,
+                            barrier: Some(barrier),
+                            actor_ids_to_send,
+                            actor_ids_to_collect,
+                            node_id: *node_id,
+                        };
+                        tracing::trace!(
+                            target: "events::meta::barrier::inject_barrier",
+                            "inject barrier request: {:?}", request
+                        );
+
+                        // This RPC returns only if this worker node has collected this barrier.
+                        client
+                            .inject_barrier(request)
+                            .await
+                            .map(tonic::Response::<_>::into_inner)
+                            .to_rw_result()
+                    }
+                    .into()
                 }
-                .into()
-            }
-        });
+            });
 
-        try_join_all(collect_futures).await?;
-        println!("inject over");
+            try_join_all(collect_futures).await?;
+        }
         *self.collect_over_sender.write().await = Some(tx);
-        rx.await.unwrap();
-        let a = self
-            .collect_word_node_map
-            .write()
-            .await
-            .values_mut()
-            .map(|val| val.take().unwrap())
-            .collect();
-        Ok(a)
+        Ok(rx.await.unwrap())
     }
 
     pub async fn collect_over(&self, request: CollectOverRequest) {
-        println!("aaaa");
         let mut collect_word_node_map_guard = self.collect_word_node_map.write().await;
         collect_word_node_map_guard
             .insert(request.node_id, Some(request))
@@ -440,7 +433,11 @@ where
             == 0
         {
             let sender = self.collect_over_sender.write().await.take();
-            sender.unwrap().send(()).unwrap();
+            let a = collect_word_node_map_guard
+                .values_mut()
+                .map(|val| val.take().unwrap())
+                .collect();
+            sender.unwrap().send(a).unwrap();
         }
     }
 
