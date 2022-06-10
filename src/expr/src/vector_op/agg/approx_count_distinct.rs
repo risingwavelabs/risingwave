@@ -137,7 +137,7 @@ impl Aggregator for ApproxCountDistinct {
     fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         let result = self.calculate_result();
         match builder {
-            ArrayBuilderImpl::Int64(b) => b.append(Some(result)),
+            ArrayBuilderImpl::Int64(b) => b.append(Some(result)).map_err(Into::into),
             _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
         }
     }

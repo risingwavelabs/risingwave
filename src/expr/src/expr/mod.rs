@@ -128,8 +128,7 @@ impl RowExpression {
     }
 
     pub fn eval(&mut self, row: &Row, data_types: &[DataType]) -> Result<ArrayRef> {
-        let input =
-            DataChunk::from_rows(slice::from_ref(row), data_types).map_err(ExprError::Array)?;
+        let input = DataChunk::from_rows(slice::from_ref(row), data_types)?;
         self.expr.eval(&input)
     }
 

@@ -52,14 +52,14 @@ impl Expression for NestedConstructExpression {
                     children: fields.clone(),
                 },
             )
-            .map_err(ExprError::Struct)?;
+            .map_err(ExprError::Array)?;
             builder
                 .append_array_refs(columns, input.capacity())
-                .map_err(ExprError::Struct)?;
-            Ok(builder
+                .map_err(ExprError::Array)?;
+            builder
                 .finish()
                 .map(|a| Arc::new(ArrayImpl::Struct(a)))
-                .map_err(ExprError::Struct)?)
+                .map_err(Into::into)
         } else if let DataType::List { datatype } = &self.data_type {
             let columns = columns.into_iter().map(Column::new).collect();
             let chunk = DataChunk::new(columns, input.vis().clone());
@@ -74,10 +74,10 @@ impl Expression for NestedConstructExpression {
                 .rows()
                 .try_for_each(|row| builder.append_row_ref(row))
                 .map_err(ExprError::Array)?;
-            Ok(builder
+            builder
                 .finish()
                 .map(|a| Arc::new(ArrayImpl::List(a)))
-                .map_err(ExprError::Array)?)
+                .map_err(Into::into)
         } else {
             Err(ExprError::UnsupportedFunction(
                 "expects struct or list type".to_string(),
@@ -145,7 +145,9 @@ mod tests {
     #[test]
     fn test_eval_array_expr() {
         let expr = NestedConstructExpression {
-            data_type: DataType::Int32,
+            data_type: DataType::List {
+                datatype: DataType::Int32.into(),
+            },
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
@@ -156,7 +158,9 @@ mod tests {
     #[test]
     fn test_eval_row_array_expr() {
         let expr = NestedConstructExpression {
-            data_type: DataType::Int32,
+            data_type: DataType::List {
+                datatype: DataType::Int32.into(),
+            },
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
