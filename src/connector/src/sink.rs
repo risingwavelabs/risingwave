@@ -22,9 +22,8 @@ use risingwave_common::array::Op::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::decimal::Decimal;
 use risingwave_common::types::{
-    IntervalUnit, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, Datum
+    ScalarImpl, Datum
 };
 
 #[async_trait]
@@ -66,65 +65,39 @@ impl MySQLSink {
     }
 }
 
-// TODO(nanderstabel): Add DATETIME and TIMESTAMP
-pub enum MySQLValue {
-    SmallInt(i16),
-    Int(i32),
-    BigInt(i64),
-    Float(OrderedF32),
-    Double(OrderedF64),
-    Bool(bool),
-    Decimal(Decimal),
-    Varchar(String),
-    Date(NaiveDateWrapper),
-    Time(NaiveTimeWrapper),
-    Interval(IntervalUnit),
-    Null
+struct MySQLValue(Value);
+
+impl fmt::Display for MySQLValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0.as_sql(true))
+    }
 }
 
 impl TryFrom<Datum> for MySQLValue {
     type Error = RwError;
 
-    fn try_from(s: Datum) -> Result<Self> {
-        match s {
-            Some(ScalarImpl::Int16(v)) => Ok(MySQLValue::SmallInt(v)),
-            Some(ScalarImpl::Int32(v)) => Ok(MySQLValue::Int(v)),
-            Some(ScalarImpl::Int64(v)) => Ok(MySQLValue::BigInt(v)),
-            Some(ScalarImpl::Float32(v)) => Ok(MySQLValue::Float(v)),
-            Some(ScalarImpl::Float64(v)) => Ok(MySQLValue::Double(v)),
-            Some(ScalarImpl::Bool(v)) => Ok(MySQLValue::Bool(v)),
-            Some(ScalarImpl::Decimal(v)) => Ok(MySQLValue::Decimal(v)),
-            Some(ScalarImpl::Utf8(v)) => Ok(MySQLValue::Varchar(v)),
-            Some(ScalarImpl::NaiveDate(v)) => Ok(MySQLValue::Date(v)),
-            Some(ScalarImpl::NaiveTime(v)) => Ok(MySQLValue::Time(v)),
-            Some(ScalarImpl::Interval(v)) => Ok(MySQLValue::Interval(v)),
-            Some(_) => unimplemented!(),
-            None => Ok(MySQLValue::Null),
+    fn try_from(datum: Datum) -> Result<MySQLValue> {
+        if let Some(scalar) = datum {
+            match scalar {
+                ScalarImpl::Int16(v) => Ok(MySQLValue(v.into())),
+                ScalarImpl::Int32(v) => Ok(MySQLValue(v.into())),
+                ScalarImpl::Int64(v) => Ok(MySQLValue(v.into())),
+                ScalarImpl::Float32(v) => Ok(MySQLValue(f32::from(v).into())),
+                ScalarImpl::Float64(v) => Ok(MySQLValue(f64::from(v).into())),
+                ScalarImpl::Bool(v) => Ok(MySQLValue(v.into())),
+                // ScalarImpl::Decimal(v) => Ok(MySQLValue(Value::NULL)),
+                ScalarImpl::Utf8(v) => Ok(MySQLValue(v.into())),
+                ScalarImpl::NaiveDate(v) => Ok(MySQLValue(format!("{}", v).into())),
+                ScalarImpl::NaiveTime(v) => Ok(MySQLValue(format!("{}", v).into())),
+                // ScalarImpl::Interval(v) => Ok(MySQLValue(Value::NULL)),
+                _ => unimplemented!(),
+            }
+        } else {
+            Ok(MySQLValue(Value::NULL))
         }
     }
 }
 
-impl fmt::Display for MySQLValue {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            MySQLValue::SmallInt(v) => write!(f, "{}", v)?,
-            MySQLValue::Int(v) => write!(f, "{}", v)?,
-            MySQLValue::BigInt(v) => write!(f, "{}", v)?,
-            MySQLValue::Float(v) => write!(f, "{}", v)?,
-            MySQLValue::Double(v) => write!(f, "{}", v)?,
-            MySQLValue::Bool(v) => write!(f, "{}", v)?,
-            MySQLValue::Decimal(v) => write!(f, "{}", v)?,
-            MySQLValue::Varchar(v) => write!(f, "{}", v)?,
-            MySQLValue::Date(_v) => todo!(),
-            MySQLValue::Time(_v) => todo!(),
-            MySQLValue::Interval(_v) => todo!(),
-            MySQLValue::Null => write!(f, "NULL")?,
-        }
-        Ok(())
-    }
-}
-
-// TODO(nanderstabel): currently writing chunk, not batch..
 #[async_trait]
 impl Sink for MySQLSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
