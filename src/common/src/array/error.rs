@@ -20,38 +20,12 @@ use crate::error::{ErrorCode, RwError};
 
 #[derive(Error, Debug)]
 pub enum ArrayError {
-    // #[error("Unsupported function: {0}")]
-    // UnsupportedFunction(String),
-
-    // #[error("Can't cast {0} to {1}")]
-    // Cast(&'static str, &'static str),
-
-    // // TODO: Unify Cast and Cast2.
-    // #[error("Can't cast {0:?} to {1:?}")]
-    // Cast2(DataType, DataType),
-
-    // #[error("Out of range")]
-    // NumericOutOfRange,
-
-    // #[error("Parse error: {0}")]
-    // Parse(&'static str),
-
-    // #[error("Invalid parameter {name}: {reason}")]
-    // InvalidParam { name: &'static str, reason: String },
-    #[error("Decode error: {0}")]
-    Decode(
-        #[backtrace]
-        #[source]
-        RwError,
-    ),
-
     #[error("Prost decode error: {0}")]
     ProstDecode(#[from] prost::DecodeError),
 
     #[error("Memcomparable error: {0}")]
     Memcomparable(#[from] memcomparable::Error),
 
-    // TODO: remove this
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -61,7 +35,7 @@ pub enum ArrayError {
 
 impl From<ArrayError> for RwError {
     fn from(s: ArrayError) -> Self {
-        ErrorCode::ArrayError(Box::new(s)).into()
+        ErrorCode::ArrayError(s).into()
     }
 }
 

@@ -20,7 +20,7 @@ use std::mem::size_of;
 use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
-use super::{Array, ArrayBuilder, ArrayError, ArrayIterator, ArrayResult, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;
@@ -93,7 +93,7 @@ macro_rules! impl_primitive_for_native_types {
                 impl_array_methods!($naive_type, $scalar_type, $scalar_type);
 
                 fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-                    NativeType::to_protobuf(self, output).map_err(ArrayError::Decode)
+                    NativeType::to_protobuf(self, output)
                 }
 
                 fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
