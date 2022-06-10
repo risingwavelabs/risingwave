@@ -99,21 +99,19 @@ fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTime
     }
 }
 
-pub fn read_interval_unit(_cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
-    // let iu = try {
-    //     let months = cursor.read_i32::<BigEndian>()?;
-    //     let days = cursor.read_i32::<BigEndian>()?;
-    //     let ms = cursor.read_i64::<BigEndian>()?;
+pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
+    let mut read = || {
+        let months = cursor.read_i32::<BigEndian>()?;
+        let days = cursor.read_i32::<BigEndian>()?;
+        let ms = cursor.read_i64::<BigEndian>()?;
 
-    //     Ok::<_, std::io::Error>(IntervalUnit::new(months, days, ms))
-    // };
+        Ok::<_, std::io::Error>(IntervalUnit::new(months, days, ms))
+    };
 
-    // match iu {
-    //     Ok(i) => Ok(i),
-    //     Err(e) => bail_anyhow!("Failed to read IntervalUnit from buffer: {}", e),
-    // }
-
-    todo!()
+    match read() {
+        Ok(iu) => Ok(iu),
+        Err(e) => bail_anyhow!("Failed to read IntervalUnit from buffer: {}", e),
+    }
 }
 
 macro_rules! read_one_value_array {

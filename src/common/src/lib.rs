@@ -36,7 +36,6 @@
 #![feature(test)]
 #![feature(trusted_len)]
 #![feature(allocator_api)]
-#![feature(try_blocks)]
 
 #[macro_use]
 pub mod error;
