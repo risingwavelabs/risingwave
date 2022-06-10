@@ -2030,7 +2030,7 @@ async fn test_state_table_iter_with_prefix() {
     let pk_prefix = Row(vec![Some(1_i32.into())]);
     let prefix_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
     let iter = state
-        .iter_with_pk_prefix(pk_prefix, prefix_serializer, epoch)
+        .iter_with_pk_prefix(&pk_prefix, prefix_serializer, epoch)
         .await
         .unwrap();
     pin_mut!(iter);
