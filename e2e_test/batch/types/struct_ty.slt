@@ -22,5 +22,12 @@ create table t (v1 int);
 statement ok
 insert into t values (1), (2), (3);
 
+query T
+select Row(1, v1*2) from t;
+----
+(1,2)
+(1,4)
+(1,6)
+
 statement ok
 drop table t;
