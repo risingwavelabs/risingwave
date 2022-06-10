@@ -204,7 +204,7 @@ impl Binder {
         if return_type.is_numeric() {
             return Ok(expr);
         }
-        return Err(ErrorCode::InvalidInputSyntax(format!("+ {:?}", return_type)).into());
+        Err(ErrorCode::InvalidInputSyntax(format!("+ {:?}", return_type)).into())
     }
 
     pub(super) fn bind_trim(

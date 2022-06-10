@@ -490,12 +490,12 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
             if expected_err == actual_err {
                 Ok(())
             } else {
-                return Err(anyhow!(
+                Err(anyhow!(
                     "Expected {context} error: {}\n  Actual {context} error: {}",
                     expected_err,
                     actual_err,
                     context = ctx
-                ));
+                ))
             }
         }
     }
