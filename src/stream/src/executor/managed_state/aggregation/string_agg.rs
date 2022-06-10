@@ -19,7 +19,6 @@ use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedArraysSerializer;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};

@@ -19,7 +19,6 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::consistent_hash::VirtualNode;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
@@ -339,7 +338,10 @@ where
                 Some(v) => {
                     local.put(
                         key_encoded,
-                        StorageValue::new_put(value_meta, serialize_cell(&v).map_err(StreamExecutorError::serde_error)?),
+                        StorageValue::new_put(
+                            value_meta,
+                            serialize_cell(&v).map_err(StreamExecutorError::serde_error)?,
+                        ),
                     );
                 }
                 None => {

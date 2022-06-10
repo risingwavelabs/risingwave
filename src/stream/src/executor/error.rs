@@ -78,11 +78,11 @@ impl StreamExecutorError {
         StreamExecutorErrorInner::ExecutorV1(error.into()).into()
     }
 
-    pub fn eval_error(error: impl std::error::Error + Send + Sync) -> Self {
+    pub fn eval_error(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         StreamExecutorErrorInner::EvalError(error.into()).into()
     }
 
-    pub fn serde_error(error: impl std::error::Error + Send + Sync) -> Self {
+    pub fn serde_error(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
     }
 

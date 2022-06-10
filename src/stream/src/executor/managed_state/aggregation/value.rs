@@ -15,7 +15,6 @@
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::write_batch::WriteBatch;

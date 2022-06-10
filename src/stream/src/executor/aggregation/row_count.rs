@@ -18,12 +18,10 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
-use crate::executor::error::StreamExecutorResult;
-
 use super::StreamingAggStateImpl;
+use crate::executor::error::StreamExecutorResult;
 
 /// `StreamingRowCountAgg` count rows, no matter whether the datum is null.
 /// Note that if there are zero rows in aggregator, `0` will be emitted

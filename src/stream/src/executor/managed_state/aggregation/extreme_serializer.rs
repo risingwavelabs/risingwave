@@ -14,14 +14,13 @@
 
 use std::marker::PhantomData;
 
-use risingwave_common::error::Result;
 use risingwave_common::types::{
     deserialize_datum_from, serialize_datum_into, DataType, Datum, Scalar,
 };
 use smallvec::SmallVec;
 
-use crate::executor::PkDataTypes;
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::PkDataTypes;
 
 type ExtremePkItem = Datum;
 

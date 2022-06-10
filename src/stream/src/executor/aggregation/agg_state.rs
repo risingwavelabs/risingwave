@@ -16,11 +16,10 @@ use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, Op};
-use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
 
-use crate::executor::error::{StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 
 /// States for [`crate::executor::LocalSimpleAggExecutor`],

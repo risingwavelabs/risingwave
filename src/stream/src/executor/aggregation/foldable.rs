@@ -21,7 +21,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 
 use super::{StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};

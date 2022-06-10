@@ -19,7 +19,6 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{option_to_owned_scalar, Datum, Scalar, ScalarImpl};
 
 use crate::executor::aggregation::StreamingAggStateImpl;
