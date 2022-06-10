@@ -54,18 +54,12 @@ impl Expression for LiteralExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut array_builder = self
-            .return_type
-            .create_array_builder(input.cardinality())
-            .map_err(ExprError::Array)?;
+        let mut array_builder = self.return_type.create_array_builder(input.cardinality())?;
         let cardinality = input.cardinality();
         let builder = &mut array_builder;
         let literal = &self.literal;
         for_all_variants! {array_impl_literal_append, builder, literal, cardinality}
-        array_builder
-            .finish()
-            .map(Arc::new)
-            .map_err(ExprError::Array)
+        array_builder.finish().map(Arc::new).map_err(Into::into)
     }
 
     fn eval_row(&self, _input: &Row) -> Result<Datum> {
@@ -82,7 +76,7 @@ where
     A1: ArrayBuilder,
 {
     for _ in 0..cardinality {
-        a.append(v).map_err(ExprError::Array)?
+        a.append(v)?
     }
     Ok(())
 }
@@ -144,8 +138,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
             let value = ScalarImpl::bytes_to_scalar(
                 prost_value.get_body(),
                 prost.get_return_type().unwrap(),
-            )
-            .map_err(ExprError::Array)?;
+            )?;
             Ok(Self {
                 return_type: ret_type,
                 literal: Some(value),

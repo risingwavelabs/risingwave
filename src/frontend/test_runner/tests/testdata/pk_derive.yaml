@@ -62,3 +62,34 @@
             StreamHashAgg { group_keys: [$0], aggs: [count, min($1)] }
               StreamExchange { dist: HashShard([0]) }
                 StreamTableScan { table: t, columns: [id, v, _row_id], pk_indices: [2] }
+- sql: |
+    create table t (v1 varchar, v2 varchar, v3 varchar);
+    create materialized view mv as
+    select
+        *
+    from
+        t
+    group by
+        v1,
+        v2,
+        v3;
+    select
+        max(v1) as v1
+    from
+        mv
+    where
+        v3 = 'world' or v3 = 'hello';
+  batch_plan: |
+    BatchSimpleAgg { aggs: [max($0)] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [max($0)] }
+          BatchProject { exprs: [$0] }
+            BatchFilter { predicate: (($1 = 'world':Varchar) OR ($1 = 'hello':Varchar)) }
+              BatchScan { table: mv, columns: [v1, v3] }
+  stream_plan: |
+    StreamMaterialize { columns: [agg#0(hidden), v1], pk_columns: [agg#0, v1] }
+      StreamSimpleAgg { aggs: [count, max($0)] }
+        StreamExchange { dist: Single }
+          StreamProject { exprs: [$0, $1] }
+            StreamFilter { predicate: (($2 = 'world':Varchar) OR ($2 = 'hello':Varchar)) }
+              StreamTableScan { table: mv, columns: [v1, v2, v3], pk_indices: [0, 1, 2] }

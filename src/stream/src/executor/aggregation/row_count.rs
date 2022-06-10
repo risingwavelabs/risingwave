@@ -54,7 +54,9 @@ impl StreamingRowCountAgg {
     }
 
     pub fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
-        I64ArrayBuilder::new(capacity).map(|builder| builder.into())
+        I64ArrayBuilder::new(capacity)
+            .map(|builder| builder.into())
+            .map_err(Into::into)
     }
 
     pub fn return_type() -> DataType {

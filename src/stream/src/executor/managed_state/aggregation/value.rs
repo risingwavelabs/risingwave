@@ -57,7 +57,9 @@ impl ManagedValueState {
                 .get_row(pk.unwrap_or(&Row(vec![])), epoch)
                 .await?;
 
-            raw_data.and_then(|row| row.values().next().cloned())
+            // According to row layout, the last field of the row is value and we sure the row is
+            // not empty.
+            raw_data.map(|row| row.0.last().unwrap().clone())
         } else {
             None
         };
@@ -110,9 +112,11 @@ impl ManagedValueState {
         // cause incorrect result: it will only produce more I/O.
         debug_assert!(self.is_dirty());
 
-        // Persist value into relational table.
-        let v = self.state.get_output()?;
-        state_table.insert(self.pk.as_ref().unwrap_or(&Row(vec![])), Row(vec![v]))?;
+        // Persist value into relational table. The inserted row should concat with pk (pk is in
+        // front of value). In this case, the pk is just group key.
+        let mut v = vec![self.state.get_output()?];
+        v.extend(self.pk.as_ref().unwrap_or(&Row(vec![])).0.iter().cloned());
+        state_table.insert(self.pk.as_ref().unwrap_or(&Row(vec![])), Row::new(v))?;
 
         self.is_dirty = false;
         Ok(())

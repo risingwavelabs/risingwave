@@ -249,8 +249,8 @@ impl UserIterator {
         // Handle multi-version
         self.last_key.clear();
         // Handle range scan when key > end_key
-        let res = self.next().await;
-        res
+
+        self.next().await
     }
 
     /// Indicates whether the iterator can be used.

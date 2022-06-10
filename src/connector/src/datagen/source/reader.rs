@@ -86,6 +86,7 @@ impl SplitReader for DatagenSplitReader {
 
         // 'fields.f_random.min'='1',
         // 'fields.f_random.max'='1000',
+        // 'fields.f_random.seed'='12345',
 
         // 'fields.f_random_str.length'='10'
         // )
@@ -94,6 +95,14 @@ impl SplitReader for DatagenSplitReader {
             let name = column.name.clone();
             let kind_key = format!("fields.{}.kind", name);
             let data_type = column.data_type.clone();
+            let random_seed_key = format!("fields.{}.seed", name);
+            let random_seed: u64 = match fields_option_map
+                .get(&random_seed_key)
+                .map(|s| s.to_string())
+            {
+                Some(seed) => seed.parse::<u64>().unwrap_or(split_index),
+                None => split_index,
+            };
             match column.data_type{
                 DataType::Timestamp => {
                 let max_past_key = format!("fields.{}.max_past", name);
@@ -107,7 +116,7 @@ impl SplitReader for DatagenSplitReader {
                         None,
                         max_past_value,
                         None,
-                        split_index
+                        random_seed
                     )?,
                 );},
                 DataType::Varchar => {
@@ -122,7 +131,7 @@ impl SplitReader for DatagenSplitReader {
                         None,
                         None,
                         length_value,
-                        split_index
+                        random_seed
                     )?,
                 );},
                 _ => {
@@ -155,7 +164,7 @@ impl SplitReader for DatagenSplitReader {
                                 max_value,
                                 None,
                                 None,
-                                split_index
+                                random_seed
                             )?,
                         );
                     }
@@ -180,5 +189,73 @@ impl SplitReader for DatagenSplitReader {
 
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         self.generator.next().await
+    }
+}
+
+mod test {
+    #[allow(unused_imports)]
+    use maplit::hashmap;
+    #[allow(unused_imports)]
+    use risingwave_common::types::DataType;
+
+    #[allow(unused_imports)]
+    use super::*;
+
+    #[tokio::test]
+    async fn test_generator() -> Result<()> {
+        let mock_datum = vec![
+            Column {
+                name: "_".to_string(),
+                data_type: DataType::Int64,
+            },
+            Column {
+                name: "random_int".to_string(),
+                data_type: DataType::Int32,
+            },
+            Column {
+                name: "random_float".to_string(),
+                data_type: DataType::Float32,
+            },
+            Column {
+                name: "sequence_int".to_string(),
+                data_type: DataType::Int32,
+            },
+        ];
+        let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
+            split_index: 0,
+            split_num: 1,
+            start_offset: None,
+        })]);
+        let properties = DatagenProperties {
+            split_num: None,
+            rows_per_second: "10".to_string(),
+            fields: hashmap! {
+                "fields.random_int.min".to_string() => "1".to_string(),
+                "fields.random_int.max".to_string() => "1000".to_string(),
+                "fields.random_int.seed".to_string() => "12345".to_string(),
+
+                "fields.random_float.min".to_string() => "1".to_string(),
+                "fields.random_float.max".to_string() => "1000".to_string(),
+                "fields.random_float.seed".to_string() => "12345".to_string(),
+
+                "fields.sequence_int.kind".to_string() => "sequence".to_string(),
+                "fields.sequence_int.start".to_string() => "1".to_string(),
+                "fields.sequence_int.end".to_string() => "1000".to_string(),
+            },
+        };
+
+        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum)).await?;
+        let res = b"{\"random_float\":533.1488647460938,\"random_int\":533,\"sequence_int\":1}";
+
+        assert_eq!(
+            res,
+            reader.next().await.unwrap().unwrap()[0]
+                .payload
+                .as_ref()
+                .unwrap()
+                .as_ref()
+        );
+
+        Ok(())
     }
 }

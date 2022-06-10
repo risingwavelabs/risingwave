@@ -122,7 +122,8 @@ impl Schema {
         self.fields
             .iter()
             .map(|field| field.data_type.create_array_builder(capacity))
-            .collect()
+            .try_collect()
+            .map_err(Into::into)
     }
 
     pub fn to_prost(&self) -> Vec<ProstField> {

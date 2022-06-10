@@ -111,7 +111,7 @@ impl EqGroups {
         use std::collections::BinaryHeap;
         let mut heap = BinaryHeap::new();
         for (ci, column) in columns.iter().enumerate() {
-            if let Some(ri) = column.starting_indices().get(0) {
+            if let Some(ri) = column.starting_indices().first() {
                 heap.push(Reverse((ri, ci, 0)));
             }
         }
@@ -243,7 +243,9 @@ where
     }
 
     pub fn output_concrete(&self, builder: &mut T::Builder) -> Result<()> {
-        builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))
+        builder
+            .append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))
+            .map_err(Into::into)
     }
 }
 
