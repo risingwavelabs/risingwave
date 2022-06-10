@@ -27,7 +27,10 @@ use crate::StateStore;
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
-        let mut it = $storage.iter::<_, Vec<u8>>($range, $epoch).await.unwrap();
+        let mut it = $storage
+            .iter::<_, Vec<u8>>($range, $epoch, Default::default())
+            .await
+            .unwrap();
         let mut count = 0;
         loop {
             match it.next().await.unwrap() {
@@ -42,7 +45,7 @@ macro_rules! assert_count_range_scan {
 macro_rules! assert_count_backward_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
-            .backward_iter::<_, Vec<u8>>($range, $epoch)
+            .backward_iter::<_, Vec<u8>>($range, $epoch, Default::default())
             .await
             .unwrap();
         let mut count = 0;

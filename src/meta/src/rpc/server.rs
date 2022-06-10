@@ -113,7 +113,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 ) -> (JoinHandle<()>, Sender<()>) {
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
 
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
+    let compaction_group_manager =
+        Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
+    let fragment_manager = Arc::new(
+        FragmentManager::new(env.clone(), compaction_group_manager.clone())
+            .await
+            .unwrap(),
+    );
     let meta_metrics = Arc::new(MetaMetrics::new());
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
@@ -122,8 +128,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .await
             .unwrap(),
     );
-    let compaction_group_manager =
-        Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let hummock_manager = Arc::new(
         hummock::HummockManager::new(
             env.clone(),
@@ -215,6 +219,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
         vacuum_trigger.clone(),
+        compaction_group_manager.clone(),
     );
     let notification_manager = env.notification_manager_ref();
     let notification_srv =

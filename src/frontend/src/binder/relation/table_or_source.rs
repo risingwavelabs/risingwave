@@ -37,6 +37,7 @@ pub struct BoundTableSource {
     pub name: String,       // explain-only
     pub source_id: TableId, // TODO: refactor to source id
     pub columns: Vec<ColumnDesc>,
+    pub append_only: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +167,7 @@ impl Binder {
 
         let source_id = TableId::new(source.id);
 
+        let append_only = source.append_only;
         let columns = source
             .columns
             .iter()
@@ -179,6 +181,7 @@ impl Binder {
             name: source_name,
             source_id,
             columns,
+            append_only,
         })
     }
 }

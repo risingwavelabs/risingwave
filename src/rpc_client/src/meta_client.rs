@@ -37,7 +37,8 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
-    CompactTask, GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot, HummockVersion,
+    CompactTask, CompactionGroup, GetCompactionGroupsRequest, GetCompactionGroupsResponse,
+    GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot, HummockVersion,
     PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
     ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
     ReportVacuumTaskResponse, SstableInfo, SubscribeCompactTasksRequest,
@@ -446,6 +447,12 @@ impl HummockMetaClient for MetaClient {
         self.inner.report_vacuum_task(req).await?;
         Ok(())
     }
+
+    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+        let req = GetCompactionGroupsRequest {};
+        let resp = self.inner.get_compaction_groups(req).await?;
+        Ok(resp.compaction_groups)
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -535,6 +542,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
+            ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
