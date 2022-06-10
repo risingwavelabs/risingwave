@@ -13,7 +13,7 @@ cargo doc --document-private-items --no-deps
 
 echo "--- Run unit tests with coverage"
 # use tee to disable progress bar
-cargo llvm-cov nextest --lcov --output-path lcov.info --features failpoints -- --no-fail-fast | tee
+cargo llvm-cov nextest --lcov --output-path lcov.info --features failpoints -- --no-fail-fast 2> >(tee)
 
 echo "--- Run doctest"
 cargo test --doc
