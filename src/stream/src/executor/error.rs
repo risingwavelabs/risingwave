@@ -14,7 +14,9 @@
 
 use std::backtrace::Backtrace;
 
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::array::ArrayError;
+use risingwave_common::error::{BoxedError, ErrorCode, RwError, TrackingIssue};
+use risingwave_expr::ExprError;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 
@@ -36,10 +38,11 @@ enum StreamExecutorErrorInner {
     ExecutorV1(RwError),
 
     #[error("Chunk operation error: {0}")]
-    EvalError(RwError),
+    EvalError(BoxedError),
 
-    #[error("Aggregate state error: {0}")]
-    AggStateError(RwError),
+    // TODO: remove this after state table is fully used
+    #[error("Serialize/deserialize error: {0}")]
+    SerdeError(BoxedError),
 
     #[error("Input error: {0}")]
     InputError(RwError),
@@ -58,6 +61,12 @@ enum StreamExecutorErrorInner {
 
     #[error("Failed to align barrier: expected {0:?} but got {1:?}")]
     AlignBarrier(Box<Barrier>, Box<Barrier>),
+
+    #[error("Feature is not yet implemented: {0}, {1}")]
+    NotImplemented(String, TrackingIssue),
+
+    #[error(transparent)]
+    Internal(anyhow::Error),
 }
 
 impl StreamExecutorError {
@@ -69,12 +78,12 @@ impl StreamExecutorError {
         StreamExecutorErrorInner::ExecutorV1(error.into()).into()
     }
 
-    pub fn eval_error(error: impl Into<RwError>) -> Self {
+    pub fn eval_error(error: impl std::error::Error + Send + Sync) -> Self {
         StreamExecutorErrorInner::EvalError(error.into()).into()
     }
 
-    pub fn agg_state_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::AggStateError(error.into()).into()
+    pub fn serde_error(error: impl std::error::Error + Send + Sync) -> Self {
+        StreamExecutorErrorInner::SerdeError(error.into()).into()
     }
 
     pub fn input_error(error: impl Into<RwError>) -> Self {
@@ -103,6 +112,10 @@ impl StreamExecutorError {
 
     pub fn invalid_argument(error: impl Into<String>) -> Self {
         StreamExecutorErrorInner::InvalidArgument(error.into()).into()
+    }
+
+    pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
+        StreamExecutorErrorInner::NotImplemented(error.into(), issue.into()).into()
     }
 }
 
@@ -136,6 +149,30 @@ impl std::fmt::Debug for StreamExecutorError {
 impl From<StorageError> for StreamExecutorError {
     fn from(s: StorageError) -> Self {
         Self::storage(s)
+    }
+}
+
+impl From<ArrayError> for StreamExecutorError {
+    fn from(a: ArrayError) -> Self {
+        Self::eval_error(a)
+    }
+}
+
+impl From<ExprError> for StreamExecutorError {
+    fn from(e: ExprError) -> Self {
+        Self::eval_error(e)
+    }
+}
+
+impl From<anyhow::Error> for StreamExecutorError {
+    fn from(a: anyhow::Error) -> Self {
+        StreamExecutorErrorInner::Internal(a).into()
+    }
+}
+
+impl From<memcomparable::Error> for StreamExecutorError {
+    fn from(m: memcomparable::Error) -> Self {
+        Self::serde_error(m)
     }
 }
 

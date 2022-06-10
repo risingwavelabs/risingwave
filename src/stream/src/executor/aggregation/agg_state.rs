@@ -20,6 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
 
+use crate::executor::error::{StreamExecutorResult};
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 
 /// States for [`crate::executor::LocalSimpleAggExecutor`],
@@ -44,7 +45,7 @@ impl<S: StateStore> Debug for AggState<S> {
 pub const ROW_COUNT_COLUMN: usize = 0;
 
 impl<S: StateStore> AggState<S> {
-    pub async fn row_count(&mut self, epoch: u64) -> Result<i64> {
+    pub async fn row_count(&mut self, epoch: u64) -> StreamExecutorResult<i64> {
         Ok(self.managed_states[ROW_COUNT_COLUMN]
             .get_output(epoch)
             .await?
@@ -71,7 +72,7 @@ impl<S: StateStore> AggState<S> {
     /// changes to the state. If the state is already marked dirty in this epoch, this function does
     /// no-op.
     /// After calling this function, `self.is_dirty()` will return `true`.
-    pub async fn may_mark_as_dirty(&mut self, epoch: u64) -> Result<()> {
+    pub async fn may_mark_as_dirty(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         if self.is_dirty() {
             return Ok(());
         }
@@ -93,7 +94,7 @@ impl<S: StateStore> AggState<S> {
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
         epoch: u64,
-    ) -> Result<usize> {
+    ) -> StreamExecutorResult<usize> {
         if !self.is_dirty() {
             return Ok(0);
         }

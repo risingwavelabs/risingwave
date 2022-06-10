@@ -291,10 +291,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 };
 
                 // 2. Mark the state as dirty by filling prev states
-                states
-                    .may_mark_as_dirty(epoch)
-                    .await
-                    .map_err(StreamExecutorError::agg_state_error)?;
+                states.may_mark_as_dirty(epoch).await?;
 
                 // 3. Apply batch to each of the state (per agg_call)
                 for (agg_state, data) in
@@ -303,17 +300,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     let data = data.iter().map(|d| &**d).collect_vec();
                     agg_state
                         .apply_batch(&ops, Some(&vis_map), &data, epoch)
-                        .await
-                        .map_err(StreamExecutorError::agg_state_error)?;
+                        .await?;
                 }
 
-                Ok::<(_, Box<AggState<S>>), RwError>((key, states))
+                Ok::<(_, Box<AggState<S>>), StreamExecutorError>((key, states))
             });
         }
 
         let mut buffered = stream::iter(futures).buffer_unordered(10);
         while let Some(result) = buffered.next().await {
-            let (key, state) = result.map_err(StreamExecutorError::agg_state_error)?;
+            let (key, state) = result?;
             state_map.put(key, Some(state));
         }
 
@@ -351,10 +347,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .iter_mut()
                         .zip_eq(state_tables.iter_mut())
                     {
-                        state
-                            .flush(&mut write_batch, state_table)
-                            .await
-                            .map_err(StreamExecutorError::agg_state_error)?;
+                        state.flush(&mut write_batch, state_table).await?;
                     }
                 }
             }
@@ -372,10 +365,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             assert!(write_batch.is_empty());
             return Ok(());
         } else {
-            write_batch
-                .ingest(epoch)
-                .await
-                .map_err(StreamExecutorError::agg_state_error)?;
+            write_batch.ingest(epoch).await?;
 
             // --- Produce the stream chunk ---
             let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
@@ -394,8 +384,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .as_mut()
                         .unwrap()
                         .build_changes(&mut builders[key_indices.len()..], &mut new_ops, epoch)
-                        .await
-                        .map_err(StreamExecutorError::agg_state_error)?;
+                        .await?;
 
                     for _ in 0..appended {
                         key.clone()

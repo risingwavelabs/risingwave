@@ -188,14 +188,14 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         states
             .may_mark_as_dirty(epoch)
             .await
-            .map_err(StreamExecutorError::agg_state_error)?;
+            ?;
 
         // 3. Apply batch to each of the state (per agg_call)
         for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
             agg_state
                 .apply_batch(&ops, visibility.as_ref(), data, epoch)
                 .await
-                .map_err(StreamExecutorError::agg_state_error)?;
+                ?;
         }
 
         Ok(())
@@ -228,12 +228,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             state
                 .flush(&mut write_batch, state_table)
                 .await
-                .map_err(StreamExecutorError::agg_state_error)?;
+                ?;
         }
         write_batch
             .ingest(epoch)
             .await
-            .map_err(StreamExecutorError::agg_state_error)?;
+            ?;
 
         // Batch commit state tables.
         for state_table in state_tables.iter_mut() {
@@ -252,7 +252,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         states
             .build_changes(&mut builders, &mut new_ops, epoch)
             .await
-            .map_err(StreamExecutorError::agg_state_error)?;
+            ?;
 
         let columns: Vec<Column> = builders
             .into_iter()

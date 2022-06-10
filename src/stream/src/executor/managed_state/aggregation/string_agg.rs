@@ -29,6 +29,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::ManagedTableState;
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 
 pub struct ManagedStringAggState<S: StateStore> {
     cache: BTreeMap<Bytes, FlushStatus<ScalarImpl>>,
@@ -79,7 +80,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         value_index: usize,
         delimiter: String,
         sort_key_serializer: OrderedArraysSerializer,
-    ) -> Result<Self> {
+    ) -> StreamExecutorResult<Self> {
         Ok(Self {
             cache: BTreeMap::new(),
             result: None,
@@ -109,7 +110,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {
-    async fn read_all_into_memory(&mut self, epoch: u64) -> Result<()> {
+    async fn read_all_into_memory(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         // We cannot read from storage into memory when the cache has not been flushed onto the
         // storage.
         assert!(!self.is_dirty());
@@ -117,7 +118,9 @@ impl<S: StateStore> ManagedStringAggState<S> {
         let all_data = self.keyspace.scan(None, epoch).await?;
         for (raw_key, mut raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
-            let value = deserialize_cell(&mut raw_value, &DataType::Varchar)?.unwrap();
+            let value = deserialize_cell(&mut raw_value, &DataType::Varchar)
+                .map_err(StreamExecutorError::serde_error)?
+                .unwrap();
             let value_string: String = value.into_utf8();
             self.cache.insert(
                 raw_key,
@@ -159,7 +162,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
         for sort_key_index in &self.sort_key_indices {
             debug_assert!(*sort_key_index < data.len());
@@ -205,7 +208,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         Ok(())
     }
 
-    async fn get_output(&mut self, epoch: u64) -> Result<Datum> {
+    async fn get_output(&mut self, epoch: u64) -> StreamExecutorResult<Datum> {
         // We allow people to get output when the data is dirty.
         // As this is easier compared to `ManagedMinState` as we have a all-or-nothing cache policy
         // here.
@@ -239,7 +242,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         self.dirty
     }
 
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             return Ok(());
         }
@@ -253,7 +256,9 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                     // TODO(Yuanxin): Implement value meta
                     local.put(
                         key,
-                        StorageValue::new_default_put(serialize_cell(&Some(val))?),
+                        StorageValue::new_default_put(
+                            serialize_cell(&Some(val)).map_err(StreamExecutorError::serde_error)?,
+                        ),
                     );
                 }
                 None => {
