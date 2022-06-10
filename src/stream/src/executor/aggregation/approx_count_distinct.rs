@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 
 use super::StreamingAggStateImpl;
@@ -30,10 +30,73 @@ const INDEX_BITS: u8 = 10; // number of bits used for finding the index of each 
 const INDICES: usize = 1 << INDEX_BITS; // number of indices available
 const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-bit hash
 
+#[derive(Copy, Clone, Debug)]
+struct RegisterBucket {
+    count_1_to_5: [u32; 5],
+    count_6_to_21: [u16; 16],
+    count_22_to_64: [u8; 43],
+}
+
+impl RegisterBucket {
+    pub fn new() -> Self {
+        Self {
+            count_1_to_5: [0; 5],
+            count_6_to_21: [0; 16],
+            count_22_to_64: [0; 43],
+        }
+    }
+
+    fn set_register(&mut self, register: usize, value: u32) {
+        if register >= 22 {
+            self.count_22_to_64[register - 22] = value as u8;
+        } else if register >= 6 {
+            self.count_6_to_21[register - 6] = value as u16;
+        } else if register >= 1 {
+            self.count_1_to_5[register - 1] = value;
+        }
+    }
+
+    fn get_register(&self, register: usize) -> u32 {
+        if register >= 22 {
+            return self.count_22_to_64[register - 22] as u32;
+        }
+
+        if register >= 6 {
+            return self.count_6_to_21[register - 6] as u32;
+        }
+
+        if register >= 1 {
+            return self.count_1_to_5[register - 1];
+        }
+
+        0
+    }
+
+    fn add_to_register(&mut self, register: usize, is_insert: bool) {
+        let count = self.get_register(register);
+        if is_insert {
+            self.set_register(register, count + 1);
+        } else {
+            self.set_register(register, count - 1);
+        }
+    }
+
+    /// Gets the max bucket such that the count in the register is greatert than zero
+    fn get_max(&self) -> u8 {
+        for i in (1..65).rev() {
+            if self.get_register(i) > 0 {
+                return i as u8;
+            }
+        }
+
+        0
+    }
+}
+
 /// `StreamingApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`.
 #[derive(Clone, Debug)]
 pub struct StreamingApproxCountDistinct {
-    registers: [u8; INDICES],
+    registers: [RegisterBucket; INDICES],
     initial_count: i64,
 }
 
@@ -56,14 +119,14 @@ impl StreamingApproxCountDistinct {
         };
 
         Self {
-            registers: [0; INDICES],
+            registers: [RegisterBucket::new(); INDICES],
             initial_count: count,
         }
     }
 
     /// Adds the count of the datum's hash into the register, if it is greater than the existing
     /// count at the register
-    fn add_datum(&mut self, datum_ref: DatumRef) {
+    fn update_registers(&mut self, datum_ref: DatumRef, is_insert: bool) {
         if datum_ref.is_none() {
             return;
         }
@@ -72,11 +135,9 @@ impl StreamingApproxCountDistinct {
         let hash = self.get_hash(scalar_impl);
 
         let index = (hash as usize) & (INDICES - 1); // Index is based on last few bits
-        let count = self.count_hash(hash);
+        let count = self.count_hash(hash) as usize;
 
-        if count > self.registers[index] {
-            self.registers[index] = count;
-        }
+        self.registers[index].add_to_register(count, is_insert);
     }
 
     /// Calculate the hash of the `scalar_impl` using Rust's default hasher
@@ -114,12 +175,8 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
             None => {
                 for (op, datum) in ops.iter().zip_eq(data[0].iter()) {
                     match op {
-                        Op::Insert | Op::UpdateInsert => self.add_datum(datum),
-                        Op::Delete | Op::UpdateDelete => {
-                            return Err(RwError::from(ErrorCode::InternalError(
-                                "insert only for approx_count_distinct".to_string(),
-                            )))
-                        }
+                        Op::Insert | Op::UpdateInsert => self.update_registers(datum, true),
+                        Op::Delete | Op::UpdateDelete => self.update_registers(datum, false),
                     }
                 }
             }
@@ -129,12 +186,8 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
                 {
                     if visible {
                         match op {
-                            Op::Insert | Op::UpdateInsert => self.add_datum(datum),
-                            Op::Delete | Op::UpdateDelete => {
-                                return Err(RwError::from(ErrorCode::InternalError(
-                                    "insert only for approx_count_distinct".to_string(),
-                                )))
-                            }
+                            Op::Insert | Op::UpdateInsert => self.update_registers(datum, true),
+                            Op::Delete | Op::UpdateDelete => self.update_registers(datum, false),
                         }
                     }
                 }
@@ -151,8 +204,9 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
         let mut mean = 0.0;
 
         // Get harmonic mean of all the counts in results
-        for count in self.registers.iter() {
-            mean += 1.0 / ((1 << *count) as f64);
+        for register_bucket in self.registers.iter() {
+            let count = register_bucket.get_max();
+            mean += 1.0 / ((1 << count) as f64);
         }
 
         let raw_estimate = bias_correction * m * m / mean;
@@ -162,7 +216,7 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
         let answer = if raw_estimate <= 2.5 * m {
             let mut zero_registers: f64 = 0.0;
             for i in self.registers.iter() {
-                if *i == 0 {
+                if i.get_max() == 0 {
                     zero_registers += 1.0;
                 }
             }
@@ -184,7 +238,7 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
     }
 
     fn reset(&mut self) {
-        self.registers = [0; INDICES];
+        self.registers = [RegisterBucket::new(); INDICES];
     }
 }
 
@@ -196,7 +250,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_insert() {
+    fn test_insert_and_delete() {
         let mut agg = StreamingApproxCountDistinct::new();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
 
@@ -215,17 +269,13 @@ mod tests {
         )
         .unwrap();
         assert_matches!(agg.get_output().unwrap(), Some(_));
-    }
 
-    #[test]
-    fn test_error_on_delete() {
-        let mut agg = StreamingApproxCountDistinct::new();
-        let result = agg.apply_batch(
-            &[Op::Delete, Op::Insert],
-            None,
-            &[&array_nonnull!(I64Array, [3, 1]).into()],
-        );
-
-        assert_matches!(result, Err(_));
+        /*agg.apply_batch(
+            &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
+            Some(&(vec![true, true, true, true]).try_into().unwrap()),
+            &[&array_nonnull!(I64Array, [3, 3, 1, 2]).into()],
+        )
+        .unwrap();
+        assert_eq!(agg.get_output().unwrap().unwrap().into_int64(), 0);*/
     }
 }
