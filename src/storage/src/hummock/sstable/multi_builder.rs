@@ -29,6 +29,7 @@ pub struct SealedSstableBuilder {
     pub vnode_bitmaps: Vec<VNodeBitmap>,
     pub upload_join_handle: JoinHandle<HummockResult<()>>,
     pub data_len: usize,
+    pub unit_id: u64,
 }
 
 /// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -42,7 +43,7 @@ pub struct CapacitySplitTableBuilder<B> {
 
     sealed_builders: Vec<SealedSstableBuilder>,
 
-    current_builder: Option<(HummockSSTableId, SSTableBuilder)>,
+    current_builder: Option<SSTableBuilder>,
 
     sstable_store: SstableStoreRef,
 }
@@ -50,7 +51,7 @@ pub struct CapacitySplitTableBuilder<B> {
 impl<B, F> CapacitySplitTableBuilder<B>
 where
     B: Clone + Fn() -> F,
-    F: Future<Output = HummockResult<(HummockSSTableId, SSTableBuilder)>>,
+    F: Future<Output = HummockResult<SSTableBuilder>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(get_id_and_builder: B, sstable_store: SstableStoreRef) -> Self {
@@ -101,7 +102,7 @@ where
         value: HummockValue<&[u8]>,
         allow_split: bool,
     ) -> HummockResult<()> {
-        if let Some((_, builder)) = self.current_builder.as_ref() {
+        if let Some(builder) = self.current_builder.as_ref() {
             if allow_split && builder.reach_capacity() {
                 self.seal_current();
             }
@@ -113,7 +114,7 @@ where
                 .insert((self.get_id_and_builder)().await?);
         }
 
-        let (_, builder) = self.current_builder.as_mut().unwrap();
+        let builder = self.current_builder.as_mut().unwrap();
         builder.add(full_key.into_inner(), value);
         Ok(())
     }
@@ -123,7 +124,8 @@ where
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
     pub fn seal_current(&mut self) {
-        if let Some((table_id, builder)) = self.current_builder.take() {
+        if let Some(builder) = self.current_builder.take() {
+            let table_id = builder.get_sstable_id();
             let (data, meta, vnode_bitmap) = builder.finish();
             let len = data.len();
             let sstable_store = self.sstable_store.clone();
@@ -146,6 +148,7 @@ where
                 vnode_bitmaps: vnode_bitmap,
                 upload_join_handle,
                 data_len: len,
+                unit_id: 0,
             })
         }
     }
@@ -178,13 +181,16 @@ mod tests {
         let get_id_and_builder = || async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(SSTableBuilderOptions {
-                    capacity: table_capacity,
-                    block_capacity: block_size,
-                    restart_interval: DEFAULT_RESTART_INTERVAL,
-                    bloom_false_positive: 0.1,
-                    compression_algorithm: CompressionAlgorithm::None,
-                }),
+                SSTableBuilder::new(
+                    0,
+                    SSTableBuilderOptions {
+                        capacity: table_capacity,
+                        block_capacity: block_size,
+                        restart_interval: DEFAULT_RESTART_INTERVAL,
+                        bloom_false_positive: 0.1,
+                        compression_algorithm: CompressionAlgorithm::None,
+                    },
+                ),
             ))
         };
         let builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
@@ -201,13 +207,16 @@ mod tests {
         let get_id_and_builder = || async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(SSTableBuilderOptions {
-                    capacity: table_capacity,
-                    block_capacity: block_size,
-                    restart_interval: DEFAULT_RESTART_INTERVAL,
-                    bloom_false_positive: 0.1,
-                    compression_algorithm: CompressionAlgorithm::None,
-                }),
+                SSTableBuilder::new(
+                    0,
+                    SSTableBuilderOptions {
+                        capacity: table_capacity,
+                        block_capacity: block_size,
+                        restart_interval: DEFAULT_RESTART_INTERVAL,
+                        bloom_false_positive: 0.1,
+                        compression_algorithm: CompressionAlgorithm::None,
+                    },
+                ),
             ))
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
@@ -235,7 +244,7 @@ mod tests {
             || async {
                 Ok((
                     next_id.fetch_add(1, SeqCst),
-                    SSTableBuilder::new(default_builder_opt_for_test()),
+                    SSTableBuilder::new(0, default_builder_opt_for_test()),
                 ))
             },
             mock_sstable_store(),
@@ -279,7 +288,7 @@ mod tests {
             || async {
                 Ok((
                     next_id.fetch_add(1, SeqCst),
-                    SSTableBuilder::new(default_builder_opt_for_test()),
+                    SSTableBuilder::new(0, default_builder_opt_for_test()),
                 ))
             },
             mock_sstable_store(),

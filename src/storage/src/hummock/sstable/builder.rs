@@ -86,10 +86,11 @@ pub struct SSTableBuilder {
     /// Last added full key.
     last_full_key: Bytes,
     key_count: usize,
+    sstable_id: u64,
 }
 
 impl SSTableBuilder {
-    pub fn new(options: SSTableBuilderOptions) -> Self {
+    pub fn new(sstable_id: u64, options: SSTableBuilderOptions) -> Self {
         Self {
             options: options.clone(),
             buf: BytesMut::with_capacity(options.capacity),
@@ -99,6 +100,7 @@ impl SSTableBuilder {
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             last_full_key: Bytes::default(),
             key_count: 0,
+            sstable_id,
         }
     }
 
@@ -148,6 +150,10 @@ impl SSTableBuilder {
             self.build_block();
         }
         self.key_count += 1;
+    }
+
+    pub fn get_sstable_id(&self) -> u64 {
+        self.sstable_id
     }
 
     /// Finish building sst.
@@ -248,14 +254,14 @@ pub(super) mod tests {
             compression_algorithm: CompressionAlgorithm::None,
         };
 
-        let b = SSTableBuilder::new(opt);
+        let b = SSTableBuilder::new(0, opt);
 
         b.finish();
     }
 
     #[test]
     fn test_smallest_key_and_largest_key() {
-        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
+        let mut b = SSTableBuilder::new(0, default_builder_opt_for_test());
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)));
