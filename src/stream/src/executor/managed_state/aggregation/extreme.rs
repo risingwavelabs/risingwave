@@ -18,8 +18,9 @@ use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::consistent_hash::VirtualNode;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::hash::{HashCode, VirtualNode};
+use risingwave_common::hash::HashCode;
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
@@ -386,34 +387,6 @@ where
     }
 }
 
-impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
-where
-    A::OwnedItem: Ord,
-{
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub async fn iterate_store(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
-        let epoch = u64::MAX;
-        let all_data = self.keyspace.scan(None, epoch).await?;
-        let mut result = vec![];
-
-        for (raw_key, mut raw_value) in all_data {
-            // let mut deserializer = value_encoding::Deserializer::new(raw_value);
-            let value = deserialize_cell(&mut raw_value, &self.data_type)?;
-            let key = value.clone().map(|x| x.try_into().unwrap());
-            let pks = self.serializer.get_pk(&raw_key[..])?;
-            result.push((key, pks));
-        }
-        Ok(result)
-    }
-
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub async fn iterate_topn_cache(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
-        Ok(self.top_n.iter().map(|(k, _)| k.clone()).collect())
-    }
-}
-
 pub async fn create_streaming_extreme_state<S: StateStore>(
     agg_call: AggCall,
     keyspace: Keyspace<S>,
@@ -475,8 +448,13 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
         { Float64, F64Array },
         { Float32, F32Array },
         { Decimal, DecimalArray },
+        { Date, NaiveDateArray },
         { Varchar, Utf8Array },
+        { Time, NaiveTimeArray },
+        { Timestamp, NaiveDateTimeArray },
         { Interval, IntervalArray },
+        { Struct { fields: _ }, StructArray },
+        { List { datatype: _ }, ListArray },
     )
 }
 
@@ -486,6 +464,7 @@ mod tests {
     use madsim::collections::{BTreeSet, HashSet};
     use madsim::rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
+    use risingwave_common::catalog::TableId;
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
     use smallvec::smallvec;
@@ -495,7 +474,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
             DataType::Int64,
@@ -638,7 +617,7 @@ mod tests {
         let row_count = managed_state.total_count;
 
         // test recovery
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace,
             DataType::Int64,
@@ -679,7 +658,7 @@ mod tests {
 
     async fn test_replicated_value_not_null<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
@@ -765,7 +744,7 @@ mod tests {
 
     async fn test_replicated_value_with_null<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
@@ -868,7 +847,7 @@ mod tests {
     #[tokio::test]
     async fn test_same_group_of_value() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
             DataType::Int64,
@@ -948,7 +927,7 @@ mod tests {
         let mut remaining_values = &values_to_insert[..];
 
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
             DataType::Int64,
@@ -1046,7 +1025,7 @@ mod tests {
         // The 6 should be deleted from the state store.
 
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
             DataType::Int64,

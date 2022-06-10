@@ -275,7 +275,7 @@ mod tests {
             stream_region: "cn-northwest-1".to_string(),
             endpoint: None,
             session_token: None,
-            assume_role_externeal_id: None,
+            assume_role_external_id: None,
         };
 
         let mut trim_horizen_reader = KinesisSplitReader::new(
@@ -326,7 +326,7 @@ mod tests {
             stream_region: "cn-northwest-1".to_string(),
             endpoint: None,
             session_token: None,
-            assume_role_externeal_id: None,
+            assume_role_external_id: None,
         };
 
         let splits = vec!["shardId-000000000000", "shardId-000000000001"]

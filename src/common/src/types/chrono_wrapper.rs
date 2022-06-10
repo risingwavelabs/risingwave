@@ -213,7 +213,9 @@ fn is_leap_year(year: i32) -> bool {
 }
 
 impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
-    fn checked_add(&self, rhs: IntervalUnit) -> Result<NaiveDateTimeWrapper> {
+    type Output = NaiveDateTimeWrapper;
+
+    fn checked_add(self, rhs: IntervalUnit) -> Option<NaiveDateTimeWrapper> {
         let mut date = self.0.date();
         if rhs.get_months() != 0 {
             // NaiveDate don't support add months. We need calculate manually
@@ -246,13 +248,9 @@ impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
             date = NaiveDate::from_ymd(year, month as u32, day as u32);
         }
         let mut datetime = NaiveDateTime::new(date, self.0.time());
-        datetime = datetime
-            .checked_add_signed(Duration::days(rhs.get_days().into()))
-            .ok_or_else(|| InternalError("Date out of range".to_string()))?;
-        datetime = datetime
-            .checked_add_signed(Duration::milliseconds(rhs.get_ms()))
-            .ok_or_else(|| InternalError("Date out of range".to_string()))?;
+        datetime = datetime.checked_add_signed(Duration::days(rhs.get_days().into()))?;
+        datetime = datetime.checked_add_signed(Duration::milliseconds(rhs.get_ms()))?;
 
-        Ok(NaiveDateTimeWrapper::new(datetime))
+        Some(NaiveDateTimeWrapper::new(datetime))
     }
 }

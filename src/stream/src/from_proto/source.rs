@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-use risingwave_common::error::ToRwResult;
-use risingwave_connector::SplitImpl;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
@@ -39,16 +37,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let source_id = TableId::from(&node.table_ref_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
 
-        let stream_source_splits = match &node.stream_source_state {
-            Some(splits) => splits
-                .stream_source_splits
-                .iter()
-                .map(|split| SplitImpl::restore_from_bytes(splits.get_split_type().clone(), split))
-                .collect::<anyhow::Result<Vec<SplitImpl>>>()
-                .to_rw_result(),
-            _ => Ok(vec![]),
-        }?;
-
         let column_ids: Vec<_> = node
             .get_column_ids()
             .iter()
@@ -64,7 +52,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
         }));
         let schema = Schema::new(fields);
-        let keyspace = Keyspace::executor_root(store, params.executor_id);
+        let keyspace = Keyspace::table_root(store, &source_id);
 
         Ok(Box::new(SourceExecutor::new(
             params.actor_id,
@@ -79,7 +67,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.operator_id,
             params.op_info,
             params.executor_stats,
-            stream_source_splits,
             stream.config.checkpoint_interval_ms as u64,
         )?))
     }

@@ -73,7 +73,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config postgresql-client tmux lld
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -85,7 +85,7 @@ You can now build RiseDev and start a dev cluster. It is as simple as:
 
 ```shell
 ./risedev d                        # shortcut for ./risedev dev
-psql -h localhost -p 4566
+psql -h localhost -p 4566 -d dev -U root
 ```
 
 The default dev cluster includes metadata-node, compute-node and frontend-node processes, and an embedded volatile in-memory state storage. No data will be persisted. This configuration is intended to make it easier to develop and debug RisingWave.
@@ -172,7 +172,7 @@ cargo run --bin risingwave -- playground
 Then, connect to the playground instance via:
 
 ```shell
-psql -h localhost -p 4566
+psql -h localhost -p 4566 -d dev -U root
 ```
 
 ## Develop the dashboard
@@ -276,7 +276,7 @@ Before running end-to-end tests, you will need to start a full cluster first:
 Then run the end-to-end tests (replace `**/*.slt` with the test case directories and files available):
 
 ```shell
-./risedev slt -p 4566 './e2e_test/streaming/**/*.slt'
+./risedev slt -p 4566 -d dev -u root './e2e_test/streaming/**/*.slt'
 ```
 
 After running e2e tests, you may kill the cluster and clean data.
@@ -316,18 +316,7 @@ buf lint
 
 ## Update Grafana dashboard
 
-Simply use the export functionality in Grafana, disable the config "external sharing". Then,
-manually modify the JSON.
-
-All datasource should use `risedev-prometheus` as datasource. If you found something else,
-change them.
-
-```
-"datasource": {
-  "type": "prometheus",
-  "uid": "risedev-prometheus"
-},
-```
+See [README](../grafana/README.md) for more information.
 
 ## Add new files
 

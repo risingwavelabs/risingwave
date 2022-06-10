@@ -3,6 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+source ci/scripts/common.env.sh
+
 while getopts 't:p:' opt; do
     case ${opt} in
         t )
@@ -22,10 +24,6 @@ while getopts 't:p:' opt; do
 done
 shift $((OPTIND -1))
 
-echo "--- Install required tools"
-rustup default "$(cat ./rust-toolchain)" && rustup component add rustfmt
-cargo install cargo-sort cargo-hakari
-
 echo "--- Rust cargo-sort check"
 cargo sort -c -w
 
@@ -36,10 +34,13 @@ echo "--- Rust format check"
 cargo fmt --all -- --check
 
 echo "--- Build Rust components"
-cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --profile "$profile"
+cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --features static-link --profile "$profile"
 
 echo "--- Compress RisingWave debug info"
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
+
+echo "--- Show link info"
+ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
 cp target/"$target"/risingwave ./risingwave-"$profile"

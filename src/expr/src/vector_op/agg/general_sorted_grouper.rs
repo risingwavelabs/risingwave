@@ -320,7 +320,7 @@ mod tests {
             ongoing: false,
             group_value: None,
         };
-        let mut builder = I32ArrayBuilder::new(0)?;
+        let mut builder = I32ArrayBuilder::new(0).unwrap();
 
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq = g.detect_groups_concrete(&input)?;
@@ -334,7 +334,7 @@ mod tests {
 
         g.output_concrete(&mut builder)?;
         assert_eq!(
-            builder.finish()?.iter().collect::<Vec<_>>(),
+            builder.finish().unwrap().iter().collect::<Vec<_>>(),
             vec![Some(1), Some(3), Some(4)]
         );
         Ok(())
@@ -352,11 +352,11 @@ mod tests {
     #[test]
     fn vec_agg_group() -> Result<()> {
         let mut g0 = GeneralSortedGrouper::<I32Array>::new(false, None);
-        let mut g0_builder = I32ArrayBuilder::new(0)?;
+        let mut g0_builder = I32ArrayBuilder::new(0).unwrap();
         let mut g1 = GeneralSortedGrouper::<I32Array>::new(false, None);
-        let mut g1_builder = I32ArrayBuilder::new(0)?;
+        let mut g1_builder = I32ArrayBuilder::new(0).unwrap();
         let mut a = GeneralAgg::<I32Array, _, I64Array>::new(DataType::Int64, 0, sum, None);
-        let mut a_builder = I64ArrayBuilder::new(0)?;
+        let mut a_builder = I64ArrayBuilder::new(0).unwrap();
 
         let g0_input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq0 = g0.detect_groups_concrete(&g0_input)?;
@@ -382,15 +382,15 @@ mod tests {
         g1.output_concrete(&mut g1_builder)?;
         a.output_concrete(&mut a_builder)?;
         assert_eq!(
-            g0_builder.finish()?.iter().collect::<Vec<_>>(),
+            g0_builder.finish().unwrap().iter().collect::<Vec<_>>(),
             vec![Some(1), Some(1), Some(3), Some(4)]
         );
         assert_eq!(
-            g1_builder.finish()?.iter().collect::<Vec<_>>(),
+            g1_builder.finish().unwrap().iter().collect::<Vec<_>>(),
             vec![Some(7), Some(8), Some(8), Some(8)]
         );
         assert_eq!(
-            a_builder.finish()?.iter().collect::<Vec<_>>(),
+            a_builder.finish().unwrap().iter().collect::<Vec<_>>(),
             vec![Some(1), Some(2), Some(4), Some(5)]
         );
         Ok(())

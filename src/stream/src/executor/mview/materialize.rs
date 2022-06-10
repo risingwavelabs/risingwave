@@ -54,7 +54,12 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let arrange_columns_set: HashSet<usize> =
             keys.iter().map(|k| k.column_idx).collect::<HashSet<_>>();
         let dist_key_set = distribution_keys.iter().copied().collect::<HashSet<_>>();
-        assert!(dist_key_set.is_subset(&arrange_columns_set));
+        assert!(
+            dist_key_set.is_subset(&arrange_columns_set),
+            "dist_key_set={:?}, arrange_columns_set={:?}",
+            dist_key_set,
+            arrange_columns_set
+        );
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
         let column_descs = column_ids
@@ -178,6 +183,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+    use risingwave_common::consistent_hash::VNODE_BITMAP_LEN;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
@@ -224,7 +230,9 @@ mod tests {
             ],
         );
 
-        let keyspace = Keyspace::table_root(memory_state_store.clone(), &table_id);
+        let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+        let keyspace =
+            Keyspace::table_root_with_vnodes(memory_state_store.clone(), &table_id, bitmap_inner);
         let order_types = vec![OrderType::Ascending];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),

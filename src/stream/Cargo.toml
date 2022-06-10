@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_stream"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -28,6 +28,7 @@ memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
+pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.10"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
@@ -43,6 +44,7 @@ serde-value = "0.7"
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
+stats_alloc = { path = "../utils/stats_alloc" }
 thiserror = "1"
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "rt",

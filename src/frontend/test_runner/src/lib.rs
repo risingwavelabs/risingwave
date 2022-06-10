@@ -18,7 +18,7 @@
 
 mod resolve_id;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -87,7 +87,7 @@ pub struct TestCase {
     pub create_source: Option<CreateSource>,
 
     /// Provide config map to frontend
-    pub with_config_map: Option<HashMap<String, String>>,
+    pub with_config_map: Option<BTreeMap<String, String>>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -178,7 +178,7 @@ impl TestCase {
 
         if let Some(ref config_map) = self.with_config_map {
             for (key, val) in config_map {
-                session.set_config(key, val);
+                session.set_config(key, val).unwrap();
             }
         }
 
@@ -263,8 +263,13 @@ impl TestCase {
                     }
                     result = Some(ret);
                 }
-                Statement::CreateTable { name, columns, .. } => {
-                    create_table::handle_create_table(context, name, columns).await?;
+                Statement::CreateTable {
+                    name,
+                    columns,
+                    with_options,
+                    ..
+                } => {
+                    create_table::handle_create_table(context, name, columns, with_options).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,

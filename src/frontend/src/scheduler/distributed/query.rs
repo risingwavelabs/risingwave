@@ -386,7 +386,7 @@ mod tests {
 
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
+        BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
@@ -425,9 +425,8 @@ mod tests {
         //
         let ctx = OptimizerContext::mock().await;
 
-        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
+        let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
-            vec![0, 1],
             Rc::new(TableDesc {
                 table_id: 0.into(),
                 pks: vec![],
@@ -449,11 +448,13 @@ mod tests {
                     },
                 ],
                 distribution_keys: vec![],
+                appendonly: false,
             }),
             vec![],
             ctx,
-        ))
-        .into();
+        )
+        .to_batch()
+        .unwrap();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),

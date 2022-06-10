@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 
 [dependencies]
@@ -74,6 +74,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
+risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
 [features]
@@ -97,4 +98,8 @@ harness = false
 
 [[bench]]
 name = "bench_fs_operation"
+harness = false
+
+[[bench]]
+name = "bench_compression"
 harness = false

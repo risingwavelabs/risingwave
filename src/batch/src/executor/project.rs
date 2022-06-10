@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -57,7 +58,7 @@ impl ProjectExecutor {
                 .expr
                 .iter_mut()
                 .map(|expr| expr.eval(&data_chunk).map(Column::new))
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
             let ret = DataChunk::new(arrays, data_chunk.cardinality());
             yield ret
         }
@@ -80,11 +81,11 @@ impl BoxedExecutorBuilder for ProjectExecutor {
             NodeBody::Project
         )?;
 
-        let project_exprs = project_node
+        let project_exprs: Vec<_> = project_node
             .get_select_list()
             .iter()
             .map(build_from_prost)
-            .collect::<Result<Vec<BoxedExpression>>>()?;
+            .try_collect()?;
 
         let fields = project_exprs
             .iter()

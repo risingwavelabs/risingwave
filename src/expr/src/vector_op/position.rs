@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use crate::Result;
 
 #[inline(always)]
 /// Location of specified substring
@@ -33,14 +33,13 @@ mod tests {
     #[test]
     fn test_length() {
         let cases = [
-            ("hello world", "world", Ok(7)),
-            ("床前明月光", "月光", Ok(4)),
-            ("床前明月光", "故乡", Ok(0)),
+            ("hello world", "world", 7),
+            ("床前明月光", "月光", 4),
+            ("床前明月光", "故乡", 0),
         ];
 
         for (str, sub_str, expected) in cases {
-            println!("position is {}", position(str, sub_str).unwrap());
-            assert_eq!(position(str, sub_str), expected)
+            assert_eq!(position(str, sub_str).unwrap(), expected)
         }
     }
 }

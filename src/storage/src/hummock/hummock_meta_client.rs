@@ -17,7 +17,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::{
-    CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
@@ -71,6 +72,10 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
+    async fn unpin_snapshot_before(&self, _min_epoch: HummockEpoch) -> Result<()> {
+        unreachable!("Currently CNs should not call this function")
+    }
+
     async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         self.stats.get_new_table_id_counts.inc();
         let timer = self.stats.get_new_table_id_latency.start_timer();
@@ -97,5 +102,9 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
         self.meta_client.report_vacuum_task(vacuum_task).await
+    }
+
+    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+        self.meta_client.get_compaction_groups().await
     }
 }

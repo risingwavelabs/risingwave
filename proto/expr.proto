@@ -66,8 +66,8 @@ message ExprNode {
     CEIL = 221;
     FLOOR = 222;
     TO_CHAR = 223;
-
     MD5 = 224;
+    CHAR_LENGTH = 225;
 
     // Boolean comparison
     IS_TRUE = 301;

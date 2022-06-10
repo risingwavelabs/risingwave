@@ -14,6 +14,7 @@
 
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
+
 use std::sync::Arc;
 
 use futures::stream::StreamExt;
@@ -22,22 +23,22 @@ use itertools::Itertools;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
-    RowSeqScanExecutor,
+    RowSeqScanExecutor, ScanType,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::test_prelude::DataChunkTestExt;
-use risingwave_common::types::IntoOrdered;
+use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
@@ -86,6 +87,8 @@ impl SingleChunkExecutor {
 /// insertion, deletion, and materialization.
 #[tokio::test]
 async fn test_table_v2_materialize() -> Result<()> {
+    use risingwave_pb::data::DataType;
+
     let memory_state_store = MemoryStateStore::new();
     let source_manager = Arc::new(MemSourceManager::default());
     let source_table_id = TableId::default();
@@ -132,7 +135,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
-    let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
+    let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
     let stream_source = SourceExecutor::new(
         0x3f3f3f,
         source_table_id,
@@ -146,7 +149,6 @@ async fn test_table_v2_materialize() -> Result<()> {
         1,
         "SourceExecutor".to_string(),
         Arc::new(StreamingMetrics::unused()),
-        vec![],
         u64::MAX,
     )?;
 
@@ -202,13 +204,22 @@ async fn test_table_v2_materialize() -> Result<()> {
     let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
     let table = CellBasedTable::new_adhoc(
         keyspace,
-        column_descs,
+        column_descs.clone(),
         Arc::new(StateStoreMetrics::unused()),
     );
 
+    let ordered_column_descs: Vec<OrderedColumnDesc> = column_descs
+        .iter()
+        .take(1)
+        .map(|d| OrderedColumnDesc {
+            column_desc: d.clone(),
+            order: OrderType::Ascending,
+        })
+        .collect();
+
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table.iter(u64::MAX).await?,
+        ScanType::TableScan(table.iter_with_pk(u64::MAX, &ordered_column_descs).await?),
         1024,
         true,
         "RowSeqExecutor2".to_string(),
@@ -267,7 +278,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table.iter(u64::MAX).await?,
+        ScanType::TableScan(table.iter_with_pk(u64::MAX, &ordered_column_descs).await?),
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
@@ -335,7 +346,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        table.iter(u64::MAX).await?,
+        ScanType::TableScan(table.iter_with_pk(u64::MAX, &ordered_column_descs).await?),
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
@@ -348,5 +359,127 @@ async fn test_table_v2_materialize() -> Result<()> {
     assert_eq!(col_data.len(), 1);
     assert_eq!(col_data.value_at(0).unwrap(), 5.14.into_ordered());
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_row_seq_scan() -> Result<()> {
+    // In this test we test if the memtable can be correctly scanned for K-V pair insertions.
+    let memory_state_store = MemoryStateStore::new();
+    let keyspace = Keyspace::table_root(memory_state_store.clone(), &TableId::from(0x42));
+
+    let schema = Schema::new(vec![
+        Field::unnamed(DataType::Int32), // pk
+        Field::unnamed(DataType::Int32),
+        Field::unnamed(DataType::Int64),
+    ]);
+    let _column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), schema[0].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(1), schema[1].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
+    ];
+
+    let mut state = StateTable::new(
+        keyspace.clone(),
+        column_descs.clone(),
+        vec![OrderType::Ascending],
+        None,
+        vec![0_usize],
+    );
+    let table = CellBasedTable::new_adhoc(
+        keyspace,
+        column_descs.clone(),
+        Arc::new(StateStoreMetrics::unused()),
+    );
+
+    let epoch: u64 = 0;
+
+    state
+        .insert(
+            &Row(vec![Some(1_i32.into())]),
+            Row(vec![
+                Some(1_i32.into()),
+                Some(4_i32.into()),
+                Some(7_i64.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            &Row(vec![Some(2_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(5_i32.into()),
+                Some(8_i64.into()),
+            ]),
+        )
+        .unwrap();
+    state.commit(epoch).await.unwrap();
+
+    let pk_descs: Vec<OrderedColumnDesc> = column_descs
+        .iter()
+        .take(1)
+        .map(|d| OrderedColumnDesc {
+            column_desc: d.clone(),
+            order: OrderType::Ascending,
+        })
+        .collect();
+
+    let executor = Box::new(RowSeqScanExecutor::new(
+        table.schema().clone(),
+        ScanType::TableScan(table.iter_with_pk(u64::MAX, &pk_descs).await.unwrap()),
+        1,
+        true,
+        "RowSeqScanExecutor2".to_string(),
+        Arc::new(BatchMetrics::unused()),
+    ));
+
+    assert_eq!(executor.schema().fields().len(), 3);
+
+    let mut stream = executor.execute();
+    let res_chunk = stream.next().await.unwrap().unwrap();
+
+    assert_eq!(res_chunk.dimension(), 3);
+    assert_eq!(
+        res_chunk
+            .column_at(0)
+            .array()
+            .as_int32()
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![Some(1)]
+    );
+    assert_eq!(
+        res_chunk
+            .column_at(1)
+            .array()
+            .as_int32()
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![Some(4)]
+    );
+
+    let res_chunk2 = stream.next().await.unwrap().unwrap();
+    assert_eq!(res_chunk2.dimension(), 3);
+    assert_eq!(
+        res_chunk2
+            .column_at(0)
+            .array()
+            .as_int32()
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![Some(2)]
+    );
+    assert_eq!(
+        res_chunk2
+            .column_at(1)
+            .array()
+            .as_int32()
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![Some(5)]
+    );
     Ok(())
 }

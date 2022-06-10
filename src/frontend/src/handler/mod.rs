@@ -39,6 +39,7 @@ pub mod drop_table;
 pub mod drop_user;
 mod explain;
 mod flush;
+pub mod handle_privilege;
 #[allow(dead_code)]
 pub mod query;
 mod set;
@@ -55,9 +56,12 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             is_materialized,
             stmt,
         } => create_source::handle_create_source(context, is_materialized, stmt).await,
-        Statement::CreateTable { name, columns, .. } => {
-            create_table::handle_create_table(context, name, columns).await
-        }
+        Statement::CreateTable {
+            name,
+            columns,
+            with_options,
+            ..
+        } => create_table::handle_create_table(context, name, columns, with_options).await,
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
@@ -69,6 +73,8 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ..
         } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
         Statement::CreateUser(stmt) => create_user::handle_create_user(context, stmt).await,
+        Statement::Grant { .. } => handle_privilege::handle_grant_privilege(context, stmt).await,
+        Statement::Revoke { .. } => handle_privilege::handle_revoke_privilege(context, stmt).await,
         Statement::Describe { name } => describe::handle_describe(context, name).await,
         Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object).await,
         Statement::Drop(DropStatement {

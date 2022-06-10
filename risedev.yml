@@ -39,6 +39,17 @@ risedev:
     # - use: kafka
     #   persist-data: true
 
+  default-v6:
+    - use: meta-node
+      address: "[::1]"
+      listen-address: "[::]"
+    - use: compute-node
+      address: "[::1]"
+      listen-address: "[::]"
+    - use: frontend
+      address: "[::1]"
+      listen-address: "[::]"
+
   # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
   dev-compute-node:
     - use: meta-node
@@ -423,6 +434,9 @@ template:
 
     # Etcd used by this Prometheus instance
     provide-etcd: "etcd*"
+
+    # Redpanda used by this Prometheus instance
+    provide-redpanda: "redpanda*"
 
   frontend:
     # Advertise address of frontend

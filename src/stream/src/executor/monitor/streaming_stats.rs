@@ -19,7 +19,7 @@ use prometheus::{
 
 pub struct StreamingMetrics {
     pub registry: Registry,
-    pub actor_row_count: GenericCounterVec<AtomicU64>,
+    pub executor_row_count: GenericCounterVec<AtomicU64>,
     pub actor_processing_time: GenericGaugeVec<AtomicF64>,
     pub actor_barrier_time: GenericGaugeVec<AtomicF64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
@@ -28,10 +28,10 @@ pub struct StreamingMetrics {
 
 impl StreamingMetrics {
     pub fn new(registry: Registry) -> Self {
-        let actor_row_count = register_int_counter_vec_with_registry!(
-            "stream_actor_row_count",
-            "Total number of rows that have been output from each actor",
-            &["actor_id"],
+        let executor_row_count = register_int_counter_vec_with_registry!(
+            "stream_executor_row_count",
+            "Total number of rows that have been output from each executor",
+            &["actor_id", "executor_id"],
             registry
         )
         .unwrap();
@@ -70,7 +70,7 @@ impl StreamingMetrics {
 
         Self {
             registry,
-            actor_row_count,
+            executor_row_count,
             actor_processing_time,
             actor_barrier_time,
             source_output_row_count,

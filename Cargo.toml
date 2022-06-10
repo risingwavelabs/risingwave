@@ -24,10 +24,13 @@ members = [
   "src/storage/compactor",
   "src/storage/hummock_sdk",
   "src/stream",
+  "src/test_runner",
   "src/tests/regress",
   "src/utils/logging",
   "src/utils/memcomparable",
   "src/utils/pgwire",
+  "src/utils/static-link",
+  "src/utils/stats_alloc",
   "src/utils/value-encoding",
   "src/workspace-hack",
 ]

@@ -87,7 +87,6 @@ impl<S: StateStore> SourceExecutor<S> {
         _operator_id: u64,
         _op_info: String,
         streaming_metrics: Arc<StreamingMetrics>,
-        stream_source_splits: Vec<SplitImpl>,
         expected_barrier_latency_ms: u64,
     ) -> Result<Self> {
         Ok(Self {
@@ -100,7 +99,7 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             identity: format!("SourceExecutor {:X}", executor_id),
             metrics: streaming_metrics,
-            stream_source_splits,
+            stream_source_splits: vec![],
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
             split_state_store: SourceStateHandler::new(keyspace),
             state_cache: HashMap::new(),
@@ -305,6 +304,14 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver.recv().await.unwrap();
 
+        if let Some(mutation) = barrier.mutation.as_ref() {
+            if let Mutation::AddOutput(add_output) = mutation.as_ref() {
+                if let Some(splits) = add_output.splits.get(&self.actor_id) {
+                    self.stream_source_splits = splits.clone();
+                }
+            }
+        }
+
         let epoch = barrier.epoch.prev;
 
         let mut boot_state = self.stream_source_splits.clone();
@@ -357,6 +364,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             self.take_snapshot(epoch)
                                 .await
                                 .map_err(StreamExecutorError::source_error)?;
+
                             if let Some(Mutation::SourceChangeSplit(mapping)) =
                                 barrier.mutation.as_deref()
                             {
@@ -534,7 +542,7 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
+        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
 
         let executor = SourceExecutor::new(
             0x3f3f3f,
@@ -549,7 +557,6 @@ mod tests {
             1,
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::new(prometheus::Registry::new())),
-            vec![],
             u64::MAX,
         )
         .unwrap();
@@ -658,7 +665,7 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
+        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
         let executor = SourceExecutor::new(
             0x3f3f3f,
             table_id,
@@ -672,7 +679,6 @@ mod tests {
             1,
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::unused()),
-            vec![],
             u64::MAX,
         )
         .unwrap();

@@ -828,6 +828,7 @@ pub enum Statement {
         objects: GrantObjects,
         grantees: Vec<Ident>,
         granted_by: Option<Ident>,
+        revoke_grant_option: bool,
         cascade: bool,
     },
     /// `DEALLOCATE [ PREPARE ] { name | ALL }`
@@ -1183,9 +1184,19 @@ impl fmt::Display for Statement {
                 objects,
                 grantees,
                 granted_by,
+                revoke_grant_option,
                 cascade,
             } => {
-                write!(f, "REVOKE {} ", privileges)?;
+                write!(
+                    f,
+                    "REVOKE {}{} ",
+                    if *revoke_grant_option {
+                        "GRANT OPTION FOR "
+                    } else {
+                        ""
+                    },
+                    privileges
+                )?;
                 write!(f, "ON {} ", objects)?;
                 write!(f, "FROM {}", display_comma_separated(grantees))?;
                 if let Some(grantor) = granted_by {
@@ -1353,8 +1364,18 @@ pub enum GrantObjects {
     AllSequencesInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL TABLES IN SCHEMA <schema_name> [, ...]`
     AllTablesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SOURCES IN SCHEMA <schema_name> [, ...]`
+    AllSourcesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL MATERIALIZED VIEWS IN SCHEMA <schema_name> [, ...]`
+    AllMviewsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on specific databases
+    Databases(Vec<ObjectName>),
     /// Grant privileges on specific schemas
     Schemas(Vec<ObjectName>),
+    /// Grant privileges on specific sources
+    Sources(Vec<ObjectName>),
+    /// Grant privileges on specific materialized views
+    Mviews(Vec<ObjectName>),
     /// Grant privileges on specific sequences
     Sequences(Vec<ObjectName>),
     /// Grant privileges on specific tables
@@ -1386,6 +1407,29 @@ impl fmt::Display for GrantObjects {
                     "ALL TABLES IN SCHEMA {}",
                     display_comma_separated(schemas)
                 )
+            }
+            GrantObjects::AllSourcesInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SOURCES IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllMviewsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL MATERIALIZED VIEWS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::Databases(databases) => {
+                write!(f, "DATABASE {}", display_comma_separated(databases))
+            }
+            GrantObjects::Sources(sources) => {
+                write!(f, "SOURCE {}", display_comma_separated(sources))
+            }
+            GrantObjects::Mviews(mviews) => {
+                write!(f, "MATERIALIZED VIEW {}", display_comma_separated(mviews))
             }
         }
     }
@@ -1436,6 +1480,15 @@ impl fmt::Display for FunctionArgExpr {
 pub enum FunctionArg {
     Named { name: Ident, arg: FunctionArgExpr },
     Unnamed(FunctionArgExpr),
+}
+
+impl FunctionArg {
+    pub fn get_expr(&self) -> FunctionArgExpr {
+        match self {
+            FunctionArg::Named { name: _, arg } => arg.clone(),
+            FunctionArg::Unnamed(arg) => arg.clone(),
+        }
+    }
 }
 
 impl fmt::Display for FunctionArg {
