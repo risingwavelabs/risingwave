@@ -270,12 +270,12 @@ mod tests {
         .unwrap();
         assert_matches!(agg.get_output().unwrap(), Some(_));
 
-        /*agg.apply_batch(
+        agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&(vec![true, true, true, true]).try_into().unwrap()),
             &[&array_nonnull!(I64Array, [3, 3, 1, 2]).into()],
         )
         .unwrap();
-        assert_eq!(agg.get_output().unwrap().unwrap().into_int64(), 0);*/
+        assert_eq!(agg.get_output().unwrap().unwrap().into_int64(), 0);
     }
 }
