@@ -357,41 +357,34 @@ pub fn generate_column_descs(
     input_ref: &dyn Executor,
 ) -> Vec<ColumnDesc> {
     let mut column_descs = Vec::with_capacity(group_keys.len() + 1);
-    let mut column_id = 0;
-    for (idx, _) in group_keys.iter().enumerate() {
-        // The agg schema layout as [group_key schema, agg_call schema], so directly get group key
-        // return type from it for DRY.
+    let mut next_column_id = 0;
+
+    // Define a closure for DRY.
+    let mut add_column_desc = |data_type: DataType| {
         column_descs.push(ColumnDesc::unnamed(
-            ColumnId::new(column_id),
-            agg_schema.fields[idx].data_type.clone(),
+            ColumnId::new(next_column_id),
+            data_type,
         ));
-        column_id += 1;
+        next_column_id += 1;
+    };
+
+    for (idx, _) in group_keys.iter().enumerate() {
+        add_column_desc(agg_schema.fields[idx].data_type.clone());
     }
 
     // For max, min, the table descs should include sort key.
     // The added columns should be (sort_key, pk from input data).
     if (agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min) && !agg_call.append_only {
         // Add value as part of sort key.
-        column_descs.push(ColumnDesc::unnamed(
-            ColumnId::new(column_id),
-            agg_call.return_type.clone(),
-        ));
-        column_id += 1;
+        add_column_desc(agg_call.return_type.clone());
 
         for pk_idx in pk_indices {
-            column_descs.push(ColumnDesc::unnamed(
-                ColumnId::new(column_id),
-                input_ref.schema().fields[*pk_idx].data_type.clone(),
-            ));
-            column_id += 1;
+            add_column_desc(input_ref.schema().fields[*pk_idx].data_type.clone());
         }
     }
 
     // Agg value should also be part of state table.
-    column_descs.push(ColumnDesc::unnamed(
-        ColumnId::new(column_id),
-        agg_call.return_type.clone(),
-    ));
+    add_column_desc(agg_call.return_type.clone());
 
     column_descs
 }

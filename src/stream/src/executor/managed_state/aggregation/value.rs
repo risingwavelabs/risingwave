@@ -57,8 +57,9 @@ impl ManagedValueState {
                 .get_row(pk.unwrap_or(&Row(vec![])), epoch)
                 .await?;
 
-            // According to row layout, the last field of the row is value.
-            raw_data.map(|row| row.0[row.0.len() - 1].clone())
+            // According to row layout, the last field of the row is value and we sure the row is
+            // not empty.
+            raw_data.map(|row| row.0.last().unwrap().clone())
         } else {
             None
         };
