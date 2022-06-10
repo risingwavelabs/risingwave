@@ -146,7 +146,6 @@ impl StreamService for StreamServiceImpl {
                 true,
             )
             .await?;
-        println!("over!!!!");
 
         let client = self.env.meta_client();
         let node_id = self.env.worker_id();
