@@ -45,15 +45,16 @@ use risingwave_pb::hummock::{
     UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
     VacuumTask,
 };
+use risingwave_pb::meta::barrier_manager_service_client::BarrierManagerServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, FlushRequest,
-    FlushResponse, HeartbeatRequest, HeartbeatResponse, ListAllNodesRequest, ListAllNodesResponse,
-    SubscribeRequest, SubscribeResponse,
+    AddWorkerNodeResponse, CollectOverRequest, CollectOverResponse, DeleteWorkerNodeRequest,
+    DeleteWorkerNodeResponse, FlushRequest, FlushResponse, HeartbeatRequest, HeartbeatResponse,
+    ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest, SubscribeResponse,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -74,7 +75,7 @@ type DatabaseId = u32;
 type SchemaId = u32;
 
 /// Client to meta server. Cloning the instance is lightweight.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MetaClient {
     worker_id: Option<u32>,
     pub inner: GrpcMetaClient,
@@ -358,6 +359,11 @@ impl MetaClient {
         self.inner.flush(request).await?;
         Ok(())
     }
+
+    pub async fn collect_over(&self, request: CollectOverRequest) -> Result<()> {
+        self.inner.collect_over(request).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -458,6 +464,7 @@ pub struct GrpcMetaClient {
     pub notification_client: NotificationServiceClient<Channel>,
     pub stream_client: StreamManagerServiceClient<Channel>,
     pub user_client: UserServiceClient<Channel>,
+    pub barrier_client: BarrierManagerServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -475,7 +482,8 @@ impl GrpcMetaClient {
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
         let stream_client = StreamManagerServiceClient::new(channel.clone());
-        let user_client = UserServiceClient::new(channel);
+        let user_client = UserServiceClient::new(channel.clone());
+        let barrier_client = BarrierManagerServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
@@ -484,6 +492,7 @@ impl GrpcMetaClient {
             notification_client,
             stream_client,
             user_client,
+            barrier_client,
         })
     }
 }
@@ -539,6 +548,7 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
+            ,{ barrier_client, collect_over, CollectOverRequest, CollectOverResponse }
         }
     };
 }

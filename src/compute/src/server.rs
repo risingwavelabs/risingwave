@@ -157,6 +157,7 @@ pub async fn compute_node_serve(
         stream_config,
         worker_id,
         state_store,
+        meta_client.clone(),
     );
 
     // Boot the runtime gRPC services.

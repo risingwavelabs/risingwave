@@ -21,6 +21,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::meta::barrier_manager_service_server::BarrierManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
@@ -40,6 +41,7 @@ use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::CompactionScheduler;
 use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv, UserManager};
 use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::service::barrier_service::BarrierServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
@@ -210,6 +212,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(stream_manager);
+    let barrier_srv = BarrierServiceImpl::<S>::new(barrier_manager.clone());
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
@@ -253,6 +256,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
+            .add_service(BarrierManagerServiceServer::new(barrier_srv))
             .serve_with_shutdown(addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},

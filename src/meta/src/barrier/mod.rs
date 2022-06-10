@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,7 +26,8 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
-use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
+use risingwave_pb::meta::CollectOverRequest;
+use risingwave_pb::stream_service::InjectBarrierRequest;
 use smallvec::SmallVec;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::{oneshot, watch, RwLock};
@@ -38,7 +39,7 @@ use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use self::progress::CreateMviewProgressTracker;
-use crate::cluster::{ClusterManagerRef, META_NODE_ID};
+use crate::cluster::{ClusterManagerRef, WorkerId, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv};
 use crate::model::BarrierManagerState;
@@ -160,6 +161,10 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 
     env: MetaSrvEnv<S>,
+
+    collect_word_node_map: Arc<RwLock<HashMap<WorkerId, Option<CollectOverRequest>>>>,
+
+    collect_over_sender: Arc<RwLock<Option<Sender<()>>>>,
 }
 
 impl<S> GlobalBarrierManager<S>
@@ -177,6 +182,8 @@ where
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let interval = env.opts.checkpoint_interval;
+        let collect_word_node_map = Arc::new(RwLock::new(HashMap::default()));
+        let collect_over_sender = Arc::new(RwLock::new(None));
         tracing::info!(
             "Starting barrier manager with: interval={:?}, enable_recovery={}",
             interval,
@@ -193,6 +200,8 @@ where
             hummock_manager,
             metrics,
             env,
+            collect_word_node_map,
+            collect_over_sender,
         }
     }
 
@@ -225,6 +234,7 @@ where
             }
             state.prev_epoch = new_epoch;
             state.update(self.env.meta_store()).await.unwrap();
+            self.collect_word_node_map.write().await.clear();
         }
 
         let mut min_interval = tokio::time::interval(self.interval);
@@ -310,7 +320,7 @@ where
     async fn run_inner<'a>(
         &self,
         command_context: &CommandContext<'a, S>,
-    ) -> Result<Vec<InjectBarrierResponse>> {
+    ) -> Result<Vec<CollectOverRequest>> {
         let timer = self.metrics.barrier_latency.start_timer();
 
         // Wait for all barriers collected
@@ -351,14 +361,16 @@ where
     async fn inject_barrier<'a>(
         &self,
         command_context: &CommandContext<'a, S>,
-    ) -> Result<Vec<InjectBarrierResponse>> {
+    ) -> Result<Vec<CollectOverRequest>> {
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info;
-
+        let mut collect_word_node_map_guard = self.collect_word_node_map.write().await;
+        collect_word_node_map_guard.clear();
+        let (tx, rx) = oneshot::channel();
         let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
             let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
             let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
-
+            collect_word_node_map_guard.insert(*node_id, None);
             if actor_ids_to_collect.is_empty() {
                 // No need to send or collect barrier for this node.
                 assert!(actor_ids_to_send.is_empty());
@@ -401,7 +413,35 @@ where
             }
         });
 
-        try_join_all(collect_futures).await
+        try_join_all(collect_futures).await?;
+        println!("inject over");
+        *self.collect_over_sender.write().await = Some(tx);
+        rx.await.unwrap();
+        let a = self
+            .collect_word_node_map
+            .write()
+            .await
+            .values_mut()
+            .map(|val| val.take().unwrap())
+            .collect();
+        Ok(a)
+    }
+
+    pub async fn collect_over(&self, request: CollectOverRequest) {
+        println!("aaaa");
+        let mut collect_word_node_map_guard = self.collect_word_node_map.write().await;
+        collect_word_node_map_guard
+            .insert(request.node_id, Some(request))
+            .unwrap();
+        if collect_word_node_map_guard
+            .iter()
+            .filter(|(_, y)| y.is_none())
+            .count()
+            == 0
+        {
+            let sender = self.collect_over_sender.write().await.take();
+            sender.unwrap().send(()).unwrap();
+        }
     }
 
     /// Resolve actor information from cluster and fragment manager.

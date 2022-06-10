@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::Source;
+use risingwave_pb::meta::CollectOverRequest;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::{Barrier, Epoch};
@@ -136,21 +137,32 @@ impl StreamService for StreamServiceImpl {
         let barrier =
             Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
 
-        let collect_result = self
+        let collect_feature = self
             .mgr
             .send_and_collect_barrier(
-                &barrier,
+                barrier,
                 req.actor_ids_to_send,
                 req.actor_ids_to_collect,
                 true,
             )
             .await?;
+        println!("over!!!!");
+
+        let client = self.env.meta_client();
+        let node_id = self.env.worker_id();
+        tokio::spawn(async move {
+            let collect_result = collect_feature.await;
+            let request = CollectOverRequest {
+                create_mview_progress: collect_result.create_mview_progress,
+                sycned_sstables: collect_result.synced_sstables,
+                node_id,
+            };
+            client.collect_over(request).await.unwrap();
+        });
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
             status: None,
-            create_mview_progress: collect_result.create_mview_progress,
-            sycned_sstables: collect_result.synced_sstables,
         }))
     }
 

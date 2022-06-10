@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_rpc_client::MetaClient;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
@@ -39,6 +40,8 @@ pub struct StreamEnvironment {
 
     /// State store for table scanning.
     state_store: StateStoreImpl,
+
+    meta_client: MetaClient,
 }
 
 impl StreamEnvironment {
@@ -48,6 +51,7 @@ impl StreamEnvironment {
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
+        meta_client: MetaClient,
     ) -> Self {
         StreamEnvironment {
             server_addr,
@@ -55,15 +59,15 @@ impl StreamEnvironment {
             config,
             worker_id,
             state_store,
+            meta_client,
         }
     }
 
     // Create an instance for testing purpose.
     #[cfg(test)]
-    pub fn for_test() -> Self {
+    pub async fn for_test() -> Self {
         use risingwave_source::MemSourceManager;
         use risingwave_storage::monitor::StateStoreMetrics;
-
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_manager: Arc::new(MemSourceManager::default()),
@@ -72,6 +76,7 @@ impl StreamEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
+            meta_client: MetaClient::new("127.0.0.1:5690").await.unwrap(),
         }
     }
 
@@ -97,5 +102,9 @@ impl StreamEnvironment {
 
     pub fn state_store(&self) -> StateStoreImpl {
         self.state_store.clone()
+    }
+
+    pub fn meta_client(&self) -> MetaClient {
+        self.meta_client.clone()
     }
 }

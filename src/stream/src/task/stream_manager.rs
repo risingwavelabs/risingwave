@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -48,6 +50,8 @@ use crate::task::{
 lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
 }
+
+// type CollectFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 pub type ActorHandle = JoinHandle<()>;
 
@@ -179,35 +183,37 @@ impl LocalStreamManager {
     /// Broadcast a barrier to all senders. Returns when the barrier is fully collected.
     pub async fn send_and_collect_barrier(
         &self,
-        barrier: &Barrier,
+        barrier: Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
         need_sync: bool,
-    ) -> Result<CollectResult> {
-        let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
+    ) -> Result<Pin<Box<dyn Future<Output = CollectResult> + Send>>> {
+        let rx = self.send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
-        // Wait for all actors finishing this barrier.
-        let mut collect_result = rx.await.unwrap();
+        let state_store = self.state_store();
+        Ok(Box::pin(async move {
+            // Wait for all actors finishing this barrier.
+            let mut collect_result = rx.await.unwrap();
 
-        // Sync states from shared buffer to S3 before telling meta service we've done.
-        if need_sync {
-            dispatch_state_store!(self.state_store(), store, {
-                match store.sync(Some(barrier.epoch.prev)).await {
-                    Ok(_) => {
-                        collect_result.synced_sstables =
-                            store.get_uncommitted_ssts(barrier.epoch.prev);
+            // Sync states from shared buffer to S3 before telling meta service we've done.
+            if need_sync {
+                dispatch_state_store!(state_store, store, {
+                    match store.sync(Some(barrier.epoch.prev)).await {
+                        Ok(_) => {
+                            collect_result.synced_sstables =
+                                store.get_uncommitted_ssts(barrier.epoch.prev);
+                        }
+                        // TODO: Handle sync failure by propagating it
+                        // back to global barrier manager
+                        Err(e) => panic!(
+                            "Failed to sync state store after receiving barrier {:?} due to {}",
+                            barrier, e
+                        ),
                     }
-                    // TODO: Handle sync failure by propagating it
-                    // back to global barrier manager
-                    Err(e) => panic!(
-                        "Failed to sync state store after receiving barrier {:?} due to {}",
-                        barrier, e
-                    ),
-                }
-            });
-        }
-
-        Ok(collect_result)
+                });
+            }
+            collect_result
+        }))
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
@@ -249,8 +255,9 @@ impl LocalStreamManager {
             span: tracing::Span::none(),
         };
 
-        self.send_and_collect_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect, false)
-            .await?;
+        self.send_and_collect_barrier(barrier, actor_ids_to_send, actor_ids_to_collect, false)
+            .await?
+            .await;
         self.core.lock().drop_all_actors();
 
         Ok(())
