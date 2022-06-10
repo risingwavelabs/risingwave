@@ -16,6 +16,9 @@ select Row(null);
 ----
 (NULL)
 
+statement error
+select Row();
+
 statement ok
 create table t (v1 int);
 
@@ -46,6 +49,18 @@ query I
 select * from t where Row(1,v1*2) > Row(1,2);
 ----
 2
+3
+
+query I
+select * from t where Row(1,v1*2) >= Row(1,2);
+----
+1
+2
+3
+
+query I
+select * from t where Row(1,v1*2) = Row(1,6);
+----
 3
 
 statement ok
