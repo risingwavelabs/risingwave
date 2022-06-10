@@ -162,6 +162,7 @@ impl StreamMaterialize {
             pks: pk_indices.clone(),
             is_index_on,
             distribution_keys: base.dist.dist_column_indices().to_vec(),
+            appendonly: input.append_only(),
         };
 
         Ok(Self { base, input, table })
@@ -206,19 +207,19 @@ impl fmt::Display for StreamMaterialize {
             .map(|order| &order.column_desc.name)
             .join(", ");
 
+        let mut builder = f.debug_struct("StreamMaterialize");
+        builder
+            .field("columns", &format_args!("[{}]", column_names))
+            .field("pk_columns", &format_args!("[{}]", pk_column_names));
+
         if pk_column_names != order_descs {
-            write!(
-                f,
-                "StreamMaterialize {{ columns: [{}], pk_columns: [{}], order_descs: [{}] }}",
-                column_names, pk_column_names, order_descs
-            )
-        } else {
-            write!(
-                f,
-                "StreamMaterialize {{ columns: [{}], pk_columns: [{}] }}",
-                column_names, pk_column_names
-            )
+            builder.field("order_descs", &format_args!("[{}]", order_descs));
         }
+
+        if self.append_only() {
+            builder.field("append_only", &format_args!("{}", true));
+        }
+        builder.finish()
     }
 }
 

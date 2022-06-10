@@ -29,7 +29,6 @@ use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
-use crate::stream::FragmentManager;
 
 pub async fn add_test_tables<S>(
     hummock_manager: &HummockManager<S>,
@@ -163,18 +162,18 @@ pub async fn setup_compute_env(
         .min_compaction_bytes(1)
         .max_bytes_for_level_base(1)
         .build();
-    let compaction_group_manager =
+    let compaction_group_manager = Arc::new(
         CompactionGroupManager::new_with_config(env.clone(), config.clone())
             .await
-            .unwrap();
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
+            .unwrap(),
+    );
+
     let hummock_manager = Arc::new(
         HummockManager::new(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
-            Arc::new(compaction_group_manager),
-            fragment_manager.clone(),
+            compaction_group_manager,
         )
         .await
         .unwrap(),

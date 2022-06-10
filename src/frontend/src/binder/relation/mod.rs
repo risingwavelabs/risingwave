@@ -22,14 +22,15 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 use super::bind_context::ColumnBinding;
 use crate::binder::Binder;
 
-mod generate_series;
 mod join;
 mod subquery;
+mod table_function;
 mod table_or_source;
 mod window_table_function;
-pub use generate_series::BoundGenerateSeriesFunction;
+
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
+pub use table_function::BoundTableFunction;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
@@ -42,7 +43,13 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    GenerateSeriesFunction(Box<BoundGenerateSeriesFunction>),
+    TableFunction(Box<BoundTableFunction>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FunctionType {
+    Generate,
+    Unnest,
 }
 
 impl Binder {
@@ -189,8 +196,12 @@ impl Binder {
                 } else {
                     let func_name = &name.0[0].value;
                     if func_name.eq_ignore_ascii_case("generate_series") {
-                        return Ok(Relation::GenerateSeriesFunction(Box::new(
+                        return Ok(Relation::TableFunction(Box::new(
                             self.bind_generate_series_function(args)?,
+                        )));
+                    } else if func_name.eq_ignore_ascii_case("unnest") {
+                        return Ok(Relation::TableFunction(Box::new(
+                            self.bind_unnest_function(args)?,
                         )));
                     }
                     let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {

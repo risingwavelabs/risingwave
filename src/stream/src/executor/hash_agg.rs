@@ -23,7 +23,7 @@ use madsim::collections::HashMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashCode, HashKey};
@@ -37,8 +37,8 @@ use super::{
     StreamExecutorResult,
 };
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, get_key_len, AggCall,
-    AggState,
+    agg_input_arrays, generate_agg_schema, generate_column_descs, generate_managed_agg_state,
+    get_key_len, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -124,10 +124,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
             let state_table = StateTable::new(
                 ks.clone(),
-                vec![ColumnDesc::unnamed(
-                    ColumnId::new(0),
-                    agg_call.return_type.clone(),
-                )],
+                generate_column_descs(agg_call, &key_indices, &pk_indices, &schema, input.as_ref()),
                 // Primary key includes group key.
                 vec![OrderType::Descending; key_indices.len() + get_key_len(agg_call)],
                 Some(key_indices.clone()),

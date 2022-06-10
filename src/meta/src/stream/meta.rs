@@ -16,10 +16,11 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::try_match_expand;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::meta::table_fragments::ActorState;
@@ -27,6 +28,7 @@ use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
 use crate::cluster::{ParallelUnitId, WorkerId};
+use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
@@ -37,10 +39,12 @@ struct FragmentManagerCore {
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
-pub struct FragmentManager<S> {
+pub struct FragmentManager<S: MetaStore> {
     meta_store: Arc<S>,
 
     core: RwLock<FragmentManagerCore>,
+
+    compaction_group_manager: CompactionGroupManagerRef<S>,
 }
 
 pub struct ActorInfos {
@@ -59,11 +63,14 @@ pub struct BuildGraphInfo {
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
 
-impl<S> FragmentManager<S>
+impl<S: MetaStore> FragmentManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
+    pub async fn new(
+        env: MetaSrvEnv<S>,
+        compaction_group_manager: CompactionGroupManagerRef<S>,
+    ) -> Result<Self> {
         let meta_store = env.meta_store_ref();
         let table_fragments = try_match_expand!(
             TableFragments::list(&*meta_store).await,
@@ -78,9 +85,15 @@ where
 
         Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
 
+        let table_fragments_list = table_fragments.values().collect_vec();
+        compaction_group_manager
+            .purge_stale_members(&table_fragments_list)
+            .await?;
+
         Ok(Self {
             meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
+            compaction_group_manager,
         })
     }
 
@@ -133,6 +146,13 @@ where
                 table_fragment.table_id()
             )))),
             Entry::Vacant(v) => {
+                // Register to compaction group beforehand.
+                // If any following operation fails, the registration will be eventually reverted by
+                // CompactionGroupManager::purge_stale_members.
+                self.compaction_group_manager
+                    .register_table_fragments(&table_fragment)
+                    .await?;
+
                 table_fragment.insert(&*self.meta_store).await?;
                 v.insert(table_fragment);
                 Ok(())
@@ -147,7 +167,15 @@ where
         match map.entry(*table_id) {
             Entry::Occupied(o) => {
                 TableFragments::delete(&*self.meta_store, &table_id.table_id).await?;
-                o.remove();
+                let table_fragments = o.remove();
+                // Unregister from compaction group afterwards.
+                if let Err(e) = self
+                    .compaction_group_manager
+                    .unregister_table_fragments(&table_fragments)
+                    .await
+                {
+                    tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
+                }
                 Ok(())
             }
             Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
@@ -250,11 +278,18 @@ where
             }
 
             self.meta_store.txn(transaction).await?;
-            map.remove(table_id);
+            let table_fragments = map.remove(table_id).unwrap();
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
             }
-
+            // Unregister from compaction group afterwards.
+            if let Err(e) = self
+                .compaction_group_manager
+                .unregister_table_fragments(&table_fragments)
+                .await
+            {
+                tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
+            }
             Ok(())
         } else {
             Err(RwError::from(InternalError(format!(
@@ -465,22 +500,5 @@ where
             }
         }
         Ok(())
-    }
-
-    // existing_table_ids include the table_ref_id (source and materialized_view) +
-    // internal_table_id (stateful executor)
-    pub async fn existing_table_ids(&self) -> Result<HashSet<u32>> {
-        let mut result_set = HashSet::default();
-        let map = &self.core.read().await.table_fragments;
-
-        for (k, v) in map {
-            result_set.insert(k.table_id());
-
-            for internal_table_id in v.internal_table_ids() {
-                result_set.insert(internal_table_id);
-            }
-        }
-
-        Ok(result_set)
     }
 }

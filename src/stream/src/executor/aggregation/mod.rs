@@ -27,7 +27,7 @@ use risingwave_common::array::{
     NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
@@ -342,6 +342,52 @@ pub fn generate_agg_schema(
     Schema { fields }
 }
 
+/// Infer column desc for state table.
+/// The column desc layout is
+/// [ `group_key` (only for hash agg) / `sort_key` (only for simple agg) / `value`(the agg call
+/// return type)].
+/// This is the Row layout insert into state table.
+/// For different agg call, different executor (hash agg or simple agg), the layout will be
+/// different.
+pub fn generate_column_descs(
+    agg_call: &AggCall,
+    group_keys: &[usize],
+    pk_indices: &[usize],
+    agg_schema: &Schema,
+    input_ref: &dyn Executor,
+) -> Vec<ColumnDesc> {
+    let mut column_descs = Vec::with_capacity(group_keys.len() + 1);
+    let mut next_column_id = 0;
+
+    // Define a closure for DRY.
+    let mut add_column_desc = |data_type: DataType| {
+        column_descs.push(ColumnDesc::unnamed(
+            ColumnId::new(next_column_id),
+            data_type,
+        ));
+        next_column_id += 1;
+    };
+
+    for (idx, _) in group_keys.iter().enumerate() {
+        add_column_desc(agg_schema.fields[idx].data_type.clone());
+    }
+
+    // For max, min, the table descs should include sort key.
+    // The added columns should be (sort_key, pk from input data).
+    if (agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min) && !agg_call.append_only {
+        // Add value as part of sort key.
+        add_column_desc(agg_call.return_type.clone());
+
+        for pk_idx in pk_indices {
+            add_column_desc(input_ref.schema().fields[*pk_idx].data_type.clone());
+        }
+    }
+
+    // Agg value should also be part of state table.
+    add_column_desc(agg_call.return_type.clone());
+
+    column_descs
+}
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
 pub async fn generate_managed_agg_state<S: StateStore>(
