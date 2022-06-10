@@ -131,6 +131,7 @@ impl CompactorManager {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::{CompactMetrics, CompactTask, TableSetStatistics};
     use tokio::sync::mpsc::error::TryRecvError;
 
@@ -170,8 +171,9 @@ mod tests {
                 write: Some(TableSetStatistics::default()),
             }),
             task_status: false,
-            prefix_pairs: vec![],
             vnode_mappings: vec![],
+            compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
+            existing_table_ids: vec![],
         }
     }
 
@@ -238,7 +240,11 @@ mod tests {
             TryRecvError::Empty
         ));
 
-        let task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+        let task = hummock_manager
+            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .await
+            .unwrap()
+            .unwrap();
         compactor.send_task(Some(task.clone()), None).await.unwrap();
         // Get a compact task.
         assert_eq!(

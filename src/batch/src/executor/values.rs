@@ -117,11 +117,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
 
         let mut rows: Vec<Vec<BoxedExpression>> = Vec::with_capacity(value_node.get_tuples().len());
         for row in value_node.get_tuples() {
-            let expr_row = row
-                .get_cells()
-                .iter()
-                .map(build_from_prost)
-                .collect::<Result<Vec<BoxedExpression>>>()?;
+            let expr_row: Vec<_> = row.get_cells().iter().map(build_from_prost).try_collect()?;
             rows.push(expr_row);
         }
 

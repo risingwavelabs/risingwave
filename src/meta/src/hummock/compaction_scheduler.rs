@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::CompactionGroupId;
+use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
@@ -119,8 +119,10 @@ where
         request_channel: Arc<CompactionRequestChannel>,
     ) -> bool {
         // 1. Pick a compaction task.
-        // TODO: specify compaction_group in get_compact_task
-        let compact_task = self.hummock_manager.get_compact_task().await;
+        let compact_task = self
+            .hummock_manager
+            .get_compact_task(compaction_group)
+            .await;
         request_channel.unschedule(compaction_group);
         let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,

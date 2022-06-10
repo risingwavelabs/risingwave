@@ -13,19 +13,18 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
-use std::collections::hash_map::Entry::Vacant;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::{ConnectorError, InternalError};
-use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source, StreamSourceInfo};
+use risingwave_pb::catalog::Source;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::{
@@ -33,8 +32,11 @@ use risingwave_pb::stream_service::{
     DropSourceRequest as ComputeNodeDropSourceRequest,
 };
 use risingwave_rpc_client::StreamClient;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
-use tokio::time;
+use tokio::task::JoinHandle;
+use tokio::time::MissedTickBehavior;
+use tokio::{select, time};
 
 use crate::barrier::BarrierManagerRef;
 use crate::cluster::ClusterManagerRef;
@@ -45,77 +47,96 @@ use crate::stream::FragmentManagerRef;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
+#[allow(dead_code)]
 pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
+    barrier_manager: BarrierManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
 
-type SharedSplitMapRef = Arc<Mutex<Option<BTreeMap<String, SplitImpl>>>>;
+pub struct SharedSplitMap {
+    splits: Option<BTreeMap<String, SplitImpl>>,
+}
 
+type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
+
+#[allow(dead_code)]
 pub struct ConnectorSourceWorker {
     source_id: SourceId,
     current_splits: SharedSplitMapRef,
     enumerator: SplitEnumeratorImpl,
-    _stop_tx: oneshot::Sender<()>,
+    period: Duration,
 }
 
 impl ConnectorSourceWorker {
-    pub async fn create(
-        source_id: SourceId,
-        info: &StreamSourceInfo,
-        stop_tx: oneshot::Sender<()>,
-    ) -> Result<Self> {
-        let properties = ConnectorProperties::extract(info.properties.to_owned()).to_rw_result()?;
+    pub async fn create(source: &Source, period: Duration) -> Result<Self> {
+        let source_id = source.get_id();
+        let info = source
+            .info
+            .clone()
+            .ok_or_else(|| internal_error("source info is empty"))?;
+        let stream_source_info = try_match_expand!(info, Info::StreamSource)?;
+        let properties =
+            ConnectorProperties::extract(stream_source_info.properties).to_rw_result()?;
         let enumerator = SplitEnumeratorImpl::create(properties)
             .await
             .to_rw_result()?;
-        let current_splits = Arc::new(Mutex::new(None));
+        let current_splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
             source_id,
             current_splits,
             enumerator,
-            _stop_tx: stop_tx,
+            period,
         })
     }
 
-    pub async fn run(&mut self, mut stop_rx: oneshot::Receiver<()>) {
-        let mut interval = time::interval(Duration::from_secs(10));
-
+    pub async fn run(&mut self, mut sync_call_rx: UnboundedReceiver<oneshot::Sender<Result<()>>>) {
+        let mut interval = time::interval(self.period);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
-            tokio::select! {
+            select! {
                 biased;
-                _ = stop_rx.borrow_mut() => {
-                    log::debug!("source worker {} stop signal received", self.source_id);
-                    break;
-                }
-
-                _ = interval.tick() => {
-                    let splits = match self.enumerator.list_splits().await {
-                        Ok(s) => s,
-                        Err(e) => {
-                            log::error!("error happened when fetching split from source {}, {}", self.source_id, e.to_string());
-                            continue;
-                        }
-                    };
-
-                    {
-                        let mut currend_splits_guard = self.current_splits.lock().await;
-                        currend_splits_guard.replace(splits.into_iter().map(|split| (split.id(), split)).collect());
+                tx = sync_call_rx.borrow_mut().recv() => {
+                    if let Some(tx) = tx {
+                        let _ = tx.send(self.tick().await);
                     }
-
+                }
+                _ = interval.tick() => {
+                    if let Err(e) = self.tick().await {
+                        log::error!("error happened when tick from connector source worker: {}", e.to_string());
+                    }
                 }
             }
         }
     }
+
+    async fn tick(&mut self) -> Result<()> {
+        let splits = self.enumerator.list_splits().await.to_rw_result()?;
+        let mut current_splits = self.current_splits.lock().await;
+        current_splits.splits.replace(
+            splits
+                .into_iter()
+                .map(|split| (split.id(), split))
+                .collect(),
+        );
+
+        Ok(())
+    }
+}
+
+pub struct ConnectorSourceWorkerHandle {
+    handle: JoinHandle<()>,
+    sync_call_tx: UnboundedSender<oneshot::Sender<Result<()>>>,
+    splits: SharedSplitMapRef,
 }
 
 pub struct SourceManagerCore<S: MetaStore> {
     pub fragment_manager: FragmentManagerRef<S>,
-    pub managed_sources: HashMap<SourceId, SharedSplitMapRef>,
+    pub managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
     pub source_fragments: HashMap<SourceId, Vec<FragmentId>>,
-    pub actor_splits: HashMap<ActorId, Vec<String>>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 impl<S> SourceManagerCore<S>
@@ -132,9 +153,10 @@ where
     }
 
     #[allow(dead_code)]
-    async fn tick(&mut self) -> Result<()> {
+    async fn diff(&mut self) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
+        // first, list all fragment, so that we can get `FragmentId` -> `Vec<ActorId>` map
         let table_frags = self.fragment_manager.list_table_fragments().await?;
-        let mut frag_actors = HashMap::new();
+        let mut frag_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
         for table_frag in table_frags {
             for (frag_id, mut frag) in table_frag.fragments {
                 let mut actors = frag.actors.iter_mut().map(|x| x.actor_id).collect_vec();
@@ -145,64 +167,126 @@ where
             }
         }
 
-        let mut changed_actors = HashMap::new();
+        // then we diff the splits
+        let mut changed_actors: HashMap<ActorId, Vec<SplitImpl>> = HashMap::new();
 
-        for (source_id, splits) in &self.managed_sources {
+        for (source_id, ConnectorSourceWorkerHandle { splits, .. }) in &self.managed_sources {
             let frag_ids = match self.source_fragments.get(source_id) {
-                Some(frags) if !frags.is_empty() => frags,
-                _ => continue,
+                Some(fragment_ids) if !fragment_ids.is_empty() => fragment_ids,
+                _ => {
+                    continue;
+                }
             };
 
-            let splits_guard = splits.lock().await;
-            let current_splits = match &*splits_guard {
-                None => continue,
-                Some(splits) => splits,
+            let discovered_splits = {
+                let splits_guard = splits.lock().await;
+                match splits_guard.splits.clone() {
+                    None => continue,
+                    Some(splits) => splits,
+                }
             };
 
             for frag_id in frag_ids {
-                let actors = match frag_actors.remove(frag_id) {
-                    None => continue,
+                let actor_ids = match frag_actors.remove(frag_id) {
+                    None => {
+                        // target fragment has gone?
+                        continue;
+                    }
                     Some(actors) => actors,
                 };
 
-                let actor_len = actors.len();
-                let mut allocated_split_ids = HashSet::new();
-                for actor_id in &actors {
-                    if let Some(splits) = self.actor_splits.get(actor_id) {
-                        for split in splits {
-                            allocated_split_ids.insert(split.clone());
-                        }
+                let mut prev_splits = HashMap::new();
+                for actor_id in actor_ids {
+                    prev_splits.insert(
+                        actor_id,
+                        self.actor_splits
+                            .get(&actor_id)
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
+                }
+
+                let diff = diff_splits(prev_splits, &discovered_splits);
+                if let Some(change) = diff {
+                    for (actor_id, splits) in change {
+                        changed_actors.insert(actor_id, splits);
                     }
                 }
+            }
+        }
 
-                let mut new_splits = vec![];
-                for (split_id, split) in current_splits {
-                    if allocated_split_ids.contains(split_id) {
-                        continue;
-                    }
-                    new_splits.push(split)
-                }
+        Ok(changed_actors)
+    }
 
-                let mut assigned = HashMap::new();
-                for (index, split) in new_splits.iter().enumerate() {
-                    let actor = actors[index % actor_len];
-                    assigned.entry(actor).or_insert(vec![]).push(split.id())
-                }
+    pub async fn patch_diff(
+        &mut self,
+        source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
+        actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
+    ) -> Result<()> {
+        if let Some(source_fragments) = source_fragments {
+            for (source_id, mut fragment_ids) in source_fragments {
+                self.source_fragments
+                    .entry(source_id)
+                    .or_insert(vec![])
+                    .append(&mut fragment_ids);
+            }
+        }
 
-                for (actor_id, mut splits) in assigned {
-                    let mut prev_splits = self
-                        .actor_splits
-                        .get(&actor_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    prev_splits.append(&mut splits);
-                    changed_actors.insert(actor_id, prev_splits);
-                }
+        if let Some(actor_splits) = actor_splits {
+            for (actor_id, splits) in actor_splits {
+                self.actor_splits.insert(actor_id, splits);
+                // TODO store state
             }
         }
 
         Ok(())
     }
+}
+
+fn diff_splits(
+    mut prev_actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    discovered_splits: &BTreeMap<String, SplitImpl>,
+) -> Option<HashMap<ActorId, Vec<SplitImpl>>> {
+    let prev_split_ids: HashSet<_> = prev_actor_splits
+        .values()
+        .flat_map(|splits| splits.iter().map(SplitImpl::id))
+        .collect();
+
+    if discovered_splits
+        .keys()
+        .all(|split_id| prev_split_ids.contains(split_id))
+    {
+        return None;
+    }
+
+    let mut new_discovered_splits = HashSet::new();
+    for (split_id, split) in discovered_splits {
+        if !prev_split_ids.contains(split_id) {
+            new_discovered_splits.insert(split.id());
+        }
+    }
+
+    let mut result = HashMap::new();
+
+    let mut actors = prev_actor_splits.keys().cloned().collect_vec();
+
+    // sort actors
+    actors.sort();
+
+    let actor_len = actors.len();
+
+    for (index, split_id) in new_discovered_splits.into_iter().enumerate() {
+        let target_actor_id = actors[index % actor_len];
+        let split = discovered_splits.get(&split_id).unwrap().clone();
+
+        result
+            .entry(target_actor_id)
+            .or_insert_with(|| prev_actor_splits.remove(&target_actor_id).unwrap());
+
+        result.get_mut(&target_actor_id).unwrap().push(split);
+    }
+
+    Some(result)
 }
 
 impl<S> SourceManager<S>
@@ -212,7 +296,7 @@ where
     pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
-        _barrier_manager: BarrierManagerRef<S>,
+        barrier_manager: BarrierManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Result<Self> {
@@ -222,119 +306,67 @@ where
             env,
             cluster_manager,
             catalog_manager,
+            barrier_manager,
             core,
         })
     }
 
-    pub async fn register_source(
+    pub async fn patch_update(
         &self,
-        actors: HashMap<SourceId, Vec<FragmentId>>,
-        affiliated_source: Option<Source>,
-    ) -> Result<()> {
+        source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
+        actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
+    ) {
         let mut core = self.core.lock().await;
-
-        let source_ref = &affiliated_source;
-
-        for (source_id, fragments) in actors {
-            if let Vacant(entry) = core.managed_sources.entry(source_id) {
-                let source = if let Some(affiliated_source) = source_ref && affiliated_source.get_id() == source_id {
-                    affiliated_source.clone()
-                } else {
-                    let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-                    catalog_guard.get_source(source_id).await?.ok_or_else(|| {
-                        internal_error(
-                            format!("could not find source catalog for {}", source_id)
-                        )
-                    })?
-                };
-
-                let stream_source_info =
-                    try_match_expand!(source.info.unwrap(), Info::StreamSource)?;
-                let (stop_tx, stop_rx) = oneshot::channel();
-                let mut worker =
-                    ConnectorSourceWorker::create(source_id, &stream_source_info, stop_tx).await?;
-                entry.insert(worker.current_splits.clone());
-                let _ = tokio::spawn(async move { worker.run(stop_rx).await });
-            }
-
-            core.source_fragments
-                .entry(source_id)
-                .or_insert(vec![])
-                .append(fragments.clone().as_mut());
-        }
-
-        Ok(())
+        let _ = core.patch_diff(source_fragments, actor_splits).await;
     }
 
-    async fn fetch_splits_for_source(&self, source: &Source) -> Result<Vec<SplitImpl>> {
-        let info = match source.get_info()? {
-            Info::StreamSource(s) => s,
-            _ => {
-                return Err(RwError::from(InternalError(
-                    "for now we only support StreamSource in source manager".to_string(),
-                )));
-            }
-        };
-
-        let properties = ConnectorProperties::extract(info.properties.clone())
-            .map_err(|e| RwError::from(ConnectorError(e.to_string())))?;
-
-        SplitEnumeratorImpl::create(properties)
-            .await
-            .to_rw_result()?
-            .list_splits()
-            .await
-            .to_rw_result()
-    }
-
-    /// Perform one-time split scheduling, using the round-robin method to assign splits to the
-    /// source actor under the same fragment Note that the same Materialized View will have
-    /// multiple identical Sources to join, so there will be multiple groups of Actors under same
-    /// `SourceId`
-    pub async fn schedule_split_for_actors(
+    pub async fn pre_allocate_splits(
         &self,
-        actors: HashMap<SourceId, Vec<Vec<ActorId>>>,
-        affiliated_source: Option<Source>,
+        table_id: &TableId,
+        source_fragments: HashMap<SourceId, Vec<FragmentId>>,
     ) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
-        let source_ref = &affiliated_source;
-        let source_splits = try_join_all(actors.keys().map(|source_id| async move {
-            if let Some(affiliated_source) = source_ref && *source_id == affiliated_source.get_id() {
-                // we are creating materialized source
-                self.fetch_splits_for_source(affiliated_source).await
-            } else {
-                let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-                let source = catalog_guard.get_source(*source_id).await?.ok_or_else(|| {
-                    RwError::from(InternalError(format!(
-                        "could not find source catalog for {}",
-                        source_id
-                    )))
-                })?;
-                self.fetch_splits_for_source(&source).await
-            }
-        }))
+        let core = self.core.lock().await;
+        let table_fragments = core
+            .fragment_manager
+            .select_table_fragments_by_table_id(table_id)
             .await?;
-        let mut result = HashMap::new();
 
-        for (splits, fragments) in source_splits.into_iter().zip_eq(actors.into_values()) {
-            log::debug!("found {} splits", splits.len());
-            for actors in fragments {
-                let actor_count = actors.len();
-                let mut chunks = vec![vec![]; actor_count];
-                for (i, split) in splits.iter().enumerate() {
-                    chunks[i % actor_count].push(split.clone());
+        let mut assigned = HashMap::new();
+
+        for (source_id, fragments) in source_fragments {
+            let handle = core
+                .managed_sources
+                .get(&source_id)
+                .ok_or_else(|| internal_error(format!("could not found source {}", source_id)))?;
+
+            if handle.splits.lock().await.splits.is_none() {
+                // force refresh source
+                let (tx, rx) = oneshot::channel();
+                handle.sync_call_tx.send(tx).to_rw_result()?;
+                rx.await.map_err(|e| internal_error(e.to_string()))??;
+            }
+
+            if let Some(splits) = &handle.splits.lock().await.splits {
+                for fragment_id in fragments {
+                    let empty_actor_splits = table_fragments
+                        .fragments
+                        .get(&fragment_id)
+                        .ok_or_else(|| {
+                            internal_error(format!("could not found source {}", source_id))
+                        })?
+                        .actors
+                        .iter()
+                        .map(|actor| (actor.actor_id, vec![]))
+                        .collect();
+
+                    assigned.extend(diff_splits(empty_actor_splits, splits).unwrap());
                 }
-
-                actors
-                    .into_iter()
-                    .zip_eq(chunks)
-                    .into_iter()
-                    .for_each(|(actor_id, splits)| {
-                        result.insert(actor_id, splits.to_vec());
-                    })
+            } else {
+                unreachable!();
             }
         }
 
-        Ok(result)
+        Ok(assigned)
     }
 
     async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
@@ -370,7 +402,33 @@ where
                 };
                 async move { client.create_source(request).await.to_rw_result() }
             });
-        let _responses: Vec<_> = try_join_all(futures).await?;
+
+        // ignore response body, always none
+        let _ = try_join_all(futures).await?;
+
+        let mut core = self.core.lock().await;
+        if core.managed_sources.contains_key(&source.get_id()) {
+            log::warn!("source {} already registered", source.get_id());
+            return Ok(());
+        }
+
+        if let Some(Info::StreamSource(_)) = source.info {
+            let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
+            let current_splits_ref = worker.current_splits.clone();
+            log::info!("Spawning new watcher for source {}", source.id);
+
+            let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+
+            let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
+            core.managed_sources.insert(
+                source.id,
+                ConnectorSourceWorkerHandle {
+                    handle,
+                    sync_call_tx,
+                    splits: current_splits_ref,
+                },
+            );
+        }
 
         Ok(())
     }
@@ -386,11 +444,24 @@ where
             });
         let _responses: Vec<_> = try_join_all(futures).await?;
 
+        let mut core = self.core.lock().await;
+        if let Some(handle) = core.managed_sources.remove(&source_id) {
+            handle.handle.abort();
+        }
+
+        Ok(())
+    }
+
+    async fn tick(&self) -> Result<()> {
         Ok(())
     }
 
     pub async fn run(&self) -> Result<()> {
-        // todo: in the future, split change will be pushed as a long running service
-        Ok(())
+        let mut ticker = time::interval(Duration::from_secs(1));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            self.tick().await?;
+        }
     }
 }

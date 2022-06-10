@@ -21,6 +21,7 @@ use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChu
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
+use crate::{ExprError, Result};
 
 #[derive(Debug)]
 pub(crate) struct InExpression {
@@ -56,10 +57,11 @@ impl Expression for InExpression {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> risingwave_common::error::Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let input_array = self.left.eval(input)?;
         let visibility = input.visibility();
-        let mut output_array = BoolArrayBuilder::new(input.cardinality())?;
+        let mut output_array =
+            BoolArrayBuilder::new(input.cardinality()).map_err(ExprError::Array)?;
         match visibility {
             Some(bitmap) => {
                 for (data, vis) in input_array.iter().zip_eq(bitmap.iter()) {
@@ -67,20 +69,22 @@ impl Expression for InExpression {
                         continue;
                     }
                     let ret = self.exists(&data.to_owned_datum());
-                    output_array.append(Some(ret))?;
+                    output_array.append(Some(ret)).map_err(ExprError::Array)?;
                 }
             }
             None => {
                 for data in input_array.iter() {
                     let ret = self.exists(&data.to_owned_datum());
-                    output_array.append(Some(ret))?;
+                    output_array.append(Some(ret)).map_err(ExprError::Array)?;
                 }
             }
         };
-        Ok(Arc::new(output_array.finish()?.into()))
+        Ok(Arc::new(
+            output_array.finish().map_err(ExprError::Array)?.into(),
+        ))
     }
 
-    fn eval_row(&self, input: &Row) -> risingwave_common::error::Result<Datum> {
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
         let data = self.left.eval_row(input)?;
         let ret = self.exists(&data);
         Ok(Some(ret.to_scalar_value()))

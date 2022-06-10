@@ -12,51 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod compaction_config;
 mod compaction_picker;
 mod level_selector;
 mod overlap_strategy;
+mod prost_type;
 mod tier_compaction_picker;
 
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
-use std::io::Cursor;
 use std::sync::Arc;
 
-use itertools::Itertools;
-use prost::Message;
-use risingwave_common::error::Result;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
+use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, HummockVersion, KeyRange, Level, TableSetStatistics,
+    CompactMetrics, CompactTask, CompactionConfig, HummockVersion, KeyRange, Level,
+    TableSetStatistics,
 };
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
     HashStrategy, OverlapStrategy, RangeOverlapStrategy,
 };
-use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
 use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
-use crate::model::Transactional;
-use crate::storage;
-use crate::storage::{MetaStore, Transaction};
-
-/// Hummock `compact_status` key
-/// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
-pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
-// no need to trigger a bigger compaction
-const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 4GB
-const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
-const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
-
-// decrease this configure when the generation of checkpoint barrier is not frequent.
-const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: usize = 8;
-
-const MAX_LEVEL: usize = 6;
 
 pub struct CompactStatus {
+    compaction_group_id: CompactionGroupId,
     pub(crate) level_handlers: Vec<LevelHandler>,
+    // TODO: remove this `CompactionConfig`, which is a duplicate of that in `CompactionGroup`.
+    compaction_config: CompactionConfig,
     compaction_selector: Arc<dyn LevelSelector>,
 }
 
@@ -73,13 +58,16 @@ impl PartialEq for CompactStatus {
     fn eq(&self, other: &Self) -> bool {
         self.level_handlers.eq(&other.level_handlers)
             && self.compaction_selector.name() == other.compaction_selector.name()
+            && self.compaction_config == other.compaction_config
     }
 }
 
 impl Clone for CompactStatus {
     fn clone(&self) -> Self {
         Self {
+            compaction_group_id: self.compaction_group_id,
             level_handlers: self.level_handlers.clone(),
+            compaction_config: self.compaction_config.clone(),
             compaction_selector: self.compaction_selector.clone(),
         }
     }
@@ -91,78 +79,29 @@ pub struct SearchResult {
     split_ranges: Vec<KeyRange>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum CompactionMode {
-    RangeMode,
-    ConsistentHashMode,
-}
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct CompactionConfig {
-    pub max_bytes_for_level_base: u64,
-    pub max_level: usize,
-    pub max_bytes_for_level_multiplier: u64,
-    pub max_compaction_bytes: u64,
-    pub min_compaction_bytes: u64,
-    pub level0_tier_compact_file_number: usize,
-    pub compaction_mode: CompactionMode,
-}
-
-impl Default for CompactionConfig {
-    fn default() -> Self {
-        Self {
-            max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE, // 1GB
-            max_bytes_for_level_multiplier: 10,
-            max_level: MAX_LEVEL,
-            max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
-            min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
-            level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
-            compaction_mode: ConsistentHashMode,
-        }
+pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
+    match compaction_mode {
+        CompactionMode::Range => Arc::new(RangeOverlapStrategy::default()),
+        CompactionMode::ConsistentHash => Arc::new(HashStrategy::default()),
     }
 }
 
 impl CompactStatus {
-    pub fn new(config: Arc<CompactionConfig>) -> CompactStatus {
+    pub fn new(
+        compaction_group_id: CompactionGroupId,
+        config: Arc<CompactionConfig>,
+    ) -> CompactStatus {
         let mut level_handlers = vec![];
         for level in 0..=config.max_level {
             level_handlers.push(LevelHandler::new(level as u32));
         }
-        let overlap_strategy = match config.compaction_mode {
-            RangeMode => Arc::new(RangeOverlapStrategy::default()) as Arc<dyn OverlapStrategy>,
-            ConsistentHashMode => Arc::new(HashStrategy::default()),
-        };
+        let overlap_strategy = create_overlap_strategy(config.compaction_mode());
         CompactStatus {
+            compaction_group_id,
             level_handlers,
-            // TODO: create selector and overlap strategy by configure.
+            compaction_config: (*config).clone(),
             compaction_selector: Arc::new(DynamicLevelSelector::new(config, overlap_strategy)),
-        }
-    }
-
-    fn cf_name() -> &'static str {
-        HUMMOCK_DEFAULT_CF_NAME
-    }
-
-    fn key() -> &'static str {
-        HUMMOCK_COMPACT_STATUS_KEY
-    }
-
-    pub async fn load<S: MetaStore>(&mut self, meta_store: &S) -> Result<()> {
-        match meta_store
-            .get_cf(CompactStatus::cf_name(), CompactStatus::key().as_bytes())
-            .await
-            .map(|v| risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(v)).unwrap())
-        {
-            Ok(compact_status) => {
-                self.level_handlers = compact_status.level_handlers.iter().map_into().collect();
-                Ok(())
-            }
-            Err(err) => {
-                if !matches!(err, storage::Error::ItemNotFound(_)) {
-                    return Err(err.into());
-                }
-                Ok(())
-            }
         }
     }
 
@@ -170,6 +109,7 @@ impl CompactStatus {
         &mut self,
         levels: &[Level],
         task_id: HummockCompactionTaskId,
+        compaction_group_id: CompactionGroupId,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
@@ -188,6 +128,7 @@ impl CompactStatus {
         } else {
             ret.split_ranges
         };
+
         let compact_task = CompactTask {
             input_ssts: vec![ret.select_level, ret.target_level],
             splits,
@@ -216,9 +157,9 @@ impl CompactStatus {
                 }),
             }),
             task_status: false,
-            // TODO: fill with compaction group info
-            prefix_pairs: vec![],
             vnode_mappings: vec![],
+            compaction_group_id,
+            existing_table_ids: vec![],
         };
         Some(compact_task)
     }
@@ -316,64 +257,8 @@ impl CompactStatus {
         }
         new_version
     }
-}
 
-impl Transactional for CompactStatus {
-    fn upsert_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
-        trx.put(
-            CompactStatus::cf_name().to_string(),
-            CompactStatus::key().as_bytes().to_vec(),
-            risingwave_pb::hummock::CompactStatus::from(self).encode_to_vec(),
-        );
-        Ok(())
-    }
-
-    fn delete_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
-        trx.delete(
-            CompactStatus::cf_name().to_string(),
-            CompactStatus::key().as_bytes().to_vec(),
-        );
-        Ok(())
-    }
-}
-
-impl Default for CompactStatus {
-    fn default() -> Self {
-        Self::new(Arc::new(CompactionConfig::default()))
-    }
-}
-
-impl From<&CompactStatus> for risingwave_pb::hummock::CompactStatus {
-    fn from(status: &CompactStatus) -> Self {
-        risingwave_pb::hummock::CompactStatus {
-            level_handlers: status.level_handlers.iter().map_into().collect(),
-        }
-    }
-}
-
-impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
-    fn from(status: &risingwave_pb::hummock::CompactStatus) -> Self {
-        CompactStatus {
-            level_handlers: status.level_handlers.iter().map_into().collect(),
-            compaction_selector: Arc::new(DynamicLevelSelector::default()),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_serde() -> Result<()> {
-        let origin = CompactStatus {
-            ..Default::default()
-        };
-        let ser = risingwave_pb::hummock::CompactStatus::from(&origin).encode_to_vec();
-        let de = risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(ser));
-        let de = (&de.unwrap()).into();
-        assert_eq!(origin, de);
-
-        Ok(())
+    pub fn compaction_group_id(&self) -> CompactionGroupId {
+        self.compaction_group_id
     }
 }
