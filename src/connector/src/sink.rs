@@ -161,19 +161,19 @@ impl Sink for MySQLSink {
             // Get SQL statement
             let stmt = match *op {
                 Insert => format!(
-                    "INSERT INTO {} VALUES ({})",
+                    "INSERT INTO {} VALUES ({});",
                     self.table(),
                     join(values(idx), ",")
                 ),
                 Delete => format!(
-                    "DELETE FROM {} WHERE ({})",
+                    "DELETE FROM {} WHERE ({});",
                     self.table(),
                     join(conditions(values(idx)), " AND ")
                 ),
                 UpdateDelete => {
                     if let Some((idx2, UpdateInsert)) = iter.next() {
                         format!(
-                            "UPDATE {} SET {} WHERE {}",
+                            "UPDATE {} SET {} WHERE {};",
                             self.table,
                             join(conditions(values(idx2)), ","),
                             join(conditions(values(idx)), " AND ")
@@ -259,29 +259,37 @@ mod test {
         pub password: &'a str,
     }
 
-    // Start connection with (already existing) database.
-    async fn start_connection(params: &ConnectionParams<'_>) -> Result<Conn> {
-        let builder = OptsBuilder::default()
+    // Start connection with optional database.
+    async fn start_connection(params: &ConnectionParams<'_>, with_db: bool) -> Result<Conn> {
+        let mut builder = OptsBuilder::default()
             .user(Some(params.user))
             .pass(Some(params.password))
-            .ip_or_hostname(params.endpoint)
-            .db_name(Some(params.database));
+            .ip_or_hostname(params.endpoint);
+        if with_db {
+            builder = builder.db_name(Some(params.database));
+        }
         let conn = Conn::new(builder).await?;
         Ok(conn)
     }
 
-    async fn create_table(params: &ConnectionParams<'_>, schema: &Schema) -> Result<()> {
-        let mut conn = start_connection(params).await?;
+    async fn create_database_and_table(
+        params: &ConnectionParams<'_>,
+        schema: &Schema,
+    ) -> Result<()> {
+        let mut conn = start_connection(params, false).await?;
         conn.query_drop(format!(
-            "CREATE TABLE {} ({});",
-            params.table,
-            join(
+            "CREATE DATABASE {database}; \
+            USE {database}; \
+            CREATE TABLE {table} ({columns});",
+            database = params.database,
+            table = params.table,
+            columns = join(
                 schema
                     .names()
                     .iter()
                     .map(|n| format!("{} int", n))
                     .collect::<Vec<String>>(),
-                ","
+                ", "
             )
         ))
         .await?;
@@ -294,8 +302,8 @@ mod test {
         let params = ConnectionParams {
             endpoint: "127.0.0.1",
             table: "t",
-            database: "db1",
-            user: "nander",
+            database: "db",
+            user: "root",
             password: "123",
         };
 
@@ -316,7 +324,7 @@ mod test {
 
         // Create table using connection parameters and table schema.
         // Beware: currently only works for 'int' type columns.
-        create_table(&params, &schema).await?;
+        create_database_and_table(&params, &schema).await?;
 
         // Initialize streamchunk.
         let chunk = StreamChunk::from_pretty(
@@ -330,7 +338,7 @@ mod test {
         sink.write_batch(chunk, &schema).await?;
 
         // Start a new connection using the same connection parameters and get the SELECT result.
-        let mut conn = start_connection(&params).await?;
+        let mut conn = start_connection(&params, true).await?;
         let select: Vec<(i32, i32)> = conn
             .query(format!("SELECT * FROM {};", params.table))
             .await?;
@@ -346,15 +354,15 @@ mod test {
 
         sink.write_batch(chunk, &schema).await?;
 
-        let mut conn = start_connection(&params).await?;
+        let mut conn = start_connection(&params, true).await?;
         let select: Vec<(i32, i32)> = conn
             .query(format!("SELECT * FROM {};", params.table))
             .await?;
 
         assert_eq!(select, [(44, 42), (33, 00),]);
 
-        // Clean up the table and drop the connection.
-        conn.query_drop(format!("DROP TABLE {};", params.table))
+        // Delete the database and drop the connection.
+        conn.query_drop(format!("DROP DATABASE {};", params.database))
             .await?;
         drop(conn);
 

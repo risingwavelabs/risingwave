@@ -75,6 +75,7 @@ mod test {
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_connector::sink::MySQLSink;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::cell_based_table::CellBasedTable;
     use risingwave_storage::Keyspace;
@@ -83,7 +84,6 @@ mod test {
     use crate::executor::test_utils::*;
     use crate::executor::{Barrier, Message, PkIndices, *};
     use crate::task::LocalBarrierManager;
-    use risingwave_connector::sink::MySQLSink;
 
     // TODO: This basic test for the most part is a copy-paste from the `MaterializeExecutor`
     // fn test_materialize_executor(). Should be replaced by a better test eventually
