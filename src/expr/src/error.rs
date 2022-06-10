@@ -45,6 +45,13 @@ pub enum ExprError {
         RwError,
     ),
 
+    #[error("Struct error: {0}")]
+    Struct(
+        #[backtrace]
+        #[source]
+        RwError,
+    ),
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }

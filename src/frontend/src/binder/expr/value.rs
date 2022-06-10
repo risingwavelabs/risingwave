@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Decimal, IntervalUnit, ScalarImpl};
 use risingwave_expr::vector_op::cast::str_parse;
@@ -158,6 +159,19 @@ impl Binder {
             }
             _ => panic!("Should be a List"),
         }
+    }
+
+    /// `Row(...)` is represented as an function call at the binder stage.
+    pub(super) fn bind_row(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
+        let exprs = exprs
+            .into_iter()
+            .map(|e| self.bind_expr(e))
+            .collect::<Result<Vec<ExprImpl>>>()?;
+        let data_type = DataType::Struct {
+            fields: exprs.iter().map(|e| e.return_type()).collect_vec().into(),
+        };
+        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Struct, exprs, data_type).into();
+        Ok(expr)
     }
 }
 

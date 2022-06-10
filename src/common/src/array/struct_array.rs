@@ -130,6 +130,19 @@ pub struct StructArray {
     len: usize,
 }
 
+impl StructArrayBuilder {
+    pub fn append_array_refs(&mut self, refs: Vec<ArrayRef>, len: usize) -> Result<()> {
+        for _ in 0..len {
+            self.bitmap.append(true);
+        }
+        self.len += len;
+        self.children_array
+            .iter_mut()
+            .zip_eq(refs.iter())
+            .try_for_each(|(a, r)| a.append_array(r))
+    }
+}
+
 impl Array for StructArray {
     type Builder = StructArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
