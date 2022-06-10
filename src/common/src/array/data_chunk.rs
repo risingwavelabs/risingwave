@@ -595,7 +595,7 @@ impl DataChunkTestExt for DataChunk {
                     builder.append_datum(&v.to_owned_datum()).unwrap();
                     builder.append_null().unwrap();
                 }
-                
+
                 Column::new(builder.finish().unwrap().into())
             })
             .collect();
