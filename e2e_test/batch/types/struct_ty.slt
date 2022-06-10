@@ -29,5 +29,11 @@ select Row(1, v1*2) from t;
 (1,4)
 (1,6)
 
+query I
+select * from t where Row(1,v1*2) < Row(1,6);
+----
+1
+2
+
 statement ok
 drop table t;
