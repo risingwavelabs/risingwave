@@ -51,6 +51,7 @@ pub(crate) fn make_prost_source(
         database_id,
         name,
         info: Some(source_info),
+        owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
     })
 }
 

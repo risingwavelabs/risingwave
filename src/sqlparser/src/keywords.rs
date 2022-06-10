@@ -322,6 +322,7 @@ define_keywords!(
     OVER,
     OVERLAPS,
     OVERLAY,
+    OWNER,
     PARAMETER,
     PARQUET,
     PARTITION,

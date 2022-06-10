@@ -134,6 +134,7 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog.write().create_database(ProstDatabase {
             name: db_name.to_string(),
             id: self.gen_id(),
+            owner: DEFAULT_SUPPER_USER.to_string(),
         });
         Ok(())
     }
@@ -144,6 +145,7 @@ impl CatalogWriter for MockCatalogWriter {
             id,
             name: schema_name.to_string(),
             database_id: db_id,
+            owner: DEFAULT_SUPPER_USER.to_string(),
         });
         self.add_schema_id(id, db_id);
         Ok(())
@@ -222,11 +224,13 @@ impl MockCatalogWriter {
         catalog.write().create_database(ProstDatabase {
             name: DEFAULT_DATABASE_NAME.to_string(),
             id: 0,
+            owner: DEFAULT_SUPPER_USER.to_string(),
         });
         catalog.write().create_schema(ProstSchema {
             id: 0,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
+            owner: DEFAULT_SUPPER_USER.to_string(),
         });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(0_u32, 0_u32);

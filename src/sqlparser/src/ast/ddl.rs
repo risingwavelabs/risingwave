@@ -62,6 +62,10 @@ pub enum AlterTableOperation {
         column_name: Ident,
         op: AlterColumnOperation,
     },
+
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
 }
 
 impl fmt::Display for AlterTableOperation {
@@ -113,6 +117,9 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::RenameConstraint { old_name, new_name } => {
                 write!(f, "RENAME CONSTRAINT {} TO {}", old_name, new_name)
             }
+            AlterTableOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "CHANGE OWNER TO {}", new_owner_name)
+            },
         }
     }
 }

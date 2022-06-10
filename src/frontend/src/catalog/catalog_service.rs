@@ -93,6 +93,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .create_database(ProstDatabase {
                 name: db_name.to_string(),
                 id: 0,
+                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             })
             .await?;
         self.wait_version(version).await
@@ -105,6 +106,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 id: 0,
                 name: schema_name.to_string(),
                 database_id: db_id,
+                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             })
             .await?;
         self.wait_version(version).await
