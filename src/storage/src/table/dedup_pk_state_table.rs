@@ -23,6 +23,10 @@ use crate::error::StorageResult;
 
 use crate::{Keyspace, StateStore};
 
+/// DedupPkStateTable is the interface which
+/// transforms input Rows into Rows w/o public key cells
+/// to reduce storage cost.
+/// Trade-off is that every access and retrieve involves ser/de, which is expensive.
 pub struct DedupPkStateTable<S: StateStore> {
     inner: StateTable<S>,
     order_key: Vec<OrderedColumnDesc>,
@@ -56,41 +60,33 @@ impl <S: StateStore> DedupPkStateTable<S> {
         dedup_pk_row
     }
 
-    /// TODO: read methods
-    /// 1) get partial row first
-    /// 2) reconstruct original row
-    /// a. Layer on top will be able to just call this public api, decode after.
-    /// b. If call get_row_with pk, it is just inserting changes into this.
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        self.inner.get_row(pk, epoch).await
+        let dedup_pk_row = self.inner.get_row(pk, epoch).await?;
+        Ok(dedup_pk_row.map(|r| self.dedup_pk_row_to_row(pk, r)))
     }
 
-    /// TODO: write methods
-    /// Layer on top will do transform,
-    /// call lower layer to insert.
-    /// For upper layer, when constructing cell based column descs,
-    /// we need to change cell_based_column_descs to partial repr.
     pub fn insert(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
-        Ok(())
+        let dedup_pk_value = self.row_to_dedup_pk_row(value);
+        self.inner.insert(pk, dedup_pk_value)
     }
 
     pub fn delete(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
-        Ok(())
+        let dedup_pk_old_value = self.row_to_dedup_pk_row(old_value);
+        self.inner.delete(pk, dedup_pk_old_value)
     }
 
-    pub fn update(&mut self, _pk: Row, _old_value: Row, _new_value: Row) -> StorageResult<()> {
-        self.inner.update(_pk, _old_value, _new_value)
+    pub fn update(&mut self, pk: Row, old_value: Row, new_value: Row) -> StorageResult<()> {
+        let dedup_pk_old_value = self.row_to_dedup_pk_row(old_value);
+        let dedup_pk_new_value = self.row_to_dedup_pk_row(new_value);
+        self.inner.update(pk, dedup_pk_old_value, dedup_pk_new_value)
     }
 
-    // At the Batch write phase, mem_table should ALREADY be in encoded fmt?
-    // that means insert needs to encode accordingly.
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
-        Ok(())
+        self.inner.commit(new_epoch).await
     }
 
     pub async fn commit_with_value_meta(&mut self, new_epoch: u64) -> StorageResult<()> {
-        // TODO: map on the stream
-        Ok(())
+        self.inner.commit_with_value_meta(new_epoch).await
     }
 
     /// TODO: iter need another layer too
