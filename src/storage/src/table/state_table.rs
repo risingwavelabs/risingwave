@@ -68,7 +68,7 @@ impl<S: StateStore> StateTable<S> {
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
                 cell_based_keyspace,
-                cell_based_column_descs,
+                cell_based_column_descs, // TODO: This needs to be partial rows?
                 Some(OrderedRowSerializer::new(order_types)),
                 Arc::new(StateStoreMetrics::unused()),
                 dist_key_indices,
@@ -78,6 +78,11 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// read methods
+    /// TODO:
+    /// 1) get partial row first
+    /// 2) reconstruct original row
+    /// a. Layer on top will be able to just call this public api, decode after.
+    /// b. If call get_row_with pk, it is just inserting changes into this.
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         let mem_table_res = self.mem_table.get_row(&pk_bytes).map_err(err)?;
@@ -92,6 +97,10 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// write methods
+    /// Layer on top will do transform,
+    /// call lower layer to insert.
+    /// For upper layer, when constructing cell based column descs,
+    /// we need to change cell_based_column_descs to partial repr.
     pub fn insert(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
         let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
@@ -110,6 +119,8 @@ impl<S: StateStore> StateTable<S> {
         todo!()
     }
 
+    // At the Batch write phase, mem_table should ALREADY be in encoded fmt?
+    // that means insert needs to encode accordingly.
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.cell_based_table
