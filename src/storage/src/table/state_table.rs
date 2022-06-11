@@ -34,6 +34,29 @@ use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
 use crate::{Keyspace, StateStore};
 
+pub struct DedupPkStateTable<S: StateStore> {
+    inner: StateTable<S>,
+    order_key: Vec<OrderedColumnDesc>,
+}
+
+impl <S: StateStore> DedupPkStateTable<S> {
+    pub fn new(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        dist_key_indices: Option<Vec<usize>>,
+        _pk_indices: Vec<usize>,
+    ) -> Self {
+        // create a new state table, but only with partial decs
+        let order_key = vec![]; // TODO: construct from fields
+        let partial_column_descs = column_descs; // TODO: update this
+        let inner = StateTable::new(keyspace, partial_column_descs, order_types, dist_key_indices, _pk_indices);
+        Self {
+            inner,
+        }
+    }
+}
+
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
@@ -77,8 +100,7 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    /// read methods
-    /// TODO:
+    /// TODO: read methods
     /// 1) get partial row first
     /// 2) reconstruct original row
     /// a. Layer on top will be able to just call this public api, decode after.
@@ -96,7 +118,7 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    /// write methods
+    /// TODO: write methods
     /// Layer on top will do transform,
     /// call lower layer to insert.
     /// For upper layer, when constructing cell based column descs,
