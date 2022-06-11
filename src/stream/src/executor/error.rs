@@ -41,10 +41,6 @@ enum StreamExecutorErrorInner {
     SerdeError(BoxedError),
 
     // TODO: remove this
-    #[error("TopN state error: {0}")]
-    TopNStateError(RwError),
-
-    // TODO: remove this
     #[error("Hash join error: {0}")]
     HashJoinError(RwError),
 
@@ -76,10 +72,6 @@ impl StreamExecutorError {
 
     pub fn serde_error(error: impl Error) -> Self {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
-    }
-
-    pub fn top_n_state_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::TopNStateError(error.into()).into()
     }
 
     pub fn hash_join_error(error: impl Into<RwError>) -> Self {
