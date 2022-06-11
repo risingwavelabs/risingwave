@@ -85,7 +85,6 @@ pub struct SharedBufferUploader {
 }
 
 impl SharedBufferUploader {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,

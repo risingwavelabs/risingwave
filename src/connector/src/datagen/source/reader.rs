@@ -192,13 +192,10 @@ impl SplitReader for DatagenSplitReader {
     }
 }
 
-mod test {
-    #[allow(unused_imports)]
+#[cfg(test)]
+mod tests {
     use maplit::hashmap;
-    #[allow(unused_imports)]
-    use risingwave_common::types::DataType;
 
-    #[allow(unused_imports)]
     use super::*;
 
     #[tokio::test]

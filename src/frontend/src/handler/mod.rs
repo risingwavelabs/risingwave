@@ -40,7 +40,6 @@ pub mod drop_user;
 mod explain;
 mod flush;
 pub mod handle_privilege;
-#[allow(dead_code)]
 pub mod query;
 mod set;
 mod show;

@@ -84,7 +84,7 @@ impl Block {
     }
 
     /// Entries data len.
-    #[allow(clippy::len_without_is_empty)]
+    #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         assert!(!self.data.is_empty());
         self.data.len()

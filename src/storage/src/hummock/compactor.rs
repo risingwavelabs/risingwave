@@ -108,7 +108,7 @@ pub struct StateCleanUpCompactionFilter {
 }
 
 impl StateCleanUpCompactionFilter {
-    #[allow(unused)]
+    #[expect(unused)]
     fn new(table_id_set: HashSet<u32>) -> Self {
         StateCleanUpCompactionFilter {
             existing_table_ids: table_id_set,

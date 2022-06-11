@@ -116,7 +116,7 @@ where
 type IdCategoryType = u8;
 
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
-#[allow(non_snake_case, non_upper_case_globals)]
+#[expect(non_snake_case, non_upper_case_globals)]
 pub mod IdCategory {
     use super::IdCategoryType;
 
