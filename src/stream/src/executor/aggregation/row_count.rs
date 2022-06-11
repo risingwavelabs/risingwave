@@ -18,10 +18,10 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::StreamingAggStateImpl;
+use crate::executor::error::StreamExecutorResult;
 
 /// `StreamingRowCountAgg` count rows, no matter whether the datum is null.
 /// Note that if there are zero rows in aggregator, `0` will be emitted
@@ -53,7 +53,7 @@ impl StreamingRowCountAgg {
         Self { row_cnt }
     }
 
-    pub fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
+    pub fn create_array_builder(capacity: usize) -> StreamExecutorResult<ArrayBuilderImpl> {
         I64ArrayBuilder::new(capacity)
             .map(|builder| builder.into())
             .map_err(Into::into)
@@ -70,7 +70,7 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         _data: &[&ArrayImpl],
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         match visibility {
             None => {
                 for op in ops {
@@ -94,7 +94,7 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
         Ok(())
     }
 
-    fn get_output(&self) -> Result<Datum> {
+    fn get_output(&self) -> StreamExecutorResult<Datum> {
         Ok(Some(self.row_cnt.into()))
     }
 

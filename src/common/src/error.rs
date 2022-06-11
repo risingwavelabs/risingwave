@@ -15,7 +15,6 @@
 use std::alloc::Layout;
 use std::backtrace::Backtrace;
 use std::convert::Infallible;
-use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
 use std::sync::Arc;
@@ -36,7 +35,9 @@ use crate::util::value_encoding::error::ValueEncodingError;
 /// Header used to store serialized [`RwError`] in grpc status.
 pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
-pub type BoxedError = Box<dyn Error + Send + Sync>;
+pub trait Error = std::error::Error + Send + Sync + 'static;
+pub type BoxedError = Box<dyn Error>;
+
 pub use anyhow::anyhow as anyhow_error;
 
 #[derive(Debug, Clone, Copy)]
@@ -297,8 +298,8 @@ impl Display for RwError {
     }
 }
 
-impl Error for RwError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+impl std::error::Error for RwError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.inner)
     }
 }

@@ -85,9 +85,7 @@ where
                     continue;
                 }
             };
-            let compacted_chunk = filtered_data_chunk
-                .compact()
-                .map_err(StreamExecutorError::eval_error)?;
+            let compacted_chunk = filtered_data_chunk.compact()?;
             let ops = vec![Op::Insert; compacted_chunk.cardinality()];
             let stream_chunk = StreamChunk::from_parts(ops, compacted_chunk);
             yield Message::Chunk(stream_chunk);
