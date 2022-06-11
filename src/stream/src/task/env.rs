@@ -60,7 +60,7 @@ impl StreamEnvironment {
 
     // Create an instance for testing purpose.
     #[cfg(test)]
-    pub async fn for_test() -> Self {
+    pub fn for_test() -> Self {
         use risingwave_source::MemSourceManager;
         use risingwave_storage::monitor::StateStoreMetrics;
         StreamEnvironment {

@@ -180,7 +180,7 @@ impl LocalStreamManager {
     }
 
     /// Broadcast a barrier to all senders. Returns when the barrier is fully collected.
-    pub async fn send_and_collect_barrier(
+    pub async fn initiate_barrier_send(
         &self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
@@ -267,7 +267,7 @@ impl LocalStreamManager {
             span: tracing::Span::none(),
         };
 
-        self.send_and_collect_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)
+        self.initiate_barrier_send(barrier, actor_ids_to_send, actor_ids_to_collect)
             .await?;
         self.initiate_barrier_collection(barrier.epoch.prev, false)
             .await;
