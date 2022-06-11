@@ -22,7 +22,7 @@ use risingwave_common::array::Op::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{Datum, ScalarImpl, Decimal};
+use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
 #[async_trait]
 pub trait Sink {
@@ -228,7 +228,6 @@ impl Sink for RedisSink {
 
 #[cfg(test)]
 mod test {
-
     use risingwave_common::types::chrono_wrapper::*;
     use rust_decimal::Decimal as RustDecimal;
 
@@ -273,17 +272,21 @@ mod test {
             "'1970-01-01 00:00:00'"
         );
     }
-    
+
     #[test]
     fn test_decimal() {
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(RustDecimal::new(0, 0)))))
+            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
+                RustDecimal::new(0, 0)
+            ))))
             .unwrap()
             .to_string(),
             "'0'"
         );
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(RustDecimal::new(124, 5)))))
+            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
+                RustDecimal::new(124, 5)
+            ))))
             .unwrap()
             .to_string(),
             "'0.00124'"

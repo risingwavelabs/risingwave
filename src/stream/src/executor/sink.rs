@@ -14,7 +14,6 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-// use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::Sink;
 
@@ -23,28 +22,22 @@ use super::{BoxedExecutor, Executor, Message};
 
 pub struct SinkExecutor<S: Sink> {
     child: BoxedExecutor,
-    external_sink: S,
+    _external_sink: S,
     identity: String,
 }
 
 impl<S: Sink> SinkExecutor<S> {
-    pub fn new(materialize_executor: BoxedExecutor, external_sink: S) -> Self {
+    pub fn new(materialize_executor: BoxedExecutor, _external_sink: S) -> Self {
         Self {
             child: materialize_executor,
-            external_sink,
+            _external_sink,
             identity: "SinkExecutor".to_string(),
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self) {
-        let input = self.child.execute();
-        #[for_await]
-        for msg in input {
-            let msg = msg?;
-            todo!();
-            // self.external_sink.write_batch();
-        }
+    async fn execute_inner(self) {
+        todo!()
     }
 }
 
@@ -58,7 +51,6 @@ impl<S: Sink + 'static + Send> Executor for SinkExecutor<S> {
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef {
-        // &self.info.pk_indices
         todo!();
     }
 
@@ -69,81 +61,26 @@ impl<S: Sink + 'static + Send> Executor for SinkExecutor<S> {
 
 #[cfg(test)]
 mod test {
-    use futures::StreamExt;
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::{Row, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema, TableId};
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+
     use risingwave_connector::sink::MySQLSink;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::cell_based_table::CellBasedTable;
-    use risingwave_storage::Keyspace;
 
-    use super::{SinkExecutor, *};
+    use super::*;
     use crate::executor::test_utils::*;
-    use crate::executor::{Barrier, Message, PkIndices, *};
-    use crate::task::LocalBarrierManager;
+    use crate::executor::*;
 
-    // TODO: This basic test for the most part is a copy-paste from the `MaterializeExecutor`
-    // fn test_materialize_executor(). Should be replaced by a better test eventually
-    #[tokio::test]
-    async fn test_basic() {
-        // Prepare storage and memtable.
-        let memory_state_store = MemoryStateStore::new();
-        let table_id = TableId::new(1);
-        // Two columns of int32 type, the first column is PK.
-        let schema = Schema::new(vec![
-            Field::unnamed(DataType::Int32),
-            Field::unnamed(DataType::Int32),
-        ]);
-        let column_ids = vec![0.into(), 1.into()];
-
-        // Prepare source chunks.
-        let chunk1 = StreamChunk::from_pretty(
-            " i i
-            + 1 4
-            + 2 5
-            + 3 6",
-        );
-        let chunk2 = StreamChunk::from_pretty(
-            " i i
-            + 7 8
-            - 3 6",
+    #[test]
+    fn test_mysqlsink() {
+        let mysql_sink = MySQLSink::new(
+            String::from("127.0.0.1:3306"),
+            String::from("<table_name>"),
+            Some(String::from("<database_name>")),
+            Some(String::from("<user_name>")),
+            Some(String::from("<password>")),
         );
 
-        // Prepare stream executors.
-        let source = MockSource::with_messages(
-            schema.clone(),
-            PkIndices::new(),
-            vec![
-                Message::Chunk(chunk1),
-                Message::Barrier(Barrier::default()),
-                Message::Chunk(chunk2),
-                Message::Barrier(Barrier::default()),
-            ],
-        );
+        // Mock `child`
+        let mock = MockSource::with_messages(Schema::default(), PkIndices::new(), vec![]);
 
-        let keyspace = Keyspace::table_root(memory_state_store.clone(), &table_id);
-        let materialize_executor = Box::new(MaterializeExecutor::new(
-            Box::new(source),
-            keyspace,
-            vec![OrderPair::new(0, OrderType::Ascending)],
-            column_ids,
-            1,
-            vec![0],
-        ));
-
-        let mut mysqlsink = MySQLSink::new(
-            "127.0.0.1:3306".into(),
-            "<table_name>".into(),
-            Some("<database_name>".into()),
-            Some("<user_name>".into()),
-            Some("<password>".into()),
-        );
-
-        let sink = Box::new(SinkExecutor::new(materialize_executor, mysqlsink));
-
-        sink.execute();
+        let _sink_executor = SinkExecutor::new(Box::new(mock), mysql_sink);
     }
 }
