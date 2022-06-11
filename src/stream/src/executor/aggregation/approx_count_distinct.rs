@@ -26,50 +26,55 @@ use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 
 use super::StreamingAggStateImpl;
 
-const INDEX_BITS: u8 = 10; // number of bits used for finding the index of each 64-bit hash
+const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
 const INDICES: usize = 1 << INDEX_BITS; // number of indices available
 const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-bit hash
 
-#[derive(Copy, Clone, Debug)]
+// Approximation for bias correction for 16384 registers. See "HyperLogLog: the analysis of a
+// near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
+const BIAS_CORRECTION: f64 = 0.72125;
+
+#[derive(Clone, Debug)]
 struct RegisterBucket {
-    count_1_to_5: [u32; 5],
-    count_6_to_21: [u16; 16],
-    count_22_to_64: [u8; 43],
+    count_1_to_16: Vec<u32>,
+    count_17_to_24: Vec<u16>,
+    count_25_to_32: Vec<u8>,
 }
 
 impl RegisterBucket {
     pub fn new() -> Self {
         Self {
-            count_1_to_5: [0; 5],
-            count_6_to_21: [0; 16],
-            count_22_to_64: [0; 43],
+            count_1_to_16: vec![0; 16],
+            count_17_to_24: vec![0; 8],
+            count_25_to_32: vec![0; 8],
         }
     }
 
     fn set_register(&mut self, register: usize, value: u32) {
-        if register >= 22 {
-            self.count_22_to_64[register - 22] = value as u8;
-        } else if register >= 6 {
-            self.count_6_to_21[register - 6] = value as u16;
+        if register >= 33 {
+        } else if register >= 25 {
+            self.count_25_to_32[register - 25] = value as u8;
+        } else if register >= 17 {
+            self.count_17_to_24[register - 17] = value as u16;
         } else if register >= 1 {
-            self.count_1_to_5[register - 1] = value;
+            self.count_1_to_16[register - 1] = value;
         }
     }
 
     fn get_register(&self, register: usize) -> Result<u32> {
-        if !(1..=64).contains(&register) {
+        if !(1..=33).contains(&register) {
             return Err(ErrorCode::InternalError("Invalid register index".into()).into());
         }
 
-        if register >= 22 {
-            return Ok(self.count_22_to_64[register - 22] as u32);
+        if register >= 25 {
+            return Ok(self.count_25_to_32[register - 25] as u32);
         }
 
-        if register >= 6 {
-            return Ok(self.count_6_to_21[register - 6] as u32);
+        if register >= 17 {
+            return Ok(self.count_17_to_24[register - 17] as u32);
         }
 
-        Ok(self.count_1_to_5[register - 1])
+        Ok(self.count_1_to_16[register - 1])
     }
 
     /// Increments or decrements the given register depending on the state of `is_insert`
@@ -84,7 +89,7 @@ impl RegisterBucket {
 
     /// Gets the number of the maximum register which has a count greater than zero.
     fn get_max(&self) -> u8 {
-        for i in (1..65).rev() {
+        for i in (1..33).rev() {
             if self.get_register(i).unwrap() > 0 {
                 return i as u8;
             }
@@ -97,7 +102,7 @@ impl RegisterBucket {
 /// `StreamingApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`.
 #[derive(Clone, Debug)]
 pub struct StreamingApproxCountDistinct {
-    registers: [RegisterBucket; INDICES],
+    registers: Vec<RegisterBucket>,
     initial_count: i64,
 }
 
@@ -120,7 +125,7 @@ impl StreamingApproxCountDistinct {
         };
 
         Self {
-            registers: [RegisterBucket::new(); INDICES],
+            registers: vec![RegisterBucket::new(); INDICES],
             initial_count: count,
         }
     }
@@ -141,8 +146,7 @@ impl StreamingApproxCountDistinct {
         self.registers[index].update_register(count, is_insert);
     }
 
-    /// Calculate the hash of the `scalar_impl` using Rust's default hasher
-    /// Perhaps a different hash like Murmur2 could be used instead for optimization?
+    /// Calculate the hash of the `scalar_impl`.
     fn get_hash(&self, scalar_impl: ScalarImpl) -> u64 {
         let mut hasher = DefaultHasher::new();
         scalar_impl.hash(&mut hasher);
@@ -151,17 +155,10 @@ impl StreamingApproxCountDistinct {
 
     /// Counts the number of trailing zeroes plus 1 in the non-index bits of the hash.
     fn count_hash(&self, mut hash: u64) -> u8 {
-        let mut count = 1;
-
         hash >>= INDEX_BITS; // Ignore bits used as index for the hash
         hash |= 1 << COUNT_BITS; // To allow hash to terminate if it is all 0s
 
-        while hash & 1 == 0 {
-            count += 1;
-            hash >>= 1;
-        }
-
-        count
+        (hash.trailing_zeros() + 1) as u8
     }
 }
 
@@ -198,25 +195,22 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
     }
 
     fn get_output(&self) -> Result<Datum> {
-        // Approximation for bias correction. See "HyperLogLog: the analysis of a near-optimal
-        // cardinality estimation algorithm" by Philippe Flajolet et al.
-        let bias_correction = 0.72134;
         let m = INDICES as f64;
         let mut mean = 0.0;
 
         // Get harmonic mean of all the counts in results
-        for register_bucket in self.registers.iter() {
+        for register_bucket in &self.registers {
             let count = register_bucket.get_max();
             mean += 1.0 / ((1 << count) as f64);
         }
 
-        let raw_estimate = bias_correction * m * m / mean;
+        let raw_estimate = BIAS_CORRECTION * m * m / mean;
 
         // If raw_estimate is not much bigger than m and some registers have value 0, set answer to
         // m * log(m/V) where V is the number of registers with value 0
         let answer = if raw_estimate <= 2.5 * m {
             let mut zero_registers: f64 = 0.0;
-            for i in self.registers.iter() {
+            for i in &self.registers {
                 if i.get_max() == 0 {
                     zero_registers += 1.0;
                 }
@@ -239,7 +233,7 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
     }
 
     fn reset(&mut self) {
-        self.registers = [RegisterBucket::new(); INDICES];
+        self.registers = vec![RegisterBucket::new(); INDICES];
     }
 }
 
@@ -278,5 +272,32 @@ mod tests {
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().into_int64(), 0);
+    }
+
+    #[test]
+    fn test_estimate_error() {
+        let mut agg = StreamingApproxCountDistinct::new();
+
+        for i in 1..500000 {
+            agg.apply_batch(
+                &[Op::Insert, Op::Insert],
+                None,
+                &[&array_nonnull!(I64Array, [i * 2 - 1, i * 2]).into()],
+            )
+            .unwrap();
+        }
+
+        println!("{}", agg.get_output().unwrap().unwrap().into_int64());
+
+        for i in 1..500000 {
+            agg.apply_batch(
+                &[Op::Insert, Op::Insert],
+                None,
+                &[&array_nonnull!(I64Array, [i * 2 - 1 + 1000000, i * 2 + 1000000]).into()],
+            )
+            .unwrap();
+        }
+
+        println!("{}", agg.get_output().unwrap().unwrap().into_int64());
     }
 }

@@ -22,9 +22,13 @@ use risingwave_common::types::*;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
-const INDEX_BITS: u8 = 10; // number of bits used for finding the index of each 64-bit hash
+const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
 const INDICES: usize = 1 << INDEX_BITS; // number of indices available
 const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-bit hash
+
+// Approximation for bias correction for 16384 registers. See "HyperLogLog: the analysis of a
+// near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
+const BIAS_CORRECTION: f64 = 0.72125;
 
 pub struct ApproxCountDistinct {
     return_type: DataType,
@@ -77,9 +81,6 @@ impl ApproxCountDistinct {
 
     /// Calculates the bias-corrected harmonic mean of the registers to get the approximate count
     fn calculate_result(&self) -> i64 {
-        // Approximation for bias correction. See "HyperLogLog: the analysis of a near-optimal
-        // cardinality estimation algorithm" by Philippe Flajolet et al.
-        let bias_correction = 0.72134;
         let m = INDICES as f64;
         let mut mean = 0.0;
 
@@ -88,7 +89,7 @@ impl ApproxCountDistinct {
             mean += 1.0 / ((1 << *count) as f64);
         }
 
-        let raw_estimate = bias_correction * m * m / mean;
+        let raw_estimate = BIAS_CORRECTION * m * m / mean;
 
         // If raw_estimate is not much bigger than m and some registers have value 0, set answer to
         // m * log(m/V) where V is the number of registers with value 0
