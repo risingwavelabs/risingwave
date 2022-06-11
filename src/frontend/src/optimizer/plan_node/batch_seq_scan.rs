@@ -118,7 +118,7 @@ impl fmt::Display for BatchSeqScan {
             )
         } else {
             let order_names = self.logical.order_names();
-            #[allow(clippy::disallowed_methods)]
+            #[expect(clippy::disallowed_methods)]
             let mut range_str = self
                 .scan_range
                 .eq_conds

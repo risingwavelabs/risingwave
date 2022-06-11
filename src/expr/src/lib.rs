@@ -32,6 +32,7 @@
 #![feature(fn_traits)]
 #![feature(assert_matches)]
 #![feature(let_else)]
+#![feature(lint_reasons)]
 
 pub mod error;
 pub mod expr;

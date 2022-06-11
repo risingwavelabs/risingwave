@@ -279,7 +279,6 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
 
     #[tokio::test]
-    #[allow(clippy::many_single_char_names)]
     async fn execute_count_star_int32() -> Result<()> {
         // mock a child executor
         let schema = Schema {
@@ -366,7 +365,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::many_single_char_names)]
     async fn execute_count_star_int32_grouped() -> Result<()> {
         // mock a child executor
         let schema = Schema {
@@ -507,7 +505,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::many_single_char_names)]
     async fn execute_sum_int32() -> Result<()> {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int32)],
@@ -578,7 +575,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::many_single_char_names)]
     async fn execute_sum_int32_grouped() -> Result<()> {
         // mock a child executor
         let schema = Schema {
@@ -704,7 +700,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::many_single_char_names)]
     async fn execute_sum_int32_grouped_execeed_limit() -> Result<()> {
         // mock a child executor
         let schema = Schema {

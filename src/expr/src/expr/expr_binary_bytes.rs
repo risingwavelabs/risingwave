@@ -37,7 +37,7 @@ pub fn new_substr_start(
     .boxed()
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn new_substr_for(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,

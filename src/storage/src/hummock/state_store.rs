@@ -280,7 +280,7 @@ impl HummockStorage {
         Ok(None)
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn read_filter<R, B>(
         &self,
         epoch: HummockEpoch,

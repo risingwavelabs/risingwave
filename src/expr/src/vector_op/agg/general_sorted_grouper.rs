@@ -182,12 +182,13 @@ where
     ongoing: bool,
     group_value: Option<T::OwnedItem>,
 }
+
 impl<T> GeneralSortedGrouper<T>
 where
     T: Array,
     for<'a> T::RefItem<'a>: Eq,
 {
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn new(ongoing: bool, group_value: Option<T::OwnedItem>) -> Self {
         Self {
             ongoing,

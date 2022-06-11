@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(lint_reasons)]
+
 pub mod error;
 pub mod pg_extended;
 pub mod pg_field_descriptor;
