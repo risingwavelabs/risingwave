@@ -15,14 +15,13 @@
 use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{BoxedError, ErrorCode, RwError, TrackingIssue};
+use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
 use risingwave_expr::ExprError;
 use risingwave_storage::error::StorageError;
-use thiserror::Error;
 
 use super::Barrier;
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 enum StreamExecutorErrorInner {
     #[error("Storage error: {0}")]
     Storage(
@@ -71,11 +70,11 @@ impl StreamExecutorError {
         StreamExecutorErrorInner::Storage(error.into()).into()
     }
 
-    pub fn eval_error(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub fn eval_error(error: impl Error) -> Self {
         StreamExecutorErrorInner::EvalError(error.into()).into()
     }
 
-    pub fn serde_error(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub fn serde_error(error: impl Error) -> Self {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
     }
 
@@ -108,7 +107,7 @@ impl StreamExecutorError {
     }
 }
 
-#[derive(Error)]
+#[derive(thiserror::Error)]
 #[error("{inner}")]
 pub struct StreamExecutorError {
     #[from]
@@ -135,30 +134,33 @@ impl std::fmt::Debug for StreamExecutorError {
     }
 }
 
+/// Storage error.
 impl From<StorageError> for StreamExecutorError {
     fn from(s: StorageError) -> Self {
         Self::storage(s)
     }
 }
 
+// Chunk operation error.
 impl From<ArrayError> for StreamExecutorError {
-    fn from(a: ArrayError) -> Self {
-        Self::eval_error(a)
+    fn from(e: ArrayError) -> Self {
+        Self::eval_error(e)
     }
 }
-
 impl From<ExprError> for StreamExecutorError {
     fn from(e: ExprError) -> Self {
         Self::eval_error(e)
     }
 }
 
+/// Internal error.
 impl From<anyhow::Error> for StreamExecutorError {
     fn from(a: anyhow::Error) -> Self {
         StreamExecutorErrorInner::Internal(a).into()
     }
 }
 
+/// Serialize/deserialize error.
 impl From<memcomparable::Error> for StreamExecutorError {
     fn from(m: memcomparable::Error) -> Self {
         Self::serde_error(m)
@@ -176,10 +178,12 @@ pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::bail;
+
     use super::*;
 
     fn func_return_error() -> StreamExecutorResult<()> {
-        Err(ErrorCode::InternalError("test_error".into())).map_err(StreamExecutorError::eval_error)
+        bail!("test_error")
     }
 
     #[test]
