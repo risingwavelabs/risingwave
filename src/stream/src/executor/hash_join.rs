@@ -626,7 +626,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                         yield Message::Chunk(chunk);
                                     }
                                 }
-                                matched_row.inc_degree();
+                                side_match.ht.inc_degree(matched_row);
                             }
                             // If the stream is append-only and the join key covers pk in both side,
                             // then we can remove matched rows since pk is unique and will not be
@@ -654,15 +654,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
 
                     if append_only_optimize {
-                        if let Some(v) = matched_rows && !v.is_empty() {
+                        if true{
                             // Since join key contains pk and pk is unique, there should be only
                             // one row if matched
                             debug_assert!(1 == matched_pks.len());
-                            v.remove(matched_pks.remove(0));
+                            // v.remove(matched_pks.remove(0));
                         } else {
                             side_update
-                                    .ht
-                                    .insert(key, pk, JoinRow::new(value, degree))?;
+                                .ht
+                                .insert(key, pk, JoinRow::new(value, degree))?;
                         }
                     } else {
                         side_update

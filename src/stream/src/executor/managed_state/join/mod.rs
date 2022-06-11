@@ -281,6 +281,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.state_table.delete(&table_pk, value.into_row())?;
         Ok(())
     }
+
+    pub fn inc_degree(&mut self, join_row: &mut JoinRow) {
+        join_row.inc_degree();
+    }
+
+    pub fn dec_degree(&self, join_row: &mut JoinRow) -> RwResult<()> {
+        join_row.dec_degree()?;
+        Ok(())
+    }
 }
 
 impl<K: HashKey, S: StateStore> Deref for JoinHashMap<K, S> {
