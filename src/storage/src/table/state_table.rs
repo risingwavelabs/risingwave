@@ -55,6 +55,81 @@ impl <S: StateStore> DedupPkStateTable<S> {
             inner,
         }
     }
+
+    /// Use order key to remove duplicate pks.
+    fn dedup_pk_in_row(&self, row: Row) -> Row {
+        return row;
+    }
+
+    /// TODO: read methods
+    /// 1) get partial row first
+    /// 2) reconstruct original row
+    /// a. Layer on top will be able to just call this public api, decode after.
+    /// b. If call get_row_with pk, it is just inserting changes into this.
+    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+    }
+
+    /// TODO: write methods
+    /// Layer on top will do transform,
+    /// call lower layer to insert.
+    /// For upper layer, when constructing cell based column descs,
+    /// we need to change cell_based_column_descs to partial repr.
+    pub fn insert(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
+        Ok(())
+    }
+
+    pub fn delete(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
+        Ok(())
+    }
+
+    pub fn update(&mut self, _pk: Row, _old_value: Row, _new_value: Row) -> StorageResult<()> {
+        todo!()
+    }
+
+    // At the Batch write phase, mem_table should ALREADY be in encoded fmt?
+    // that means insert needs to encode accordingly.
+    pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
+        Ok(())
+    }
+
+    pub async fn commit_with_value_meta(&mut self, new_epoch: u64) -> StorageResult<()> {
+        // TODO: map on the stream
+        Ok(())
+    }
+
+    /// TODO: iter need another layer too
+    /// This function scans rows from the relational table.
+    pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
+        // TODO: map on the stream
+        self.inner.iter(epoch)
+    }
+
+    /// TODO: as above.
+    /// This function scans rows from the relational table with specific `pk_bounds`.
+    pub async fn iter_with_pk_bounds<R, B>(
+        &self,
+        pk_bounds: R,
+        epoch: u64,
+    ) -> StorageResult<impl RowStream<'_>>
+    where
+        R: RangeBounds<B> + Send + Clone + 'static,
+        B: AsRef<Row> + Send + Clone + 'static,
+    {
+        // TODO: map on the stream
+        self.inner.iter_with_pk_bounds(pk_bounds, epoch)
+    }
+
+    /// TODO: as above.
+    /// This function scans rows from the relational table with specific `pk_prefix`.
+    pub async fn iter_with_pk_prefix(
+        &self,
+        pk_prefix: Row,
+        prefix_serializer: OrderedRowSerializer,
+        epoch: u64,
+    ) -> StorageResult<impl RowStream<'_>> {
+        // TODO: map on the stream
+        self.inner.iter_with_pk_prefix(pk_prefix, prefix_serializer, epoch)
+    }
 }
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
@@ -100,11 +175,6 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    /// TODO: read methods
-    /// 1) get partial row first
-    /// 2) reconstruct original row
-    /// a. Layer on top will be able to just call this public api, decode after.
-    /// b. If call get_row_with pk, it is just inserting changes into this.
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         let mem_table_res = self.mem_table.get_row(&pk_bytes).map_err(err)?;
@@ -118,11 +188,6 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    /// TODO: write methods
-    /// Layer on top will do transform,
-    /// call lower layer to insert.
-    /// For upper layer, when constructing cell based column descs,
-    /// we need to change cell_based_column_descs to partial repr.
     pub fn insert(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
         let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
