@@ -118,7 +118,7 @@ impl<'a> TryFrom<&'a ExprNode> for NestedConstructExpression {
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(
             prost.get_expr_type().unwrap() == Type::Array
-                || prost.get_expr_type().unwrap() == Type::Struct
+                || prost.get_expr_type().unwrap() == Type::Row
         );
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());

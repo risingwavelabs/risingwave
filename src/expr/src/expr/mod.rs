@@ -108,7 +108,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         In => build_in_expr(prost),
         Field => FieldExpression::try_from(prost).map(Expression::boxed),
         Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        Struct => NestedConstructExpression::try_from(prost).map(Expression::boxed),
+        Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()

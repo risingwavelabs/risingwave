@@ -204,7 +204,7 @@ impl Binder {
             let is_struct_function = match item {
                 ExprImpl::InputRef(_) => true,
                 ExprImpl::FunctionCall(function) => {
-                    matches!(function.get_expr_type(), ExprType::Field | ExprType::Struct)
+                    matches!(function.get_expr_type(), ExprType::Field | ExprType::Row)
                 }
                 ExprImpl::AggCall(agg) => {
                     matches!(agg.agg_kind(), AggKind::Max | AggKind::Min)
@@ -262,7 +262,7 @@ impl ExprVisitor for GetFieldDesc {
     /// `Field{Field,Literal(i32)}`. So we only need to check the first input to get
     /// `column_desc` from bindings. And then we get the `field_desc` by second input.
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
-        if func_call.get_expr_type() == ExprType::Struct {
+        if func_call.get_expr_type() == ExprType::Row {
             return;
         }
         match func_call.inputs().get(0) {

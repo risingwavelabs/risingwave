@@ -146,7 +146,7 @@ impl Binder {
     /// we need to change the data type of these fields to target type.
     pub fn change_null_struct_type(expr: ExprImpl, target: DataType) -> Result<ExprImpl> {
         if let ExprImpl::FunctionCall(func) = &expr {
-            if func.get_expr_type() == ExprType::Struct {
+            if func.get_expr_type() == ExprType::Row {
                 if let DataType::Struct { fields } = target {
                     let inputs = func
                         .inputs()

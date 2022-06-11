@@ -170,7 +170,7 @@ impl Binder {
         let data_type = DataType::Struct {
             fields: exprs.iter().map(|e| e.return_type()).collect_vec().into(),
         };
-        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Struct, exprs, data_type).into();
+        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }
 }
