@@ -27,7 +27,7 @@ pub struct SinkExecutor<S: Sink> {
 }
 
 impl<S: Sink> SinkExecutor<S> {
-    pub fn new(materialize_executor: BoxedExecutor, _external_sink: S) -> Self {
+    pub fn _new(materialize_executor: BoxedExecutor, _external_sink: S) -> Self {
         Self {
             child: materialize_executor,
             _external_sink,
@@ -47,7 +47,7 @@ impl<S: Sink + 'static + Send> Executor for SinkExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.child.schema()
+        self.child.schema()
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef {
@@ -81,6 +81,6 @@ mod test {
         // Mock `child`
         let mock = MockSource::with_messages(Schema::default(), PkIndices::new(), vec![]);
 
-        let _sink_executor = SinkExecutor::new(Box::new(mock), mysql_sink);
+        let _sink_executor = SinkExecutor::_new(Box::new(mock), mysql_sink);
     }
 }

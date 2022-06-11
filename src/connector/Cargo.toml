@@ -62,6 +62,6 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 rand = "0.8"
+rust_decimal = "1"
 tempfile = "3"
 wiremock = "0.5"
-rust_decimal = "1"
