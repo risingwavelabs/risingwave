@@ -84,6 +84,7 @@ message ExprNode {
     // Array expression.
     ARRAY = 521;
     ARRAY_ACCESS = 522;
+    ROW = 523;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;
