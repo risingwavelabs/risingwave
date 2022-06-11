@@ -46,9 +46,14 @@ impl <S: StateStore> DedupPkStateTable<S> {
         }
     }
 
-    /// Use order key to remove duplicate pks.
-    fn dedup_pk_in_row(&self, row: Row) -> Row {
-        return row;
+    /// Use order key to remove duplicate pk datums
+    fn row_to_dedup_pk_row(&self, row: Row) -> Row {
+        row
+    }
+
+    /// Use order key to replace deduped pk datums
+    fn dedup_pk_row_to_row(&self, _pk: &Row, dedup_pk_row: Row) -> Row {
+        dedup_pk_row
     }
 
     /// TODO: read methods
