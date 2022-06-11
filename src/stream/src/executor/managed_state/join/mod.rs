@@ -229,7 +229,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let table_iter = self
             .state_table
-            .iter_with_pk_prefix(key, self.current_epoch)?;
+            .iter_with_pk_prefix(Some(&key), self.current_epoch)?;
         pin_mut!(table_iter);
 
         let mut cached = BTreeMap::new();
