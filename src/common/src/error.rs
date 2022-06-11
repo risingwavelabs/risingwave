@@ -340,6 +340,7 @@ impl ErrorCode {
             ErrorCode::UnrecognizedConfigurationParameter(_) => 27,
             ErrorCode::ExprError(_) => 28,
             ErrorCode::ArrayError(_) => 29,
+            ErrorCode::MySQLError(_) => 30,
             ErrorCode::UnknownError(_) => 101,
         }
     }
