@@ -4172,6 +4172,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_pb",
  "risingwave_storage",
+ "rust_decimal",
  "serde",
  "serde_derive",
  "serde_json",

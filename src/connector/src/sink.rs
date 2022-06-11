@@ -22,9 +22,7 @@ use risingwave_common::array::Op::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{
-    ScalarImpl, Datum
-};
+use risingwave_common::types::{Datum, ScalarImpl, Decimal};
 
 #[async_trait]
 pub trait Sink {
@@ -85,10 +83,12 @@ impl TryFrom<Datum> for MySQLValue {
                 ScalarImpl::Float32(v) => Ok(MySQLValue(f32::from(v).into())),
                 ScalarImpl::Float64(v) => Ok(MySQLValue(f64::from(v).into())),
                 ScalarImpl::Bool(v) => Ok(MySQLValue(v.into())),
-                // ScalarImpl::Decimal(v) => Ok(MySQLValue(Value::NULL)),
+                ScalarImpl::Decimal(Decimal::Normalized(v)) => Ok(MySQLValue(v.into())),
+                ScalarImpl::Decimal(_) => panic!("NaN, -inf, +inf are not supported by MySQL"),
                 ScalarImpl::Utf8(v) => Ok(MySQLValue(v.into())),
                 ScalarImpl::NaiveDate(v) => Ok(MySQLValue(format!("{}", v).into())),
                 ScalarImpl::NaiveTime(v) => Ok(MySQLValue(format!("{}", v).into())),
+                ScalarImpl::NaiveDateTime(v) => Ok(MySQLValue(format!("{}", v).into())),
                 // ScalarImpl::Interval(v) => Ok(MySQLValue(Value::NULL)),
                 _ => unimplemented!(),
             }
@@ -109,7 +109,7 @@ impl Sink for MySQLSink {
                 .map(|x| MySQLValue::try_from(x.array_ref().datum_at(idx)))
                 .collect_vec()
                 .into_iter()
-                .collect()  
+                .collect()
         };
 
         // Closure that builds a String containing WHERE conditions, i.e. 'v1=1 AND v2=2'.
@@ -124,12 +124,18 @@ impl Sink for MySQLSink {
         };
 
         // Build a connection and start transaction
-        // TODO(nanderstabel): fix, currently defaults to port 3306
-        let builder = OptsBuilder::default()
+        let endpoint = self.endpoint();
+        let mut endpoint = endpoint.split(':');
+        let mut builder = OptsBuilder::default()
             .user(self.user())
             .pass(self.password())
-            .ip_or_hostname(self.endpoint())
+            .ip_or_hostname(endpoint.next().unwrap())
             .db_name(self.database());
+        // TODO(nanderstabel): Fix ParseIntError
+        if let Some(port) = endpoint.next() {
+            builder = builder.tcp_port(port.parse().unwrap());
+        }
+
         let mut conn = Conn::new(builder).await?;
         let mut transaction = conn.start_transaction(TxOpts::default()).await?;
 
@@ -222,9 +228,9 @@ impl Sink for RedisSink {
 
 #[cfg(test)]
 mod test {
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::Field;
-    use risingwave_common::types::DataType;
+
+    use risingwave_common::types::chrono_wrapper::*;
+    use rust_decimal::Decimal as RustDecimal;
 
     use super::*;
 
@@ -236,113 +242,51 @@ mod test {
         pub password: &'a str,
     }
 
-    // Start connection with optional database.
-    async fn start_connection(params: &ConnectionParams<'_>, with_db: bool) -> Result<Conn> {
-        let mut builder = OptsBuilder::default()
-            .user(Some(params.user))
-            .pass(Some(params.password))
-            .ip_or_hostname(params.endpoint);
-        if with_db {
-            builder = builder.db_name(Some(params.database));
-        }
-        let conn = Conn::new(builder).await?;
-        Ok(conn)
+    #[test]
+    fn test_date() {
+        assert_eq!(
+            MySQLValue::try_from(Some(ScalarImpl::NaiveDate(NaiveDateWrapper::default())))
+                .unwrap()
+                .to_string(),
+            "'1970-01-01'"
+        );
     }
 
-    async fn create_database_and_table(
-        params: &ConnectionParams<'_>,
-        schema: &Schema,
-    ) -> Result<()> {
-        let mut conn = start_connection(params, false).await?;
-        conn.query_drop(format!(
-            "CREATE DATABASE {database}; \
-            USE {database}; \
-            CREATE TABLE {table} ({columns});",
-            database = params.database,
-            table = params.table,
-            columns = join(
-                schema
-                    .names()
-                    .iter()
-                    .map(|n| format!("{} int", n))
-                    .collect::<Vec<String>>(),
-                ", "
-            )
-        ))
-        .await?;
-        Ok(())
+    #[test]
+    fn test_time() {
+        assert_eq!(
+            MySQLValue::try_from(Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::default())))
+                .unwrap()
+                .to_string(),
+            "'00:00:00'"
+        );
     }
 
-    #[tokio::test]
-    async fn test_basic() -> Result<()> {
-        // Connection parameters for testing purposes.
-        let params = ConnectionParams {
-            endpoint: "127.0.0.1",
-            table: "t",
-            database: "db",
-            user: "root",
-            password: "123",
-        };
-
-        // Initialize a sink using connection parameters.
-        let mut sink = MySQLSink::new(
-            params.endpoint.into(),
-            params.table.into(),
-            Some(params.database.into()),
-            Some(params.user.into()),
-            Some(params.password.into()),
+    #[test]
+    fn test_datetime() {
+        assert_eq!(
+            MySQLValue::try_from(Some(ScalarImpl::NaiveDateTime(
+                NaiveDateTimeWrapper::default()
+            )))
+            .unwrap()
+            .to_string(),
+            "'1970-01-01 00:00:00'"
         );
-
-        // Initialize schema of two Int32 columns.
-        let schema = Schema::new(vec![
-            Field::with_name(DataType::Int32, "v1"),
-            Field::with_name(DataType::Int32, "v2"),
-        ]);
-
-        // Create table using connection parameters and table schema.
-        // Beware: currently only works for 'int' type columns.
-        create_database_and_table(&params, &schema).await?;
-
-        // Initialize streamchunk.
-        let chunk = StreamChunk::from_pretty(
-            "  i  i
-            + 55 11
-            + 44 22
-            + 33 00
-            - 55 11",
+    }
+    
+    #[test]
+    fn test_decimal() {
+        assert_eq!(
+            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(RustDecimal::new(0, 0)))))
+            .unwrap()
+            .to_string(),
+            "'0'"
         );
-
-        sink.write_batch(chunk, &schema).await?;
-
-        // Start a new connection using the same connection parameters and get the SELECT result.
-        let mut conn = start_connection(&params, true).await?;
-        let select: Vec<(i32, i32)> = conn
-            .query(format!("SELECT * FROM {};", params.table))
-            .await?;
-
-        assert_eq!(select, [(44, 22), (33, 00),]);
-
-        // Initialize streamchunk with UpdateDelete and UpdateInsert.
-        let chunk = StreamChunk::from_pretty(
-            "   i  i
-            U- 44 22
-            U+ 44 42",
+        assert_eq!(
+            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(RustDecimal::new(124, 5)))))
+            .unwrap()
+            .to_string(),
+            "'0.00124'"
         );
-
-        sink.write_batch(chunk, &schema).await?;
-
-        let mut conn = start_connection(&params, true).await?;
-        let select: Vec<(i32, i32)> = conn
-            .query(format!("SELECT * FROM {};", params.table))
-            .await?;
-
-        assert_eq!(select, [(44, 42), (33, 00),]);
-
-        // Delete the database and drop the connection.
-        conn.query_drop(format!("DROP DATABASE {};", params.database))
-            .await?;
-        drop(conn);
-
-        Ok(())
     }
 }
