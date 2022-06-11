@@ -14,11 +14,11 @@
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn trim(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer.write_ref(s.trim()).map_err(ExprError::Array)
+    writer.write_ref(s.trim()).map_err(Into::into)
 }
 
 #[cfg(test)]

@@ -78,7 +78,9 @@ where
     }
 
     pub(super) fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
-        builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()))
+        builder
+            .append(self.result.as_ref().map(|x| x.as_scalar_ref()))
+            .map_err(Into::into)
     }
 
     pub(super) fn update_and_output_with_sorted_groups_concrete(
@@ -241,7 +243,7 @@ mod tests {
         let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, false)?;
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
-        builder.finish()
+        builder.finish().map_err(Into::into)
     }
 
     #[test]

@@ -79,6 +79,12 @@ impl ExprImpl {
         Literal::new(Some(v.to_scalar_value()), DataType::Boolean).into()
     }
 
+    /// A literal varchar value.
+    #[inline(always)]
+    pub fn literal_varchar(v: String) -> Self {
+        Literal::new(Some(v.to_scalar_value()), DataType::Varchar).into()
+    }
+
     /// A `count(*)` aggregate function.
     #[inline(always)]
     pub fn count_star() -> Self {

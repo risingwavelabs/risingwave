@@ -21,10 +21,10 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use super::{VirtualNode, VIRTUAL_NODE_COUNT};
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, Row, StructRef,
 };
+use crate::consistent_hash::{VirtualNode, VIRTUAL_NODE_COUNT};
 use crate::error::Result;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -126,9 +126,9 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 
     #[inline(always)]
     fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> Result<Row> {
-        let mut builders = data_types
+        let mut builders: Vec<_> = data_types
             .map(|dt| dt.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
 
         self.deserialize_to_builders(&mut builders)?;
         builders
@@ -647,7 +647,9 @@ impl HashKey for SerializedKey {
         array_builders
             .iter_mut()
             .zip_eq(self.key)
-            .try_for_each(|(array_builder, key)| array_builder.append_datum(&key))
+            .try_for_each(|(array_builder, key)| {
+                array_builder.append_datum(&key).map_err(Into::into)
+            })
     }
 
     fn has_null(&self) -> bool {

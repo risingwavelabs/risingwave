@@ -33,10 +33,10 @@ macro_rules! array_impl_add_datum {
         match ($arr_builder, $datum) {
             $(
                 (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
-                    inner.append(Some(v.as_scalar_ref())).map_err($crate::ExprError::Array)?;
+                    inner.append(Some(v.as_scalar_ref()))?;
                 }
                 (ArrayBuilderImpl::$variant_name(inner), None) => {
-                    inner.append(None).map_err($crate::ExprError::Array)?;
+                    inner.append(None)?;
                 }
             )*
             (_, _) => $crate::bail!(
@@ -56,7 +56,7 @@ macro_rules! gen_eval {
                 )*
 
                 let bitmap = data_chunk.get_visibility_ref();
-                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity()).map_err($crate::ExprError::Array)?;
+                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity())?;
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
                         for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
@@ -65,13 +65,13 @@ macro_rules! gen_eval {
                             }
                             $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                         }
-                        output_array.finish().map_err($crate::ExprError::Array)?.into()
+                        output_array.finish()?.into()
                     }
                     None => {
                         for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
                             $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                         }
-                        output_array.finish().map_err($crate::ExprError::Array)?.into()
+                        output_array.finish()?.into()
                     }
                 }))
             }
@@ -86,20 +86,20 @@ macro_rules! gen_eval {
                 $(
                     let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;
 
-                    let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1).map_err($crate::ExprError::Array)?;
+                    let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1)?;
                     let [<ref_ $arg:lower>] = &mut [<builder_ $arg:lower>];
 
                     for_all_variants! {array_impl_add_datum, [<ref_ $arg:lower>], [<datum_ $arg:lower>]}
 
-                    let [<arr_ $arg:lower>] = [<builder_ $arg:lower>].finish().map(Arc::new).map_err($crate::ExprError::Array)?;
+                    let [<arr_ $arg:lower>] = [<builder_ $arg:lower>].finish().map(Arc::new)?;
                     let [<arr_ $arg:lower>]: &$arg = [<arr_ $arg:lower>].as_ref().into();
                 )*
 
-                let mut output_array = <$OA as Array>::Builder::new(1).map_err($crate::ExprError::Array)?;
+                let mut output_array = <$OA as Array>::Builder::new(1)?;
                 for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
                     $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                 }
-                let output_arrayimpl: ArrayImpl = output_array.finish().map_err($crate::ExprError::Array)?.into();
+                let output_arrayimpl: ArrayImpl = output_array.finish()?.into();
 
                 Ok(output_arrayimpl.to_datum())
             }
@@ -112,9 +112,9 @@ macro_rules! eval_normal {
         if let ($(Some($arg), )*) = ($($arg, )*) {
             let ret = ($self.func)($($arg, )*)?;
             let output = Some(ret.as_scalar_ref());
-            $output_array.append(output).map_err($crate::ExprError::Array)?;
+            $output_array.append(output)?;
         } else {
-            $output_array.append(None).map_err($crate::ExprError::Array)?;
+            $output_array.append(None)?;
         }
     }
 }
@@ -190,7 +190,7 @@ macro_rules! eval_bytes {
             let guard = ($self.func)($($arg, )* writer)?;
             $output_array = guard.into_inner();
         } else {
-            $output_array.append(None).map_err($crate::ExprError::Array)?;
+            $output_array.append(None)?;
         }
     }
 }
@@ -257,7 +257,7 @@ macro_rules! eval_nullable {
     ($self:ident, $output_array:ident, $($arg:ident,)*) => {
         {
             let ret = ($self.func)($($arg,)*)?;
-            $output_array.append(option_as_scalar_ref(&ret)).map_err($crate::ExprError::Array)?;
+            $output_array.append(option_as_scalar_ref(&ret))?;
         }
     }
 }

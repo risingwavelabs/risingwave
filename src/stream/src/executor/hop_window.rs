@@ -181,11 +181,9 @@ impl HopWindowExecutor {
                 continue;
             };
             // TODO: compact may be not necessary here.
-            let chunk = chunk.compact().map_err(StreamExecutorError::executor_v1)?;
+            let chunk = chunk.compact()?;
             let (data_chunk, ops) = chunk.into_parts();
-            let hop_start = hop_start
-                .eval(&data_chunk)
-                .map_err(StreamExecutorError::eval_error)?;
+            let hop_start = hop_start.eval(&data_chunk)?;
             let len = hop_start.len();
             let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
             let (origin_cols, vis) = data_chunk.into_parts();
@@ -193,20 +191,12 @@ impl HopWindowExecutor {
             assert!(matches!(vis, Vis::Compact(_)));
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {
-                    Some(
-                        window_start_exprs[i]
-                            .eval(&hop_start_chunk)
-                            .map_err(StreamExecutorError::eval_error)?,
-                    )
+                    Some(window_start_exprs[i].eval(&hop_start_chunk)?)
                 } else {
                     None
                 };
                 let window_end_col = if output_indices.contains(&window_end_col_index) {
-                    Some(
-                        window_end_exprs[i]
-                            .eval(&hop_start_chunk)
-                            .map_err(StreamExecutorError::eval_error)?,
-                    )
+                    Some(window_end_exprs[i].eval(&hop_start_chunk)?)
                 } else {
                     None
                 };

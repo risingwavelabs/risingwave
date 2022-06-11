@@ -264,7 +264,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         #[for_await]
         for msg in input {
-            let msg = msg.map_err(StreamExecutorError::input_error)?;
+            let msg = msg?;
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
                     if self.arrangement.use_current_epoch {
