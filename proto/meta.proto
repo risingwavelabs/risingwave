@@ -72,22 +72,6 @@ message FlushResponse {
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
 }
-message CollectOverRequest {
-  message CreateMviewProgress {
-    uint32 chain_actor_id = 1;
-    bool done = 2;
-    uint64 consumed_epoch = 3;
-  }
-  repeated CreateMviewProgress create_mview_progress = 1;
-  repeated hummock.SstableInfo sycned_sstables = 2;
-  uint32 node_id = 3;
-}
-message CollectOverResponse {
-  common.Status status = 1;
-}
-service BarrierManagerService{
-  rpc CollectOver(CollectOverRequest) returns (CollectOverResponse);
-}
 
 // Below for cluster service.
 

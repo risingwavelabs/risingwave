@@ -15,7 +15,7 @@
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
-use risingwave_pb::meta::collect_over_request::CreateMviewProgress as ProstCreateMviewProgress;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 

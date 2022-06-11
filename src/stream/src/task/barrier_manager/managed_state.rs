@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::iter::once;
 
 use madsim::collections::HashSet;
-use risingwave_pb::meta::collect_over_request::CreateMviewProgress;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use tokio::sync::oneshot;
 
 use super::progress::ChainState;
