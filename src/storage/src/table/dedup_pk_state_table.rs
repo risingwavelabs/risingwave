@@ -29,7 +29,7 @@ use crate::{Keyspace, StateStore};
 /// Trade-off is that every access and retrieve involves ser/de, which is expensive.
 pub struct DedupPkStateTable<S: StateStore> {
     inner: StateTable<S>,
-    order_key: Vec<OrderedColumnDesc>,
+    _order_key: Vec<OrderedColumnDesc>,
 }
 
 impl <S: StateStore> DedupPkStateTable<S> {
@@ -41,11 +41,11 @@ impl <S: StateStore> DedupPkStateTable<S> {
         _pk_indices: Vec<usize>,
     ) -> Self {
         // create a new state table, but only with partial decs
-        let order_key = vec![]; // TODO: construct from fields
+        let _order_key = vec![]; // TODO: construct from fields
         let partial_column_descs = column_descs; // TODO: update this
         let inner = StateTable::new(keyspace, partial_column_descs, order_types, dist_key_indices, _pk_indices);
         Self {
-            order_key,
+            _order_key,
             inner,
         }
     }
@@ -89,15 +89,10 @@ impl <S: StateStore> DedupPkStateTable<S> {
         self.inner.commit_with_value_meta(new_epoch).await
     }
 
-    /// TODO: iter need another layer too
-    /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
-        // TODO: map on the stream
         self.inner.iter(epoch).await
     }
 
-    /// TODO: as above.
-    /// This function scans rows from the relational table with specific `pk_bounds`.
     pub async fn iter_with_pk_bounds<R, B>(
         &self,
         pk_bounds: R,
@@ -107,12 +102,9 @@ impl <S: StateStore> DedupPkStateTable<S> {
         R: RangeBounds<B> + Send + Clone + 'static,
         B: AsRef<Row> + Send + Clone + 'static,
     {
-        // TODO: map on the stream
         self.inner.iter_with_pk_bounds(pk_bounds, epoch).await
     }
 
-    /// TODO: as above.
-    /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix(
         &self,
         pk_prefix: Row,
