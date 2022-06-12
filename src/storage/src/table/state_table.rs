@@ -244,7 +244,9 @@ impl<S: StateStore> StateTable<S> {
         R: RangeBounds<B> + Send + Clone + 'static,
         B: AsRef<Row> + Send + Clone + 'static,
     {
-        let stream = self.iter_key_and_row_with_pk_bounds::<R, B>(pk_bounds, epoch).await?;
+        let stream = self
+            .iter_key_and_row_with_pk_bounds::<R, B>(pk_bounds, epoch)
+            .await?;
         Ok(stream.map(|r| r.map(|(_k, v)| v)))
     }
 
@@ -293,7 +295,8 @@ impl<S: StateStore> StateTable<S> {
 pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>>;
 
 type RawKey = Vec<u8>;
-pub trait KeyAndRowStream<'a> = StreamExt<Item = StorageResult<(Cow<'a, RawKey>, Cow<'a, Row>)>> + 'a;
+pub trait KeyAndRowStream<'a> =
+    StreamExt<Item = StorageResult<(Cow<'a, RawKey>, Cow<'a, Row>)>> + 'a;
 
 struct StateTableRowIter<S: StateStore> {
     _phantom: PhantomData<S>,
@@ -365,7 +368,9 @@ impl<S: StateStore> StateTableRowIter<S> {
 
                             let (key, row_op) = mem_table_iter.next().unwrap();
                             match row_op {
-                                RowOp::Insert(row) => yield (Cow::Borrowed(key), Cow::Borrowed(row)),
+                                RowOp::Insert(row) => {
+                                    yield (Cow::Borrowed(key), Cow::Borrowed(row))
+                                }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update((old_row, new_row)) => {
                                     debug_assert!(old_row == cell_based_row);
@@ -379,7 +384,9 @@ impl<S: StateStore> StateTableRowIter<S> {
 
                             let (key, row_op) = mem_table_iter.next().unwrap();
                             match row_op {
-                                RowOp::Insert(row) => yield (Cow::Borrowed(key), Cow::Borrowed(row)),
+                                RowOp::Insert(row) => {
+                                    yield (Cow::Borrowed(key), Cow::Borrowed(row))
+                                }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update(_) => unreachable!(),
                             }

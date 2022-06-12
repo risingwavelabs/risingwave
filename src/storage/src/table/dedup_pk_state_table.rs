@@ -20,10 +20,9 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::state_table::{RowStream, StateTable};
 use crate::error::StorageResult;
-
 use crate::{Keyspace, StateStore};
 
-/// DedupPkStateTable is the interface which
+/// `DedupPkStateTable` is the interface which
 /// transforms input Rows into Rows w/o public key cells
 /// to reduce storage cost.
 /// Trade-off is that every access and retrieve involves ser/de, which is expensive.
@@ -32,7 +31,7 @@ pub struct DedupPkStateTable<S: StateStore> {
     _order_key: Vec<OrderedColumnDesc>,
 }
 
-impl <S: StateStore> DedupPkStateTable<S> {
+impl<S: StateStore> DedupPkStateTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
@@ -43,11 +42,14 @@ impl <S: StateStore> DedupPkStateTable<S> {
         // create a new state table, but only with partial decs
         let _order_key = vec![]; // TODO: construct from fields
         let partial_column_descs = column_descs; // TODO: update this
-        let inner = StateTable::new(keyspace, partial_column_descs, order_types, dist_key_indices, _pk_indices);
-        Self {
-            _order_key,
-            inner,
-        }
+        let inner = StateTable::new(
+            keyspace,
+            partial_column_descs,
+            order_types,
+            dist_key_indices,
+            _pk_indices,
+        );
+        Self { inner, _order_key }
     }
 
     /// Use order key to remove duplicate pk datums
@@ -78,7 +80,8 @@ impl <S: StateStore> DedupPkStateTable<S> {
     pub fn update(&mut self, pk: Row, old_value: Row, new_value: Row) -> StorageResult<()> {
         let dedup_pk_old_value = self.row_to_dedup_pk_row(old_value);
         let dedup_pk_new_value = self.row_to_dedup_pk_row(new_value);
-        self.inner.update(pk, dedup_pk_old_value, dedup_pk_new_value)
+        self.inner
+            .update(pk, dedup_pk_old_value, dedup_pk_new_value)
     }
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
@@ -112,6 +115,8 @@ impl <S: StateStore> DedupPkStateTable<S> {
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
         // TODO: map on the stream
-        self.inner.iter_with_pk_prefix(pk_prefix, prefix_serializer, epoch).await
+        self.inner
+            .iter_with_pk_prefix(pk_prefix, prefix_serializer, epoch)
+            .await
     }
 }
