@@ -99,6 +99,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
+        Repeat => build_repeat_expr(prost),
         ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
         SplitPart => build_split_part_expr(prost),
         ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),

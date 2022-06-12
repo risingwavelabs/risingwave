@@ -27,6 +27,7 @@ pub mod lower;
 pub mod ltrim;
 pub mod md5;
 pub mod position;
+pub mod repeat;
 pub mod replace;
 pub mod round;
 pub mod rtrim;
