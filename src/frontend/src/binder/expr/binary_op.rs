@@ -49,7 +49,7 @@ impl Binder {
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::StringConcat => return self.bind_concat(bound_left, bound_right),
+            BinaryOperator::Concat => return self.bind_concat_op(bound_left, bound_right),
 
             _ => return Err(ErrorCode::NotImplemented(format!("{:?}", op), 112.into()).into()),
         };
@@ -67,22 +67,31 @@ impl Binder {
 
     /// Bind `||`. Based on the types of the inputs, this can be string concat or others like array
     /// concat.
-    fn bind_concat(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
+    fn bind_concat_op(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
         let types = [left.return_type(), right.return_type()];
 
+        let has_string = types.iter().any(|t| matches!(t, DataType::Varchar));
+        let has_array = types.iter().any(|t| matches!(t, DataType::List { .. }));
+
         // StringConcat
-        if types.iter().any(|t| matches!(t, DataType::Varchar))
-            && !types.iter().any(|t| matches!(t, DataType::List { .. }))
-        {
+        if has_string && !has_array {
             Ok(FunctionCall::new(
                 ExprType::ConcatWs,
                 Self::rewrite_concat_to_concat_ws(vec![left, right])?,
             )?
             .into())
         }
-        // TODO: ArrayConcat
+        // ArrayConcat
+        else if has_array {
+            Err(ErrorCode::NotImplemented("array concat operator".into(), None.into()).into())
+        }
+        // Invalid types
         else {
-            todo!()
+            Err(ErrorCode::BindError(format!(
+                "operator does not exist: {:?} || {:?}",
+                &types[0], &types[1]
+            ))
+            .into())
         }
     }
 }
