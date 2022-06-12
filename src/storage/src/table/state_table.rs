@@ -40,8 +40,6 @@ pub struct StateTable<S: StateStore> {
     keyspace: Keyspace<S>,
 
     column_descs: Vec<ColumnDesc>,
-    /// Ordering of primary key (for assertion)
-    order_types: Vec<OrderType>,
 
     /// buffer key/values
     mem_table: MemTable,
@@ -64,7 +62,6 @@ impl<S: StateStore> StateTable<S> {
         Self {
             keyspace,
             column_descs,
-            order_types: order_types.clone(),
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
                 cell_based_keyspace,
@@ -94,12 +91,9 @@ impl<S: StateStore> StateTable<S> {
     /// write methods
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
         let mut datums = vec![];
-        println!("pk_indice.len() = {:?}", self.pk_indices.len());
         for pk_indice in &self.pk_indices {
             datums.push(value.index(*pk_indice).clone());
         }
-        println!("datums.len() = {:?}", datums.len());
-        println!("order_type.len() = {:?}", self.order_types.len());
         let pk = Row::new(datums);
         let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         self.mem_table.insert(pk_bytes, value)?;

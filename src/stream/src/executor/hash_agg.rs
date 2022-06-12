@@ -122,13 +122,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut state_tables = Vec::with_capacity(agg_calls.len());
         for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
+            let mut index = key_indices.clone();
+            if get_key_len(agg_call) == 1 {
+                index.push(index[index.len() - 1]);
+            }
             let state_table = StateTable::new(
                 ks.clone(),
                 generate_column_descs(agg_call, &key_indices, &pk_indices, &schema, input.as_ref()),
                 // Primary key includes group key.
                 vec![OrderType::Descending; key_indices.len() + get_key_len(agg_call)],
                 Some(key_indices.clone()),
-                key_indices.clone(),
+                index,
             );
             state_tables.push(state_table);
         }

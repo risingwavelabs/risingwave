@@ -210,7 +210,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only() {
         let keyspace = create_in_memory_keyspace();
-        let pk_index = vec![0_usize, 1_usize];
+        let pk_index = vec![];
         let mut state_table = StateTable::new(
             keyspace.clone(),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
