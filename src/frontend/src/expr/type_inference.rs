@@ -109,7 +109,6 @@ struct FuncSign {
 
 impl Eq for FuncSign {}
 
-#[allow(dead_code)]
 impl FuncSign {
     pub fn new(func: ExprType, inputs_type: Vec<DataTypeName>) -> Self {
         FuncSign { func, inputs_type }

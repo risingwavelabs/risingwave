@@ -64,7 +64,7 @@ pub struct CellBasedTable<S: StateStore> {
     column_ids: Vec<ColumnId>,
 
     /// Statistics.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     stats: Arc<StateStoreMetrics>,
 
     /// Indices of distribution keys in pk for computing value meta. None if value meta is not

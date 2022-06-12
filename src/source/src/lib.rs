@@ -29,6 +29,7 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
+#![feature(lint_reasons)]
 
 use std::fmt::Debug;
 
@@ -70,7 +71,7 @@ pub enum SourceImpl {
     Connector(ConnectorSource),
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
     TableV2(TableV2StreamReader),
     Connector(ConnectorSourceReader),

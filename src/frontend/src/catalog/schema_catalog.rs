@@ -27,7 +27,7 @@ pub type SourceId = u32;
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     id: SchemaId,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     name: String,
     table_by_name: HashMap<String, TableCatalog>,
     table_name_by_id: HashMap<TableId, String>,
