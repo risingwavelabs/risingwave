@@ -16,8 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::mem::swap;
 use std::sync::Arc;
 
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result};
+use anyhow::{anyhow, Error};
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -32,7 +31,7 @@ use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::HummockSnapshotManagerRef;
+use crate::scheduler::{HummockSnapshotManagerRef, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -55,13 +54,13 @@ enum QueryState {
         runner: QueryRunner,
 
         /// Receiver of root stage info.
-        root_stage_receiver: oneshot::Receiver<Result<QueryResultFetcher>>,
+        root_stage_receiver: oneshot::Receiver<SchedulerResult<QueryResultFetcher>>,
     },
 
     /// Running
     Running {
         _msg_sender: Sender<QueryMessage>,
-        _task_handle: JoinHandle<Result<()>>,
+        _task_handle: JoinHandle<SchedulerResult<()>>,
     },
 
     /// Failed
@@ -87,7 +86,7 @@ struct QueryRunner {
     msg_sender: Sender<QueryMessage>,
 
     /// Will be set to `None` after all stage scheduled.
-    root_stage_sender: Option<oneshot::Sender<Result<QueryResultFetcher>>>,
+    root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
 
     epoch: u64,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -131,7 +130,7 @@ impl QueryExecution {
         };
 
         let (root_stage_sender, root_stage_receiver) =
-            oneshot::channel::<Result<QueryResultFetcher>>();
+            oneshot::channel::<SchedulerResult<QueryResultFetcher>>();
 
         let runner = QueryRunner {
             query: query.clone(),
@@ -158,7 +157,7 @@ impl QueryExecution {
     }
 
     /// Start execution of this query.
-    pub async fn start(&self) -> Result<QueryResultFetcher> {
+    pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let mut cur_state = Failed;
         swap(&mut *state, &mut cur_state);
@@ -177,9 +176,7 @@ impl QueryExecution {
                     })
                 });
 
-                let root_stage = root_stage_receiver.await.map_err(|e| {
-                    InternalError(format!("Starting query execution failed: {:?}", e))
-                })??;
+                let root_stage = root_stage_receiver.await.map_err(|e| anyhow!(e))??;
 
                 info!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
@@ -196,19 +193,19 @@ impl QueryExecution {
             s => {
                 // Restore old state
                 *state = s;
-                Err(ErrorCode::InternalError("Query not pending!".to_string()).into())
+                Err(SchedulerError::Internal(Error::msg("Query not pending!")))
             }
         }
     }
 
     /// Cancel execution of this query.
-    pub async fn abort(&mut self) -> Result<()> {
+    pub async fn abort(&mut self) -> SchedulerResult<()> {
         todo!()
     }
 }
 
 impl QueryRunner {
-    async fn run(mut self) -> Result<()> {
+    async fn run(mut self) -> SchedulerResult<()> {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -282,7 +279,7 @@ impl QueryRunner {
                 }
                 Stage(StageEvent::Failed { id, reason }) => {
                     error!(
-                        "Query stage {:?}-{:?} failed: {}.",
+                        "Query stage {:?}-{:?} failed: {:?}.",
                         self.query.query_id, id, reason
                     );
 
@@ -303,12 +300,11 @@ impl QueryRunner {
                     }
                     // TODO: We should can cancel all scheduled stages here.
                 }
-                _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        "unsupported type for QueryRunner.run".to_string(),
+                rest => {
+                    return Err(SchedulerError::NotImplemented(
+                        format!("unsupported message \"{:?}\" for QueryRunner.run", rest),
                         None.into(),
-                    )
-                    .into())
+                    ));
                 }
             }
         }
