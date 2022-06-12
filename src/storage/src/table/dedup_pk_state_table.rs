@@ -18,7 +18,7 @@ use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc};
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 
-use super::state_table::{RowStream, StateTable};
+use super::state_table::{KeyAndRowStream, RowStream, StateTable};
 use crate::error::StorageResult;
 use crate::{Keyspace, StateStore};
 
@@ -93,7 +93,8 @@ impl<S: StateStore> DedupPkStateTable<S> {
     }
 
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
-        self.inner.iter(epoch).await
+        let stream = self.inner.iter_key_and_row(epoch).await?;
+        Ok(stream.map(|r| r.map(|(_k, v)| v))) // TODO: use key to decode
     }
 
     pub async fn iter_with_pk_bounds<R, B>(
@@ -105,7 +106,8 @@ impl<S: StateStore> DedupPkStateTable<S> {
         R: RangeBounds<B> + Send + Clone + 'static,
         B: AsRef<Row> + Send + Clone + 'static,
     {
-        self.inner.iter_with_pk_bounds(pk_bounds, epoch).await
+        let stream = self.inner.iter_key_and_row_with_pk_bounds(pk_bounds, epoch).await?;
+        Ok(stream.map(|r| r.map(|(_k, v)| v))) // TODO: use key to decode
     }
 
     pub async fn iter_with_pk_prefix(
@@ -114,9 +116,7 @@ impl<S: StateStore> DedupPkStateTable<S> {
         prefix_serializer: OrderedRowSerializer,
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
-        // TODO: map on the stream
-        self.inner
-            .iter_with_pk_prefix(pk_prefix, prefix_serializer, epoch)
-            .await
+        let stream = self.inner.iter_key_and_row_with_pk_prefix(pk_prefix, prefix_serializer, epoch).await?;
+        Ok(stream.map(|r| r.map(|(_k, v)| v))) // TODO: use key to decode
     }
 }
