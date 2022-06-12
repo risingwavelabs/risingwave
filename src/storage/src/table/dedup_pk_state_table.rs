@@ -30,6 +30,8 @@ use crate::{Keyspace, StateStore};
 pub struct DedupPkStateTable<S: StateStore> {
     inner: StateTable<S>,
     pk_decoder: OrderedRowDeserializer,
+    dedupped_datum_indices: Vec<usize>,
+    pk_to_row_mapping: Vec<Option<usize>>,
 }
 
 impl<S: StateStore> DedupPkStateTable<S> {
@@ -45,7 +47,9 @@ impl<S: StateStore> DedupPkStateTable<S> {
             .iter()
             .map(|i| column_descs[*i].data_type.clone())
             .collect();
-        let pk_decoder = OrderedRowDeserializer::new(data_types, order_types.clone());
+        let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
+        let dedupped_datum_indices = todo!();
+        let pk_to_row_mapping = todo!();
         let partial_column_descs = column_descs; // TODO: update this
         let inner = StateTable::new(
             keyspace,
@@ -54,7 +58,12 @@ impl<S: StateStore> DedupPkStateTable<S> {
             dist_key_indices,
             pk_indices,
         );
-        Self { inner, pk_decoder }
+        Self {
+            inner,
+            pk_decoder,
+            dedupped_datum_indices,
+            pk_to_row_mapping,
+        }
     }
 
     fn raw_key_to_dedup_pk_row(&self, pk: &RawKey) -> StorageResult<Row> {
@@ -67,7 +76,13 @@ impl<S: StateStore> DedupPkStateTable<S> {
 
     /// Use order key to remove duplicate pk datums
     fn row_to_dedup_pk_row(&self, row: Row) -> Row {
-        row
+        Row(row
+            .0
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| self.dedupped_datum_indices.contains(i))
+            .map(|(_, d)| d)
+            .collect())
     }
 
     /// Use order key to replace deduped pk datums
