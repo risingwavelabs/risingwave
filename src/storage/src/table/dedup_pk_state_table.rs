@@ -14,8 +14,8 @@
 use std::ops::RangeBounds;
 
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc};
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::util::ordered::{OrderedRowSerializer, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::state_table::{KeyAndRowStream, RowStream, StateTable};
@@ -28,7 +28,7 @@ use crate::{Keyspace, StateStore};
 /// Trade-off is that every access and retrieve involves ser/de, which is expensive.
 pub struct DedupPkStateTable<S: StateStore> {
     inner: StateTable<S>,
-    _order_key: Vec<OrderedColumnDesc>,
+    pk_decoder: OrderedRowDeserializer,
 }
 
 impl<S: StateStore> DedupPkStateTable<S> {
@@ -37,20 +37,23 @@ impl<S: StateStore> DedupPkStateTable<S> {
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         dist_key_indices: Option<Vec<usize>>,
-        _pk_indices: Vec<usize>,
+        pk_indices: Vec<usize>,
     ) -> Self {
         // create a new state table, but only with partial decs
-        let _order_key = vec![]; // TODO: construct from fields
+        let data_types = pk_indices.iter().map(|i| column_descs[*i].data_type.clone()).collect();
+        let pk_decoder = OrderedRowDeserializer::new(data_types, order_types.clone());
         let partial_column_descs = column_descs; // TODO: update this
         let inner = StateTable::new(
             keyspace,
             partial_column_descs,
             order_types,
             dist_key_indices,
-            _pk_indices,
+            pk_indices,
         );
-        Self { inner, _order_key }
+        Self { inner, pk_decoder }
     }
+
+    // fn raw_key_to_dedup_pk_row()
 
     /// Use order key to remove duplicate pk datums
     fn row_to_dedup_pk_row(&self, row: Row) -> Row {
