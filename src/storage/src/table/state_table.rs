@@ -279,7 +279,7 @@ impl<S: StateStore> StateTable<S> {
 
 pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>>;
 
-type RawKey = Vec<u8>;
+pub type RawKey = Vec<u8>;
 pub trait KeyAndRowStream<'a> =
     StreamExt<Item = StorageResult<(Cow<'a, RawKey>, Cow<'a, Row>)>> + 'a;
 

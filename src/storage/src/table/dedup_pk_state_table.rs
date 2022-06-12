@@ -18,8 +18,8 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::ordered::{OrderedRowSerializer, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 
-use super::state_table::{KeyAndRowStream, RowStream, StateTable};
-use crate::error::StorageResult;
+use super::state_table::{KeyAndRowStream, RawKey, RowStream, StateTable};
+use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 
 /// `DedupPkStateTable` is the interface which
@@ -53,7 +53,10 @@ impl<S: StateStore> DedupPkStateTable<S> {
         Self { inner, pk_decoder }
     }
 
-    // fn raw_key_to_dedup_pk_row()
+    fn raw_key_to_dedup_pk_row(&self, pk: &RawKey) -> StorageResult<Row> {
+        let ordered_row = self.pk_decoder.deserialize(pk).map_err(|e| StorageError::DedupPkStateTable(e.into()))?;
+        Ok(ordered_row.into_row())
+    }
 
     /// Use order key to remove duplicate pk datums
     fn row_to_dedup_pk_row(&self, row: Row) -> Row {

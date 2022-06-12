@@ -40,6 +40,13 @@ pub enum StorageError {
         #[source]
         RwError,
     ),
+
+    #[error("Dedup Pk State table error: {0}")]
+    DedupPkStateTable(
+        #[backtrace]
+        #[source]
+        RwError,
+    ),
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;
