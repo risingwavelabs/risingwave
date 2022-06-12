@@ -39,6 +39,7 @@ struct RegisterBucket {
     count_1_to_16: Vec<u32>,
     count_17_to_24: Vec<u16>,
     count_25_to_32: Vec<u8>,
+    count_33_to_64: u32,
 }
 
 impl RegisterBucket {
@@ -47,23 +48,19 @@ impl RegisterBucket {
             count_1_to_16: vec![0; 16],
             count_17_to_24: vec![0; 8],
             count_25_to_32: vec![0; 8],
-        }
-    }
-
-    fn set_register(&mut self, register: usize, value: u32) {
-        if register >= 33 {
-        } else if register >= 25 {
-            self.count_25_to_32[register - 25] = value as u8;
-        } else if register >= 17 {
-            self.count_17_to_24[register - 17] = value as u16;
-        } else if register >= 1 {
-            self.count_1_to_16[register - 1] = value;
+            count_33_to_64: 0,
         }
     }
 
     fn get_register(&self, register: usize) -> Result<u32> {
-        if !(1..=33).contains(&register) {
-            return Err(ErrorCode::InternalError("Invalid register index".into()).into());
+        if !(1..=64).contains(&register) {
+            return Err(
+                ErrorCode::InternalError("HyperLogLog: Invalid register index".into()).into(),
+            );
+        }
+
+        if register >= 33 {
+            return Ok(self.count_33_to_64 & (1 << (register - 33)));
         }
 
         if register >= 25 {
@@ -77,19 +74,58 @@ impl RegisterBucket {
         Ok(self.count_1_to_16[register - 1])
     }
 
-    /// Increments or decrements the given register depending on the state of `is_insert`
-    fn update_register(&mut self, register: usize, is_insert: bool) {
+    /// Increments or decrements the given register depending on the state of `is_insert`.
+    /// Returns an Error if the register is invalid or if inserting will cause a register overflow
+    fn update_register(&mut self, register: usize, is_insert: bool) -> Result<()> {
+        if !(1..=64).contains(&register) {
+            return Err(
+                ErrorCode::InternalError("HyperLogLog: Invalid register index".into()).into(),
+            );
+        }
+
         let count = self.get_register(register).unwrap();
         if is_insert {
-            self.set_register(register, count + 1);
+            if register >= 33 {
+                if count == 1 {
+                    return Err(ErrorCode::InternalError("HyperLogLog: Count exceeds maximum register value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.".into()).into());
+                }
+                self.count_33_to_64 |= 1 << (register - 33);
+            } else if register >= 25 {
+                if count as u8 == u8::MAX {
+                    return Err(ErrorCode::InternalError("HyperLogLog: Count exceeds maximum register value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.".into()).into());
+                }
+                self.count_25_to_32[register - 25] = count as u8 + 1;
+            } else if register >= 17 {
+                if count as u16 == u16::MAX {
+                    return Err(ErrorCode::InternalError("HyperLogLog: Count exceeds maximum register value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.".into()).into());
+                }
+                self.count_17_to_24[register - 17] = count as u16 + 1;
+            } else if register >= 1 {
+                if count == u32::MAX {
+                    return Err(ErrorCode::InternalError("HyperLogLog: Count exceeds maximum register value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.".into()).into());
+                }
+                self.count_1_to_16[register - 1] = count + 1;
+            }
         } else {
-            self.set_register(register, count - 1);
+            // We don't have to worry about the user deleting nonexistent elements, so the counts
+            // can never go below 0
+            if register >= 33 {
+                self.count_33_to_64 ^= 1 << (register - 33);
+            } else if register >= 25 {
+                self.count_25_to_32[register - 25] = count as u8 - 1;
+            } else if register >= 17 {
+                self.count_17_to_24[register - 17] = count as u16 - 1;
+            } else if register >= 1 {
+                self.count_1_to_16[register - 1] = count - 1;
+            }
         }
+
+        Ok(())
     }
 
     /// Gets the number of the maximum register which has a count greater than zero.
     fn get_max(&self) -> u8 {
-        for i in (1..33).rev() {
+        for i in (1..64).rev() {
             if self.get_register(i).unwrap() > 0 {
                 return i as u8;
             }
@@ -99,7 +135,18 @@ impl RegisterBucket {
     }
 }
 
-/// `StreamingApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`.
+/// `StreamingApproxCountDistinct` approximates the count of non-null rows using a modified version
+/// of the `HyperLogLog` algorithm. Each `RegisterBucket` stores a count of how many hash values
+/// have a certain number of trailing zeroes. This allows the algorithm to support insertion and
+/// deletion, but uses up more memory and limits the number of rows that can be counted.
+///
+/// Currently, each `RegisterBucket` can count 2^33 rows on average. `StreamingApproxCountDistinct`
+/// stores 2^14 `RegisterBuckets`, so about 2^47 or 141 trillion rows can be counted on average.
+/// Each `RegisterBucket` takes up 736 bits, so the memory usage of `StreamingApproxCountDistinct`
+/// is about 1.5 MB.
+///
+/// The estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^14 registers this
+/// is ~1/128.
 #[derive(Clone, Debug)]
 pub struct StreamingApproxCountDistinct {
     registers: Vec<RegisterBucket>,
@@ -143,7 +190,9 @@ impl StreamingApproxCountDistinct {
         let index = (hash as usize) & (INDICES - 1); // Index is based on last few bits
         let count = self.count_hash(hash) as usize;
 
-        self.registers[index].update_register(count, is_insert);
+        self.registers[index]
+            .update_register(count, is_insert)
+            .unwrap();
     }
 
     /// Calculate the hash of the `scalar_impl`.
@@ -272,32 +321,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().into_int64(), 0);
-    }
-
-    #[test]
-    fn test_estimate_error() {
-        let mut agg = StreamingApproxCountDistinct::new();
-
-        for i in 1..500000 {
-            agg.apply_batch(
-                &[Op::Insert, Op::Insert],
-                None,
-                &[&array_nonnull!(I64Array, [i * 2 - 1, i * 2]).into()],
-            )
-            .unwrap();
-        }
-
-        println!("{}", agg.get_output().unwrap().unwrap().into_int64());
-
-        for i in 1..500000 {
-            agg.apply_batch(
-                &[Op::Insert, Op::Insert],
-                None,
-                &[&array_nonnull!(I64Array, [i * 2 - 1 + 1000000, i * 2 + 1000000]).into()],
-            )
-            .unwrap();
-        }
-
-        println!("{}", agg.get_output().unwrap().unwrap().into_int64());
     }
 }

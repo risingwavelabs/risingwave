@@ -30,6 +30,9 @@ const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-b
 // near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
 const BIAS_CORRECTION: f64 = 0.72125;
 
+/// `ApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`. The
+/// estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^14 registers this
+/// is ~1/128.
 pub struct ApproxCountDistinct {
     return_type: DataType,
     input_col_idx: usize,
