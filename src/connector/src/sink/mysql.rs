@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::sink::Sink;
 use std::fmt;
-
-use async_trait::async_trait;
 use itertools::{join, Itertools};
 use mysql_async::prelude::*;
 use mysql_async::*;
@@ -23,17 +22,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
-
-#[async_trait]
-pub trait Sink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
-
-    fn endpoint(&self) -> String;
-    fn table(&self) -> String;
-    fn database(&self) -> Option<String>;
-    fn user(&self) -> Option<String>;
-    fn password(&self) -> Option<String>; // TODO(nanderstabel): auth?
-}
+use async_trait::async_trait;
 
 // Primitive design of MySQLSink
 #[allow(dead_code)]
@@ -194,35 +183,6 @@ impl Sink for MySQLSink {
 
     fn password(&self) -> Option<String> {
         self.password.clone()
-    }
-}
-
-pub struct RedisSink;
-
-#[async_trait]
-impl Sink for RedisSink {
-    async fn write_batch(&mut self, _chunk: StreamChunk, _schema: &Schema) -> Result<()> {
-        todo!();
-    }
-
-    fn endpoint(&self) -> String {
-        todo!();
-    }
-
-    fn table(&self) -> String {
-        todo!();
-    }
-
-    fn database(&self) -> Option<String> {
-        todo!();
-    }
-
-    fn user(&self) -> Option<String> {
-        todo!();
-    }
-
-    fn password(&self) -> Option<String> {
-        todo!();
     }
 }
 

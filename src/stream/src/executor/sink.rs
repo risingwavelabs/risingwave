@@ -62,7 +62,7 @@ impl<S: Sink + 'static + Send> Executor for SinkExecutor<S> {
 #[cfg(test)]
 mod test {
 
-    use risingwave_connector::sink::MySQLSink;
+    use risingwave_connector::sink::mysql::MySQLSink;
 
     use super::*;
     use crate::executor::test_utils::*;
