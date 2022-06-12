@@ -64,6 +64,7 @@ pub struct CellBasedTable<S: StateStore> {
     column_ids: Vec<ColumnId>,
 
     /// Statistics.
+    #[allow(dead_code)]
     stats: Arc<StateStoreMetrics>,
 
     /// Indices of distribution keys in pk for computing value meta. None if value meta is not
@@ -337,13 +338,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&self, epoch: u64) -> StorageResult<CellBasedTableRowIter<S>> {
-        CellBasedTableRowIter::new(
-            &self.keyspace,
-            self.column_descs.clone(),
-            epoch,
-            self.stats.clone(),
-        )
-        .await
+        CellBasedTableRowIter::new(&self.keyspace, self.column_descs.clone(), epoch).await
     }
 
     pub async fn iter_with_pk(
@@ -355,7 +350,6 @@ impl<S: StateStore> CellBasedTable<S> {
             self.keyspace.clone(),
             self.column_descs.clone(),
             epoch,
-            self.stats.clone(),
             pk_descs,
         )
         .await
@@ -432,7 +426,6 @@ impl<S: StateStore> CellBasedTable<S> {
             self.column_descs.clone(),
             (start_key, end_key),
             epoch,
-            self.stats.clone(),
         )
         .await
     }
@@ -458,7 +451,6 @@ impl<S: StateStore> CellBasedTable<S> {
             self.column_descs.clone(),
             (start_key, next_key),
             epoch,
-            self.stats.clone(),
         )
         .await
     }
@@ -488,8 +480,6 @@ pub struct CellBasedTableRowIter<S: StateStore> {
     iter: StripPrefixIterator<S::Iter>,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
-    /// Statistics
-    _stats: Arc<StateStoreMetrics>,
 }
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
@@ -497,7 +487,6 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         keyspace: &Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
-        _stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<Self> {
         keyspace.state_store().wait_epoch(epoch).await?;
 
@@ -508,7 +497,6 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         let iter = Self {
             iter,
             cell_based_row_deserializer,
-            _stats,
         };
         Ok(iter)
     }
@@ -518,7 +506,6 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         table_descs: Vec<ColumnDesc>,
         serialized_pk_bounds: R,
         epoch: u64,
-        _stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
@@ -534,7 +521,6 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         let iter = Self {
             iter,
             cell_based_row_deserializer,
-            _stats,
         };
         Ok(iter)
     }
@@ -599,11 +585,9 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         keyspace: Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
-        _stats: Arc<StateStoreMetrics>,
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<Self> {
-        let inner =
-            CellBasedTableRowIter::new(&keyspace, table_descs.clone(), epoch, _stats).await?;
+        let inner = CellBasedTableRowIter::new(&keyspace, table_descs.clone(), epoch).await?;
 
         let (data_types, order_types) = pk_descs
             .iter()

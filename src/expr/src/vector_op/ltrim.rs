@@ -14,14 +14,14 @@
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// Note: the behavior of `ltrim` in `PostgreSQL` and `trim_start` (or `trim_left`) in Rust
 /// are actually different when the string is in right-to-left languages like Arabic or Hebrew.
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[inline(always)]
 pub fn ltrim(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer.write_ref(s.trim_start()).map_err(ExprError::Array)
+    writer.write_ref(s.trim_start()).map_err(Into::into)
 }
 
 #[cfg(test)]

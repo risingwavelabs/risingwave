@@ -13,15 +13,14 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::array::StructValue;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_common::types::{DataType, Scalar};
-use risingwave_sqlparser::ast::{Expr, Values};
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
+use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{align_types, Expr as _, ExprImpl, Literal};
+use crate::expr::{align_types, ExprImpl};
 
 #[derive(Debug, Clone)]
 pub struct BoundValues {
@@ -81,34 +80,6 @@ impl Binder {
             schema,
         })
     }
-
-    /// Bind row to `struct_value` for nested column,
-    /// e.g. Row(1,2,(1,2,3)).
-    /// Only accept value and row expr in row.
-    pub fn bind_row(&mut self, exprs: &[Expr]) -> Result<Literal> {
-        let literals = exprs
-            .iter()
-            .map(|e| match e {
-                Expr::Value(value) => Ok(self.bind_value(value.clone())?),
-                Expr::Row(expr) => Ok(self.bind_row(expr)?),
-                _ => Err(ErrorCode::NotImplemented(
-                    format!("unsupported expression {:?}", e),
-                    TrackingIssue::none(),
-                )
-                .into()),
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let data_type = DataType::Struct {
-            fields: literals
-                .iter()
-                .map(|l| l.return_type())
-                .collect_vec()
-                .into(),
-        };
-        let value = StructValue::new(literals.iter().map(|f| f.get_data().clone()).collect_vec());
-
-        Ok(Literal::new(Some(value.to_scalar_value()), data_type))
-    }
 }
 
 #[cfg(test)]
@@ -119,6 +90,7 @@ mod tests {
 
     use super::*;
     use crate::binder::test_utils::mock_binder;
+    use crate::expr::Expr as _;
 
     #[test]
     fn test_bind_values() {

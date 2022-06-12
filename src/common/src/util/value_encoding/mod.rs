@@ -156,7 +156,7 @@ fn deserialize_struct_or_list(data_type: &DataType, mut data: impl Buf) -> Resul
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
-    ScalarImpl::bytes_to_scalar(&bytes, &data_type.to_protobuf())
+    ScalarImpl::bytes_to_scalar(&bytes, &data_type.to_protobuf()).map_err(Into::into)
 }
 
 fn deserialize_str(mut data: impl Buf) -> Result<String> {

@@ -25,7 +25,6 @@ use proc_macro2::TokenStream as TokenStream2;
 use proc_macro_error::{proc_macro_error, ResultExt};
 use syn::{DataStruct, DeriveInput};
 
-#[cfg_attr(coverage, no_coverage)]
 mod generate;
 
 // This attribute will be placed before any pb types, including messages and enums.
