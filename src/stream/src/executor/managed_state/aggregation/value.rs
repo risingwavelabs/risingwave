@@ -15,13 +15,13 @@
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
+use crate::executor::error::StreamExecutorResult;
 
 /// A wrapper around [`StreamingAggStateImpl`], which fetches data from the state store and helps
 /// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce
@@ -34,6 +34,9 @@ pub struct ManagedValueState {
     /// state from memory.
     is_dirty: bool,
 
+    /// Primary key to look up in relational table. For value state, there is only one row.
+    /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
+    pk: Option<Row>,
 }
 
 impl ManagedValueState {
@@ -43,7 +46,7 @@ impl ManagedValueState {
         row_count: Option<usize>,
         pk: Option<&Row>,
         state_table: &StateTable<S>,
-    ) -> Result<Self> {
+    ) -> StreamExecutorResult<Self> {
         let data = if row_count != Some(0) {
             // TODO: use the correct epoch
             let epoch = u64::MAX;
@@ -54,7 +57,9 @@ impl ManagedValueState {
                 .get_row(pk.unwrap_or(&Row(vec![])), epoch)
                 .await?;
 
-            raw_data.and_then(|row| row.values().next().cloned())
+            // According to row layout, the last field of the row is value and we sure the row is
+            // not empty.
+            raw_data.map(|row| row.0.last().unwrap().clone())
         } else {
             None
         };
@@ -68,6 +73,7 @@ impl ManagedValueState {
                 data,
             )?,
             is_dirty: false,
+            pk: pk.cloned(),
         })
     }
 
@@ -77,7 +83,7 @@ impl ManagedValueState {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
         self.is_dirty = true;
         self.state.apply_batch(ops, visibility, data)
@@ -86,7 +92,7 @@ impl ManagedValueState {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    pub async fn get_output(&mut self) -> Result<Datum> {
+    pub async fn get_output(&mut self) -> StreamExecutorResult<Datum> {
         debug_assert!(!self.is_dirty());
         self.state.get_output()
     }
@@ -101,14 +107,16 @@ impl ManagedValueState {
         &mut self,
         _write_batch: &mut WriteBatch<S>,
         state_table: &mut StateTable<S>,
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.
         debug_assert!(self.is_dirty());
 
-        // Persist value into relational table.
-        let v = self.state.get_output()?;
-        state_table.insert( Row(vec![v]))?;
+        // Persist value into relational table. The inserted row should concat with pk (pk is in
+        // front of value). In this case, the pk is just group key.
+        let mut v = vec![self.state.get_output()?];
+        v.extend(self.pk.as_ref().unwrap_or(&Row(vec![])).0.iter().cloned());
+        state_table.insert(Row::new(v))?;
 
         self.is_dirty = false;
         Ok(())

@@ -22,6 +22,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
+use risingwave_common::consistent_hash::VNodeBitmap;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::HummockError;
@@ -109,10 +110,18 @@ impl StateStore for MemoryStateStore {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        epoch: u64,
+        _vnode: Option<&'a VNodeBitmap>,
+    ) -> Self::GetFuture<'_> {
         async move {
             let range_bounds = key.to_vec()..=key.to_vec();
-            let res = self.scan(range_bounds, Some(1), epoch).await?;
+            // We do not really care about vnodes here, so we just use the default value.
+            let res = self
+                .scan(range_bounds, Some(1), epoch, Default::default())
+                .await?;
 
             Ok(match res.as_slice() {
                 [] => None,
@@ -127,6 +136,7 @@ impl StateStore for MemoryStateStore {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
+        _vnodes: Option<VNodeBitmap>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -163,6 +173,7 @@ impl StateStore for MemoryStateStore {
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
+        _vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -195,19 +206,32 @@ impl StateStore for MemoryStateStore {
         async move { unimplemented!() }
     }
 
-    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(
+        &self,
+        key_range: R,
+        epoch: u64,
+        vnodes: Option<VNodeBitmap>,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
             Ok(MemoryStateStoreIter::new(
-                self.scan(key_range, None, epoch).await.unwrap().into_iter(),
+                self.scan(key_range, None, epoch, vnodes)
+                    .await
+                    .unwrap()
+                    .into_iter(),
             ))
         }
     }
 
-    fn backward_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(
+        &self,
+        _key_range: R,
+        _epoch: u64,
+        _vnodes: Option<VNodeBitmap>,
+    ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -291,34 +315,43 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            state_store.scan("a"..="b", None, 0).await.unwrap(),
+            state_store
+                .scan("a"..="b", None, 0, Default::default())
+                .await
+                .unwrap(),
             vec![
                 (b"a".to_vec().into(), b"v1".to_vec().into()),
                 (b"b".to_vec().into(), b"v1".to_vec().into())
             ]
         );
         assert_eq!(
-            state_store.scan("a"..="b", Some(1), 0).await.unwrap(),
+            state_store
+                .scan("a"..="b", Some(1), 0, Default::default())
+                .await
+                .unwrap(),
             vec![(b"a".to_vec().into(), b"v1".to_vec().into())]
         );
         assert_eq!(
-            state_store.scan("a"..="b", None, 1).await.unwrap(),
+            state_store
+                .scan("a"..="b", None, 1, Default::default())
+                .await
+                .unwrap(),
             vec![(b"a".to_vec().into(), b"v2".to_vec().into())]
         );
         assert_eq!(
-            state_store.get(b"a", 0).await.unwrap(),
+            state_store.get(b"a", 0, None).await.unwrap(),
             Some(b"v1".to_vec().into())
         );
         assert_eq!(
-            state_store.get(b"b", 0).await.unwrap(),
+            state_store.get(b"b", 0, None).await.unwrap(),
             Some(b"v1".to_vec().into())
         );
-        assert_eq!(state_store.get(b"c", 0).await.unwrap(), None);
+        assert_eq!(state_store.get(b"c", 0, None).await.unwrap(), None);
         assert_eq!(
-            state_store.get(b"a", 1).await.unwrap(),
+            state_store.get(b"a", 1, None).await.unwrap(),
             Some(b"v2".to_vec().into())
         );
-        assert_eq!(state_store.get(b"b", 1).await.unwrap(), None);
-        assert_eq!(state_store.get(b"c", 1).await.unwrap(), None);
+        assert_eq!(state_store.get(b"b", 1, None).await.unwrap(), None);
+        assert_eq!(state_store.get(b"c", 1, None).await.unwrap(), None);
     }
 }

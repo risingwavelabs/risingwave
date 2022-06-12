@@ -17,7 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;

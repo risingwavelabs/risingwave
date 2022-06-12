@@ -45,11 +45,7 @@ impl Expression for InputRefExpression {
         match bitmap {
             Some(bitmap) => {
                 if input.cardinality() != input.capacity() {
-                    Ok(Arc::new(
-                        array
-                            .compact(bitmap, cardinality)
-                            .map_err(ExprError::Array)?,
-                    ))
+                    Ok(Arc::new(array.compact(bitmap, cardinality)?))
                 } else {
                     Ok(array)
                 }

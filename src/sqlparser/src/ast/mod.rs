@@ -1482,6 +1482,15 @@ pub enum FunctionArg {
     Unnamed(FunctionArgExpr),
 }
 
+impl FunctionArg {
+    pub fn get_expr(&self) -> FunctionArgExpr {
+        match self {
+            FunctionArg::Named { name: _, arg } => arg.clone(),
+            FunctionArg::Unnamed(arg) => arg.clone(),
+        }
+    }
+}
+
 impl fmt::Display for FunctionArg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

@@ -76,6 +76,7 @@ impl HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
+        vnodes: Option<VNodeBitmap>,
     ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
@@ -109,7 +110,8 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, None);
+            let table_infos =
+                prune_ssts(level.get_table_infos().iter(), &key_range, vnodes.as_ref());
             if table_infos.is_empty() {
                 continue;
             }
@@ -190,11 +192,11 @@ impl HummockStorage {
         &'a self,
         key: &'a [u8],
         epoch: u64,
-        vnode_set: Option<VNodeBitmap>,
+        vnode_set: Option<&'a VNodeBitmap>,
     ) -> StorageResult<Option<Bytes>> {
         let mut stats = StoreLocalStatistic::default();
         let (shared_buffer_data, pinned_version) =
-            self.read_filter(epoch, &(key..=key), vnode_set.as_ref())?;
+            self.read_filter(epoch, &(key..=key), vnode_set)?;
 
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
@@ -254,8 +256,7 @@ impl HummockStorage {
                 continue;
             }
             {
-                let table_infos =
-                    prune_ssts(level.table_infos.iter(), &(key..=key), vnode_set.as_ref());
+                let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key), vnode_set);
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
@@ -279,7 +280,7 @@ impl HummockStorage {
         Ok(None)
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn read_filter<R, B>(
         &self,
         epoch: HummockEpoch,
@@ -313,8 +314,13 @@ impl StateStore for HummockStorage {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
-        async move { self.get_with_vnode_set(key, epoch, None).await }
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        epoch: u64,
+        vnode: Option<&'a VNodeBitmap>,
+    ) -> Self::GetFuture<'_> {
+        async move { self.get_with_vnode_set(key, epoch, vnode).await }
     }
 
     fn scan<R, B>(
@@ -322,12 +328,18 @@ impl StateStore for HummockStorage {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move { self.iter(key_range, epoch).await?.collect(limit).await }
+        async move {
+            self.iter(key_range, epoch, vnodes)
+                .await?
+                .collect(limit)
+                .await
+        }
     }
 
     fn backward_scan<R, B>(
@@ -335,13 +347,14 @@ impl StateStore for HummockStorage {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
+        vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.backward_iter(key_range, epoch)
+            self.backward_iter(key_range, epoch, vnodes)
                 .await?
                 .collect(limit)
                 .await
@@ -388,17 +401,27 @@ impl StateStore for HummockStorage {
 
     /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(
+        &self,
+        key_range: R,
+        epoch: u64,
+        vnodes: Option<VNodeBitmap>,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, ForwardIter>(key_range, epoch)
+        self.iter_inner::<R, B, ForwardIter>(key_range, epoch, vnodes)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(
+        &self,
+        key_range: R,
+        epoch: u64,
+        vnodes: Option<VNodeBitmap>,
+    ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -407,7 +430,7 @@ impl StateStore for HummockStorage {
             key_range.end_bound().map(|v| v.as_ref().to_vec()),
             key_range.start_bound().map(|v| v.as_ref().to_vec()),
         );
-        self.iter_inner::<_, _, BackwardIter>(key_range, epoch)
+        self.iter_inner::<_, _, BackwardIter>(key_range, epoch, vnodes)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {

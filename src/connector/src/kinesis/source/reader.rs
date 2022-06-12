@@ -150,13 +150,11 @@ impl KinesisSplitReader {
     async fn get_records(
         &mut self,
     ) -> core::result::Result<GetRecordsOutput, SdkError<GetRecordsError>> {
-        let resp = self
-            .client
+        self.client
             .get_records()
             .set_shard_iterator(self.shard_iter.take())
             .send()
-            .await;
-        resp
+            .await
     }
 }
 

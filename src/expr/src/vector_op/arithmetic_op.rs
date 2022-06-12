@@ -16,10 +16,9 @@ use std::any::type_name;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
 use risingwave_common::types::{
-    CheckedAdd as NaiveDateTimeCheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper,
-    NaiveDateWrapper,
+    CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
 };
 
 use super::cast::date_to_timestamp;
@@ -30,10 +29,10 @@ pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
-    T3: CheckedAdd,
+    T3: CheckedAdd<Output = T3>,
 {
     general_atm(l, r, |a, b| {
-        a.checked_add(&b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_add(b).ok_or(ExprError::NumericOutOfRange)
     })
 }
 
@@ -139,7 +138,7 @@ pub fn interval_timestamp_add<T1, T2, T3>(
     l: IntervalUnit,
     r: NaiveDateTimeWrapper,
 ) -> Result<NaiveDateTimeWrapper> {
-    r.checked_add(l).map_err(ExprError::Array)
+    r.checked_add(l).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]

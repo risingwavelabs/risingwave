@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 use tokio::sync::RwLock;
 
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
 use crate::manager::MetaSrvEnv;
@@ -37,7 +38,7 @@ pub struct CompactionGroupManager<S: MetaStore> {
 
 impl<S: MetaStore> CompactionGroupManager<S> {
     pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
-        let config = CompactionConfig::default();
+        let config = CompactionConfigBuilder::new().build();
         Self::new_with_config(env, config).await
     }
 
@@ -73,6 +74,8 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     pub async fn register_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
         let mut pairs = vec![];
         // MV or source
+        // existing_table_ids include the table_ref_id (source and materialized_view) +
+        // internal_table_id (stateful executor)
         pairs.push((
             Prefix::from(table_fragments.table_id().table_id),
             CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
@@ -138,6 +141,16 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         guard
             .unregister(&to_unregister, self.env.meta_store())
             .await
+    }
+
+    pub async fn internal_table_ids_by_compation_group_id(
+        &self,
+        compaction_group_id: u64,
+    ) -> Result<HashSet<u32>> {
+        let inner = self.inner.read().await;
+        let prefix_set = inner.prefixs_by_compaction_group_id(compaction_group_id)?;
+
+        Ok(prefix_set.into_iter().map(u32::from).collect())
     }
 }
 
@@ -242,6 +255,14 @@ impl CompactionGroupManagerInner {
             self.index.remove(prefix);
         }
         Ok(())
+    }
+
+    fn prefixs_by_compaction_group_id(&self, compaction_group_id: u64) -> Result<HashSet<Prefix>> {
+        match self.compaction_groups.get(&compaction_group_id) {
+            Some(compaction_group) => Ok(compaction_group.member_prefixes.clone()),
+
+            None => Err(Error::InvalidCompactionGroup(compaction_group_id)),
+        }
     }
 }
 

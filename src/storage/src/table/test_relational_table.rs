@@ -19,6 +19,7 @@ use futures::stream::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+use risingwave_common::consistent_hash::VNODE_BITMAP_LEN;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
@@ -43,7 +44,9 @@ use crate::Keyspace;
 #[tokio::test]
 async fn test_state_table() -> StorageResult<()> {
     let state_store = MemoryStateStore::new();
-    let keyspace = Keyspace::table_root(state_store.clone(), &TableId::from(0x42));
+    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+    let keyspace =
+        Keyspace::table_root_with_vnodes(state_store.clone(), &TableId::from(0x42), bitmap_inner);
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
@@ -173,7 +176,9 @@ async fn test_state_table() -> StorageResult<()> {
 #[tokio::test]
 async fn test_state_table_update_insert() -> StorageResult<()> {
     let state_store = MemoryStateStore::new();
-    let keyspace = Keyspace::table_root(state_store.clone(), &TableId::from(0x42));
+    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+    let keyspace =
+        Keyspace::table_root_with_vnodes(state_store.clone(), &TableId::from(0x42), bitmap_inner);
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
@@ -720,7 +725,9 @@ async fn test_cell_based_get_row_by_scan() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
+    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+    let keyspace =
+        Keyspace::table_root_with_vnodes(state_store, &TableId::from(0x42), bitmap_inner);
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
@@ -764,7 +771,7 @@ async fn test_cell_based_get_row_by_scan() {
     assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
-        .get_row_by_scan(&Row(vec![Some(3_i32.into()),None]), epoch)
+        .get_row_by_scan(&Row(vec![Some(3_i32.into()), None]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -781,7 +788,7 @@ async fn test_cell_based_get_row_by_scan() {
 
 // test cell_based table
 #[tokio::test]
-async fn test_cell_based_get_row_by_muti_get() {
+async fn test_cell_based_get_row_by_multi_get() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
@@ -791,7 +798,9 @@ async fn test_cell_based_get_row_by_muti_get() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
+    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+    let keyspace =
+        Keyspace::table_root_with_vnodes(state_store, &TableId::from(0x42), bitmap_inner);
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
@@ -843,7 +852,6 @@ async fn test_cell_based_get_row_by_muti_get() {
         Some(Row(vec![Some(3_i32.into()), None, None]))
     );
 
-
     let get_no_exist_res = table
         .get_row(&Row(vec![Some(0_i32.into()), Some(00_i32.into())]), epoch)
         .await
@@ -855,7 +863,9 @@ async fn test_cell_based_get_row_by_muti_get() {
 async fn test_cell_based_get_row_for_string() {
     let state_store = MemoryStateStore::new();
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
+    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+    let keyspace =
+        Keyspace::table_root_with_vnodes(state_store, &TableId::from(0x42), bitmap_inner);
     let column_ids = vec![ColumnId::from(1), ColumnId::from(4), ColumnId::from(7)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Varchar),
@@ -940,7 +950,9 @@ async fn test_shuffled_column_id_for_get_row() {
     ];
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
+    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+    let keyspace =
+        Keyspace::table_root_with_vnodes(state_store, &TableId::from(0x42), bitmap_inner);
     let pk_index = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
@@ -970,7 +982,7 @@ async fn test_shuffled_column_id_for_get_row() {
     let epoch = u64::MAX;
 
     let get_row1_res = table
-        .get_row(&Row(vec![Some(1_i32.into()),None]), epoch)
+        .get_row(&Row(vec![Some(1_i32.into()), None]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -979,21 +991,19 @@ async fn test_shuffled_column_id_for_get_row() {
     );
 
     let get_row2_res = table
-        .get_row(&Row(vec![Some(2_i32.into()),None]), epoch)
+        .get_row(&Row(vec![Some(2_i32.into()), None]), epoch)
         .await
         .unwrap();
     assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
-        .get_row(&Row(vec![Some(3_i32.into()),None]), epoch)
+        .get_row(&Row(vec![Some(3_i32.into()), None]), epoch)
         .await
         .unwrap();
     assert_eq!(
         get_row3_res,
         Some(Row(vec![Some(3_i32.into()), None, None]))
     );
-
-
 
     let get_no_exist_res = table
         .get_row(&Row(vec![Some(0_i32.into()), Some(00_i32.into())]), epoch)
@@ -1721,7 +1731,7 @@ async fn test_state_table_iter_with_prefix() {
     let pk_prefix = Row(vec![Some(1_i32.into())]);
     let prefix_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
     let iter = state
-        .iter_with_pk_prefix(pk_prefix, prefix_serializer, epoch)
+        .iter_with_pk_prefix(Some(&pk_prefix), prefix_serializer, epoch)
         .await
         .unwrap();
     pin_mut!(iter);

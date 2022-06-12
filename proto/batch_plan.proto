@@ -129,10 +129,15 @@ message HopWindowNode {
   repeated uint32 output_indices = 4;
 }
 
-message GenerateSeriesNode {
-  expr.ExprNode start = 1;
-  expr.ExprNode stop = 2;
-  expr.ExprNode step = 3;
+message TableFunctionNode {
+  enum Type {
+    GENERATE = 0;
+    UNNEST = 1;
+  }
+  Type function_type = 1;
+  repeated expr.ExprNode args = 2;
+  // The element type of the return set.
+  data.DataType return_type = 3;
 }
 
 // Task is a running instance of Stage.
@@ -195,7 +200,7 @@ message PlanNode {
     MergeSortExchangeNode merge_sort_exchange = 21;
     SortMergeJoinNode sort_merge_join = 22;
     HopWindowNode hop_window = 25;
-    GenerateSeriesNode generate_series = 26;
+    TableFunctionNode table_function = 26;
   }
   string identity = 24;
 }
