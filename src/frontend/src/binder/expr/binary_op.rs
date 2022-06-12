@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::binder::Binder;
-use crate::expr::{ExprImpl, ExprType, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {
     pub(super) fn bind_binary_op(
@@ -48,6 +49,7 @@ impl Binder {
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
+            BinaryOperator::StringConcat => return self.bind_concat(bound_left, bound_right),
 
             _ => return Err(ErrorCode::NotImplemented(format!("{:?}", op), 112.into()).into()),
         };
@@ -61,5 +63,26 @@ impl Binder {
             vec![FunctionCall::new(ExprType::Like, vec![left, right])?.into()],
         )?
         .into())
+    }
+
+    /// Bind `||`. Based on the types of the inputs, this can be string concat or others like array
+    /// concat.
+    fn bind_concat(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
+        let types = [left.return_type(), right.return_type()];
+
+        // StringConcat
+        if types.iter().any(|t| matches!(t, DataType::Varchar))
+            && !types.iter().any(|t| matches!(t, DataType::List { .. }))
+        {
+            Ok(FunctionCall::new(
+                ExprType::ConcatWs,
+                Self::rewrite_concat_to_concat_ws(vec![left, right])?,
+            )?
+            .into())
+        }
+        // TODO: ArrayConcat
+        else {
+            todo!()
+        }
     }
 }
