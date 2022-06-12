@@ -112,7 +112,7 @@ impl<S: StateStore> DedupPkStateTable<S> {
 
     pub async fn iter_with_pk_prefix(
         &self,
-        pk_prefix: Row,
+        pk_prefix: Option<&Row>,
         prefix_serializer: OrderedRowSerializer,
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
