@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::borrow::Cow;
 use std::ops::RangeBounds;
 
 use risingwave_common::array::Row;
@@ -68,6 +69,11 @@ impl<S: StateStore> DedupPkStateTable<S> {
         dedup_pk_row
     }
 
+    fn dedup_pk_row_and_raw_key_to_row(&self, pk: &RawKey, dedup_pk_row: Row) -> StorageResult<Row> {
+        let pk_row = self.raw_key_to_dedup_pk_row(pk)?;
+        Ok(self.dedup_pk_row_to_row(&pk_row, dedup_pk_row))
+    }
+
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         let dedup_pk_row = self.inner.get_row(pk, epoch).await?;
         Ok(dedup_pk_row.map(|r| self.dedup_pk_row_to_row(pk, r)))
@@ -100,7 +106,15 @@ impl<S: StateStore> DedupPkStateTable<S> {
 
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
         let stream = self.inner.iter_key_and_row(epoch).await?;
-        Ok(stream.map(|r| r.map(|(_k, v)| v))) // TODO: use key to decode
+        Ok(stream
+           .map(|r| match r {
+               Ok((k, v)) => {
+                    let row = self.dedup_pk_row_and_raw_key_to_row(&k, v.into_owned())?;
+                    let row = Cow::Owned(row);
+                    Ok(row)
+               },
+               Err(e) => Err(e)
+           }))
     }
 
     pub async fn iter_with_pk_bounds<R, B>(
@@ -116,7 +130,15 @@ impl<S: StateStore> DedupPkStateTable<S> {
             .inner
             .iter_key_and_row_with_pk_bounds(pk_bounds, epoch)
             .await?;
-        Ok(stream.map(|r| r.map(|(_k, v)| v))) // TODO: use key to decode
+        Ok(stream
+           .map(|r| match r {
+               Ok((k, v)) => {
+                    let row = self.dedup_pk_row_and_raw_key_to_row(&k, v.into_owned())?;
+                    let row = Cow::Owned(row);
+                    Ok(row)
+               },
+               Err(e) => Err(e)
+           }))
     }
 
     pub async fn iter_with_pk_prefix(
@@ -129,6 +151,15 @@ impl<S: StateStore> DedupPkStateTable<S> {
             .inner
             .iter_key_and_row_with_pk_prefix(pk_prefix, prefix_serializer, epoch)
             .await?;
-        Ok(stream.map(|r| r.map(|(_k, v)| v))) // TODO: use key to decode
+        Ok(stream
+           .map(|r| match r {
+               Ok((k, v)) => {
+                    let row = self.dedup_pk_row_and_raw_key_to_row(&k, v.into_owned())?;
+                    let row = Cow::Owned(row);
+                    Ok(row)
+               },
+               Err(e) => Err(e)
+           }))
+
     }
 }
