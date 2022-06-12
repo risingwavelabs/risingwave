@@ -60,7 +60,7 @@ impl RegisterBucket {
         }
 
         if index >= 33 {
-            return Ok(self.count_33_to_64 & (1 << (index - 33)));
+            return Ok((self.count_33_to_64 >> (index - 33)) & 1);
         }
 
         if index >= 25 {
@@ -321,5 +321,46 @@ mod tests {
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().into_int64(), 0);
+    }
+
+    #[test]
+    fn test_register_bucket_get_and_update() {
+        let mut rb = RegisterBucket::new();
+
+        for i in 0..20 {
+            rb.update_bucket(i % 2 + 1, true).unwrap();
+        }
+        assert_eq!(rb.get_bucket(1).unwrap(), 10);
+        assert_eq!(rb.get_bucket(2).unwrap(), 10);
+
+        rb.update_bucket(1, false).unwrap();
+        assert_eq!(rb.get_bucket(1).unwrap(), 9);
+        assert_eq!(rb.get_bucket(2).unwrap(), 10);
+
+        rb.update_bucket(64, true).unwrap();
+        assert_eq!(rb.get_bucket(64).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_register_bucket_invalid_register() {
+        let mut rb = RegisterBucket::new();
+
+        assert_matches!(rb.get_bucket(0), Err(_));
+        assert_matches!(rb.get_bucket(65), Err(_));
+        assert_matches!(rb.update_bucket(0, true), Err(_));
+        assert_matches!(rb.update_bucket(65, true), Err(_));
+    }
+
+    #[test]
+    fn test_register_bucket_overflow() {
+        let mut rb = RegisterBucket::new();
+
+        rb.update_bucket(64, true).unwrap();
+        assert_matches!(rb.update_bucket(64, true), Err(_));
+
+        for _i in 0..u8::MAX {
+            rb.update_bucket(32, true).unwrap();
+        }
+        assert_matches!(rb.update_bucket(32, true), Err(_));
     }
 }
