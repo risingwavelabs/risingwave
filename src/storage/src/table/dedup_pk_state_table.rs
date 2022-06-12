@@ -16,7 +16,7 @@ use std::ops::RangeBounds;
 
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::util::ordered::{OrderedRowSerializer, OrderedRowDeserializer};
+use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::state_table::{KeyAndRowStream, RawKey, RowStream, StateTable};
@@ -41,7 +41,10 @@ impl<S: StateStore> DedupPkStateTable<S> {
         pk_indices: Vec<usize>,
     ) -> Self {
         // create a new state table, but only with partial decs
-        let data_types = pk_indices.iter().map(|i| column_descs[*i].data_type.clone()).collect();
+        let data_types = pk_indices
+            .iter()
+            .map(|i| column_descs[*i].data_type.clone())
+            .collect();
         let pk_decoder = OrderedRowDeserializer::new(data_types, order_types.clone());
         let partial_column_descs = column_descs; // TODO: update this
         let inner = StateTable::new(
@@ -55,7 +58,10 @@ impl<S: StateStore> DedupPkStateTable<S> {
     }
 
     fn raw_key_to_dedup_pk_row(&self, pk: &RawKey) -> StorageResult<Row> {
-        let ordered_row = self.pk_decoder.deserialize(pk).map_err(|e| StorageError::DedupPkStateTable(e.into()))?;
+        let ordered_row = self
+            .pk_decoder
+            .deserialize(pk)
+            .map_err(StorageError::DedupPkStateTable)?;
         Ok(ordered_row.into_row())
     }
 
@@ -69,7 +75,11 @@ impl<S: StateStore> DedupPkStateTable<S> {
         dedup_pk_row
     }
 
-    fn dedup_pk_row_and_raw_key_to_row(&self, pk: &RawKey, dedup_pk_row: Row) -> StorageResult<Row> {
+    fn dedup_pk_row_and_raw_key_to_row(
+        &self,
+        pk: &RawKey,
+        dedup_pk_row: Row,
+    ) -> StorageResult<Row> {
         let pk_row = self.raw_key_to_dedup_pk_row(pk)?;
         Ok(self.dedup_pk_row_to_row(&pk_row, dedup_pk_row))
     }
@@ -106,15 +116,14 @@ impl<S: StateStore> DedupPkStateTable<S> {
 
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
         let stream = self.inner.iter_key_and_row(epoch).await?;
-        Ok(stream
-           .map(|r| match r {
-               Ok((k, v)) => {
-                    let row = self.dedup_pk_row_and_raw_key_to_row(&k, v.into_owned())?;
-                    let row = Cow::Owned(row);
-                    Ok(row)
-               },
-               Err(e) => Err(e)
-           }))
+        Ok(stream.map(|r| match r {
+            Ok((k, v)) => {
+                let row = self.dedup_pk_row_and_raw_key_to_row(&k, v.into_owned())?;
+                let row = Cow::Owned(row);
+                Ok(row)
+            }
+            Err(e) => Err(e),
+        }))
     }
 
     pub async fn iter_with_pk_bounds<R, B>(
@@ -130,15 +139,14 @@ impl<S: StateStore> DedupPkStateTable<S> {
             .inner
             .iter_key_and_row_with_pk_bounds(pk_bounds, epoch)
             .await?;
-        Ok(stream
-           .map(|r| match r {
-               Ok((k, v)) => {
-                    let row = self.dedup_pk_row_and_raw_key_to_row(&k, v.into_owned())?;
-                    let row = Cow::Owned(row);
-                    Ok(row)
-               },
-               Err(e) => Err(e)
-           }))
+        Ok(stream.map(|r| match r {
+            Ok((k, v)) => {
+                let row = self.dedup_pk_row_and_raw_key_to_row(&k, v.into_owned())?;
+                let row = Cow::Owned(row);
+                Ok(row)
+            }
+            Err(e) => Err(e),
+        }))
     }
 
     pub async fn iter_with_pk_prefix(
@@ -151,15 +159,13 @@ impl<S: StateStore> DedupPkStateTable<S> {
             .inner
             .iter_key_and_row_with_pk_prefix(pk_prefix, prefix_serializer, epoch)
             .await?;
-        Ok(stream
-           .map(|r| match r {
-               Ok((k, v)) => {
-                    let row = self.dedup_pk_row_and_raw_key_to_row(&k, v.into_owned())?;
-                    let row = Cow::Owned(row);
-                    Ok(row)
-               },
-               Err(e) => Err(e)
-           }))
-
+        Ok(stream.map(|r| match r {
+            Ok((k, v)) => {
+                let row = self.dedup_pk_row_and_raw_key_to_row(&k, v.into_owned())?;
+                let row = Cow::Owned(row);
+                Ok(row)
+            }
+            Err(e) => Err(e),
+        }))
     }
 }
