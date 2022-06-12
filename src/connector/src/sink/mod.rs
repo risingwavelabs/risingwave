@@ -23,11 +23,6 @@ use risingwave_common::error::Result;
 use crate::sink::mysql::{MySQLConfig, MySQLSink};
 use crate::sink::redis::{RedisConfig, RedisSink};
 
-pub enum SinkImpl {
-    MySQL(MySQLSink),
-    Redis(RedisSink),
-}
-
 #[async_trait]
 pub trait Sink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
@@ -38,11 +33,26 @@ pub enum SinkConfig {
     Redis(RedisConfig),
 }
 
-impl dyn Sink {
-    fn new(cfg: SinkConfig) -> SinkImpl {
+pub enum SinkImpl {
+    MySQL(MySQLSink),
+    Redis(RedisSink),
+}
+
+impl SinkImpl {
+    fn new(cfg: SinkConfig) -> Self {
         match cfg {
             SinkConfig::Mysql(cfg) => SinkImpl::MySQL(MySQLSink::new(cfg)),
             SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg)),
+        }
+    }
+}
+
+#[async_trait]
+impl Sink for SinkImpl {
+    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+        match self {
+            SinkImpl::MySQL(sink) => sink.write_batch(chunk, schema).await,
+            SinkImpl::Redis(sink) => sink.write_batch(chunk, schema).await,
         }
     }
 }
