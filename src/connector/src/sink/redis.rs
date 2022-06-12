@@ -12,31 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_trait::async_trait;
+use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
+
+use crate::sink::Sink;
+
+pub struct RedisConfig;
+
 pub struct RedisSink;
+
+impl RedisSink {
+    pub fn new(_cfg: RedisConfig) -> Self {
+        todo!()
+    }
+}
 
 #[async_trait]
 impl Sink for RedisSink {
     async fn write_batch(&mut self, _chunk: StreamChunk, _schema: &Schema) -> Result<()> {
-        todo!();
-    }
-
-    fn endpoint(&self) -> String {
-        todo!();
-    }
-
-    fn table(&self) -> String {
-        todo!();
-    }
-
-    fn database(&self) -> Option<String> {
-        todo!();
-    }
-
-    fn user(&self) -> Option<String> {
-        todo!();
-    }
-
-    fn password(&self) -> Option<String> {
         todo!();
     }
 }

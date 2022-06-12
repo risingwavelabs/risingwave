@@ -62,7 +62,7 @@ impl<S: Sink + 'static + Send> Executor for SinkExecutor<S> {
 #[cfg(test)]
 mod test {
 
-    use risingwave_connector::sink::mysql::MySQLSink;
+    use risingwave_connector::sink::mysql::{MySQLConfig, MySQLSink};
 
     use super::*;
     use crate::executor::test_utils::*;
@@ -70,13 +70,15 @@ mod test {
 
     #[test]
     fn test_mysqlsink() {
-        let mysql_sink = MySQLSink::new(
-            String::from("127.0.0.1:3306"),
-            String::from("<table_name>"),
-            Some(String::from("<database_name>")),
-            Some(String::from("<user_name>")),
-            Some(String::from("<password>")),
-        );
+        let cfg = MySQLConfig {
+            endpoint: String::from("127.0.0.1:3306"),
+            table: String::from("<table_name>"),
+            database: Some(String::from("<database_name>")),
+            user: Some(String::from("<user_name>")),
+            password: Some(String::from("<password>")),
+        };
+
+        let mysql_sink = MySQLSink::new(cfg);
 
         // Mock `child`
         let mock = MockSource::with_messages(Schema::default(), PkIndices::new(), vec![]);

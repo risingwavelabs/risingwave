@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::sink::Sink;
 use std::fmt;
+
+use async_trait::async_trait;
 use itertools::{join, Itertools};
 use mysql_async::prelude::*;
 use mysql_async::*;
@@ -22,33 +23,46 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
-use async_trait::async_trait;
+
+use crate::sink::Sink;
+
+pub struct MySQLConfig {
+    pub endpoint: String,
+    pub table: String,
+    pub database: Option<String>,
+    pub user: Option<String>,
+    pub password: Option<String>,
+}
 
 // Primitive design of MySQLSink
 #[allow(dead_code)]
 pub struct MySQLSink {
-    endpoint: String,
-    table: String,
-    database: Option<String>,
-    user: Option<String>,
-    password: Option<String>,
+    cfg: MySQLConfig,
 }
 
 impl MySQLSink {
-    pub fn new(
-        endpoint: String,
-        table: String,
-        database: Option<String>,
-        user: Option<String>,
-        password: Option<String>,
-    ) -> Self {
-        Self {
-            endpoint,
-            table,
-            database,
-            user,
-            password,
-        }
+    pub fn new(cfg: MySQLConfig) -> Self {
+        Self { cfg }
+    }
+
+    fn endpoint(&self) -> String {
+        self.cfg.endpoint.clone()
+    }
+
+    fn table(&self) -> String {
+        self.cfg.table.clone()
+    }
+
+    fn database(&self) -> Option<String> {
+        self.cfg.database.clone()
+    }
+
+    fn user(&self) -> Option<String> {
+        self.cfg.user.clone()
+    }
+
+    fn password(&self) -> Option<String> {
+        self.cfg.password.clone()
     }
 }
 
@@ -146,7 +160,7 @@ impl Sink for MySQLSink {
                     if let Some((idx2, UpdateInsert)) = iter.next() {
                         format!(
                             "UPDATE {} SET {} WHERE {};",
-                            self.table,
+                            self.table(),
                             join(conditions(values(idx2)?), ","),
                             join(conditions(values(idx)?), " AND ")
                         )
@@ -163,26 +177,6 @@ impl Sink for MySQLSink {
         transaction.commit().await?;
         drop(conn);
         Ok(())
-    }
-
-    fn endpoint(&self) -> String {
-        self.endpoint.clone()
-    }
-
-    fn table(&self) -> String {
-        self.table.clone()
-    }
-
-    fn database(&self) -> Option<String> {
-        self.database.clone()
-    }
-
-    fn user(&self) -> Option<String> {
-        self.user.clone()
-    }
-
-    fn password(&self) -> Option<String> {
-        self.password.clone()
     }
 }
 

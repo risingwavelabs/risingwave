@@ -13,19 +13,36 @@
 // limitations under the License.
 
 pub mod mysql;
+pub mod redis;
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
+use crate::sink::mysql::{MySQLConfig, MySQLSink};
+use crate::sink::redis::{RedisConfig, RedisSink};
+
+pub enum SinkImpl {
+    MySQL(MySQLSink),
+    Redis(RedisSink),
+}
+
 #[async_trait]
 pub trait Sink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
+}
 
-    fn endpoint(&self) -> String;
-    fn table(&self) -> String;
-    fn database(&self) -> Option<String>;
-    fn user(&self) -> Option<String>;
-    fn password(&self) -> Option<String>; // TODO(nanderstabel): auth?
+pub enum SinkConfig {
+    Mysql(MySQLConfig),
+    Redis(RedisConfig),
+}
+
+impl dyn Sink {
+    fn new(cfg: SinkConfig) -> SinkImpl {
+        match cfg {
+            SinkConfig::Mysql(cfg) => SinkImpl::MySQL(MySQLSink::new(cfg)),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg)),
+        }
+    }
 }
