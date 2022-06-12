@@ -110,8 +110,6 @@ impl<S: StateStore> StateTable<S> {
         todo!()
     }
 
-    // At the Batch write phase, mem_table should ALREADY be in encoded fmt?
-    // that means insert needs to encode accordingly.
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.cell_based_table
