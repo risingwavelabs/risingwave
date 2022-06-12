@@ -59,7 +59,6 @@ pub struct ConnectorSourceReader {
     message_rx: Receiver<Either<Vec<SourceMessage>, RwError>>,
     // We need to keep this tx, otherwise the channel will return none with 0 inner readers, and we
     // need to clone this tx when adding new inner readers in the future.
-    #[allow(dead_code)]
     message_tx: Sender<Either<Vec<SourceMessage>, RwError>>,
 }
 
