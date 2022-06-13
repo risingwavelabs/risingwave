@@ -20,11 +20,12 @@ use std::hash::{Hash, Hasher};
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 
 use super::StreamingAggStateImpl;
+use crate::executor::error::StreamExecutorResult;
 
 const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
 const NUM_OF_REGISTERS: usize = 1 << INDEX_BITS; // number of registers available
@@ -52,11 +53,9 @@ impl RegisterBucket {
         }
     }
 
-    fn get_bucket(&self, index: usize) -> Result<u32> {
+    fn get_bucket(&self, index: usize) -> StreamExecutorResult<u32> {
         if !(1..=64).contains(&index) {
-            return Err(
-                ErrorCode::InternalError("HyperLogLog: Invalid bucket index".into()).into(),
-            );
+            bail!("HyperLogLog: Invalid bucket index");
         }
 
         if index >= 33 {
@@ -76,33 +75,32 @@ impl RegisterBucket {
 
     /// Increments or decrements the bucket at `index` depending on the state of `is_insert`.
     /// Returns an Error if `index` is invalid or if inserting will cause an overflow in the bucket.
-    fn update_bucket(&mut self, index: usize, is_insert: bool) -> Result<()> {
+    fn update_bucket(&mut self, index: usize, is_insert: bool) -> StreamExecutorResult<()> {
         if !(1..=64).contains(&index) {
-            return Err(
-                ErrorCode::InternalError("HyperLogLog: Invalid bucket index".into()).into(),
-            );
+            bail!("HyperLogLog: Invalid bucket index");
         }
 
-        let count = self.get_bucket(index).unwrap();
+        let count = self.get_bucket(index)?;
+
         if is_insert {
             if index >= 33 {
                 if count == 1 {
-                    return Err(ErrorCode::InternalError("HyperLogLog: Count exceeds maximum bucket value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.".into()).into());
+                    bail!("HyperLogLog: Count exceeds maximum bucket value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.");
                 }
                 self.count_33_to_64 |= 1 << (index - 33);
             } else if index >= 25 {
                 if count as u8 == u8::MAX {
-                    return Err(ErrorCode::InternalError("HyperLogLog: Count exceeds maximum bucket value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.".into()).into());
+                    bail!("HyperLogLog: Count exceeds maximum bucket value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.");
                 }
                 self.count_25_to_32[index - 25] = count as u8 + 1;
             } else if index >= 17 {
                 if count as u16 == u16::MAX {
-                    return Err(ErrorCode::InternalError("HyperLogLog: Count exceeds maximum bucket value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.".into()).into());
+                    bail!("HyperLogLog: Count exceeds maximum bucket value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.");
                 }
                 self.count_17_to_24[index - 17] = count as u16 + 1;
             } else if index >= 1 {
                 if count == u32::MAX {
-                    return Err(ErrorCode::InternalError("HyperLogLog: Count exceeds maximum bucket value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.".into()).into());
+                    bail!("HyperLogLog: Count exceeds maximum bucket value. Your data stream may have too many repeated values or too large a cardinality for approx_count_distinct to handle.");
                 }
                 self.count_1_to_16[index - 1] = count + 1;
             }
@@ -124,14 +122,14 @@ impl RegisterBucket {
     }
 
     /// Gets the number of the maximum bucket which has a count greater than zero.
-    fn get_max(&self) -> u8 {
+    fn get_max(&self) -> StreamExecutorResult<u8> {
         for i in (1..64).rev() {
-            if self.get_bucket(i).unwrap() > 0 {
-                return i as u8;
+            if self.get_bucket(i)? > 0 {
+                return Ok(i as u8);
             }
         }
 
-        0
+        Ok(0)
     }
 }
 
@@ -179,9 +177,13 @@ impl StreamingApproxCountDistinct {
 
     /// Adds the count of the datum's hash into the register, if it is greater than the existing
     /// count at the register.
-    fn update_registers(&mut self, datum_ref: DatumRef, is_insert: bool) {
+    fn update_registers(
+        &mut self,
+        datum_ref: DatumRef,
+        is_insert: bool,
+    ) -> StreamExecutorResult<()> {
         if datum_ref.is_none() {
-            return;
+            return Ok(());
         }
 
         let scalar_impl = datum_ref.unwrap().into_scalar_impl();
@@ -190,9 +192,9 @@ impl StreamingApproxCountDistinct {
         let index = (hash as usize) & (NUM_OF_REGISTERS - 1); // Index is based on last few bits
         let count = self.count_hash(hash) as usize;
 
-        self.registers[index]
-            .update_bucket(count, is_insert)
-            .unwrap();
+        self.registers[index].update_bucket(count, is_insert)?;
+
+        Ok(())
     }
 
     /// Calculate the hash of the `scalar_impl`.
@@ -217,13 +219,13 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         match visibility {
             None => {
                 for (op, datum) in ops.iter().zip_eq(data[0].iter()) {
                     match op {
-                        Op::Insert | Op::UpdateInsert => self.update_registers(datum, true),
-                        Op::Delete | Op::UpdateDelete => self.update_registers(datum, false),
+                        Op::Insert | Op::UpdateInsert => self.update_registers(datum, true)?,
+                        Op::Delete | Op::UpdateDelete => self.update_registers(datum, false)?,
                     }
                 }
             }
@@ -233,8 +235,8 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
                 {
                     if visible {
                         match op {
-                            Op::Insert | Op::UpdateInsert => self.update_registers(datum, true),
-                            Op::Delete | Op::UpdateDelete => self.update_registers(datum, false),
+                            Op::Insert | Op::UpdateInsert => self.update_registers(datum, true)?,
+                            Op::Delete | Op::UpdateDelete => self.update_registers(datum, false)?,
                         }
                     }
                 }
@@ -243,13 +245,13 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
         Ok(())
     }
 
-    fn get_output(&self) -> Result<Datum> {
+    fn get_output(&self) -> StreamExecutorResult<Datum> {
         let m = NUM_OF_REGISTERS as f64;
         let mut mean = 0.0;
 
         // Get harmonic mean of all the counts in results
         for register_bucket in &self.registers {
-            let count = register_bucket.get_max();
+            let count = register_bucket.get_max()?;
             mean += 1.0 / ((1 << count) as f64);
         }
 
@@ -260,7 +262,7 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
         let answer = if raw_estimate <= 2.5 * m {
             let mut zero_registers: f64 = 0.0;
             for i in &self.registers {
-                if i.get_max() == 0 {
+                if i.get_max()? == 0 {
                     zero_registers += 1.0;
                 }
             }

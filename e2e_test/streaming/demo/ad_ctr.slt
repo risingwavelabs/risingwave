@@ -1,0 +1,120 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Refer to the blog:
+# https://www.risingwave.dev/docs/latest/perform-real-time-ad-performance-analysis/
+
+statement ok
+CREATE TABLE ad_impression (
+    bid_id BIGINT,
+    ad_id BIGINT,
+    impression_timestamp TIMESTAMP
+);
+
+statement ok
+CREATE TABLE ad_click (
+    bid_id BIGINT,
+    click_timestamp TIMESTAMP
+);
+
+statement ok
+INSERT INTO ad_impression VALUES 
+('8821808526777993777', '7', '2022-06-10 12:20:04.858173'),
+('7151244365040293409', '7', '2022-06-10 12:20:06.409411'),
+('6925263822026025842', '7', '2022-06-10 12:20:06.420565'),
+('3665010658430074808', '8', '2022-06-10 12:20:06.911027');
+
+statement ok
+INSERT INTO ad_click VALUES 
+('8821808526777993777', '2022-06-10 12:20:04.923066'),
+('3665010658430074808', '2022-06-10 12:20:07.651162');
+
+statement ok
+CREATE MATERIALIZED VIEW ad_ctr AS
+SELECT
+    ad_clicks.ad_id AS ad_id,
+    ad_clicks.clicks_count :: NUMERIC / ad_impressions.impressions_count AS ctr
+FROM
+    (
+        SELECT
+            ad_impression.ad_id AS ad_id,
+            COUNT(*) AS impressions_count
+        FROM
+            ad_impression
+        GROUP BY
+            ad_id
+    ) AS ad_impressions
+    JOIN (
+        SELECT
+            ai.ad_id,
+            COUNT(*) AS clicks_count
+        FROM
+            ad_click AS ac
+            LEFT JOIN ad_impression AS ai ON ac.bid_id = ai.bid_id
+        GROUP BY
+            ai.ad_id
+    ) AS ad_clicks ON ad_impressions.ad_id = ad_clicks.ad_id;
+
+query T
+SELECT ROUND(ctr, 2) FROM ad_ctr WHERE ad_id = 7;
+----
+0.33
+
+statement ok
+CREATE MATERIALIZED VIEW ad_ctr_5min AS
+SELECT
+    ac.ad_id AS ad_id,
+    ac.clicks_count :: NUMERIC / ai.impressions_count AS ctr,
+    ai.window_end AS window_end
+FROM
+    (
+        SELECT
+            ad_id,
+            COUNT(*) AS impressions_count,
+            window_end
+        FROM
+            TUMBLE(
+                ad_impression,
+                impression_timestamp,
+                INTERVAL '1' MINUTE
+            )
+        GROUP BY
+            ad_id,
+            window_end
+    ) AS ai
+    JOIN (
+        SELECT
+            ai.ad_id,
+            COUNT(*) AS clicks_count,
+            ai.window_end AS window_end
+        FROM
+            TUMBLE(ad_click, click_timestamp, INTERVAL '1' MINUTE) AS ac
+            INNER JOIN TUMBLE(
+                ad_impression,
+                impression_timestamp,
+                INTERVAL '1' MINUTE
+            ) AS ai ON ai.bid_id = ac.bid_id
+            AND ai.window_end = ac.window_end
+        GROUP BY
+            ai.ad_id,
+            ai.window_end
+    ) AS ac ON ai.ad_id = ac.ad_id
+    AND ai.window_end = ac.window_end;
+
+query TTT
+SELECT ad_id, ROUND(ctr, 2), window_end FROM ad_ctr_5min;
+----
+7  0.33      2022-06-10 12:21:00
+8  1         2022-06-10 12:21:00
+
+statement ok
+DROP MATERIALIZED VIEW ad_ctr;
+
+statement ok
+DROP MATERIALIZED VIEW ad_ctr_5min;
+
+statement ok
+DROP TABLE ad_impression;
+
+statement ok
+DROP TABLE ad_click;
