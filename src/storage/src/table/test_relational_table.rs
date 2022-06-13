@@ -1465,12 +1465,11 @@ async fn test_dedup_pk_state_write_with_cell_based_read() {
 
     state.commit(0).await.unwrap();
 
-    // ---------- Init table for reads
-    let table = CellBasedTable::new_for_test(keyspace.clone(), actual_column_descs, order_types);
-
     // ---------- Init reader
+    let table = CellBasedTable::new_for_test(keyspace.clone(), actual_column_descs, order_types);
     let epoch: u64 = 0;
     let mut iter = table.iter_with_pk(epoch, &pk_ordered_descs).await.unwrap();
+
     // ---------- Read + Deserialize from storage
     let expected = Row(vec![
         Some(1_i32.into()),
