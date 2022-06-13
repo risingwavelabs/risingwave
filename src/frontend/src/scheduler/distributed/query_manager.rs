@@ -14,11 +14,12 @@
 
 use std::fmt::{Debug, Formatter};
 
-use futures::{Stream, StreamExt};
+use anyhow::anyhow;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use log::debug;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{RwError, ToErrorStr};
 use risingwave_pb::batch_plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -27,7 +28,10 @@ use uuid::Uuid;
 use super::QueryExecution;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef};
+use crate::scheduler::SchedulerError::RpcError;
+use crate::scheduler::{
+    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult,
+};
 
 pub struct QueryResultFetcher {
     // TODO: Remove these after implemented worker node level snapshot pinnning
@@ -67,12 +71,13 @@ impl QueryManager {
         &self,
         _context: ExecutionContextRef,
         plan: BatchPlanProst,
-    ) -> Result<impl Stream<Item = Result<DataChunk>>> {
+    ) -> SchedulerResult<impl DataChunkStream> {
         let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
         let compute_client = self
             .compute_client_pool
             .get_client_for_addr((&worker_node_addr).into())
-            .await?;
+            .await
+            .map_err(|e| anyhow!(e.to_string()))?;
 
         let query_id = QueryId {
             id: Uuid::new_v4().to_string(),
@@ -100,7 +105,7 @@ impl QueryManager {
         self.hummock_snapshot_manager
             .unpin_snapshot(epoch, &query_id)
             .await?;
-        creat_task_resp?;
+        creat_task_resp.map_err(|e| RpcError(e.to_string()))?;
 
         let query_result_fetcher = QueryResultFetcher::new(
             epoch,
@@ -117,7 +122,7 @@ impl QueryManager {
         &self,
         _context: ExecutionContextRef,
         query: Query,
-    ) -> Result<impl DataChunkStream> {
+    ) -> SchedulerResult<impl DataChunkStream> {
         let query_id = query.query_id().clone();
         // Cheat compiler to resolve type
         let epoch = self
@@ -176,7 +181,11 @@ impl QueryResultFetcher {
             .await?;
         let mut stream = compute_client.get_data(self.task_output_id.clone()).await?;
         while let Some(response) = stream.next().await {
-            yield DataChunk::from_protobuf(response.to_rw_result()?.get_record_batch()?)?
+            yield DataChunk::from_protobuf(
+                response
+                    .map_err(|e| RpcError(e.to_error_str()))?
+                    .get_record_batch()?,
+            )?;
         }
     }
 }

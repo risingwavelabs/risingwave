@@ -117,8 +117,10 @@ pub enum ErrorCode {
     CatalogError(BoxedError),
     #[error("Out of range")]
     NumericValueOutOfRange,
-    #[error("protocol error: {0}")]
+    #[error("Protocol error: {0}")]
     ProtocolError(String),
+    #[error("Scheduler error: {0}")]
+    SchedulerError(BoxedError),
     #[error("Task not found")]
     TaskNotFound,
     #[error("Item not found: {0}")]
@@ -333,7 +335,8 @@ impl ErrorCode {
             ErrorCode::UnrecognizedConfigurationParameter(_) => 27,
             ErrorCode::ExprError(_) => 28,
             ErrorCode::ArrayError(_) => 29,
-            ErrorCode::SinkError(_) => 30,
+            ErrorCode::SchedulerError(_) => 30,
+            ErrorCode::SinkError(_) => 31,
             ErrorCode::UnknownError(_) => 101,
         }
     }

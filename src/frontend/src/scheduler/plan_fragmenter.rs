@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeInfo;
 use risingwave_pb::plan_common::Field as FieldProst;
@@ -26,10 +25,17 @@ use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::SchedulerResult;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct QueryId {
     pub id: String,
+}
+
+impl std::fmt::Display for QueryId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "QueryId:{}", self.id)
+    }
 }
 
 pub type StageId = u32;
@@ -302,7 +308,7 @@ impl StageGraphBuilder {
 
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
-    pub fn split(mut self, batch_node: PlanRef) -> Result<Query> {
+    pub fn split(mut self, batch_node: PlanRef) -> SchedulerResult<Query> {
         let root_stage = self.new_stage(batch_node.clone(), Distribution::Single.to_prost(1));
         let stage_graph = self.stage_graph_builder.build(root_stage.id);
         Ok(Query {
