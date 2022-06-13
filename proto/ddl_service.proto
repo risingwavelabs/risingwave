@@ -65,6 +65,25 @@ message DropSourceResponse {
   uint64 version = 2;
 }
 
+message CreateSinkRequest {
+  catalog.Sink sink = 1;
+}
+
+message CreateSinkResponse {
+  common.Status status = 1;
+  uint32 sink_id = 2;
+  uint64 version = 3;
+}
+
+message DropSinkRequest {
+  uint32 sink_id = 1;
+}
+
+message DropSinkResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;

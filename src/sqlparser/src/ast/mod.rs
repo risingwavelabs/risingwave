@@ -620,6 +620,7 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
+    Sink { schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
@@ -647,6 +648,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
+            ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
@@ -750,6 +752,10 @@ pub enum Statement {
     CreateSource {
         is_materialized: bool,
         stmt: CreateSourceStatement,
+    },
+    /// CREATE SINK
+    CreateSink {
+        stmt: CreateSinkStatement,
     },
     /// ALTER TABLE
     AlterTable {
@@ -1089,6 +1095,13 @@ impl fmt::Display for Statement {
                 } else {
                     ""
                 }
+            ),
+            Statement::CreateSink {
+                stmt,
+            } => write!(
+                f,
+                "CREATE SINK {}",
+                stmt,
             ),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
@@ -1537,6 +1550,7 @@ pub enum ObjectType {
     Schema,
     Source,
     MaterializedSource,
+    Sink,
     Database,
     User,
 }
@@ -1551,6 +1565,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Schema => "SCHEMA",
             ObjectType::Source => "SOURCE",
             ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
+            ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
         })
@@ -1569,6 +1584,8 @@ impl ParseTo for ObjectType {
             ObjectType::MaterializedSource
         } else if parser.parse_keyword(Keyword::SOURCE) {
             ObjectType::Source
+        } else if parser.parse_keyword(Keyword::SINK) {
+            ObjectType::Sink
         } else if parser.parse_keyword(Keyword::INDEX) {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {
@@ -1579,7 +1596,7 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SCHEMA, DATABASE or USER after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
                 parser.peek_token(),
             );
         };

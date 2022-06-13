@@ -1378,6 +1378,8 @@ impl Parser {
             self.parse_create_source(false, or_replace)
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
             self.parse_create_source(true, or_replace)
+        } else if self.parse_keyword(Keyword::SINK) {
+            self.parse_create_sink(or_replace)
         } else if or_replace {
             self.expected(
                 "[EXTERNAL] TABLE or [MATERIALIZED] VIEW after CREATE OR REPLACE",
@@ -1457,6 +1459,23 @@ impl Parser {
         Ok(Statement::CreateSource {
             is_materialized,
             stmt: CreateSourceStatement::parse_to(self)?,
+        })
+    }
+
+    // CREATE [OR REPLACE]?
+    // SINK
+    // [IF NOT EXISTS]?
+    // <sink_name: Ident>
+    // [COLUMNS]?
+    // [WITH (properties)]?
+    // ROW FORMAT <row_format: Ident>
+    // [ROW SCHEMA LOCATION <row_schema_location: String>]?
+    pub fn parse_create_sink(
+        &mut self,
+        _or_replace: bool,
+    ) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSink {
+            stmt: CreateSinkStatement::parse_to(self)?,
         })
     }
 

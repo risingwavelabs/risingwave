@@ -185,6 +185,52 @@ impl fmt::Display for CreateSourceStatement {
     }
 }
 
+// sql_grammar!(CreateSinkStatement {
+//     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
+//     sink_name: Ident,
+//     [Keyword::FROM],
+//     materialized_view: Ident,
+//     with_properties: AstOption<WithProperties>,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateSinkStatement {
+    pub if_not_exists: bool,
+    pub sink_name: ObjectName,
+    pub with_properties: WithProperties,
+    pub materialized_view: ObjectName,
+}
+
+impl ParseTo for CreateSinkStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
+        impl_parse_to!(sink_name: ObjectName, p);
+
+        p.expect_keyword(Keyword::FROM)?;
+        impl_parse_to!(materialized_view: ObjectName, p);
+        
+        impl_parse_to!(with_properties: WithProperties, p);
+        Ok(Self {
+            if_not_exists,
+            sink_name,
+            with_properties,
+            materialized_view,
+        })
+    }
+}
+
+impl fmt::Display for CreateSinkStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
+        impl_fmt_display!(sink_name, v, self);
+        impl_fmt_display!([Keyword::FROM], v);
+        impl_fmt_display!(materialized_view, v, self);
+        impl_fmt_display!(with_properties, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AstVec<T>(pub Vec<T>);
