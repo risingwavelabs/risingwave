@@ -15,13 +15,14 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ops::RangeBounds;
 
+use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
-use super::state_table::{KeyAndRowStream, RawKey, RowStream, StateTable};
+use super::state_table::{RawKey, RowStream, StateTable};
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 

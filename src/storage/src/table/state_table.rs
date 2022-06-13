@@ -280,8 +280,7 @@ impl<S: StateStore> StateTable<S> {
 pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>>;
 
 pub type RawKey = Vec<u8>;
-pub trait KeyAndRowStream<'a> =
-    StreamExt<Item = StorageResult<(Cow<'a, RawKey>, Cow<'a, Row>)>> + 'a;
+pub trait KeyAndRowStream<'a> = Stream<Item = StorageResult<(Cow<'a, RawKey>, Cow<'a, Row>)>> + 'a;
 
 struct StateTableRowIter<S: StateStore> {
     _phantom: PhantomData<S>,
