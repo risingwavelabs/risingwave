@@ -66,8 +66,9 @@ impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
     fn from(status: &risingwave_pb::hummock::CompactStatus) -> Self {
         let compaction_config = status.compaction_config.as_ref().cloned().unwrap();
         let overlap_strategy = create_overlap_strategy(compaction_config.compaction_mode());
-        // Currently we only support DynamicLevelSelector. If we add more LevelSelector in the
-        // future, make sure to persist its type as well.
+        // Currently we have and only have DynamicLevelSelector and HashMapping Selector(which will
+        // be built outside). If we add more LevelSelector in the future, make sure to
+        // persist its type as well.
         let compaction_selector =
             DynamicLevelSelector::new(Arc::new(compaction_config.clone()), overlap_strategy);
         CompactStatus {
