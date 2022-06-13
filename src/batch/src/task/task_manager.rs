@@ -19,6 +19,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
@@ -47,11 +48,12 @@ impl BatchManager {
         &self,
         tid: &ProstTaskId,
         plan: PlanFragment,
+        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
         epoch: u64,
         context: ComputeNodeContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
-        let task = BatchTaskExecution::new(tid, plan, context, epoch)?;
+        let task = BatchTaskExecution::new(tid, vnode_bitmap, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
 
@@ -175,6 +177,7 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::hash::EMPTY_VNODE_BITMAP;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
@@ -241,11 +244,17 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                EMPTY_VNODE_BITMAP,
+                0,
+                context.clone(),
+            )
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, 0, context)
+            .fire_task(&task_id, plan, EMPTY_VNODE_BITMAP, 0, context)
             .await
             .unwrap_err();
         assert!(err
@@ -284,7 +293,13 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                EMPTY_VNODE_BITMAP,
+                0,
+                context.clone(),
+            )
             .await
             .unwrap();
         manager.abort_task(&task_id).unwrap();

@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
@@ -210,7 +211,8 @@ impl StageExecution {
     }
 
     /// Returns all exchange sources for `output_id`. Each `ExchangeSource` is identified by
-    /// producer `TaskId` and `output_id`, since each task may produce output to several channels.
+    /// producer's `TaskId` and `output_id` (consumer's `TaskId`), since each task may produce
+    /// output to several channels.
     ///
     /// When this method is called, all tasks should have been scheduled, and their `worker_node`
     /// should have been set.
@@ -296,7 +298,11 @@ impl StageRunner {
                 task_id: id,
             };
             let plan_fragment = self.create_plan_fragment(id);
-            futures.push(async { self.schedule_task(task_id, plan_fragment).await });
+            let vnode_bitmap = todo!();
+            futures.push(async {
+                self.schedule_task(task_id, plan_fragment, vnode_bitmap)
+                    .await
+            });
         }
         let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
         while let Some(result) = buffered.next().await {
@@ -309,6 +315,7 @@ impl StageRunner {
         &self,
         task_id: TaskIdProst,
         plan_fragment: PlanFragment,
+        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
     ) -> SchedulerResult<()> {
         let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
 
@@ -320,7 +327,7 @@ impl StageRunner {
 
         let t_id = task_id.task_id;
         compute_client
-            .create_task2(task_id, plan_fragment, self.epoch)
+            .create_task2(task_id, plan_fragment, vnode_bitmap, self.epoch)
             .await
             .map_err(|e| anyhow!(e))?;
 
@@ -350,14 +357,14 @@ impl StageRunner {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
                 // Find the stage this exchange node should fetch from and get all exchange sources.
-                let exchange_sources = self
+                let child_stage = self
                     .children
                     .iter()
                     .find(|child_stage| {
                         child_stage.stage.id == execution_plan_node.source_stage_id.unwrap()
                     })
-                    .map(|child_stage| child_stage.all_exchange_sources_for(task_id))
                     .unwrap();
+                let exchange_sources = child_stage.all_exchange_sources_for(task_id);
 
                 match &execution_plan_node.node {
                     NodeBody::Exchange(_exchange_node) => {

@@ -29,6 +29,7 @@ use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::hash::FULL_VNODE_BITMAP;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -216,7 +217,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.schema().clone(),
         ScanType::TableScan(table.dedup_pk_iter(u64::MAX, &ordered_column_descs).await?),
         1024,
-        true,
+        FULL_VNODE_BITMAP,
         "RowSeqExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
@@ -275,7 +276,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.schema().clone(),
         ScanType::TableScan(table.dedup_pk_iter(u64::MAX, &ordered_column_descs).await?),
         1024,
-        true,
+        FULL_VNODE_BITMAP,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
@@ -343,7 +344,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.schema().clone(),
         ScanType::TableScan(table.dedup_pk_iter(u64::MAX, &ordered_column_descs).await?),
         1024,
-        true,
+        FULL_VNODE_BITMAP,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
@@ -416,7 +417,7 @@ async fn test_row_seq_scan() -> Result<()> {
         table.schema().clone(),
         ScanType::TableScan(table.dedup_pk_iter(u64::MAX, &pk_descs).await.unwrap()),
         1,
-        true,
+        FULL_VNODE_BITMAP,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));

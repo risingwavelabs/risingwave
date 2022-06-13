@@ -35,6 +35,7 @@ message CreateTaskRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   uint64 epoch = 3;
+  bytes vnode_bitmap = 4;
 }
 
 message CreateTaskResponse {
@@ -80,6 +81,7 @@ message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   uint64 epoch = 3;
+  bytes vnode_bitmap = 4;
 }
 
 service TaskService {

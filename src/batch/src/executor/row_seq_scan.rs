@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
@@ -38,7 +39,7 @@ use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
 pub struct RowSeqScanExecutor<S: StateStore> {
-    primary: bool,
+    vnode_bitmap: [u8; VNODE_BITMAP_LEN],
     chunk_size: usize,
     schema: Schema,
     identity: String,
@@ -57,25 +58,18 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         schema: Schema,
         scan_type: ScanType<S>,
         chunk_size: usize,
-        primary: bool,
+        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
         identity: String,
         stats: Arc<BatchMetrics>,
     ) -> Self {
         Self {
-            primary,
+            vnode_bitmap,
             chunk_size,
             schema,
             identity,
             stats,
             scan_type,
         }
-    }
-
-    // TODO: Remove this when we support real partition-scan.
-    // For shared storage like Hummock, we are using a fake partition-scan now. If `self.primary` is
-    // false, we'll ignore this scanning and yield no chunk.
-    fn should_ignore(&self) -> bool {
-        !self.primary
     }
 }
 
@@ -165,6 +159,8 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 None,
             );
 
+            todo!("use source.vnode_bitmap to scan different ranges");
+
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
                 let iter = table.dedup_pk_iter(source.epoch, &pk_descs).await?;
                 ScanType::TableScan(iter)
@@ -191,7 +187,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 table.schema().clone(),
                 scan_type,
                 RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
-                source.task_id.task_id == 0,
+                *source.vnode_bitmap,
                 source.plan_node().get_identity().clone(),
                 batch_stats,
             )))
@@ -216,43 +212,41 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
 impl<S: StateStore> RowSeqScanExecutor<S> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        if !self.should_ignore() {
-            match self.scan_type {
-                ScanType::TableScan(mut iter) => loop {
-                    let timer = self.stats.row_seq_scan_next_duration.start_timer();
+        match self.scan_type {
+            ScanType::TableScan(mut iter) => loop {
+                let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
-                    let chunk = iter
-                        .collect_data_chunk(&self.schema, Some(self.chunk_size))
-                        .await
-                        .map_err(RwError::from)?;
-                    timer.observe_duration();
+                let chunk = iter
+                    .collect_data_chunk(&self.schema, Some(self.chunk_size))
+                    .await
+                    .map_err(RwError::from)?;
+                timer.observe_duration();
 
-                    if let Some(chunk) = chunk {
-                        yield chunk
-                    } else {
-                        break;
-                    }
-                },
-                ScanType::RangeScan(mut iter) => loop {
-                    // TODO: same as TableScan except iter type
-                    let timer = self.stats.row_seq_scan_next_duration.start_timer();
+                if let Some(chunk) = chunk {
+                    yield chunk
+                } else {
+                    break;
+                }
+            },
+            ScanType::RangeScan(mut iter) => loop {
+                // TODO: same as TableScan except iter type
+                let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
-                    let chunk = iter
-                        .collect_data_chunk(&self.schema, Some(self.chunk_size))
-                        .await
-                        .map_err(RwError::from)?;
-                    timer.observe_duration();
+                let chunk = iter
+                    .collect_data_chunk(&self.schema, Some(self.chunk_size))
+                    .await
+                    .map_err(RwError::from)?;
+                timer.observe_duration();
 
-                    if let Some(chunk) = chunk {
-                        yield chunk
-                    } else {
-                        break;
-                    }
-                },
-                ScanType::PointGet(row) => {
-                    if let Some(row) = row {
-                        yield DataChunk::from_rows(&[row], &self.schema.data_types())?;
-                    }
+                if let Some(chunk) = chunk {
+                    yield chunk
+                } else {
+                    break;
+                }
+            },
+            ScanType::PointGet(row) => {
+                if let Some(row) = row {
+                    yield DataChunk::from_rows(&[row], &self.schema.data_types())?;
                 }
             }
         }

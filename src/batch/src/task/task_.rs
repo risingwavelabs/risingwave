@@ -19,6 +19,7 @@ use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
@@ -163,6 +164,7 @@ impl TaskOutput {
 pub struct BatchTaskExecution<C> {
     /// Task id.
     task_id: TaskId,
+    vnode_bitmap: [u8; VNODE_BITMAP_LEN],
 
     /// Inner plan to execute.
     plan: PlanFragment,
@@ -188,12 +190,14 @@ pub struct BatchTaskExecution<C> {
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn new(
         prost_tid: &ProstTaskId,
+        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
         plan: PlanFragment,
         context: C,
         epoch: u64,
     ) -> Result<Self> {
         Ok(Self {
             task_id: TaskId::from(prost_tid),
+            vnode_bitmap,
             plan,
             state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(Vec::new()),
@@ -223,7 +227,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         *self.state.lock() = TaskStatus::Running;
         let exec = ExecutorBuilder::new(
             self.plan.root.as_ref().unwrap(),
-            &self.task_id.clone(),
+            &self.task_id,
+            &self.vnode_bitmap,
             self.context.clone(),
             self.epoch,
         )

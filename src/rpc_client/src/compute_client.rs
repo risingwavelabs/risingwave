@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use risingwave_common::array::DataChunk;
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
@@ -88,7 +89,13 @@ impl ComputeClient {
     }
 
     // TODO: Remove this
-    pub async fn create_task(&self, task_id: TaskId, plan: PlanNode, epoch: u64) -> Result<()> {
+    pub async fn create_task(
+        &self,
+        task_id: TaskId,
+        plan: PlanNode,
+        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
+        epoch: u64,
+    ) -> Result<()> {
         let plan = PlanFragment {
             root: Some(plan),
             exchange_info: Some(ExchangeInfo {
@@ -101,6 +108,7 @@ impl ComputeClient {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch,
+                vnode_bitmap: vnode_bitmap.to_vec(),
             })
             .await?;
         Ok(())
@@ -110,6 +118,7 @@ impl ComputeClient {
         &self,
         task_id: TaskId,
         plan: PlanFragment,
+        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
         epoch: u64,
     ) -> Result<()> {
         let _ = self
@@ -117,6 +126,7 @@ impl ComputeClient {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch,
+                vnode_bitmap: vnode_bitmap.to_vec(),
             })
             .await?;
         Ok(())

@@ -52,6 +52,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
@@ -101,6 +102,7 @@ pub trait BoxedExecutorBuilder {
 pub struct ExecutorBuilder<'a, C> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
+    pub vnode_bitmap: &'a [u8; VNODE_BITMAP_LEN],
     context: C,
     epoch: u64,
 }
@@ -118,10 +120,17 @@ macro_rules! build_executor {
 }
 
 impl<'a, C: Clone> ExecutorBuilder<'a, C> {
-    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, context: C, epoch: u64) -> Self {
+    pub fn new(
+        plan_node: &'a PlanNode,
+        task_id: &'a TaskId,
+        vnode_bitmap: &'a [u8; VNODE_BITMAP_LEN],
+        context: C,
+        epoch: u64,
+    ) -> Self {
         Self {
             plan_node,
             task_id,
+            vnode_bitmap,
             context,
             epoch,
         }
@@ -129,7 +138,13 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 
     #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
+        ExecutorBuilder::new(
+            plan_node,
+            self.task_id,
+            self.vnode_bitmap,
+            self.context.clone(),
+            self.epoch,
+        )
     }
 
     pub fn plan_node(&self) -> &PlanNode {
@@ -194,6 +209,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::hash::EMPTY_VNODE_BITMAP;
     use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
@@ -212,6 +228,7 @@ mod tests {
         let builder = ExecutorBuilder::new(
             &plan_node,
             task_id,
+            &EMPTY_VNODE_BITMAP,
             ComputeNodeContext::new_for_test(),
             u64::MAX,
         );

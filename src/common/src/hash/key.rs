@@ -44,6 +44,8 @@ pub type VirtualNode = u16;
 pub const VNODE_BITS: usize = 11;
 pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
 pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
+pub const EMPTY_VNODE_BITMAP: [u8; VNODE_BITMAP_LEN] = [0; VNODE_BITMAP_LEN];
+pub const FULL_VNODE_BITMAP: [u8; VNODE_BITMAP_LEN] = [0xff; VNODE_BITMAP_LEN];
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone, Debug, PartialEq)]
