@@ -62,6 +62,14 @@ macro_rules! for_all_metrics {
             compaction_upload_sst_counts: GenericCounter<AtomicU64>,
             compaction_read_bytes: GenericCounter<AtomicU64>,
             compaction_write_bytes: GenericCounter<AtomicU64>,
+
+            level_compact_read_curr: GenericCounterVec<AtomicU64>,
+            level_compact_read_next: GenericCounterVec<AtomicU64>,
+            level_compact_write: GenericCounterVec<AtomicU64>,
+            level_compact_read_sstn_curr: GenericCounterVec<AtomicU64>,
+            level_compact_read_sstn_next: GenericCounterVec<AtomicU64>,
+            level_compact_write_sstn: GenericCounterVec<AtomicU64>,
+            level_compact_frequency: GenericCounterVec<AtomicU64>,
             compact_sst_duration: Histogram,
             compact_task_duration: HistogramVec,
             get_table_id_total_time_duration: Histogram,
@@ -290,6 +298,61 @@ impl StateStoreMetrics {
             exponential_buckets(0.001, 1.6, 28).unwrap() // max 520s
         );
         let remote_read_time = register_histogram_with_registry!(opts, registry).unwrap();
+        let level_compact_read_curr = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_curr",
+            "KBs read from current level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_next = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_next",
+            "KBs read from next level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_write = register_int_counter_vec_with_registry!(
+            "storage_level_compact_write",
+            "KBs written into next level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_sstn_curr = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_sstn_curr",
+            "num of SSTs read from current level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_sstn_next = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_sstn_next",
+            "num of SSTs read from next level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_write_sstn = register_int_counter_vec_with_registry!(
+            "storage_level_compact_write_sstn",
+            "num of SSTs written into next level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_frequency = register_int_counter_vec_with_registry!(
+            "storage_level_compact_frequency",
+            "num of compactions from each level to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
 
         monitor_process(&registry).unwrap();
         Self {
@@ -321,8 +384,14 @@ impl StateStoreMetrics {
             compaction_write_bytes,
             compact_sst_duration,
             compact_task_duration,
+            level_compact_read_curr,
+            level_compact_read_next,
+            level_compact_write,
+            level_compact_read_sstn_curr,
+            level_compact_read_sstn_next,
+            level_compact_write_sstn,
+            level_compact_frequency,
             get_table_id_total_time_duration,
-
             remote_read_time,
         }
     }
