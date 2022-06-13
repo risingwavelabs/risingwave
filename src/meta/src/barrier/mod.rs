@@ -389,7 +389,7 @@ where
                         "inject barrier request: {:?}", request
                     );
 
-                    // This RPC returns only if this worker node has collected this barrier.
+                    // This RPC returns only if this worker node has inject this barrier.
                     client
                         .inject_barrier(request)
                         .await
@@ -411,7 +411,7 @@ where
                     prev_epoch,
                 };
                 tracing::trace!(
-                    target: "events::meta::barrier::inject_barrier",
+                    target: "events::meta::barrier::barrier_complete",
                     "inject barrier request: {:?}", request
                 );
 

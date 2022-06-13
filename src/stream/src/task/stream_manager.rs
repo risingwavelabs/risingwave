@@ -83,13 +83,14 @@ pub struct LocalStreamManagerCore {
 
     /// Config of streaming engine
     pub(crate) config: StreamingConfig,
+
+    /// Save collect rx
+    collect_complete_receiver: HashMap<u64, oneshot::Receiver<CollectResult>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
 pub struct LocalStreamManager {
     core: Mutex<LocalStreamManagerCore>,
-
-    collect_complete_receiver: Mutex<HashMap<u64, oneshot::Receiver<CollectResult>>>,
 }
 
 pub struct ExecutorParams {
@@ -140,7 +141,6 @@ impl LocalStreamManager {
     fn with_core(core: LocalStreamManagerCore) -> Self {
         Self {
             core: Mutex::new(core),
-            collect_complete_receiver: Mutex::new(HashMap::default()),
         }
     }
 
@@ -179,7 +179,8 @@ impl LocalStreamManager {
         Ok(rx)
     }
 
-    /// Broadcast a barrier to all senders. Returns when the barrier is fully collected.
+    /// Broadcast a barrier to all senders and save collect rx. Returns when the barrier is sent to
+    /// all senders
     pub async fn initiate_barrier_send(
         &self,
         barrier: &Barrier,
@@ -187,22 +188,31 @@ impl LocalStreamManager {
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> Result<()> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
-        self.collect_complete_receiver
+        self.core
             .lock()
+            .collect_complete_receiver
             .insert(barrier.epoch.prev, rx);
         Ok(())
     }
 
+    /// Use `prev_epoch` to find collect rx. And wait for all actor to be collected before
+    /// returning.
     pub async fn initiate_barrier_collection(
         &self,
         prev_epoch: u64,
         need_sync: bool,
     ) -> CollectResult {
         let rx = self
-            .collect_complete_receiver
+            .core
             .lock()
+            .collect_complete_receiver
             .remove_entry(&prev_epoch)
-            .unwrap()
+            .unwrap_or_else(|| {
+                panic!(
+                    "barrier collect complete receiver for prev epoch {} not exists",
+                    prev_epoch
+                )
+            })
             .1;
         // Wait for all actors finishing this barrier.
         let mut collect_result = rx.await.unwrap();
@@ -214,9 +224,9 @@ impl LocalStreamManager {
                     Ok(_) => {
                         collect_result.synced_sstables =
                         store.get_uncommitted_ssts(prev_epoch);
-                        }
-                        // TODO: Handle sync failure by propagating it
-                        // back to global barrier manager
+                    }
+                    // TODO: Handle sync failure by propagating it
+                    // back to global barrier manager
                     Err(e) => panic!(
                         "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
                         prev_epoch, e
@@ -380,6 +390,7 @@ impl LocalStreamManagerCore {
             streaming_metrics,
             compute_client_pool: ComputeClientPool::new(u64::MAX),
             config,
+            collect_complete_receiver: HashMap::default(),
         }
     }
 
