@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //! Local execution for batch query.
-
 use std::collections::HashMap;
 
 use anyhow::anyhow;

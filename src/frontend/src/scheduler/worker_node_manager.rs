@@ -14,13 +14,12 @@
 
 use std::sync::{Arc, RwLock};
 
-use anyhow::anyhow;
 use rand::distributions::{Distribution as RandDistribution, Uniform};
+use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_rpc_client::MetaClient;
 
-use crate::scheduler::SchedulerError::Internal;
 use crate::scheduler::SchedulerResult;
 
 /// `WorkerNodeManager` manages live worker nodes.
@@ -69,7 +68,7 @@ impl WorkerNodeManager {
         let mut rng = rand::thread_rng();
         if current_nodes.is_empty() {
             tracing::error!("No worker node available.");
-            return Err(Internal(anyhow!("No worker node available")));
+            bail!("No worker node available");
         }
 
         let die = Uniform::from(0..current_nodes.len());

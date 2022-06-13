@@ -16,7 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::mem::swap;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Error};
+use anyhow::anyhow;
+use risingwave_common::bail;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -176,7 +177,9 @@ impl QueryExecution {
                     })
                 });
 
-                let root_stage = root_stage_receiver.await.map_err(|e| anyhow!(e))??;
+                let root_stage = root_stage_receiver
+                    .await
+                    .map_err(|e| anyhow!("Starting query execution failed: {:?}", e))??;
 
                 info!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
@@ -193,7 +196,7 @@ impl QueryExecution {
             s => {
                 // Restore old state
                 *state = s;
-                Err(SchedulerError::Internal(Error::msg("Query not pending!")))
+                bail!("Query not pending!")
             }
         }
     }

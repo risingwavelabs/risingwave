@@ -274,10 +274,11 @@ impl StageRunner {
             .send(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
             .await
             .map_err(|e| {
-                Internal(anyhow!(format!(
+                Internal(anyhow!(
                     "Failed to send stage scheduled event: {:?}, reason: {:?}",
-                    self.stage.id, e
-                )))
+                    self.stage.id,
+                    e
+                ))
             })?;
 
         Ok(())
@@ -287,10 +288,11 @@ impl StageRunner {
     async fn send_event(&self, event: QueryMessage) -> SchedulerResult<()> {
         self.msg_sender.send(event).await.map_err(|e| {
             {
-                Internal(anyhow::Error::msg(format!(
+                Internal(anyhow!(
                     "Failed to send stage scheduled event: {:?}, reason: {:?}",
-                    self.stage.id, e
-                )))
+                    self.stage.id,
+                    e
+                ))
             }
         })
     }

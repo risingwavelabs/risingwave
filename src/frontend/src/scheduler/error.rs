@@ -22,8 +22,8 @@ pub enum SchedulerError {
     #[error("Pin snapshot error: {0} fails to get epoch {1}")]
     PinSnapshot(QueryId, u64),
 
-    #[error("Tonic Status: {0}")]
-    TonicStatus(tonic::Status),
+    #[error("Rpc error:{0}")]
+    RpcError(String),
 
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
