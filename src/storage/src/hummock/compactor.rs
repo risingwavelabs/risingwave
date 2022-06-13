@@ -306,14 +306,20 @@ impl Compactor {
             .sum::<u64>();
         context
             .stats
-            .level_compact_read_curr
+            .compact_read_current_level
             .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
             .inc_by(compaction_read_bytes);
         context
             .stats
-            .level_compact_read_sstn_curr
+            .compact_read_sstn_current_level
             .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
             .inc_by(compact_task.input_ssts[0].table_infos.len() as u64);
+        context
+            .stats
+            .compact_frequency
+            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
+            .inc();
+
         if compact_task.input_ssts.len() > 1 {
             let sec_level_read_bytes: u64 = compact_task.input_ssts[1]
                 .table_infos
@@ -323,12 +329,12 @@ impl Compactor {
             let next_level_label = compact_task.input_ssts[1].level_idx.to_string();
             context
                 .stats
-                .level_compact_read_next
+                .compact_read_next_level
                 .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
                 .inc_by(sec_level_read_bytes);
             context
                 .stats
-                .level_compact_read_sstn_next
+                .compact_read_sstn_next_level
                 .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
                 .inc_by(compact_task.input_ssts[1].table_infos.len() as u64);
         }
@@ -468,20 +474,17 @@ impl Compactor {
                 self.compact_task.sorted_output_ssts.push(sst_info);
             }
         }
-        self.context
-            .stats
-            .compaction_write_bytes
-            .inc_by(compaction_write_bytes);
+
         let group_label = self.compact_task.compaction_group_id.to_string();
         let level_label = self.compact_task.target_level.to_string();
         self.context
             .stats
-            .level_compact_write
+            .compact_write_bytes
             .with_label_values(&[group_label.as_str(), level_label.as_str()])
             .inc_by(compaction_write_bytes);
         self.context
             .stats
-            .level_compact_read_sstn_curr
+            .compact_read_sstn_current_level
             .with_label_values(&[group_label.as_str(), level_label.as_str()])
             .inc_by(self.compact_task.sorted_output_ssts.len() as u64);
 

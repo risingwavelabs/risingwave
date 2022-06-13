@@ -60,20 +60,17 @@ macro_rules! for_all_metrics {
             shared_buffer_to_sstable_size: Histogram,
 
             compaction_upload_sst_counts: GenericCounter<AtomicU64>,
-            compaction_read_bytes: GenericCounter<AtomicU64>,
-            compaction_write_bytes: GenericCounter<AtomicU64>,
-
-            level_compact_read_curr: GenericCounterVec<AtomicU64>,
-            level_compact_read_next: GenericCounterVec<AtomicU64>,
-            level_compact_write: GenericCounterVec<AtomicU64>,
-            level_compact_read_sstn_curr: GenericCounterVec<AtomicU64>,
-            level_compact_read_sstn_next: GenericCounterVec<AtomicU64>,
-            level_compact_write_sstn: GenericCounterVec<AtomicU64>,
-            level_compact_frequency: GenericCounterVec<AtomicU64>,
+            compact_frequency: GenericCounterVec<AtomicU64>,
+            compact_write_bytes: GenericCounterVec<AtomicU64>,
+            compact_read_current_level: GenericCounterVec<AtomicU64>,
+            compact_read_next_level: GenericCounterVec<AtomicU64>,
+            compact_read_sstn_current_level: GenericCounterVec<AtomicU64>,
+            compact_read_sstn_next_level: GenericCounterVec<AtomicU64>,
+            compact_write_sstn: GenericCounterVec<AtomicU64>,
             compact_sst_duration: Histogram,
             compact_task_duration: HistogramVec,
-            get_table_id_total_time_duration: Histogram,
 
+            get_table_id_total_time_duration: Histogram,
             remote_read_time: Histogram,
         }
     };
@@ -258,18 +255,6 @@ impl StateStoreMetrics {
             registry
         )
         .unwrap();
-        let compaction_read_bytes = register_int_counter_with_registry!(
-            "state_store_compaction_read_bytes",
-            "Total size of file size that read from object store in compaction job",
-            registry
-        )
-        .unwrap();
-        let compaction_write_bytes = register_int_counter_with_registry!(
-            "state_store_compaction_write_bytes",
-            "Total size of compaction files size that have been written to object store",
-            registry
-        )
-        .unwrap();
 
         let opts = histogram_opts!(
             "state_store_compact_sst_duration",
@@ -298,7 +283,7 @@ impl StateStoreMetrics {
             exponential_buckets(0.001, 1.6, 28).unwrap() // max 520s
         );
         let remote_read_time = register_histogram_with_registry!(opts, registry).unwrap();
-        let level_compact_read_curr = register_int_counter_vec_with_registry!(
+        let compact_read_current_level = register_int_counter_vec_with_registry!(
             "storage_level_compact_read_curr",
             "KBs read from current level during history compactions to next level",
             &["group", "level_index"],
@@ -306,7 +291,7 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let level_compact_read_next = register_int_counter_vec_with_registry!(
+        let compact_read_next_level = register_int_counter_vec_with_registry!(
             "storage_level_compact_read_next",
             "KBs read from next level during history compactions to next level",
             &["group", "level_index"],
@@ -314,7 +299,7 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let level_compact_write = register_int_counter_vec_with_registry!(
+        let compact_write_bytes = register_int_counter_vec_with_registry!(
             "storage_level_compact_write",
             "KBs written into next level during history compactions to next level",
             &["group", "level_index"],
@@ -322,7 +307,7 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let level_compact_read_sstn_curr = register_int_counter_vec_with_registry!(
+        let compact_read_sstn_current_level = register_int_counter_vec_with_registry!(
             "storage_level_compact_read_sstn_curr",
             "num of SSTs read from current level during history compactions to next level",
             &["group", "level_index"],
@@ -330,7 +315,7 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let level_compact_read_sstn_next = register_int_counter_vec_with_registry!(
+        let compact_read_sstn_next_level = register_int_counter_vec_with_registry!(
             "storage_level_compact_read_sstn_next",
             "num of SSTs read from next level during history compactions to next level",
             &["group", "level_index"],
@@ -338,7 +323,7 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let level_compact_write_sstn = register_int_counter_vec_with_registry!(
+        let compact_write_sstn = register_int_counter_vec_with_registry!(
             "storage_level_compact_write_sstn",
             "num of SSTs written into next level during history compactions to next level",
             &["group", "level_index"],
@@ -346,7 +331,7 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let level_compact_frequency = register_int_counter_vec_with_registry!(
+        let compact_frequency = register_int_counter_vec_with_registry!(
             "storage_level_compact_frequency",
             "num of compactions from each level to next level",
             &["group", "level_index"],
@@ -378,19 +363,16 @@ impl StateStoreMetrics {
             sst_store_block_request_counts,
             shared_buffer_to_l0_duration,
             shared_buffer_to_sstable_size,
-
+            compact_frequency,
             compaction_upload_sst_counts,
-            compaction_read_bytes,
-            compaction_write_bytes,
+            compact_write_bytes,
+            compact_read_current_level,
+            compact_read_next_level,
+            compact_read_sstn_current_level,
+            compact_read_sstn_next_level,
+            compact_write_sstn,
             compact_sst_duration,
             compact_task_duration,
-            level_compact_read_curr,
-            level_compact_read_next,
-            level_compact_write,
-            level_compact_read_sstn_curr,
-            level_compact_read_sstn_next,
-            level_compact_write_sstn,
-            level_compact_frequency,
             get_table_id_total_time_duration,
             remote_read_time,
         }
