@@ -78,7 +78,10 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         // internal_table_id (stateful executor)
         pairs.push((
             Prefix::from(table_fragments.table_id().table_id),
-            CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
+            // TODO: before compaction group write path is finished, all SSTs belongs to
+            // `StateDefault`.
+            CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
+            // CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
         ));
         // internal states
         for table_id in table_fragments.internal_table_ids() {
