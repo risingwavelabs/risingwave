@@ -21,10 +21,10 @@ use crate::executor::MaterializeExecutor;
 pub struct MaterializeExecutorBuilder;
 
 impl ExecutorBuilder for MaterializeExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         mut params: ExecutorParams,
         node: &StreamNode,
-        store: impl StateStore,
+        store: S,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
@@ -66,10 +66,10 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 pub struct ArrangeExecutorBuilder;
 
 impl ExecutorBuilder for ArrangeExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         mut params: ExecutorParams,
         node: &StreamNode,
-        store: impl StateStore,
+        store: S,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;

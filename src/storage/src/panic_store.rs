@@ -14,10 +14,13 @@
 
 use std::future::Future;
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_common::consistent_hash::VNodeBitmap;
 
+use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -130,11 +133,25 @@ impl StateStore for PanicStateStore {
             panic!("should not wait epoch from the panic state store!");
         }
     }
+}
+
+impl StateStoreProxy for PanicStateStore {
+    type Output = PanicStateStore;
+
+    type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
 
     fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
             panic!("should not sync from the panic state store!");
         }
+    }
+
+    fn state(&self, _table_id: TableId) -> Self::Output {
+        panic!("should not build the panic state store!");
+    }
+
+    fn stats(&self) -> Arc<StateStoreMetrics> {
+        panic!("should not get stats from the panic state store!");
     }
 }
 

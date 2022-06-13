@@ -22,10 +22,10 @@ use crate::executor::HopWindowExecutor;
 pub struct HopWindowExecutorBuilder;
 
 impl ExecutorBuilder for HopWindowExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         params: ExecutorParams,
         node: &StreamNode,
-        _store: impl StateStore,
+        _store: S,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let ExecutorParams {

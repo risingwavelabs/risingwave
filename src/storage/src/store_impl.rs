@@ -37,17 +37,17 @@ pub enum StateStoreImpl {
     /// * `hummock+s3://bucket`
     /// * `hummock+minio://KEY:SECRET@minio-ip:port`
     /// * `hummock+memory` (should only be used in 1 compute node mode)
-    HummockStateStore(Monitored<HummockStorage>),
+    HummockStateStore(HummockStorage),
     /// In-memory B-Tree state store. Should only be used in unit and integration tests. If you
     /// want speed up e2e test, you should use Hummock in-memory mode instead. Also, this state
     /// store misses some critical implementation to ensure the correctness of persisting streaming
     /// state. (e.g., no read_epoch support, no async checkpoint)
-    MemoryStateStore(Monitored<MemoryStateStore>),
+    MemoryStateStore(MemoryStateStore),
 }
 
 impl StateStoreImpl {
-    pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
-        Self::MemoryStateStore(MemoryStateStore::shared().monitored(state_store_metrics))
+    pub fn shared_in_memory_store() -> Self {
+        Self::MemoryStateStore(MemoryStateStore::shared())
     }
 }
 
@@ -115,14 +115,14 @@ impl StateStoreImpl {
                     config.block_cache_capacity_mb * (1 << 20),
                     config.meta_cache_capacity_mb * (1 << 20),
                 ));
-                let inner = HummockStorage::new(
+                let hummock_storage = HummockStorage::new(
                     config.clone(),
                     sstable_store.clone(),
                     hummock_meta_client.clone(),
                     state_store_stats.clone(),
                 )
                 .await?;
-                StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
+                StateStoreImpl::HummockStateStore(hummock_storage)
             }
 
             "in_memory" | "in-memory" => {

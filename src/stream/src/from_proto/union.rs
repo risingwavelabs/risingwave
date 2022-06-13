@@ -18,10 +18,10 @@ use crate::executor::UnionExecutor;
 pub struct UnionExecutorBuilder;
 
 impl ExecutorBuilder for UnionExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         params: ExecutorParams,
         node: &StreamNode,
-        _store: impl StateStore,
+        _store: S,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         try_match_expand!(node.get_node_body().unwrap(), NodeBody::Union)?;

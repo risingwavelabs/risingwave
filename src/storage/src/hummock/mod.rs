@@ -170,6 +170,10 @@ impl HummockStorage {
     pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
         &self.local_version_manager
     }
+
+    pub fn stats(&self) -> Arc<StateStoreMetrics> {
+        self.stats.clone()
+    }
 }
 
 impl fmt::Debug for HummockStorage {

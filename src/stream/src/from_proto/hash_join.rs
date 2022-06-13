@@ -26,10 +26,10 @@ use crate::executor::PkIndices;
 pub struct HashJoinExecutorBuilder;
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         mut params: ExecutorParams,
         node: &StreamNode,
-        store: impl StateStore,
+        store: S,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         // Get table id and used as keyspace prefix.

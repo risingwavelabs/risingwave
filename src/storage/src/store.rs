@@ -16,6 +16,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_pb::hummock::SstableInfo;
 
@@ -38,7 +39,6 @@ macro_rules! define_state_store_associated_type {
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
         type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
-        type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
         type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
         type BackwardIterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
     }
@@ -64,8 +64,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     type ReplicateBatchFuture<'a>: EmptyFutureTrait<'a>;
 
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
-
-    type SyncFuture<'a>: EmptyFutureTrait<'a>;
 
     type IterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter>> + Send
     where
@@ -169,19 +167,9 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Waits until the epoch is committed and its data is ready to read.
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_>;
 
-    /// Syncs buffered data to S3.
-    /// If the epoch is None, all buffered data will be synced.
-    /// Otherwise, only data of the provided epoch will be synced.
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_>;
-
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         MonitoredStateStore::new(self, stats)
-    }
-
-    /// Gets `epoch`'s uncommitted `SSTables`.
-    fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<SstableInfo> {
-        todo!()
     }
 }
 
@@ -190,4 +178,23 @@ pub trait StateStoreIter: Send + 'static {
     type NextFuture<'a>: Future<Output = StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_>;
+}
+
+pub trait StateStoreProxy: Send + Sync + 'static + Clone {
+    type Output: StateStore;
+    type SyncFuture<'a>: EmptyFutureTrait<'a>;
+
+    /// Syncs buffered data to S3.
+    /// If the epoch is None, all buffered data will be synced.
+    /// Otherwise, only data of the provided epoch will be synced.
+    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_>;
+
+    /// Gets `epoch`'s uncommitted `SSTables`.
+    fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<SstableInfo> {
+        todo!()
+    }
+
+    fn state(&self, table_id: TableId) -> Self::Output;
+
+    fn stats(&self) -> Arc<StateStoreMetrics>;
 }

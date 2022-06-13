@@ -21,6 +21,7 @@ use rand::SeedableRng;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
+use risingwave_storage::store::StateStoreProxy;
 use risingwave_storage::StateStore;
 
 use crate::utils::display_stats::*;
@@ -50,7 +51,7 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(
-        store: impl StateStore,
+        store: impl StateStoreProxy,
         meta_service: Arc<MockHummockMetaClient>,
         context: Option<(Arc<CompactorContext>, Arc<LocalVersionManager>)>,
         opts: &Opts,

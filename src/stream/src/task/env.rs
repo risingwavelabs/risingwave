@@ -69,9 +69,7 @@ impl StreamEnvironment {
             source_manager: Arc::new(MemSourceManager::default()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
-            state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
-                StateStoreMetrics::unused(),
-            )),
+            state_store: StateStoreImpl::shared_in_memory_store(),
         }
     }
 

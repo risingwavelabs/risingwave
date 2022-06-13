@@ -22,10 +22,12 @@ use std::sync::Arc;
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
+use risingwave_common::catalog::TableId;
 use risingwave_common::consistent_hash::VNodeBitmap;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::HummockError;
+use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -44,6 +46,7 @@ pub struct MemoryStateStore {
     inner: Arc<RwLock<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
     /// current largest committed epoch,
     epoch: Option<u64>,
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl Default for MemoryStateStore {
@@ -75,6 +78,7 @@ impl MemoryStateStore {
         Self {
             inner: Arc::new(RwLock::new(BTreeMap::new())),
             epoch: None,
+            stats: Arc::new(StateStoreMetrics::unused()),
         }
     }
 
@@ -245,12 +249,26 @@ impl StateStore for MemoryStateStore {
             Ok(())
         }
     }
+}
+
+impl StateStoreProxy for MemoryStateStore {
+    type Output = MemoryStateStore;
+
+    type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
 
     fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
             // memory backend doesn't support push to S3, so this is a no-op
             Ok(())
         }
+    }
+
+    fn state(&self, _table_id: TableId) -> Self::Output {
+        self.clone()
+    }
+
+    fn stats(&self) -> Arc<StateStoreMetrics> {
+        self.stats.clone()
     }
 }
 

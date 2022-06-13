@@ -38,6 +38,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
+use risingwave_storage::store::StateStoreProxy;
 use risingwave_storage::{Keyspace, StateStore};
 
 use self::batch_query::*;
@@ -62,10 +63,10 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 trait ExecutorBuilder {
     /// Create a [`BoxedExecutor`] from [`StreamNode`].
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         params: ExecutorParams,
         node: &StreamNode,
-        store: impl StateStore,
+        store: S,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor>;
 }
@@ -89,11 +90,11 @@ macro_rules! build_executor {
 }
 
 /// Create an executor from protobuf [`StreamNode`].
-pub fn create_executor(
+pub fn create_executor<S: StateStoreProxy>(
     params: ExecutorParams,
     stream: &mut LocalStreamManagerCore,
     node: &StreamNode,
-    store: impl StateStore,
+    store: S,
 ) -> Result<BoxedExecutor> {
     build_executor! {
         params,

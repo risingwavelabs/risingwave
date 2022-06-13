@@ -18,10 +18,10 @@ use crate::executor::{ChainExecutor, RearrangedChainExecutor};
 pub struct ChainExecutorBuilder;
 
 impl ExecutorBuilder for ChainExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         mut params: ExecutorParams,
         node: &StreamNode,
-        _store: impl StateStore,
+        _store: S,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Chain)?;

@@ -20,8 +20,9 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::store::StateStoreProxy;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::Keyspace;
 
 use super::*;
 use crate::executor::BatchQueryExecutor;
@@ -29,10 +30,10 @@ use crate::executor::BatchQueryExecutor;
 pub struct BatchQueryExecutorBuilder;
 
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         params: ExecutorParams,
         node: &StreamNode,
-        state_store: impl StateStore,
+        state_store: S,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;

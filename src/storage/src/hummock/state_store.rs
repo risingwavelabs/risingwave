@@ -19,9 +19,10 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use super::iterator::{
@@ -41,7 +42,7 @@ use crate::hummock::shared_buffer::{
 };
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{MonitoredStateStore, StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -71,7 +72,21 @@ impl HummockIteratorType for BackwardIter {
     type UserIteratorBuilder = BackwardUserIterator;
 }
 
-impl HummockStorage {
+#[derive(Clone)]
+pub struct HummockStateStore {
+    table_id: TableId,
+    hummock_storage: HummockStorage,
+}
+
+// TODO: use compaction_group_id to filter SSTs
+impl HummockStateStore {
+    fn new(table_id: TableId, hummock_storage: HummockStorage) -> Self {
+        Self {
+            table_id,
+            hummock_storage
+        }
+    }
+
     async fn iter_inner<R, B, T>(
         &self,
         key_range: R,
@@ -98,8 +113,8 @@ impl HummockStorage {
             overlapped_iters.push(
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
-                    self.sstable_store.clone(),
-                    self.stats.clone(),
+                    self.hummock_storage.sstable_store.clone(),
+                    self.hummock_storage.stats.clone(),
                     &mut stats,
                     read_options.clone(),
                 )
@@ -141,25 +156,27 @@ impl HummockStorage {
 
                 overlapped_iters.push(Box::new(ConcatIteratorInner::<T::SstableIteratorType>::new(
                     tables,
-                    self.sstable_store(),
+                    self.hummock_storage.sstable_store(),
                     read_options.clone(),
                 )) as BoxedHummockIterator<T::Direction>);
             } else {
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
+                        .hummock_storage
                         .sstable_store
                         .sstable(table_info.id, &mut stats)
                         .await?;
                     overlapped_iters.push(Box::new(T::SstableIteratorType::create(
                         table,
-                        self.sstable_store(),
+                        self.hummock_storage.sstable_store(),
                         read_options.clone(),
                     )));
                 }
             }
         }
 
-        self.stats
+        self.hummock_storage
+            .stats
             .iter_merge_sstable_counts
             .observe(overlapped_iters.len() as f64);
 
@@ -170,14 +187,14 @@ impl HummockStorage {
 
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
-            self.stats.clone(),
+            self.hummock_storage.stats.clone(),
             key_range,
             epoch,
             Some(pinned_version),
         );
 
         user_iterator.rewind().await?;
-        stats.report(self.stats.as_ref());
+        stats.report(self.hummock_storage.stats.as_ref());
         Ok(HummockStateStoreIter::new(user_iterator))
     }
 
@@ -201,7 +218,10 @@ impl HummockStorage {
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
             batch.get(key).map(|v| {
-                self.stats.get_shared_buffer_hit_counts.inc();
+                self.hummock_storage
+                    .stats
+                    .get_shared_buffer_hit_counts
+                    .inc();
                 v.into_user_value().map(|v| v.into())
             })
         };
@@ -229,11 +249,13 @@ impl HummockStorage {
                         }
                         UncommittedData::Sst(table_info) => {
                             let table = self
+                                .hummock_storage
                                 .sstable_store
                                 .sstable(table_info.id, &mut stats)
                                 .await?;
                             table_counts += 1;
                             if let Some(v) = self
+                                .hummock_storage
                                 .get_from_table(
                                     table,
                                     &internal_key,
@@ -259,11 +281,13 @@ impl HummockStorage {
                 let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key), vnode_set);
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
+                        .hummock_storage
                         .sstable_store
                         .sstable(table_info.id, &mut stats)
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self
+                        .hummock_storage
                         .get_from_table(table, &internal_key, key, read_options.clone(), &mut stats)
                         .await?
                     {
@@ -273,8 +297,9 @@ impl HummockStorage {
             }
         }
 
-        stats.report(self.stats.as_ref());
-        self.stats
+        stats.report(self.hummock_storage.stats.as_ref());
+        self.hummock_storage
+            .stats
             .iter_merge_sstable_counts
             .observe(table_counts as f64);
         Ok(None)
@@ -294,7 +319,10 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        let read_version = self.local_version_manager.read_version(epoch);
+        let read_version = self
+            .hummock_storage
+            .local_version_manager
+            .read_version(epoch);
 
         // Check epoch validity
         validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
@@ -309,7 +337,7 @@ impl HummockStorage {
     }
 }
 
-impl StateStore for HummockStorage {
+impl StateStore for HummockStateStore {
     type Iter = HummockStateStoreIter;
 
     define_state_store_associated_type!();
@@ -377,6 +405,7 @@ impl StateStore for HummockStorage {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let size = self
+                .hummock_storage
                 .local_version_manager
                 .write_shared_buffer(epoch, kv_pairs, false)
                 .await?;
@@ -391,7 +420,8 @@ impl StateStore for HummockStorage {
         epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
-            self.local_version_manager
+            self.hummock_storage
+                .local_version_manager
                 .write_shared_buffer(epoch, kv_pairs, true)
                 .await?;
 
@@ -434,20 +464,13 @@ impl StateStore for HummockStorage {
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
-        async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
-    }
-
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
-            self.local_version_manager()
-                .sync_shared_buffer(epoch)
-                .await?;
-            Ok(())
+            Ok(self
+                .hummock_storage
+                .local_version_manager
+                .wait_epoch(epoch)
+                .await?)
         }
-    }
-
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
-        self.local_version_manager.get_uncommitted_ssts(epoch)
     }
 }
 
@@ -496,5 +519,35 @@ impl StateStoreIter for HummockStateStoreIter {
                 Ok(None)
             }
         }
+    }
+}
+
+impl StateStoreProxy for HummockStorage {
+    type Output = MonitoredStateStore<HummockStateStore>;
+
+    type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
+
+    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
+        async move {
+            let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
+            self.local_version_manager
+                .sync_shared_buffer(epoch)
+                .await
+                .inspect_err(|e| tracing::error!("Failed in sync: {:?}", e))?;
+            timer.observe_duration();
+            Ok(())
+        }
+    }
+
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
+        self.local_version_manager.get_uncommitted_ssts(epoch)
+    }
+
+    fn state(&self, table_id: TableId) -> Self::Output {
+        HummockStateStore::new(table_id, self.clone()).monitored(self.stats())
+    }
+
+    fn stats(&self) -> Arc<StateStoreMetrics> {
+        self.stats.clone()
     }
 }

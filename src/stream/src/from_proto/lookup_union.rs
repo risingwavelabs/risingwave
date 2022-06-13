@@ -18,10 +18,10 @@ use crate::executor::LookupUnionExecutor;
 pub struct LookupUnionExecutorBuilder;
 
 impl ExecutorBuilder for LookupUnionExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         params: ExecutorParams,
         node: &StreamNode,
-        _store: impl StateStore,
+        _store: S,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let lookup_union = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LookupUnion)?;

@@ -21,10 +21,10 @@ use crate::executor::MergeExecutor;
 pub struct MergeExecutorBuilder;
 
 impl ExecutorBuilder for MergeExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         params: ExecutorParams,
         x_node: &StreamNode,
-        _store: impl StateStore,
+        _store: S,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(x_node.get_node_body().unwrap(), NodeBody::Merge)?;

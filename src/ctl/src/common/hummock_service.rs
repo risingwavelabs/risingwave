@@ -54,7 +54,7 @@ impl HummockServiceOpts {
         })
     }
 
-    pub async fn create_hummock_store(&self) -> Result<MonitoredStateStore<HummockStorage>> {
+    pub async fn create_hummock_store(&self) -> Result<HummockStorage> {
         let meta_client = self.meta_opts.create_meta_client().await?;
 
         // FIXME: allow specify custom config

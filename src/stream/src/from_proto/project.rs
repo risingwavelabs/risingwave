@@ -20,10 +20,10 @@ use crate::executor::ProjectExecutor;
 pub struct ProjectExecutorBuilder;
 
 impl ExecutorBuilder for ProjectExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         mut params: ExecutorParams,
         node: &StreamNode,
-        _store: impl StateStore,
+        _store: S,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Project)?;

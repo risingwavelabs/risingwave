@@ -29,6 +29,7 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
+use risingwave_storage::store::StateStoreProxy;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -370,7 +371,7 @@ impl LocalStreamManagerCore {
         let register = prometheus::Registry::new();
         let streaming_metrics = Arc::new(StreamingMetrics::new(register));
         Self::with_store_and_context(
-            StateStoreImpl::shared_in_memory_store(Arc::new(StateStoreMetrics::unused())),
+            StateStoreImpl::shared_in_memory_store(),
             SharedContext::for_test(),
             streaming_metrics,
             StreamingConfig::default(),
@@ -452,14 +453,14 @@ impl LocalStreamManagerCore {
 
     /// Create a chain(tree) of nodes, with given `store`.
     #[allow(clippy::too_many_arguments)]
-    fn create_nodes_inner(
+    fn create_nodes_inner<S: StateStoreProxy>(
         &mut self,
         fragment_id: u32,
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         input_pos: usize,
         env: StreamEnvironment,
-        store: impl StateStore,
+        store: S,
         actor_context: &ActorContextRef,
         vnode_bitmap: Rc<Vec<u8>>,
     ) -> Result<BoxedExecutor> {

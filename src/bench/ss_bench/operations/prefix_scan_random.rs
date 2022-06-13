@@ -19,6 +19,7 @@ use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
 use risingwave_hummock_sdk::key::next_key;
+use risingwave_storage::store::StateStoreProxy;
 use risingwave_storage::StateStore;
 
 use super::Operations;
@@ -27,7 +28,7 @@ use crate::utils::workload::Workload;
 use crate::Opts;
 
 impl Operations {
-    pub(crate) async fn prefix_scan_random(&mut self, store: &impl StateStore, opts: &Opts) {
+    pub(crate) async fn prefix_scan_random(&mut self, store: &impl StateStoreProxy, opts: &Opts) {
         // generate queried prefixes
         let mut scan_prefixes = match self.prefixes.is_empty() {
             true => Workload::new_random_prefixes(opts, opts.scans as u64, &mut self.rng),
@@ -60,6 +61,7 @@ impl Operations {
                 for prefix in prefixes {
                     let start = Instant::now();
                     let kv_pairs = store
+                        .state(Default::default())
                         .scan(
                             prefix.chunk().to_vec()..next_key(prefix.chunk()),
                             None,

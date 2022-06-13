@@ -22,6 +22,7 @@ use risingwave_common::consistent_hash::{VNodeBitmap, VirtualNode};
 use risingwave_hummock_sdk::key::next_key;
 
 use crate::error::StorageResult;
+use crate::store::StateStoreProxy;
 use crate::{StateStore, StateStoreIter};
 
 /// Provides API to read key-value pairs of a prefix in the storage backend.
@@ -45,7 +46,7 @@ impl<S: StateStore> Keyspace<S> {
     /// here.
 
     /// Creates a root [`Keyspace`] for a table.
-    pub fn table_root(store: S, id: &TableId) -> Self {
+    pub fn table_root<B: StateStoreProxy<Output = S>>(store_builder: B, id: &TableId) -> Self {
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -53,7 +54,7 @@ impl<S: StateStore> Keyspace<S> {
             buf.to_vec()
         };
         Self {
-            store,
+            store: store_builder.state(*id),
             prefix,
             vnode_bitmap: None,
         }
@@ -61,7 +62,10 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Creates a root [`Keyspace`] for a table with default vnode (i.e. only no.1 vnode is
     /// present). This is used for singleton stateful executor.
-    pub fn table_root_with_default_vnodes(store: S, id: &TableId) -> Self {
+    pub fn table_root_with_default_vnodes<B: StateStoreProxy<Output = S>>(
+        store_builder: B,
+        id: &TableId,
+    ) -> Self {
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -70,7 +74,7 @@ impl<S: StateStore> Keyspace<S> {
         };
         let vnode_bitmap = VNodeBitmap::new_with_default_bitmap(id.table_id);
         Self {
-            store,
+            store: store_builder.state(*id),
             prefix,
             vnode_bitmap: Some(vnode_bitmap),
         }
@@ -78,7 +82,11 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Creates a root [`Keyspace`] for a table with specific vnodes. This is used for non-singleton
     /// stateful executor.
-    pub fn table_root_with_vnodes(store: S, id: &TableId, bitmap_inner: Vec<u8>) -> Self {
+    pub fn table_root_with_vnodes<B: StateStoreProxy<Output = S>>(
+        store_builder: B,
+        id: &TableId,
+        bitmap_inner: Vec<u8>,
+    ) -> Self {
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -87,7 +95,7 @@ impl<S: StateStore> Keyspace<S> {
         };
         let vnode_bitmap = VNodeBitmap::new(id.table_id, bitmap_inner);
         Self {
-            store,
+            store: store_builder.state(*id),
             prefix,
             vnode_bitmap: Some(vnode_bitmap),
         }

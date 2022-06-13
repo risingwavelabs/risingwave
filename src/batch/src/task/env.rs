@@ -83,9 +83,7 @@ impl BatchEnvironment {
             source_manager: std::sync::Arc::new(MemSourceManager::default()),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
-            state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
-                StateStoreMetrics::unused(),
-            )),
+            state_store: StateStoreImpl::shared_in_memory_store(),
             stats: Arc::new(BatchMetrics::unused()),
         }
     }

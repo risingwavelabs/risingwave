@@ -21,10 +21,10 @@ use crate::executor::SourceExecutor;
 pub struct SourceExecutorBuilder;
 
 impl ExecutorBuilder for SourceExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor<S: StateStoreProxy>(
         params: ExecutorParams,
         node: &StreamNode,
-        store: impl StateStore,
+        store: S,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Source)?;

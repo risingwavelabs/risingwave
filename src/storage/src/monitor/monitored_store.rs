@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
+use risingwave_common::catalog::TableId;
 use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_pb::hummock::SstableInfo;
 use tracing::error;
@@ -38,10 +39,6 @@ pub struct MonitoredStateStore<S> {
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         Self { inner, stats }
-    }
-
-    pub fn inner(&self) -> &S {
-        &self.inner
     }
 }
 
@@ -224,18 +221,6 @@ where
         }
     }
 
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
-        async move {
-            let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            self.inner
-                .sync(epoch)
-                .await
-                .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
-            timer.observe_duration();
-            Ok(())
-        }
-    }
-
     fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
     }
@@ -251,10 +236,6 @@ where
                 .await
                 .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
         }
-    }
-
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
-        self.inner.get_uncommitted_ssts(epoch)
     }
 }
 
