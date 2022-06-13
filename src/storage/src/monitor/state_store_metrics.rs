@@ -345,10 +345,8 @@ impl StateStoreMetrics {
             get_key_size,
             get_value_size,
             get_shared_buffer_hit_counts,
-
             bloom_filter_true_negative_counts,
             bloom_filter_might_positive_counts,
-
             range_scan_size,
             range_scan_duration,
             range_backward_scan_size,
@@ -363,8 +361,9 @@ impl StateStoreMetrics {
             sst_store_block_request_counts,
             shared_buffer_to_l0_duration,
             shared_buffer_to_sstable_size,
-            compact_frequency,
+
             compaction_upload_sst_counts,
+            compact_frequency,
             compact_write_bytes,
             compact_read_current_level,
             compact_read_next_level,
