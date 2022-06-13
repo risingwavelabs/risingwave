@@ -1546,20 +1546,55 @@ async fn test_dedup_pk_table_write_and_reads() {
         Some(2222_i32.into()),
     ]);
 
-    // ---------- write-write-read-read
-    state.insert(&key_1, row_1.clone()).unwrap();
+    // ---------- write-write-delete-read-read
 
+    // write-write
+    state.insert(&key_1, row_1.clone()).unwrap();
     state.insert(&key_2, row_2.clone()).unwrap();
 
+    // delete
+    state.delete(&key_2, row_2.clone()).unwrap();
+
     // get_row read-read
-    let row_1_actual = state.get_row(&key_1, 0).await.unwrap();
-    let row_1_actual = row_1_actual.unwrap();
+    let row_1_actual = state.get_row(&key_1, 0).await.unwrap().unwrap();
     assert_eq!(row_1_actual, row_1);
 
-    // ---------- write-delete-read
+    let row_2_actual = state.get_row(&key_2, 0).await.unwrap();
+    assert_eq!(row_2_actual, None);
 
-    // ---------- write-commit-read
-    // state.commit(0).await.unwrap();
+    // iter read-read
+    let iter = state.iter(0).await.unwrap();
+    let mut iter = Box::pin(iter);
+
+    let row_1_actual = iter.next().await.unwrap().unwrap().into_owned();
+    assert_eq!(row_1_actual, row_1);
+
+    let row_2_actual = iter.next().await;
+    assert!(row_2_actual.is_none());
+
+    drop(iter);
+
+    // ---------- write-write-delete-commit-read-read
+
+    // commit
+    state.commit(0).await.unwrap();
+
+    // get_row read-read
+    let row_1_actual = state.get_row(&key_1, 0).await.unwrap().unwrap();
+    assert_eq!(row_1_actual, row_1);
+
+    let row_2_actual = state.get_row(&key_2, 0).await.unwrap();
+    assert_eq!(row_2_actual, None);
+
+    // iter read-read
+    let iter = state.iter(0).await.unwrap();
+    let mut iter = Box::pin(iter);
+
+    let row_1_actual = iter.next().await.unwrap().unwrap().into_owned();
+    assert_eq!(row_1_actual, row_1);
+
+    let row_2_actual = iter.next().await;
+    assert!(row_2_actual.is_none());
 }
 
 #[tokio::test]
