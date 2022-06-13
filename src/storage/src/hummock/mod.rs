@@ -28,6 +28,8 @@ mod sstable;
 pub use sstable::*;
 
 pub mod compaction_executor;
+#[expect(dead_code)]
+mod compaction_group_client;
 pub mod compactor;
 #[cfg(test)]
 mod compactor_tests;

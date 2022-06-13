@@ -16,7 +16,8 @@ use async_trait::async_trait;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use tonic::Streaming;
 
@@ -33,4 +34,5 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn commit_epoch(&self, epoch: HummockEpoch, sstables: Vec<SstableInfo>) -> Result<()>;
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
+    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>>;
 }

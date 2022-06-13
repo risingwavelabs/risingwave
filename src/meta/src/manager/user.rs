@@ -15,13 +15,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_PASSWORD};
+use risingwave_common::catalog::{DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_FOR_PG};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
-use risingwave_pb::user::{AuthInfo, GrantPrivilege, UserInfo};
+use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 
 use crate::manager::{MetaSrvEnv, NotificationVersion};
@@ -56,21 +55,19 @@ impl<S: MetaStore> UserManager<S> {
 
     async fn init(&self) -> Result<()> {
         let mut core = self.core.lock().await;
-        if !core.contains_key(DEFAULT_SUPPER_USER) {
-            let default_user = UserInfo {
-                name: DEFAULT_SUPPER_USER.to_string(),
-                is_supper: true,
-                can_create_db: true,
-                can_login: true,
-                auth_info: Some(AuthInfo {
-                    encryption_type: EncryptionType::Plaintext as i32,
-                    encrypted_value: Vec::from(DEFAULT_SUPPER_USER_PASSWORD.as_bytes()),
-                }),
-                ..Default::default()
-            };
+        for user in [DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_FOR_PG] {
+            if !core.contains_key(user) {
+                let default_user = UserInfo {
+                    name: user.to_string(),
+                    is_supper: true,
+                    can_create_db: true,
+                    can_login: true,
+                    ..Default::default()
+                };
 
-            default_user.insert(self.env.meta_store()).await?;
-            core.insert(DEFAULT_SUPPER_USER.to_string(), default_user);
+                default_user.insert(self.env.meta_store()).await?;
+                core.insert(user.to_string(), default_user);
+            }
         }
 
         Ok(())
@@ -122,7 +119,7 @@ impl<S: MetaStore> UserManager<S> {
                 user_name
             ))));
         }
-        if user_name == DEFAULT_SUPPER_USER {
+        if user_name == DEFAULT_SUPPER_USER || user_name == DEFAULT_SUPPER_USER_FOR_PG {
             return Err(RwError::from(InternalError(format!(
                 "Cannot drop default super user {}",
                 user_name
@@ -390,7 +387,7 @@ mod tests {
             .is_err());
 
         let users = user_manager.list_users().await?;
-        assert_eq!(users.len(), 2);
+        assert_eq!(users.len(), 3);
 
         let object = Object::TableId(0);
         // Grant Select/Insert without grant option.

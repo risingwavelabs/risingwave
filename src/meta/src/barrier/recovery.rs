@@ -116,14 +116,14 @@ where
         .expect("Retry until recovery success.");
         debug!("recovery success");
 
-        return (
+        (
             new_epoch,
             self.fragment_manager.all_chain_actor_ids().await,
             responses
                 .into_iter()
                 .flat_map(|r| r.create_mview_progress)
                 .collect(),
-        );
+        )
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty

@@ -84,7 +84,7 @@ impl Command {
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<'a, S> {
+pub struct CommandContext<'a, S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
     client_pool: StreamClientPoolRef,
@@ -99,7 +99,7 @@ pub struct CommandContext<'a, S> {
     command: Command,
 }
 
-impl<'a, S> CommandContext<'a, S> {
+impl<'a, S: MetaStore> CommandContext<'a, S> {
     pub fn new(
         fragment_manager: FragmentManagerRef<S>,
         client_pool: StreamClientPoolRef,
@@ -219,7 +219,7 @@ where
                 table_fragments,
                 dispatches,
                 table_sink_map,
-                source_state: _source_state,
+                source_state: _,
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {

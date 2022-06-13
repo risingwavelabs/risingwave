@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::sync::Arc;
 
@@ -84,6 +84,7 @@ pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>)
         }),
         file_size: batches.len() as u64,
         vnode_bitmaps: vec![],
+        unit_id: u64::MAX,
     }
 }
 
@@ -123,11 +124,12 @@ pub fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
-    let mut b = SSTableBuilder::new(opts);
+    let mut b = SSTableBuilder::new(0, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }
-    b.finish()
+    let (_, data, meta, vnodes) = b.finish();
+    (data, meta, vnodes)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`

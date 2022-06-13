@@ -16,11 +16,11 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
+use crate::Result;
 
 #[derive(Debug)]
 pub(crate) struct InExpression {
@@ -56,31 +56,17 @@ impl Expression for InExpression {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> risingwave_common::error::Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let input_array = self.left.eval(input)?;
-        let visibility = input.visibility();
-        let mut output_array = BoolArrayBuilder::new(input.cardinality())?;
-        match visibility {
-            Some(bitmap) => {
-                for (data, vis) in input_array.iter().zip_eq(bitmap.iter()) {
-                    if !vis {
-                        continue;
-                    }
-                    let ret = self.exists(&data.to_owned_datum());
-                    output_array.append(Some(ret))?;
-                }
-            }
-            None => {
-                for data in input_array.iter() {
-                    let ret = self.exists(&data.to_owned_datum());
-                    output_array.append(Some(ret))?;
-                }
-            }
-        };
+        let mut output_array = BoolArrayBuilder::new(input_array.len())?;
+        for data in input_array.iter() {
+            let ret = self.exists(&data.to_owned_datum());
+            output_array.append(Some(ret))?;
+        }
         Ok(Arc::new(output_array.finish()?.into()))
     }
 
-    fn eval_row(&self, input: &Row) -> risingwave_common::error::Result<Datum> {
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
         let data = self.left.eval_row(input)?;
         let ret = self.exists(&data);
         Ok(Some(ret.to_scalar_value()))
@@ -110,7 +96,8 @@ mod tests {
              a
              def
              abc",
-        );
+        )
+        .with_invisible_holes();
         let res = search_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Bool(true)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Bool(false)));

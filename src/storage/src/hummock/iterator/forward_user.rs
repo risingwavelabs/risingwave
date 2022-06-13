@@ -46,6 +46,7 @@ pub trait DirectedUserIteratorBuilder {
 }
 
 impl DirectedUserIterator {
+    #[inline(always)]
     pub async fn next(&mut self) -> HummockResult<()> {
         match self {
             Self::Forward(ref mut iter) => iter.next().await,
@@ -69,6 +70,7 @@ impl DirectedUserIterator {
         }
     }
 
+    #[inline(always)]
     pub async fn rewind(&mut self) -> HummockResult<()> {
         match self {
             Self::Forward(ref mut iter) => iter.rewind().await,
@@ -76,7 +78,7 @@ impl DirectedUserIterator {
         }
     }
 
-    #[allow(dead_code)]
+    #[inline(always)]
     pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
         match self {
             Self::Forward(ref mut iter) => iter.seek(user_key).await,
@@ -249,8 +251,8 @@ impl UserIterator {
         // Handle multi-version
         self.last_key.clear();
         // Handle range scan when key > end_key
-        let res = self.next().await;
-        res
+
+        self.next().await
     }
 
     /// Indicates whether the iterator can be used.

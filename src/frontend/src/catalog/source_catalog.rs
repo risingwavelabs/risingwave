@@ -18,6 +18,12 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId, TABLE_SOURCE_PK_COLID};
+
+#[expect(non_snake_case, non_upper_case_globals)]
+pub mod WithOptions {
+    pub const AppenOnly: &str = "appendonly";
+}
+
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
 #[derive(Clone, Debug)]
@@ -27,6 +33,7 @@ pub struct SourceCatalog {
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
     pub source_type: SourceType,
+    pub append_only: bool,
 }
 
 impl SourceCatalog {
@@ -56,7 +63,7 @@ impl From<&ProstSource> for SourceCatalog {
     fn from(prost: &ProstSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
-        let (source_type, prost_columns, pk_col_ids) = match &prost.info {
+        let (source_type, prost_columns, pk_col_ids, with_options) = match &prost.info {
             Some(Info::StreamSource(source)) => (
                 SourceType::Source,
                 source.columns.clone(),
@@ -65,21 +72,33 @@ impl From<&ProstSource> for SourceCatalog {
                     .iter()
                     .map(|id| ColumnId::new(*id))
                     .collect(),
+                source.properties.clone(),
             ),
             Some(Info::TableSource(source)) => (
                 SourceType::Table,
                 source.columns.clone(),
                 vec![TABLE_SOURCE_PK_COLID],
+                source.properties.clone(),
             ),
             None => unreachable!(),
         };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
+
+        // parse options in WITH clause
+        let mut append_only = false;
+        if let Some(val) = with_options.get(WithOptions::AppenOnly) {
+            if val.to_lowercase() == "true" {
+                append_only = true;
+            }
+        }
+
         Self {
             id,
             name,
             columns,
             pk_col_ids,
             source_type,
+            append_only,
         }
     }
 }

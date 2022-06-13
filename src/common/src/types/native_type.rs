@@ -17,21 +17,18 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 
 use super::{OrderedF32, OrderedF64};
-use crate::error::ErrorCode::IoError;
-use crate::error::{Result, RwError};
+use crate::array::ArrayResult;
 
 pub trait NativeType:
     PartialOrd + PartialEq + Debug + Copy + Send + Sync + Sized + Default + 'static
 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize>;
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize>;
     fn hash_wrapper<H: Hasher>(&self, state: &mut H);
 }
 
 impl NativeType for i16 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        output
-            .write(&self.to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
@@ -40,10 +37,8 @@ impl NativeType for i16 {
 }
 
 impl NativeType for i32 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        output
-            .write(&self.to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
@@ -52,10 +47,8 @@ impl NativeType for i32 {
 }
 
 impl NativeType for i64 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        output
-            .write(&self.to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
@@ -64,10 +57,8 @@ impl NativeType for i64 {
 }
 
 impl NativeType for OrderedF32 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        output
-            .write(&self.to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
@@ -76,10 +67,8 @@ impl NativeType for OrderedF32 {
 }
 
 impl NativeType for OrderedF64 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        output
-            .write(&self.to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
@@ -88,10 +77,8 @@ impl NativeType for OrderedF64 {
 }
 
 impl NativeType for u8 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        output
-            .write(&self.to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
@@ -100,10 +87,8 @@ impl NativeType for u8 {
 }
 
 impl NativeType for u16 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        output
-            .write(&self.to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
@@ -112,10 +97,8 @@ impl NativeType for u16 {
 }
 
 impl NativeType for u32 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        output
-            .write(&self.to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
@@ -124,10 +107,8 @@ impl NativeType for u32 {
 }
 
 impl NativeType for u64 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        output
-            .write(&self.to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write(&self.to_be_bytes()).map_err(Into::into)
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {

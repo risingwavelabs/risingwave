@@ -91,7 +91,9 @@ where
     }
 
     fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
-        builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()))
+        builder
+            .append(self.result.as_ref().map(|x| x.as_scalar_ref()))
+            .map_err(Into::into)
     }
 
     fn update_and_output_with_sorted_groups_concrete(
@@ -257,7 +259,7 @@ mod tests {
         let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, true)?;
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
-        builder.finish()
+        builder.finish().map_err(Into::into)
     }
 
     #[test]
@@ -271,7 +273,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
+            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0).unwrap()),
         )?;
         let actual = actual.as_int64();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -290,7 +292,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            DecimalArrayBuilder::new(0)?.into(),
+            DecimalArrayBuilder::new(0).unwrap().into(),
         )?;
         let actual: &DecimalArray = (&actual).into();
         let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
@@ -310,7 +312,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)?),
+            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0).unwrap()),
         )?;
         let actual = actual.as_float32();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -329,7 +331,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)?),
+            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0).unwrap()),
         )?;
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -348,7 +350,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)?),
+            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0).unwrap()),
         )?;
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -367,7 +369,7 @@ mod tests {
                 Arc::new(input),
                 &agg_type,
                 return_type,
-                ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
+                ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0).unwrap()),
             )?;
             let actual = actual.as_int64();
             let actual = actual.iter().collect::<Vec<_>>();

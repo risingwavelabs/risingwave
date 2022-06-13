@@ -37,7 +37,8 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
-    CompactTask, GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot, HummockVersion,
+    CompactTask, CompactionGroup, GetCompactionGroupsRequest, GetCompactionGroupsResponse,
+    GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot, HummockVersion,
     PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
     ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
     ReportVacuumTaskResponse, SstableInfo, SubscribeCompactTasksRequest,
@@ -65,6 +66,7 @@ use risingwave_pb::user::{
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
 
@@ -446,6 +448,12 @@ impl HummockMetaClient for MetaClient {
         self.inner.report_vacuum_task(req).await?;
         Ok(())
     }
+
+    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+        let req = GetCompactionGroupsRequest {};
+        let resp = self.inner.get_compaction_groups(req).await?;
+        Ok(resp.compaction_groups)
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -461,14 +469,34 @@ pub struct GrpcMetaClient {
 }
 
 impl GrpcMetaClient {
+    // Retry base interval in ms for connecting to meta server.
+    const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
+    // Max retry interval in ms for connecting to meta server.
+    const CONN_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
-        let channel = Endpoint::from_shared(addr.to_string())
-            .map_err(|e| InternalError(format!("{}", e)))?
-            .connect_timeout(Duration::from_secs(5))
-            .connect()
-            .await
-            .to_rw_result_with(|| format!("failed to connect to {}", addr))?;
+        let endpoint =
+            Endpoint::from_shared(addr.to_string()).map_err(|e| InternalError(format!("{}", e)))?;
+        let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
+            .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
+            .map(jitter);
+        let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
+            let endpoint = endpoint.clone();
+            endpoint
+                .connect_timeout(Duration::from_secs(5))
+                .connect()
+                .await
+                .map_err(|_e| {
+                    tracing::warn!(
+                        "Failed to connect to meta server: {}, wait for online.",
+                        addr
+                    );
+                })
+        })
+        .await
+        .expect("Retry connecting to meta server");
+
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let ddl_client = DdlServiceClient::new(channel.clone());
@@ -535,6 +563,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
+            ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }

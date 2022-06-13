@@ -118,7 +118,7 @@ impl fmt::Display for BatchSeqScan {
             )
         } else {
             let order_names = self.logical.order_names();
-            #[allow(clippy::disallowed_methods)]
+            #[expect(clippy::disallowed_methods)]
             let mut range_str = self
                 .scan_range
                 .eq_conds
@@ -160,7 +160,7 @@ impl ToBatchProst for BatchSeqScan {
         NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(CellBasedTableDesc {
                 table_id: self.logical.table_desc().table_id.into(),
-                pk: self
+                order_key: self
                     .logical
                     .table_desc()
                     .order_desc

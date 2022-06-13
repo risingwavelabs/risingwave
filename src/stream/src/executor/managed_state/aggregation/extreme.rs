@@ -18,8 +18,8 @@ use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::hash::{HashCode, VirtualNode};
+use risingwave_common::consistent_hash::VirtualNode;
+use risingwave_common::hash::HashCode;
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
@@ -30,6 +30,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::executor::aggregation::{AggArgs, AggCall};
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::PkDataTypes;
 
 pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
@@ -103,16 +104,16 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-    ) -> Result<()>;
+    ) -> StreamExecutorResult<()>;
 
     /// Get the output of the state. Must flush before getting output.
-    async fn get_output(&mut self, epoch: u64) -> Result<Datum>;
+    async fn get_output(&mut self, epoch: u64) -> StreamExecutorResult<Datum>;
 
     /// Check if this state needs a flush.
     fn is_dirty(&self) -> bool;
 
     /// Flush the internal state to a write batch.
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()>;
+    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> StreamExecutorResult<()>;
 }
 
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
@@ -130,7 +131,7 @@ where
         row_count: usize,
         pk_data_types: PkDataTypes,
         group_key_hash_code: HashCode,
-    ) -> Result<Self> {
+    ) -> StreamExecutorResult<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
             top_n: BTreeMap::new(),
@@ -177,7 +178,7 @@ where
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
 
         // For extreme state, there's only one column for data, and following columns are for
@@ -236,11 +237,7 @@ where
                                     }
                                 }
                             }
-                            _ => {
-                                return Err(
-                                    ErrorCode::NotImplemented("".to_string(), None.into()).into()
-                                )
-                            }
+                            _ => unreachable!(),
                         }
                     }
 
@@ -283,7 +280,7 @@ where
         None
     }
 
-    async fn get_output_inner(&mut self, epoch: u64) -> Result<Datum> {
+    async fn get_output_inner(&mut self, epoch: u64) -> StreamExecutorResult<Datum> {
         // To make things easier, we do not allow get_output before flushing. Otherwise we will need
         // to merge data from flush_buffer and state store, which is hard to implement.
         //
@@ -305,7 +302,8 @@ where
 
             for (raw_key, mut raw_value) in all_data {
                 // let mut deserializer = value_encoding::Deserializer::new(raw_value);
-                let value = deserialize_cell(&mut raw_value, &self.data_type)?;
+                let value = deserialize_cell(&mut raw_value, &self.data_type)
+                    .map_err(StreamExecutorError::serde_error)?;
                 let key = value.clone().map(|x| x.try_into().unwrap());
                 let pks = self.serializer.get_pk(&raw_key[..])?;
                 self.top_n.insert((key, pks), value);
@@ -320,7 +318,7 @@ where
     }
 
     /// Flush the internal state to a write batch.
-    fn flush_inner(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+    fn flush_inner(&mut self, write_batch: &mut WriteBatch<S>) -> StreamExecutorResult<()> {
         // Generally, we require the state the be dirty before flushing. However, it is possible
         // that after a sequence of operations, the flush buffer becomes empty. Then, the
         // state becomes "dirty", but we do not need to flush anything.
@@ -340,7 +338,10 @@ where
                 Some(v) => {
                     local.put(
                         key_encoded,
-                        StorageValue::new_put(value_meta, serialize_cell(&v)?),
+                        StorageValue::new_put(
+                            value_meta,
+                            serialize_cell(&v).map_err(StreamExecutorError::serde_error)?,
+                        ),
                     );
                 }
                 None => {
@@ -368,11 +369,11 @@ where
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         _epoch: u64,
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         self.apply_batch_inner(ops, visibility, data).await
     }
 
-    async fn get_output(&mut self, epoch: u64) -> Result<Datum> {
+    async fn get_output(&mut self, epoch: u64) -> StreamExecutorResult<Datum> {
         self.get_output_inner(epoch).await
     }
 
@@ -381,36 +382,8 @@ where
         !self.flush_buffer.is_empty()
     }
 
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> StreamExecutorResult<()> {
         self.flush_inner(write_batch)
-    }
-}
-
-impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
-where
-    A::OwnedItem: Ord,
-{
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub async fn iterate_store(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
-        let epoch = u64::MAX;
-        let all_data = self.keyspace.scan(None, epoch).await?;
-        let mut result = vec![];
-
-        for (raw_key, mut raw_value) in all_data {
-            // let mut deserializer = value_encoding::Deserializer::new(raw_value);
-            let value = deserialize_cell(&mut raw_value, &self.data_type)?;
-            let key = value.clone().map(|x| x.try_into().unwrap());
-            let pks = self.serializer.get_pk(&raw_key[..])?;
-            result.push((key, pks));
-        }
-        Ok(result)
-    }
-
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub async fn iterate_topn_cache(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
-        Ok(self.top_n.iter().map(|(k, _)| k.clone()).collect())
     }
 }
 
@@ -421,7 +394,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     top_n_count: Option<usize>,
     pk_data_types: PkDataTypes,
     key_hash_code: Option<HashCode>,
-) -> Result<Box<dyn ManagedTableState<S>>> {
+) -> StreamExecutorResult<Box<dyn ManagedTableState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
             if agg_call.return_type != *x {

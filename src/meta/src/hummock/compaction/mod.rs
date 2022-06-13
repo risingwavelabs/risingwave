@@ -26,10 +26,7 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, CompactionConfig, HummockVersion, KeyRange, Level,
-    TableSetStatistics,
-};
+use risingwave_pb::hummock::{CompactTask, CompactionConfig, HummockVersion, KeyRange, Level};
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
@@ -127,6 +124,7 @@ impl CompactStatus {
         } else {
             ret.split_ranges
         };
+
         let compact_task = CompactTask {
             input_ssts: vec![ret.select_level, ret.target_level],
             splits,
@@ -137,26 +135,10 @@ impl CompactStatus {
             is_target_ultimate_and_leveling: target_level_id as usize
                 == self.level_handlers.len() - 1
                 && select_level_id > 0,
-            metrics: Some(CompactMetrics {
-                read_level_n: Some(TableSetStatistics {
-                    level_idx: select_level_id,
-                    size_kb: 0,
-                    cnt: 0,
-                }),
-                read_level_nplus1: Some(TableSetStatistics {
-                    level_idx: target_level_id,
-                    size_kb: 0,
-                    cnt: 0,
-                }),
-                write: Some(TableSetStatistics {
-                    level_idx: target_level_id,
-                    size_kb: 0,
-                    cnt: 0,
-                }),
-            }),
             task_status: false,
             vnode_mappings: vec![],
             compaction_group_id,
+            existing_table_ids: vec![],
         };
         Some(compact_task)
     }

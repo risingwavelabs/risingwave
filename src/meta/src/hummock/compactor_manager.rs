@@ -132,7 +132,7 @@ impl CompactorManager {
 #[cfg(test)]
 mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_pb::hummock::{CompactMetrics, CompactTask, TableSetStatistics};
+    use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::test_utils::{generate_test_tables, setup_compute_env};
@@ -165,14 +165,10 @@ mod tests {
             task_id,
             target_level: 0,
             is_target_ultimate_and_leveling: false,
-            metrics: Some(CompactMetrics {
-                read_level_n: Some(TableSetStatistics::default()),
-                read_level_nplus1: Some(TableSetStatistics::default()),
-                write: Some(TableSetStatistics::default()),
-            }),
             task_status: false,
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
+            existing_table_ids: vec![],
         }
     }
 

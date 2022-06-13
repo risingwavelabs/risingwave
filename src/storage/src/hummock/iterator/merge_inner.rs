@@ -113,7 +113,6 @@ pub struct MergeIteratorInner<D: HummockIteratorDirection, NE: NodeExtraOrderInf
 pub type OrderedMergeIteratorInner<D> = MergeIteratorInner<D, OrderedNodeExtra>;
 
 impl<D: HummockIteratorDirection> OrderedMergeIteratorInner<D> {
-    #[allow(dead_code)]
     pub fn new(
         iterators: impl IntoIterator<Item = BoxedHummockIterator<D>>,
         stats: Arc<StateStoreMetrics>,

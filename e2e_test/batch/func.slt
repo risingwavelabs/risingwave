@@ -99,7 +99,7 @@ select concat_ws(',', 1, 1.01, 'A', true, NULL);
 1,1.01,A,true
 
 statement ok
-create table t (v1 varchar, v2 smallint, v3 int, v4 decimal, v5 real, v6 double, v7 bool, v8 varchar);
+create table t (v1 varchar, v2 smallint, v3 int, v4 decimal, v5 real, v6 double, v7 bool, v8 string);
 
 statement ok
 insert into t values (',', 1, 2, 3.01, 4, 5.01, true, NULL);
@@ -148,3 +148,13 @@ query I
 select char_length('abcdefghijklmnopqrstuvwxyz');
 ----
 26
+
+query I
+select repeat('hello', 3);
+----
+hellohellohello
+
+query I
+select repeat('hello', -1);
+----
+(empty)

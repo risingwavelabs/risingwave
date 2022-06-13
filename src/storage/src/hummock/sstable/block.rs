@@ -84,7 +84,7 @@ impl Block {
     }
 
     /// Entries data len.
-    #[allow(clippy::len_without_is_empty)]
+    #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         assert!(!self.data.is_empty());
         self.data.len()
@@ -299,7 +299,7 @@ impl BlockBuilder {
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 encoder
-                    .write(&self.buf[..])
+                    .write_all(&self.buf[..])
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 let (writer, result) = encoder.finish();
@@ -312,7 +312,7 @@ impl BlockBuilder {
                         .map_err(HummockError::encode_error)
                         .unwrap();
                 encoder
-                    .write(&self.buf[..])
+                    .write_all(&self.buf[..])
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 let writer = encoder

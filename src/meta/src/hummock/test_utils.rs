@@ -109,6 +109,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
                     bitmap: vec![],
                 },
             ],
+            unit_id: 0,
         });
     }
     sst_info
@@ -162,16 +163,18 @@ pub async fn setup_compute_env(
         .min_compaction_bytes(1)
         .max_bytes_for_level_base(1)
         .build();
-    let compaction_group_manager =
+    let compaction_group_manager = Arc::new(
         CompactionGroupManager::new_with_config(env.clone(), config.clone())
             .await
-            .unwrap();
+            .unwrap(),
+    );
+
     let hummock_manager = Arc::new(
         HummockManager::new(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
-            Arc::new(compaction_group_manager),
+            compaction_group_manager,
         )
         .await
         .unwrap(),

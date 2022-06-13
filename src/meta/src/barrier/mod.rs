@@ -449,13 +449,11 @@ where
     }
 
     /// Schedule a command and return immediately.
-    #[allow(dead_code)]
     pub async fn schedule_command(&self, command: Command) -> Result<()> {
         self.do_schedule(command, Default::default()).await
     }
 
     /// Schedule a command and return when its corresponding barrier is about to sent.
-    #[allow(dead_code)]
     pub async fn issue_command(&self, command: Command) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.do_schedule(

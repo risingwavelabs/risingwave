@@ -373,9 +373,6 @@ template:
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
-    # Whether to enable in-memory pure KV state backend
-    enable-in-memory-kv-state-backend: false
-
   meta-node:
     # Meta-node advertise address
     address: "127.0.0.1"
@@ -434,6 +431,9 @@ template:
 
     # Etcd used by this Prometheus instance
     provide-etcd: "etcd*"
+
+    # Redpanda used by this Prometheus instance
+    provide-redpanda: "redpanda*"
 
   frontend:
     # Advertise address of frontend

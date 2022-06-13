@@ -39,7 +39,7 @@ impl Binder {
                 let s: ExprImpl = self.bind_string(value)?.into();
                 s.cast_explicit(bind_data_type(&data_type)?)
             }
-            Expr::Row(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_row(&exprs)?))),
+            Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
@@ -204,7 +204,7 @@ impl Binder {
         if return_type.is_numeric() {
             return Ok(expr);
         }
-        return Err(ErrorCode::InvalidInputSyntax(format!("+ {:?}", return_type)).into());
+        Err(ErrorCode::InvalidInputSyntax(format!("+ {:?}", return_type)).into())
     }
 
     pub(super) fn bind_trim(
@@ -382,7 +382,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar(_) => DataType::Varchar,
+        AstDataType::Varchar(_) | AstDataType::String => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
