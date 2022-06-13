@@ -138,6 +138,7 @@ pub struct FrontendEnv {
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    server_addr: HostAddr,
 }
 
 impl FrontendEnv {
@@ -166,6 +167,7 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
             compute_client_pool,
         );
+        let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         Self {
             meta_client,
             catalog_writer,
@@ -175,6 +177,7 @@ impl FrontendEnv {
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
+            server_addr,
         }
     }
 
@@ -254,6 +257,7 @@ impl FrontendEnv {
                 meta_client: frontend_meta_client,
                 query_manager,
                 hummock_snapshot_manager,
+                server_addr: frontend_address,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -303,6 +307,10 @@ impl FrontendEnv {
 
     pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManagerRef {
         &self.hummock_snapshot_manager
+    }
+
+    pub fn server_address(&self) -> &HostAddr {
+        &self.server_addr
     }
 }
 

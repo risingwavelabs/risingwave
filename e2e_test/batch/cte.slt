@@ -37,6 +37,16 @@ with cte1 as (select v3, v4 from t2), cte2 as (select v3 from cte1) select v3 fr
 3
 1
 
+query II
+with t1 as (values(100, 200)) select * from t1;
+----
+100 200
+
+query II
+with t1 as (values(100, 200)) select * from public.t1;
+----
+1 2
+
 statement ok
 drop table t1;
 
