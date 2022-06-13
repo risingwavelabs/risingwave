@@ -28,7 +28,6 @@ use tracing::error;
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::group_builder::DEFAULT_KEY_VALUE_GROUP_ID;
 use crate::hummock::shared_buffer::{OrderIndex, OrderSortedUncommittedData};
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;

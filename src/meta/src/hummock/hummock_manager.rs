@@ -596,25 +596,6 @@ where
                         .fold(max_committed_epoch, std::cmp::min)
                 };
 
-<<<<<<< wallace/fix-compact
-                // do not split units for a small compaction.
-                if compact_task.target_level != 0
-                    || compact_task.input_ssts[0].total_file_size > self.config.min_compaction_bytes
-                {
-                    let table_ids = compact_task
-                        .input_ssts
-                        .iter()
-                        .flat_map(|level| {
-                            level
-                                .table_infos
-                                .iter()
-                                .flat_map(|sst_info| {
-                                    sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
-                                })
-                                .collect_vec()
-                        })
-                        .collect::<HashSet<u32>>();
-=======
                 // to get all relational table_id from sst_info
                 let table_ids = compact_task
                     .input_ssts
@@ -631,12 +612,14 @@ where
                     .collect::<HashSet<u32>>();
 
                 if compact_task.target_level != 0 {
->>>>>>> main
                     compact_task.vnode_mappings.reserve_exact(table_ids.len());
                 }
 
                 for table_id in table_ids {
-                    if compact_task.target_level != 0 {
+                    if compact_task.target_level != 0
+                        || compact_task.input_ssts[0].total_file_size
+                            > compact_status.get_config().min_compaction_bytes
+                    {
                         if let Some(vnode_mapping) = self
                             .env
                             .hash_mapping_manager()

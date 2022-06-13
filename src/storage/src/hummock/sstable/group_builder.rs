@@ -156,7 +156,6 @@ where
             .for_each(|(_k, v)| v.seal_current());
     }
 
-
     pub fn finish(mut self) -> Vec<SealedSstableBuilder> {
         self.seal_current();
         self.builders

@@ -110,7 +110,6 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
                     bitmap: vec![],
                 },
             ],
-            unit_id: 0,
         });
     }
     sst_info
@@ -166,11 +165,6 @@ pub async fn setup_compute_env(
         .build();
     let compaction_group_manager = Arc::new(
         CompactionGroupManager::new_with_config(env.clone(), config.clone())
-            .await
-            .unwrap(),
-    );
-    let fragment_manager = Arc::new(
-        FragmentManager::new(env.clone(), compaction_group_manager.clone())
             .await
             .unwrap(),
     );

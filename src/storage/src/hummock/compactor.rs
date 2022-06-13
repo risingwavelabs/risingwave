@@ -550,36 +550,6 @@ impl Compactor {
             compaction_filter,
         )
         .await?;
-<<<<<<< wallace/fix-compact
-
-        // Seal.
-        builder.seal_current();
-
-        let mut ssts = Vec::new();
-        ssts.reserve(builder.len());
-        // TODO: decide upload concurrency. Maybe we shall create a upload task channel for multiple
-        // compaction tasks.
-        let mut pending_requests = vec![];
-        let files = builder.finish();
-        let file_count = files.len();
-        for (table_id, group_id, data, meta, vnode_bitmaps) in files {
-            let sst = Sstable { id: table_id, meta };
-            let len = data.len();
-            ssts.push((sst.clone(), group_id, vnode_bitmaps));
-            if file_count > 1 {
-                let sstable_store = self.context.sstable_store.clone();
-                let ret =
-                    tokio::spawn(
-                        async move { sstable_store.put(sst, data, CachePolicy::Fill).await },
-                    );
-                pending_requests.push(ret);
-            } else {
-                self.context
-                    .sstable_store
-                    .put(sst, data, CachePolicy::Fill)
-                    .await?;
-            }
-=======
         let builder_len = builder.len();
         let sealed_builders = builder.finish();
         compact_timer.observe_duration();
@@ -599,7 +569,6 @@ impl Compactor {
             let len = data_len;
             ssts.push((sst.clone(), unit_id, vnode_bitmaps));
             upload_join_handles.push(upload_join_handle);
->>>>>>> main
 
             if self.context.is_share_buffer_compact {
                 self.context

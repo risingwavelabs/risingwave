@@ -149,13 +149,7 @@ impl CompactionPicker for TierCompactionPicker {
         {
             level
         } else {
-            if let Some(level) =
-                self.pick_by_unit(levels, level_handlers, |unit_id| unit_id == u64::MAX)
-            {
-                level
-            } else {
-                return None;
-            }
+            self.pick_by_unit(levels, level_handlers, |unit_id| unit_id == u64::MAX)?
         };
         Some(SearchResult {
             select_level,
@@ -432,7 +426,7 @@ impl LevelCompactionPicker {
 
             // do not schedule tasks with small data to base level
             if select_compaction_bytes < self.config.max_bytes_for_level_base / 2
-                && select_level_ssts.len() < self.config.level0_tier_compact_file_number
+                && select_level_ssts.len() < self.config.level0_tier_compact_file_number as usize
             {
                 continue;
             }
@@ -558,7 +552,11 @@ pub mod tests {
         let config = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
             .build();
-        let picker = TierCompactionPicker::new(2, Arc::new(config));
+        let picker = TierCompactionPicker::new(
+            2,
+            Arc::new(config),
+            Arc::new(RangeOverlapStrategy::default()),
+        );
         levels[0]
             .table_infos
             .push(generate_table(9, 1, 100, 400, 3));

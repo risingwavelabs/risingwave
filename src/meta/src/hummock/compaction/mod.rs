@@ -76,7 +76,6 @@ pub struct SearchResult {
     split_ranges: Vec<KeyRange>,
 }
 
-
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
     match compaction_mode {
         CompactionMode::Range => Arc::new(RangeOverlapStrategy::default()),
@@ -240,5 +239,9 @@ impl CompactStatus {
 
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
+    }
+
+    pub fn get_config(&self) -> &CompactionConfig {
+        &self.compaction_config
     }
 }

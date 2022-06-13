@@ -291,17 +291,6 @@ pub mod tests {
 
     #[test]
     fn test_dynamic_level() {
-<<<<<<< wallace/fix-compact
-        let config = CompactionConfig {
-            max_bytes_for_level_base: 100,
-            max_level: 4,
-            max_bytes_for_level_multiplier: 5,
-            max_compaction_bytes: 0,
-            min_compaction_bytes: 1,
-            level0_tier_compact_file_number: 2,
-            compaction_mode: RangeMode,
-        };
-=======
         let config = CompactionConfigBuilder::new()
             .max_bytes_for_level_base(100)
             .max_level(4)
@@ -312,7 +301,6 @@ pub mod tests {
             .level0_tier_compact_file_number(2)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
->>>>>>> main
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
         let mut levels = vec![
@@ -385,17 +373,6 @@ pub mod tests {
 
     #[test]
     fn test_pick_compaction() {
-<<<<<<< wallace/fix-compact
-        let mut config = CompactionConfig {
-            max_bytes_for_level_base: 200,
-            max_level: 4,
-            max_bytes_for_level_multiplier: 5,
-            max_compaction_bytes: 10000,
-            min_compaction_bytes: 200,
-            level0_tier_compact_file_number: 4,
-            compaction_mode: RangeMode,
-        };
-=======
         let config = CompactionConfigBuilder::new()
             .max_bytes_for_level_base(200)
             .max_level(4)
@@ -406,7 +383,6 @@ pub mod tests {
             .level0_tier_compact_file_number(4)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
->>>>>>> main
         let mut levels = vec![
             generate_level(0, generate_tables(15..25, 0..600, 3, 10)),
             generate_level(1, vec![]),
@@ -429,16 +405,10 @@ pub mod tests {
         assert_eq!(compaction.select_level.table_infos.len(), 10);
         assert_eq!(compaction.target_level.table_infos.len(), 0);
 
-<<<<<<< wallace/fix-compact
-        config.min_compaction_bytes = 1;
-        config.max_bytes_for_level_base = 100;
-=======
         let config = CompactionConfigBuilder::new_with(config)
             .min_compaction_bytes(1)
             .max_bytes_for_level_base(100)
-            .level0_tigger_file_numer(8)
             .build();
->>>>>>> main
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
