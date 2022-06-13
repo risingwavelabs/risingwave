@@ -299,7 +299,7 @@ impl StageGraphBuilder {
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
     pub fn split(mut self, batch_node: PlanRef) -> Result<Query> {
-        let root_stage = self.new_stage(batch_node.clone(), None, None);
+        let root_stage = self.new_stage(batch_node.clone(), None);
         let stage_graph = self.stage_graph_builder.build(root_stage.id);
         Ok(Query {
             stage_graph,
@@ -307,12 +307,7 @@ impl BatchPlanFragmenter {
         })
     }
 
-    fn new_stage(
-        &mut self,
-        root: PlanRef,
-        _parent_parallelism: Option<u32>,
-        exchange_info: Option<ExchangeInfo>,
-    ) -> QueryStageRef {
+    fn new_stage(&mut self, root: PlanRef, exchange_info: Option<ExchangeInfo>) -> QueryStageRef {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
         let parallelism = match root.distribution() {
@@ -374,11 +369,7 @@ impl BatchPlanFragmenter {
     ) {
         let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
         let child_exchange_info = Some(node.distribution().to_prost(builder.parallelism));
-        let child_stage = self.new_stage(
-            node.inputs()[0].clone(),
-            Some(builder.parallelism),
-            child_exchange_info,
-        );
+        let child_stage = self.new_stage(node.inputs()[0].clone(), child_exchange_info);
         execution_plan_node.stage_id = Some(child_stage.id);
 
         if let Some(parent) = parent_exec_node {
