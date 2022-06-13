@@ -148,6 +148,13 @@ impl FunctionCall {
                     .try_collect()?;
                 Ok(DataType::Varchar)
             }
+            ExprType::ConcatOp => {
+                inputs = inputs
+                    .into_iter()
+                    .map(|input| input.cast_explicit(DataType::Varchar))
+                    .try_collect()?;
+                Ok(DataType::Varchar)
+            }
 
             _ => infer_type(
                 func_type,

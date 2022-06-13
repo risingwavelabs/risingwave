@@ -12,33 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod agg;
-pub mod arithmetic_op;
-pub mod array_access;
-pub mod ascii;
-pub mod bitwise_op;
-pub mod cast;
-pub mod cmp;
-pub mod concat_op;
-pub mod conjunction;
-pub mod extract;
-pub mod length;
-pub mod like;
-pub mod lower;
-pub mod ltrim;
-pub mod md5;
-pub mod position;
-pub mod repeat;
-pub mod replace;
-pub mod round;
-pub mod rtrim;
-pub mod split_part;
-pub mod substr;
-pub mod to_char;
-pub mod translate;
-pub mod trim;
-pub mod tumble;
-pub mod upper;
+use crate::Result;
+
+#[inline(always)]
+pub fn concat_op(left: &str, right: &str) -> Result<String> {
+    Ok(left.chars().chain(right.chars()).collect())
+}
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_concat_op() {
+        assert_eq!(concat_op("114", "514").unwrap(), "114514".to_owned())
+    }
+}

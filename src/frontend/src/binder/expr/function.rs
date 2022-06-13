@@ -122,7 +122,7 @@ impl Binder {
         }
     }
 
-    pub(super) fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+    fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         if inputs.is_empty() {
             Err(ErrorCode::BindError(
                 "Function `Concat` takes at least 1 arguments (0 given)".to_string(),

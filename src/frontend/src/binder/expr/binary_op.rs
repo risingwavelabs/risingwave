@@ -65,8 +65,7 @@ impl Binder {
         .into())
     }
 
-    /// Bind `||`. Based on the types of the inputs, this can be string concat or others like array
-    /// concat.
+    /// Bind `||`. Based on the types of the inputs, this can be string concat or array concat.
     fn bind_concat_op(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
         let types = [left.return_type(), right.return_type()];
 
@@ -75,11 +74,7 @@ impl Binder {
 
         // StringConcat
         if has_string && !has_array {
-            Ok(FunctionCall::new(
-                ExprType::ConcatWs,
-                Self::rewrite_concat_to_concat_ws(vec![left, right])?,
-            )?
-            .into())
+            Ok(FunctionCall::new(ExprType::ConcatOp, vec![left, right])?.into())
         }
         // ArrayConcat
         else if has_array {

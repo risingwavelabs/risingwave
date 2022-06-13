@@ -25,6 +25,7 @@ use crate::for_all_cmp_variants;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
+use crate::vector_op::concat_op::*;
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
@@ -473,6 +474,9 @@ pub fn new_binary_expr(
             l, r, ret, position,
         )),
         Type::TumbleStart => new_tumble_start(l, r, ret),
+        Type::ConcatOp => Box::new(BinaryExpression::<Utf8Array, Utf8Array, Utf8Array, _>::new(
+            l, r, ret, concat_op,
+        )),
 
         tp => {
             unimplemented!(
