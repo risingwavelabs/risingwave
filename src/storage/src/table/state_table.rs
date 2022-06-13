@@ -68,7 +68,7 @@ impl<S: StateStore> StateTable<S> {
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
                 cell_based_keyspace,
-                cell_based_column_descs, // TODO: This needs to be partial rows?
+                cell_based_column_descs,
                 Some(OrderedRowSerializer::new(order_types)),
                 Arc::new(StateStoreMetrics::unused()),
                 dist_key_indices,

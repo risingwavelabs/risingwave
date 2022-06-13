@@ -29,7 +29,7 @@ use crate::{Keyspace, StateStore};
 /// `DedupPkStateTable` is the interface which
 /// transforms input Rows into Rows w/o public key cells
 /// to reduce storage cost.
-/// Trade-off is that every access and retrieve involves ser/de, which is expensive.
+/// Trade-off is that access involves overhead of ser/de
 pub struct DedupPkStateTable<S: StateStore> {
     inner: StateTable<S>,
     pk_decoder: OrderedRowDeserializer,
