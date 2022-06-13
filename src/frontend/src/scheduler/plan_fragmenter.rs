@@ -144,7 +144,7 @@ impl Query {
         &self.query_id
     }
 
-    pub fn stage_has_table_scan(&self) -> Vec<StageId> {
+    pub fn stages_with_table_scan(&self) -> Vec<StageId> {
         self.stage_graph
             .stages
             .iter()
