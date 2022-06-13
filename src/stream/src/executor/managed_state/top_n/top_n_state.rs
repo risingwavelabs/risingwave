@@ -252,7 +252,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 }
             }
             TOP_N_MAX => {
-                let state_table_iter = self.state_table.iter(epoch).await?;
+                let state_table_iter = self.state_table.iter_rev(epoch).await?;
                 pin_mut!(state_table_iter);
 
                 loop {

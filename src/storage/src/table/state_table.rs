@@ -95,12 +95,12 @@ impl<S: StateStore> StateTable<S> {
     /// write methods
     pub fn insert<const RVERSE: bool>(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        println!("write to storage pk = {:?}", pk);
+        println!("\nwrite to storage pk = {:?}", pk);
         let pk_bytes = match RVERSE {
             true => reverse_serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
             false => serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
         };
-        println!("write to storage pk_bytes = {:?}", pk_bytes);
+        println!("write to storage pk_bytes = {:?}\n", pk_bytes);
 
         self.mem_table.insert(pk_bytes, value)?;
         Ok(())
@@ -108,11 +108,12 @@ impl<S: StateStore> StateTable<S> {
 
     pub fn delete<const RVERSE: bool>(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
+        println!("\nwrite to storage pk = {:?}", pk);
         let pk_bytes = match RVERSE {
             true => reverse_serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
             false => serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
         };
-        println!("delete write to storage pk_bytes = {:?}", pk_bytes);
+        println!("delete write to storage pk_bytes = {:?}\n", pk_bytes);
         self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }
@@ -278,6 +279,7 @@ impl<S: StateStore> StateTableRowIter<S> {
         cell_based_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
     ) {
+        println!("一次next\n");
         let cell_based_table_iter: futures::stream::Peekable<_> =
             CellBasedTableStreamingIter::new_with_bounds(
                 keyspace,
@@ -369,7 +371,7 @@ impl<S: StateStore> StateTableRowIter<S> {
         cell_based_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
     ) {
-        println!("走的是rev");
+        println!("一次rev next\n");
         let cell_based_table_iter: futures::stream::Peekable<_> =
             CellBasedTableStreamingIter::new_with_bounds(
                 keyspace,
@@ -413,7 +415,9 @@ impl<S: StateStore> StateTableRowIter<S> {
                     match cell_based_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
                             // cell_based_table_item will be return
+
                             let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+                            println!("Less write cell_item = {:?}", row);
                             yield Cow::Owned(row);
                         }
                         Ordering::Equal => {
@@ -422,10 +426,14 @@ impl<S: StateStore> StateTableRowIter<S> {
                             // once.
                             let row_op = mem_table_iter.next().unwrap().1;
                             match row_op {
-                                RowOp::Insert(row) => yield Cow::Borrowed(row),
+                                RowOp::Insert(row) => {
+                                    println!("Equal write mem_item_insert = {:?}", row);
+                                    yield Cow::Borrowed(row);
+                                }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update((old_row, new_row)) => {
                                     debug_assert!(old_row == cell_based_row);
+                                    println!("Equal write mem_item_update = {:?}", new_row);
                                     yield Cow::Borrowed(new_row);
                                 }
                             }
@@ -435,7 +443,10 @@ impl<S: StateStore> StateTableRowIter<S> {
                             // mem_table_item will be return
                             let row_op = mem_table_iter.next().unwrap().1;
                             match row_op {
-                                RowOp::Insert(row) => yield Cow::Borrowed(row),
+                                RowOp::Insert(row) => {
+                                    println!("Greater write mem_item_insert = {:?}", row);
+                                    yield Cow::Borrowed(row);
+                                }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update(_) => unreachable!(),
                             }
@@ -452,8 +463,6 @@ impl<S: StateStore> StateTableRowIter<S> {
             }
         }
     }
-
-   
 }
 
 fn err(rw: impl Into<RwError>) -> StorageError {

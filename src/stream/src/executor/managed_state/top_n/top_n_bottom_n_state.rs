@@ -16,7 +16,7 @@
 #![allow(dead_code)]
 
 use std::vec::Drain;
-
+use std::ops::Index;
 use futures::pin_mut;
 use futures::stream::StreamExt;
 use madsim::collections::BTreeMap;
@@ -278,13 +278,23 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     /// `flush`.
     pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
         debug_assert!(!self.is_dirty());
-        let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_MIN>::new(
-            self.keyspace.iter(epoch).await?,
-            &mut self.ordered_row_deserializer,
-            &mut self.cell_based_row_deserializer,
-        );
-        while let Some((pk, row)) = pk_and_row_iter.next().await? {
-            self.bottom_n.insert(pk, row);
+        let state_table_iter = self.state_table.iter(epoch).await?;
+        pin_mut!(state_table_iter);
+        while let Some(res) = state_table_iter.next().await{
+            let row = res.unwrap().into_owned();
+            println!("\nfill in cache res = {:?}", row);
+            println!(
+                "\nself.state_table.pk_indices = {:?}",
+                self.state_table.pk_indices
+            );
+            let mut datums = vec![];
+            for pk_indice in &self.state_table.pk_indices {
+                let a = row.index(*pk_indice).clone();
+                datums.push(a);
+            }
+            let pk = Row::new(datums);
+            let pk_ordered = OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+            self.bottom_n.insert(pk_ordered, row);
         }
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
         Ok(())
