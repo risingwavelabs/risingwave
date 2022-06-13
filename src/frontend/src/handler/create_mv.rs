@@ -62,8 +62,6 @@ pub fn gen_create_mv_plan(
     let materialize = plan_root.gen_create_mv_plan(table_name)?;
     let table = materialize.table().to_prost(schema_id, database_id);
     let plan: PlanRef = materialize.into();
-    dbg!(eprintln!("{}", plan.explain_to_string().unwrap()));
-    dbg!(plan.schema());
 
     Ok((plan, table))
 }

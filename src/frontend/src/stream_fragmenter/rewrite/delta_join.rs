@@ -232,7 +232,6 @@ impl StreamFragmenter {
                 .map(|&x| tmp[x as usize])
                 .collect_vec()
         };
-        dbg!(&lookup_0_column_reordering);
         // lookup left table by right stream
         let lookup_0 = self.build_lookup_for_delta_join(
             state,
