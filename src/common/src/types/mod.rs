@@ -33,8 +33,8 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
 pub use scalar_impl::*;
-mod chrono_wrapper;
-mod decimal;
+pub mod chrono_wrapper;
+pub mod decimal;
 pub mod interval;
 
 mod ordered_float;

@@ -34,6 +34,7 @@ log = "0.4"
 madsim = "=0.2.0-alpha.3"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
+mysql_async = "0.30"
 num-traits = "0.2"
 paste = "1"
 prost = "0.10"
@@ -61,5 +62,6 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 rand = "0.8"
+rust_decimal = "1"
 tempfile = "3"
 wiremock = "0.5"
