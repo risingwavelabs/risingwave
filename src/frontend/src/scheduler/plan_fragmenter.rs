@@ -232,6 +232,10 @@ impl StageGraph {
         self.child_edges.get(stage_id).unwrap()
     }
 
+    pub fn get_child_stages(&self, stage_id: &StageId) -> Option<&HashSet<StageId>> {
+        self.child_edges.get(stage_id)
+    }
+
     /// Returns stage ids in topology order, e.g. child stage always appears before parent.
     pub fn stage_ids_by_topo_order(&self) -> impl Iterator<Item = StageId> {
         let mut stack = Vec::with_capacity(self.stages.len());
