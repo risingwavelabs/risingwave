@@ -510,7 +510,7 @@
             BatchFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($1 >= (0.08:Decimal - 0.01:Decimal)) AND ($1 <= (0.08:Decimal + 0.01:Decimal)) AND ($2 < 24:Int32) }
               BatchScan { table: lineitem, columns: [l_extendedprice, l_discount, l_quantity, l_shipdate] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), revenue], pk_columns: [agg#0, revenue] }
+    StreamMaterialize { columns: [agg#0(hidden), revenue], pk_columns: [] }
       StreamSimpleAgg { aggs: [count, sum($0)] }
         StreamExchange { dist: Single }
           StreamProject { exprs: [($0 * $1), $2] }
@@ -1202,8 +1202,8 @@
                 BatchExchange { order: [], dist: HashShard([0]) }
                   BatchScan { table: part, columns: [p_partkey, p_type] }
   stream_plan: |
-    StreamMaterialize { columns: [promo_revenue, agg#0(hidden), agg#1(hidden), agg#2(hidden)], pk_columns: [agg#0, agg#1, agg#2] }
-      StreamProject { exprs: [((100.00:Decimal * $1) / $2), $0, $1, $2] }
+    StreamMaterialize { columns: [promo_revenue], pk_columns: [] }
+      StreamProject { exprs: [((100.00:Decimal * $1) / $2)] }
         StreamSimpleAgg { aggs: [count, sum($0), sum($1)] }
           StreamExchange { dist: Single }
             StreamProject { exprs: [Case(Like($5, 'PROMO%':Varchar), ($1 * (1:Int32 - $2)), 0:Int32::Decimal), ($1 * (1:Int32 - $2)), $3, $6] }
@@ -1275,28 +1275,29 @@
                             BatchFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
                               BatchScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
   stream_plan: |
-    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, _row_id(hidden), l_suppkey(hidden), agg#0(hidden), agg#1(hidden)], pk_columns: [_row_id, l_suppkey, agg#0, agg#1], order_descs: [s_suppkey, _row_id, l_suppkey, agg#0, agg#1] }
-      StreamExchange { dist: HashShard([5, 6, 7, 8]) }
-        StreamHashJoin { type: Inner, predicate: $4 = $8 }
-          StreamExchange { dist: HashShard([4]) }
-            StreamProject { exprs: [$0, $1, $2, $3, $7, $4, $5] }
-              StreamHashJoin { type: Inner, predicate: $0 = $5 }
-                StreamExchange { dist: HashShard([0]) }
-                  StreamTableScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone, _row_id], pk_indices: [4] }
-                StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, _row_id(hidden), l_suppkey(hidden)], pk_columns: [_row_id, l_suppkey], order_descs: [s_suppkey, _row_id, l_suppkey] }
+      StreamExchange { dist: HashShard([5, 6]) }
+        StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6] }
+          StreamHashJoin { type: Inner, predicate: $4 = $8 }
+            StreamExchange { dist: HashShard([4]) }
+              StreamProject { exprs: [$0, $1, $2, $3, $7, $4, $5] }
+                StreamHashJoin { type: Inner, predicate: $0 = $5 }
                   StreamExchange { dist: HashShard([0]) }
-                    StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $3] }
-                      StreamFilter { predicate: ($4 >= '1993-01-01':Varchar::Date) AND ($4 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                        StreamTableScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, _row_id, l_shipdate], pk_indices: [3] }
-          StreamExchange { dist: HashShard([1]) }
-            StreamSimpleAgg { aggs: [count, max($0)] }
-              StreamExchange { dist: Single }
-                StreamProject { exprs: [$2, $0] }
+                    StreamTableScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone, _row_id], pk_indices: [4] }
                   StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
                     StreamExchange { dist: HashShard([0]) }
                       StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $3] }
                         StreamFilter { predicate: ($4 >= '1993-01-01':Varchar::Date) AND ($4 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
                           StreamTableScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, _row_id, l_shipdate], pk_indices: [3] }
+            StreamExchange { dist: HashShard([1]) }
+              StreamSimpleAgg { aggs: [count, max($0)] }
+                StreamExchange { dist: Single }
+                  StreamProject { exprs: [$2, $0] }
+                    StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $3] }
+                          StreamFilter { predicate: ($4 >= '1993-01-01':Varchar::Date) AND ($4 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                            StreamTableScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, _row_id, l_shipdate], pk_indices: [3] }
 - id: tpch_q16
   before:
     - create_tables
@@ -1411,8 +1412,8 @@
                           BatchProject { exprs: [$1, $0] }
                             BatchScan { table: lineitem, columns: [l_partkey, l_quantity] }
   stream_plan: |
-    StreamMaterialize { columns: [avg_yearly, agg#0(hidden), agg#1(hidden)], pk_columns: [agg#0, agg#1] }
-      StreamProject { exprs: [RoundDigit(($1 / 7.0:Decimal), 16:Int32), $0, $1] }
+    StreamMaterialize { columns: [avg_yearly], pk_columns: [] }
+      StreamProject { exprs: [RoundDigit(($1 / 7.0:Decimal), 16:Int32)] }
         StreamSimpleAgg { aggs: [count, sum($0)] }
           StreamExchange { dist: Single }
             StreamProject { exprs: [$1, $4, $5, $6, $7, $8, $0, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28] }
@@ -1568,7 +1569,7 @@
                   BatchFilter { predicate: ($2 >= 1:Int32) }
                     BatchScan { table: part, columns: [p_partkey, p_brand, p_size, p_container] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), revenue], pk_columns: [agg#0, revenue] }
+    StreamMaterialize { columns: [agg#0(hidden), revenue], pk_columns: [] }
       StreamSimpleAgg { aggs: [count, sum($0)] }
         StreamExchange { dist: Single }
           StreamProject { exprs: [($2 * (1:Int32 - $3)), $4, $9] }
