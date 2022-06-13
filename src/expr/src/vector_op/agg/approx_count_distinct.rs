@@ -22,14 +22,21 @@ use risingwave_common::types::*;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
-const INDEX_BITS: u8 = 10; // number of bits used for finding the index of each 64-bit hash
-const INDICES: usize = 1 << INDEX_BITS; // number of indices available
+const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
+const NUM_OF_REGISTERS: usize = 1 << INDEX_BITS; // number of indices available
 const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-bit hash
 
+// Approximation for bias correction for 16384 registers. See "HyperLogLog: the analysis of a
+// near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
+const BIAS_CORRECTION: f64 = 0.72125;
+
+/// `ApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`. The
+/// estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^14 registers this
+/// is ~1/128.
 pub struct ApproxCountDistinct {
     return_type: DataType,
     input_col_idx: usize,
-    registers: [u8; INDICES],
+    registers: [u8; NUM_OF_REGISTERS],
 }
 
 impl ApproxCountDistinct {
@@ -37,7 +44,7 @@ impl ApproxCountDistinct {
         Self {
             return_type,
             input_col_idx,
-            registers: [0; INDICES],
+            registers: [0; NUM_OF_REGISTERS],
         }
     }
 
@@ -51,7 +58,7 @@ impl ApproxCountDistinct {
         let scalar_impl = datum_ref.unwrap().into_scalar_impl();
         let hash = self.get_hash(scalar_impl);
 
-        let index = (hash as usize) & (INDICES - 1); // Index is based on last few bits
+        let index = (hash as usize) & (NUM_OF_REGISTERS - 1); // Index is based on last few bits
         let count = self.count_hash(hash);
 
         if count > self.registers[index] {
@@ -77,10 +84,7 @@ impl ApproxCountDistinct {
 
     /// Calculates the bias-corrected harmonic mean of the registers to get the approximate count
     fn calculate_result(&self) -> i64 {
-        // Approximation for bias correction. See "HyperLogLog: the analysis of a near-optimal
-        // cardinality estimation algorithm" by Philippe Flajolet et al.
-        let bias_correction = 0.72134;
-        let m = INDICES as f64;
+        let m = NUM_OF_REGISTERS as f64;
         let mut mean = 0.0;
 
         // Get harmonic mean of all the counts in results
@@ -88,7 +92,7 @@ impl ApproxCountDistinct {
             mean += 1.0 / ((1 << *count) as f64);
         }
 
-        let raw_estimate = bias_correction * m * m / mean;
+        let raw_estimate = BIAS_CORRECTION * m * m / mean;
 
         // If raw_estimate is not much bigger than m and some registers have value 0, set answer to
         // m * log(m/V) where V is the number of registers with value 0
@@ -168,14 +172,14 @@ impl Aggregator for ApproxCountDistinct {
                 groups_iter.next();
                 group_cnt += 1;
                 builder.append(Some(self.calculate_result()))?;
-                self.registers = [0; INDICES];
+                self.registers = [0; NUM_OF_REGISTERS];
             }
 
             self.add_datum(datum_ref);
 
             // reset state and exit when reach limit
             if groups.is_reach_limit(group_cnt) {
-                self.registers = [0; INDICES];
+                self.registers = [0; NUM_OF_REGISTERS];
                 break;
             }
         }
