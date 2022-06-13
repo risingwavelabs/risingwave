@@ -440,29 +440,20 @@ mod tests {
             table_id,
             bitmap: [u8::MAX; VIRTUAL_NODE_COUNT / u8::BITS as usize].to_vec(),
         };
-        assert_eq!(
-            hash_mapping_manager.check_sst_deprecated(&[full_bitmap]),
-            true
-        );
+        assert!(hash_mapping_manager.check_sst_deprecated(&[full_bitmap]));
 
         let mut bitmap = [0; VIRTUAL_NODE_COUNT / u8::BITS as usize].to_vec();
         for i in 0..VIRTUAL_NODE_COUNT / parallel_unit_count {
             bitmap[i / u8::BITS as usize] |= 1 << (i % u8::BITS as usize);
         }
         let fresh_bitmap = VNodeBitmap { table_id, bitmap };
-        assert_eq!(
-            hash_mapping_manager.check_sst_deprecated(&[fresh_bitmap]),
-            false
-        );
+        assert!(!hash_mapping_manager.check_sst_deprecated(&[fresh_bitmap]));
 
         bitmap = [0; VIRTUAL_NODE_COUNT / u8::BITS as usize].to_vec();
         for i in 0..VIRTUAL_NODE_COUNT / parallel_unit_count + 1 {
             bitmap[i / u8::BITS as usize] |= 1 << (i % u8::BITS as usize);
         }
         let stale_bitmap = VNodeBitmap { table_id, bitmap };
-        assert_eq!(
-            hash_mapping_manager.check_sst_deprecated(&[stale_bitmap]),
-            true
-        );
+        assert!(hash_mapping_manager.check_sst_deprecated(&[stale_bitmap]));
     }
 }
