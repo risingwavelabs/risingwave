@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
@@ -549,6 +550,13 @@ impl Session for SessionImpl {
             e
         })?;
         Ok(rsp)
+    }
+
+    async fn infer_return_type(
+        self: Arc<Self>,
+        _sql: &str,
+    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
+        unimplemented!()
     }
 
     fn user_authenticator(&self) -> &UserAuthenticator {
