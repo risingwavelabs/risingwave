@@ -19,7 +19,6 @@ use futures::stream::StreamExt;
 use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
@@ -27,6 +26,7 @@ use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::variants::*;
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
 /// This state is used for several ranges (e.g `[0, offset)`, `[offset+limit, +inf)` of elements in
@@ -106,7 +106,10 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
     }
 
-    pub async fn pop_top_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_top_element(
+        &mut self,
+        epoch: u64,
+    ) -> StreamExecutorResult<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -153,7 +156,12 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
     }
 
-    pub async fn insert(&mut self, key: OrderedRow, value: Row, _epoch: u64) -> Result<()> {
+    pub async fn insert(
+        &mut self,
+        key: OrderedRow,
+        value: Row,
+        _epoch: u64,
+    ) -> StreamExecutorResult<()> {
         let have_key_on_storage = self.total_count > self.top_n.len();
         let need_to_flush = if have_key_on_storage {
             // It is impossible that the cache is empty.
@@ -192,7 +200,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ///
     /// This function scans kv pairs from the storage, and properly deal with them
     /// according to the flush buffer.
-    pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
+    pub async fn scan_and_merge(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         // For a key scanned from the storage,
         // 1. Not touched by flush buffer. Do nothing.
         // 2. Deleted by flush buffer. Do not go into cache.
@@ -268,7 +276,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         key: &OrderedRow,
         value: Row,
         epoch: u64,
-    ) -> Result<Option<Row>> {
+    ) -> StreamExecutorResult<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
         match TOP_N_TYPE {
             TOP_N_MIN => self
@@ -295,7 +303,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     /// We don't need to care about whether `self.top_n` is empty or not as the key is unique.
     /// An element with duplicated key scanned from the storage would just override the element with
     /// the same key in the cache, and their value must be the same.
-    pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
+    pub async fn fill_in_cache(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         debug_assert!(!self.is_dirty());
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
@@ -324,7 +332,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ///
     /// TODO: `Flush` should also be called internally when `top_n` and `flush_buffer` exceeds
     /// certain limit.
-    pub async fn flush(&mut self, epoch: u64) -> Result<()> {
+    pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             self.retain_top_n();
             return Ok(());

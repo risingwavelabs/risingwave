@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::try_match_expand;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::meta::table_fragments::ActorState;
@@ -500,22 +500,5 @@ where
             }
         }
         Ok(())
-    }
-
-    // existing_table_ids include the table_ref_id (source and materialized_view) +
-    // internal_table_id (stateful executor)
-    pub async fn existing_table_ids(&self) -> Result<HashSet<u32>> {
-        let mut result_set = HashSet::default();
-        let map = &self.core.read().await.table_fragments;
-
-        for (k, v) in map {
-            result_set.insert(k.table_id());
-
-            for internal_table_id in v.internal_table_ids() {
-                result_set.insert(internal_table_id);
-            }
-        }
-
-        Ok(result_set)
     }
 }

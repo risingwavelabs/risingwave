@@ -50,8 +50,8 @@ pub trait TestStreamChunk {
 pub struct BigStreamChunk(StreamChunk);
 
 impl BigStreamChunk {
-    #[allow(clippy::if_same_then_else)]
-    #[allow(clippy::needless_bool)]
+    #[expect(clippy::if_same_then_else)]
+    #[expect(clippy::needless_bool)]
     pub fn new(capacity: usize) -> Self {
         let ops = (0..capacity)
             .map(|i| {

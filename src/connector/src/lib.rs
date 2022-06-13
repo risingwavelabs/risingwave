@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
@@ -32,6 +32,7 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(let_chains)]
+#![feature(lint_reasons)]
 
 pub mod base;
 mod datagen;

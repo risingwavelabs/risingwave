@@ -124,10 +124,10 @@ pub fn implement(field: &Field) -> TokenStream2 {
         }
     }
 
-    return quote! {
+    quote! {
         #[inline(always)]
         pub fn #getter_fn_name(&self) -> &#ty {
             &self.#field_name
         }
-    };
+    }
 }

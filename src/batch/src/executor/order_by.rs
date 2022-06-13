@@ -50,7 +50,7 @@ pub struct OrderByExecutor {
     schema: Schema,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 impl OrderByExecutor {
     fn new(
         child: BoxedExecutor,

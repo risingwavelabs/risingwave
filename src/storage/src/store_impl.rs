@@ -126,8 +126,7 @@ impl StateStoreImpl {
             }
 
             "in_memory" | "in-memory" => {
-                tracing::warn!("in-memory state backend should never be used in benchmarks and production environment.");
-                StateStoreImpl::shared_in_memory_store(state_store_stats.clone())
+                panic!("in-memory state backend should never be used in end-to-end environment, use `hummock+memory` instead.")
             }
 
             other => unimplemented!("{} state store is not supported", other),

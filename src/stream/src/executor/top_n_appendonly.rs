@@ -15,13 +15,12 @@
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
-use risingwave_common::error::Result;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::error::{StreamExecutorError, StreamExecutorResult};
+use super::error::StreamExecutorResult;
 use super::managed_state::top_n::variants::TOP_N_MAX;
 use super::managed_state::top_n::ManagedTopNState;
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
@@ -47,7 +46,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         total_count: (usize, usize),
         executor_id: u64,
         key_indices: Vec<usize>,
-    ) -> Result<Self> {
+    ) -> StreamExecutorResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
 
@@ -120,7 +119,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         total_count: (usize, usize),
         executor_id: u64,
         key_indices: Vec<usize>,
-    ) -> Result<Self> {
+    ) -> StreamExecutorResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_internal_key(&order_pairs, &pk_indices, &schema);
 
@@ -177,14 +176,8 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
     }
 
     async fn flush_inner(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.managed_higher_state
-            .flush(epoch)
-            .await
-            .map_err(StreamExecutorError::top_n_state_error)?;
-        self.managed_lower_state
-            .flush(epoch)
-            .await
-            .map_err(StreamExecutorError::top_n_state_error)
+        self.managed_higher_state.flush(epoch).await?;
+        self.managed_lower_state.flush(epoch).await
     }
 }
 
@@ -196,14 +189,8 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
         if self.first_execution {
-            self.managed_lower_state
-                .fill_in_cache(epoch)
-                .await
-                .map_err(StreamExecutorError::top_n_state_error)?;
-            self.managed_higher_state
-                .fill_in_cache(epoch)
-                .await
-                .map_err(StreamExecutorError::top_n_state_error)?;
+            self.managed_lower_state.fill_in_cache(epoch).await?;
+            self.managed_higher_state.fill_in_cache(epoch).await?;
             self.first_execution = false;
         }
 
@@ -223,8 +210,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 // we ignored it for now as it is not in the result set.
                 self.managed_lower_state
                     .insert(ordered_pk_row, row, epoch)
-                    .await
-                    .map_err(StreamExecutorError::top_n_state_error)?;
+                    .await?;
                 continue;
             }
 
@@ -238,13 +224,11 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 let res = self
                     .managed_lower_state
                     .pop_top_element(epoch)
-                    .await
-                    .map_err(StreamExecutorError::top_n_state_error)?
+                    .await?
                     .unwrap();
                 self.managed_lower_state
                     .insert(ordered_pk_row, row, epoch)
-                    .await
-                    .map_err(StreamExecutorError::top_n_state_error)?;
+                    .await?;
                 res
             } else {
                 (ordered_pk_row, row)
@@ -257,8 +241,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                         element_to_compare_with_upper.1.clone(),
                         epoch,
                     )
-                    .await
-                    .map_err(StreamExecutorError::top_n_state_error)?;
+                    .await?;
                 new_ops.push(Op::Insert);
                 new_rows.push(element_to_compare_with_upper.1);
             } else if self.managed_higher_state.top_element().unwrap().0
@@ -267,8 +250,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 let element_to_pop = self
                     .managed_higher_state
                     .pop_top_element(epoch)
-                    .await
-                    .map_err(StreamExecutorError::top_n_state_error)?
+                    .await?
                     .unwrap();
                 new_ops.push(Op::Delete);
                 new_rows.push(element_to_pop.1);
@@ -280,8 +262,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                         element_to_compare_with_upper.1,
                         epoch,
                     )
-                    .await
-                    .map_err(StreamExecutorError::top_n_state_error)?;
+                    .await?;
             }
             // The "else" case can only be that `element_to_compare_with_upper` is larger than
             // the largest element in [offset, offset+limit), which is already full.

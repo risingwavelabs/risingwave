@@ -16,6 +16,7 @@
 //! compared with memcmp.
 
 #![deny(missing_docs)]
+#![feature(lint_reasons)]
 
 mod de;
 mod error;

@@ -19,8 +19,8 @@ use std::time::Instant;
 use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::catalog::TableId;
+use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::error::{internal_error, Result, ToRwResult};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
@@ -841,7 +841,6 @@ mod tests {
                     cluster_manager.clone(),
                     meta_metrics.clone(),
                     compaction_group_manager.clone(),
-                    fragment_manager.clone(),
                 )
                 .await?,
             );

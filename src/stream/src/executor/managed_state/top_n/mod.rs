@@ -15,10 +15,11 @@
 mod top_n_bottom_n_state;
 mod top_n_state;
 
-use risingwave_common::error::Result;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 pub use top_n_bottom_n_state::ManagedTopNBottomNState;
 pub use top_n_state::ManagedTopNState;
+
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 
 pub mod variants {
     pub const TOP_N_MIN: usize = 0;
@@ -28,11 +29,13 @@ pub mod variants {
 fn deserialize_pk<const TOP_N_TYPE: usize>(
     pk_buf: &mut [u8],
     ordered_row_deserializer: &mut OrderedRowDeserializer,
-) -> Result<OrderedRow> {
+) -> StreamExecutorResult<OrderedRow> {
     if TOP_N_TYPE == variants::TOP_N_MAX {
         pk_buf.iter_mut().for_each(|byte| *byte = !*byte);
     }
     // We just encounter the start of a new row, so we finalize the previous one.
-    let pk = ordered_row_deserializer.deserialize(pk_buf)?;
+    let pk = ordered_row_deserializer
+        .deserialize(pk_buf)
+        .map_err(StreamExecutorError::serde_error)?;
     Ok(pk)
 }

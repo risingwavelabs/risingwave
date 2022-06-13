@@ -22,7 +22,6 @@ use futures::stream::StreamExt;
 use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
@@ -30,6 +29,7 @@ use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::variants::TOP_N_MIN;
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::deserialize_pk;
 use crate::executor::PkIndices;
 
@@ -127,7 +127,10 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn pop_top_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_top_element(
+        &mut self,
+        epoch: u64,
+    ) -> StreamExecutorResult<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -143,7 +146,10 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn pop_bottom_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_bottom_element(
+        &mut self,
+        epoch: u64,
+    ) -> StreamExecutorResult<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -209,7 +215,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         key: &OrderedRow,
         value: Row,
         epoch: u64,
-    ) -> Result<Option<Row>> {
+    ) -> StreamExecutorResult<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
         self.state_table
@@ -228,7 +234,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     }
 
     /// The same as the one in `ManagedTopNState`.
-    pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
+    pub async fn scan_and_merge(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         let mut kv_pairs = vec![];
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
@@ -266,7 +272,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// We can fill in the cache from storage only when state is not dirty, i.e. right after
     /// `flush`.
-    pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
+    pub async fn fill_in_cache(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         debug_assert!(!self.is_dirty());
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
@@ -287,7 +293,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// `Flush` can be called by the executor when it receives a barrier and thus needs to
     /// checkpoint.
-    pub async fn flush(&mut self, epoch: u64) -> Result<()> {
+    pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             // We don't retain `n` elements as we have a all-or-nothing policy for now.
             return Ok(());

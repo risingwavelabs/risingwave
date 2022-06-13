@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[allow(dead_code)]
 pub mod shared_buffer_batch;
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub mod shared_buffer_uploader;
 
 use std::collections::{BTreeMap, HashMap};

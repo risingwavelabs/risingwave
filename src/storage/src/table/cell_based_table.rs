@@ -24,6 +24,7 @@ use log::debug;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
+use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_common::error::RwError;
 use risingwave_common::types::Datum;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -175,14 +176,24 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // get row by state_store scan
+        let vnode = self
+            .dist_key_indices
+            .as_ref()
+            .map(|indices| {
+                let hash_builder = CRC32FastBuilder {};
+                pk.hash_by_indices(indices, &hash_builder)
+                    .unwrap()
+                    .to_vnode()
+            })
+            .unwrap_or_default();
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let start_key = self.keyspace.prefixed_key(&serialize_pk(pk, pk_serializer));
         let end_key = next_key(&start_key);
-
+        let vnode_bitmap = VNodeBitmap::new_with_single_vnode(self.keyspace.table_id(), vnode);
         let state_store_range_scan_res = self
             .keyspace
             .state_store()
-            .scan(start_key..end_key, None, epoch)
+            .scan(start_key..end_key, None, epoch, Some(vnode_bitmap))
             .await?;
         let mut cell_based_row_deserializer =
             CellBasedRowDeserializer::new(self.column_descs.clone());
@@ -211,7 +222,6 @@ impl<S: StateStore> CellBasedTable<S> {
             // If value meta is computed here, then the cell based table is guaranteed to have
             // distribution keys. Also, it is guaranteed that distribution key indices will
             // not exceed the length of pk. So we simply do unwrap here.
-            println!("cell based write pk_bytes = {:?}\n", pk);
             match row_op {
                 RowOp::Insert(row) => {
                     let value_meta = if WITH_VALUE_META {

@@ -1356,7 +1356,7 @@ impl Parser {
         let all = self.parse_keyword(Keyword::ALL);
         let distinct = self.parse_keyword(Keyword::DISTINCT);
         if all && distinct {
-            return parser_err!("Cannot specify both ALL and DISTINCT".to_string());
+            parser_err!("Cannot specify both ALL and DISTINCT".to_string())
         } else {
             Ok(distinct)
         }
