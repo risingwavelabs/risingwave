@@ -126,7 +126,7 @@ impl Distribution {
         match self {
             Distribution::Single => Default::default(),
             Distribution::HashShard(dists) => dists,
-            _ => unreachable!(),
+            _ => unreachable!("{:#?}", self),
         }
     }
 }

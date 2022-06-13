@@ -74,7 +74,7 @@
         v2,
         v3;
     select
-        max(v1) as v1
+        v1
     from
         mv
     where
