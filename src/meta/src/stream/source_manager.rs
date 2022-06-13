@@ -24,9 +24,13 @@ use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
+use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::meta::{
+    SourceActorInfo as ProstSourceActorInfo, SourceActorSplit as ProstSourceActorSplit,
+};
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
     DropSourceRequest as ComputeNodeDropSourceRequest,
@@ -41,7 +45,7 @@ use tokio::{select, time};
 use crate::barrier::BarrierManagerRef;
 use crate::cluster::ClusterManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
-use crate::model::{ActorId, FragmentId, MetadataModel};
+use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::stream::FragmentManagerRef;
 
@@ -70,6 +74,50 @@ pub struct ConnectorSourceWorker {
     current_splits: SharedSplitMapRef,
     enumerator: SplitEnumeratorImpl,
     period: Duration,
+}
+
+#[derive(Debug)]
+pub struct SourceActorInfo {
+    actor_id: ActorId,
+    splits: Vec<SplitImpl>,
+}
+
+impl MetadataModel for SourceActorInfo {
+    type KeyType = u32;
+    type ProstType = ProstSourceActorInfo;
+
+    fn cf_name() -> String {
+        SOURCE_CF_NAME.to_string()
+    }
+
+    fn to_protobuf(&self) -> Self::ProstType {
+        Self::ProstType {
+            actor_id: self.actor_id,
+            splits: self
+                .splits
+                .iter()
+                .map(|split| ProstSourceActorSplit {
+                    r#type: split.get_type(),
+                    split: split.to_json_bytes().to_vec(),
+                })
+                .collect(),
+        }
+    }
+
+    fn from_protobuf(prost: Self::ProstType) -> Self {
+        Self {
+            actor_id: prost.actor_id,
+            splits: prost
+                .splits
+                .into_iter()
+                .map(|split| SplitImpl::restore_from_bytes(split.r#type, &split.split).unwrap())
+                .collect(),
+        }
+    }
+
+    fn key(&self) -> Result<Self::KeyType> {
+        Ok(self.actor_id)
+    }
 }
 
 impl ConnectorSourceWorker {
@@ -142,15 +190,20 @@ pub struct SourceManagerCore<S: MetaStore> {
 }
 
 impl<S> SourceManagerCore<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
-    fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
+    fn new(
+        fragment_manager: FragmentManagerRef<S>,
+        managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
+        source_fragments: HashMap<SourceId, Vec<FragmentId>>,
+        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    ) -> Self {
         Self {
             fragment_manager,
-            managed_sources: HashMap::new(),
-            source_fragments: HashMap::new(),
-            actor_splits: HashMap::new(),
+            managed_sources,
+            source_fragments,
+            actor_splits,
         }
     }
 
@@ -222,13 +275,13 @@ impl<S> SourceManagerCore<S>
 
     pub async fn patch_diff(
         &mut self,
-        source_fragments: &Option<HashMap<SourceId, Vec<FragmentId>>>,
-        actor_splits: &Option<HashMap<ActorId, Vec<SplitImpl>>>,
+        source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
+        actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
     ) {
         if let Some(source_fragments) = source_fragments {
             for (source_id, mut fragment_ids) in source_fragments {
                 self.source_fragments
-                    .entry(source_id.clone())
+                    .entry(source_id)
                     .or_insert(vec![])
                     .append(&mut fragment_ids);
             }
@@ -236,7 +289,27 @@ impl<S> SourceManagerCore<S>
 
         if let Some(actor_splits) = actor_splits {
             for (actor_id, splits) in actor_splits {
-                self.actor_splits.insert(actor_id.clone(), splits.clone());
+                self.actor_splits.insert(actor_id, splits.clone());
+            }
+        }
+    }
+}
+
+pub(crate) fn fetch_source_fragments(
+    source_fragments: &mut HashMap<SourceId, Vec<FragmentId>>,
+    table_fragments: &TableFragments,
+) {
+    for fragment in table_fragments.fragments() {
+        for actor in &fragment.actors {
+            if let Some(source_id) =
+                TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+            {
+                source_fragments
+                    .entry(source_id)
+                    .or_insert(vec![])
+                    .push(fragment.fragment_id as FragmentId);
+
+                break;
             }
         }
     }
@@ -289,8 +362,8 @@ fn diff_splits(
 }
 
 impl<S> SourceManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -299,7 +372,35 @@ impl<S> SourceManager<S>
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Result<Self> {
-        let core = Arc::new(Mutex::new(SourceManagerCore::new(fragment_manager)));
+        let mut managed_sources = HashMap::new();
+        {
+            let catalog_guard = catalog_manager.get_catalog_core_guard().await;
+            let sources = catalog_guard.list_sources().await?;
+
+            for source in sources {
+                if let Some(StreamSource(_)) = source.info {
+                    Self::create_source_worker(&source, &mut managed_sources).await?
+                }
+            }
+        }
+
+        let mut source_fragments = HashMap::new();
+        for table_fragments in fragment_manager.list_table_fragments().await? {
+            fetch_source_fragments(&mut source_fragments, &table_fragments)
+        }
+
+        let actor_splits = SourceActorInfo::list(env.meta_store())
+            .await?
+            .into_iter()
+            .map(|source_actor_info| (source_actor_info.actor_id, source_actor_info.splits))
+            .collect();
+
+        let core = Arc::new(Mutex::new(SourceManagerCore::new(
+            fragment_manager,
+            managed_sources,
+            source_fragments,
+            actor_splits,
+        )));
 
         Ok(Self {
             env,
@@ -317,21 +418,25 @@ impl<S> SourceManager<S>
     ) -> Result<()> {
         {
             let mut core = self.core.lock().await;
-            core.patch_diff(&source_fragments, &actor_splits).await;
+            core.patch_diff(source_fragments, actor_splits.clone())
+                .await;
         }
 
         let mut trx = Transaction::default();
         if let Some(actor_splits) = actor_splits {
             for (actor_id, splits) in actor_splits {
-                let value = serde_json::to_vec(&splits).unwrap();
-                let key = actor_id.to_string();
-                trx.put(SOURCE_CF_NAME.to_string(), key.into_bytes(), value);
+                let source_actor_info = SourceActorInfo { actor_id, splits };
+
+                source_actor_info.upsert_in_transaction(&mut trx)?;
             }
         }
 
-        self.env.meta_store().txn(trx).await.map_err(|e| internal_error(e.to_string()))
+        self.env
+            .meta_store()
+            .txn(trx)
+            .await
+            .map_err(|e| internal_error(e.to_string()))
     }
-
 
     pub async fn pre_allocate_splits(
         &self,
@@ -382,7 +487,7 @@ impl<S> SourceManager<S>
         Ok(assigned)
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -397,8 +502,8 @@ impl<S> SourceManager<S>
                 .iter()
                 .map(|worker| self.env.stream_client_pool().get(worker)),
         )
-            .await?
-            .into_iter();
+        .await?
+        .into_iter();
 
         Ok(all_stream_clients)
     }
@@ -426,22 +531,31 @@ impl<S> SourceManager<S>
         }
 
         if let Some(Info::StreamSource(_)) = source.info {
-            let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
-            let current_splits_ref = worker.current_splits.clone();
-            log::info!("Spawning new watcher for source {}", source.id);
-
-            let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
-
-            let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
-            core.managed_sources.insert(
-                source.id,
-                ConnectorSourceWorkerHandle {
-                    handle,
-                    sync_call_tx,
-                    splits: current_splits_ref,
-                },
-            );
+            Self::create_source_worker(source, &mut core.managed_sources).await?;
         }
+
+        Ok(())
+    }
+
+    async fn create_source_worker(
+        source: &Source,
+        managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
+    ) -> Result<()> {
+        let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
+        let current_splits_ref = worker.current_splits.clone();
+        log::info!("spawning new watcher for source {}", source.id);
+
+        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
+        managed_sources.insert(
+            source.id,
+            ConnectorSourceWorkerHandle {
+                handle,
+                sync_call_tx,
+                splits: current_splits_ref,
+            },
+        );
 
         Ok(())
     }

@@ -37,9 +37,9 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
+use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
+use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
@@ -573,18 +573,7 @@ where
         }
 
         let mut source_fragments = HashMap::new();
-        for fragment in table_fragments.fragments() {
-            for actor in &fragment.actors {
-                if let Some(source_id) =
-                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
-                {
-                    source_fragments
-                        .entry(source_id)
-                        .or_insert(vec![])
-                        .push(fragment.fragment_id as FragmentId);
-                }
-            }
-        }
+        fetch_source_fragments(&mut source_fragments, &table_fragments);
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
