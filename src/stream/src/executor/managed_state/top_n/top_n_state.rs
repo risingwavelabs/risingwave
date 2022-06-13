@@ -311,8 +311,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             let row = res.unwrap().into_owned();
             let mut datums = vec![];
             for pk_indice in &self.state_table.pk_indices {
-                let a = row.index(*pk_indice).clone();
-                datums.push(a);
+                datums.push(row.index(*pk_indice).clone());
             }
             let pk = Row::new(datums);
             let pk_ordered = OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
