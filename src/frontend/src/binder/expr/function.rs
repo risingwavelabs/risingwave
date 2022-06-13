@@ -103,6 +103,7 @@ impl Binder {
                 }
                 "char_length" => ExprType::CharLength,
                 "character_length" => ExprType::CharLength,
+                "repeat" => ExprType::Repeat,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
