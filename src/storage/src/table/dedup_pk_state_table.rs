@@ -41,6 +41,11 @@ pub struct DedupPkStateTable<S: StateStore> {
     /// Not all pk datums have corresponding positions
     /// in row, hence the optional.
     pk_to_row_mapping: Vec<Option<usize>>,
+
+    /// maps dedup_pk_row datums by their index to their row idx.
+    dedup_pk_row_to_row_mapping: Vec<usize>,
+
+    column_descs: Vec<ColumnDesc>,
 }
 
 impl<S: StateStore> DedupPkStateTable<S> {
@@ -58,7 +63,7 @@ impl<S: StateStore> DedupPkStateTable<S> {
             .collect();
         let pk_decoder = OrderedRowDeserializer::new(data_types, order_types.clone());
 
-        // -------- construct dedup pk decoding info
+        // -------- construct dedup pk row decoding info
         let pk_to_row_mapping = pk_indices
             .iter()
             .map(|&i| {
@@ -76,6 +81,10 @@ impl<S: StateStore> DedupPkStateTable<S> {
             .copied()
             .flatten()
             .collect::<HashSet<_>>();
+
+        let dedup_pk_row_to_row_mapping = (0..column_descs.len())
+            .filter(|i| !dedupped_datum_indices.contains(i))
+            .collect();
 
         // -------- init inner StateTable
         let partial_column_descs = column_descs
@@ -98,6 +107,8 @@ impl<S: StateStore> DedupPkStateTable<S> {
             pk_decoder,
             dedupped_datum_indices,
             pk_to_row_mapping,
+            dedup_pk_row_to_row_mapping,
+            column_descs,
         }
     }
 
@@ -124,11 +135,17 @@ impl<S: StateStore> DedupPkStateTable<S> {
     /// `dedup_pk_row` is row with `None` values
     /// in place of pk datums.
     fn dedup_pk_row_to_row(&self, pk: &Row, dedup_pk_row: Row) -> Row {
-        let mut inner = dedup_pk_row.0;
+        let mut inner = vec![None; self.column_descs.len()];
+        // fill pk
         for (pk_idx, datum) in pk.0.iter().enumerate() {
             if let Some(row_idx) = self.pk_to_row_mapping[pk_idx] {
                 inner[row_idx] = datum.clone();
             }
+        }
+        // fill dedup_pk_row
+        for (dedup_pk_idx, datum) in dedup_pk_row.0.into_iter().enumerate() {
+            let row_idx = self.dedup_pk_row_to_row_mapping[dedup_pk_idx];
+            inner[row_idx] = datum.clone();
         }
         Row(inner)
     }
