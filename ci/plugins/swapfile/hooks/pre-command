@@ -1,0 +1,12 @@
+#!/bin/bash
+
+set -euo pipefail
+
+if [ ! -f "/swapfile" ]; then
+  echo "--- Create swap file"
+  sudo fallocate -l 32G /swapfile
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile
+  sudo swapon /swapfile
+  sudo swapon -s
+fi

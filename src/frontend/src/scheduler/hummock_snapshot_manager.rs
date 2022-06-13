@@ -16,11 +16,12 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use log::error;
-use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::plan_fragmenter::QueryId;
+use crate::scheduler::SchedulerError::PinSnapshot;
+use crate::scheduler::SchedulerResult;
 
 /// Cache of hummock snapshot in meta.
 pub struct HummockSnapshotManager {
@@ -37,13 +38,14 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn get_epoch(&self, query_id: QueryId) -> Result<u64> {
+    pub async fn get_epoch(&self, query_id: QueryId) -> SchedulerResult<u64> {
         let mut core_guard = self.core.lock().await;
         if core_guard.is_outdated {
             let epoch = self
                 .meta_client
                 .pin_snapshot(core_guard.last_pinned)
-                .await?;
+                .await
+                .map_err(|_e| PinSnapshot(query_id.clone(), core_guard.last_pinned))?;
             core_guard.is_outdated = false;
             core_guard.last_pinned = epoch;
             core_guard.epoch_to_query_ids.insert(epoch, HashSet::new());
@@ -57,7 +59,7 @@ impl HummockSnapshotManager {
         Ok(core_guard.last_pinned)
     }
 
-    pub async fn unpin_snapshot(&self, epoch: u64, query_id: &QueryId) -> Result<()> {
+    pub async fn unpin_snapshot(&self, epoch: u64, query_id: &QueryId) -> SchedulerResult<()> {
         let min_epoch = async {
             // Decrease the ref count of corresponding epoch. If all last pinned epoch is dropped,
             // mark as outdated.
