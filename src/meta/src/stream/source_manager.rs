@@ -77,7 +77,7 @@ pub struct ConnectorSourceWorker {
     period: Duration,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SourceActorInfo {
     actor_id: ActorId,
     splits: Vec<SplitImpl>,
@@ -460,7 +460,7 @@ where
             for actor_id in actor_ids {
                 let source_actor_info = SourceActorInfo {
                     actor_id,
-                    splits: vec![],
+                    ..Default::default()
                 };
                 source_actor_info.delete_in_transaction(&mut trx)?;
             }
