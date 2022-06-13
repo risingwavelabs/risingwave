@@ -615,6 +615,27 @@ where
         self.barrier_manager
             .run_command(Command::DropMaterializedView(*table_id))
             .await?;
+
+        let table_fragments = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(table_id)
+            .await?;
+        let mut source_fragments = Default::default();
+        fetch_source_fragments(&mut source_fragments, &table_fragments);
+        let mut actor_ids = HashSet::new();
+        for fragment_ids in source_fragments.values() {
+            for fragment_id in fragment_ids {
+                if let Some(fragment) = table_fragments.fragments.get(fragment_id) {
+                    for actor in &fragment.actors {
+                        actor_ids.insert(actor.actor_id);
+                    }
+                }
+            }
+        }
+        self.source_manager
+            .drop_update(Some(source_fragments), Some(actor_ids))
+            .await?;
+
         Ok(())
     }
 

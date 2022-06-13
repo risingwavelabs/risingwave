@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -185,7 +185,7 @@ pub struct ConnectorSourceWorkerHandle {
 pub struct SourceManagerCore<S: MetaStore> {
     pub fragment_manager: FragmentManagerRef<S>,
     pub managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
-    pub source_fragments: HashMap<SourceId, Vec<FragmentId>>,
+    pub source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
@@ -196,7 +196,7 @@ where
     fn new(
         fragment_manager: FragmentManagerRef<S>,
         managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
-        source_fragments: HashMap<SourceId, Vec<FragmentId>>,
+        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     ) -> Self {
         Self {
@@ -275,14 +275,14 @@ where
 
     pub async fn patch_diff(
         &mut self,
-        source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
+        source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
     ) {
         if let Some(source_fragments) = source_fragments {
             for (source_id, mut fragment_ids) in source_fragments {
                 self.source_fragments
                     .entry(source_id)
-                    .or_insert(vec![])
+                    .or_insert_with(BTreeSet::default)
                     .append(&mut fragment_ids);
             }
         }
@@ -293,10 +293,32 @@ where
             }
         }
     }
+
+    pub async fn drop_diff(
+        &mut self,
+        source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
+        actor_splits: Option<HashSet<ActorId>>,
+    ) {
+        if let Some(source_fragments) = source_fragments {
+            for (source_id, fragment_ids) in source_fragments {
+                if let Some(managed_fragment_ids) = self.source_fragments.get_mut(&source_id) {
+                    for fragment_id in fragment_ids {
+                        managed_fragment_ids.remove(&fragment_id);
+                    }
+                }
+            }
+        }
+
+        if let Some(actor_splits) = actor_splits {
+            for actor_id in actor_splits {
+                self.actor_splits.remove(&actor_id);
+            }
+        }
+    }
 }
 
 pub(crate) fn fetch_source_fragments(
-    source_fragments: &mut HashMap<SourceId, Vec<FragmentId>>,
+    source_fragments: &mut HashMap<SourceId, BTreeSet<FragmentId>>,
     table_fragments: &TableFragments,
 ) {
     for fragment in table_fragments.fragments() {
@@ -306,8 +328,8 @@ pub(crate) fn fetch_source_fragments(
             {
                 source_fragments
                     .entry(source_id)
-                    .or_insert(vec![])
-                    .push(fragment.fragment_id as FragmentId);
+                    .or_insert(BTreeSet::new())
+                    .insert(fragment.fragment_id as FragmentId);
 
                 break;
             }
@@ -411,9 +433,37 @@ where
         })
     }
 
+    pub async fn drop_update(
+        &self,
+        source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
+        actor_splits: Option<HashSet<ActorId>>,
+    ) -> Result<()> {
+        {
+            let mut core = self.core.lock().await;
+            core.drop_diff(source_fragments, actor_splits.clone()).await;
+        }
+
+        let mut trx = Transaction::default();
+        if let Some(actor_ids) = actor_splits {
+            for actor_id in actor_ids {
+                let source_actor_info = SourceActorInfo {
+                    actor_id,
+                    splits: vec![],
+                };
+                source_actor_info.delete_in_transaction(&mut trx)?;
+            }
+        }
+
+        self.env
+            .meta_store()
+            .txn(trx)
+            .await
+            .map_err(|e| internal_error(e.to_string()))
+    }
+
     pub async fn patch_update(
         &self,
-        source_fragments: Option<HashMap<SourceId, Vec<FragmentId>>>,
+        source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
     ) -> Result<()> {
         {
@@ -441,7 +491,7 @@ where
     pub async fn pre_allocate_splits(
         &self,
         table_id: &TableId,
-        source_fragments: HashMap<SourceId, Vec<FragmentId>>,
+        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
     ) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
         let table_fragments = core
@@ -530,7 +580,7 @@ where
             return Ok(());
         }
 
-        if let Some(Info::StreamSource(_)) = source.info {
+        if let Some(StreamSource(_)) = source.info {
             Self::create_source_worker(source, &mut core.managed_sources).await?;
         }
 
@@ -574,6 +624,13 @@ where
         let mut core = self.core.lock().await;
         if let Some(handle) = core.managed_sources.remove(&source_id) {
             handle.handle.abort();
+        }
+
+        if core.source_fragments.contains_key(&source_id) {
+            log::warn!(
+                "dropping source {}, but associated fragments still exists",
+                source_id
+            );
         }
 
         Ok(())
