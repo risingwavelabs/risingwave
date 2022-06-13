@@ -15,10 +15,9 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
-use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
@@ -58,9 +57,8 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|key| *key as usize)
             .collect_vec();
 
-        let parallel_unit_id = node.get_parallel_unit_id() as u32;
-        let mapping = node.hash_mapping.as_ref().unwrap();
-        let hash_filter = generate_hash_filter(mapping, parallel_unit_id);
+        let mapping = (*params.vnode_bitmap).clone();
+        let hash_filter = Bitmap::from_bytes_with_num_bits(mapping.into(), VIRTUAL_NODE_COUNT);
 
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
@@ -77,41 +75,5 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         );
 
         Ok(executor.boxed())
-    }
-}
-
-/// Generate bitmap from compressed parallel unit mapping.
-fn generate_hash_filter(mapping: &ParallelUnitMapping, parallel_unit_id: u32) -> Bitmap {
-    let mut builder = BitmapBuilder::with_capacity(VIRTUAL_NODE_COUNT);
-    let mut start: usize = 0;
-    for (idx, range_right) in mapping.original_indices.iter().enumerate() {
-        let bit = parallel_unit_id == mapping.data[idx];
-        for _ in start..=*range_right as usize {
-            builder.append(bit);
-        }
-        start = *range_right as usize + 1;
-    }
-    builder.finish()
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_pb::common::ParallelUnitMapping;
-
-    use super::*;
-
-    #[test]
-    fn test_generate_hash_filter() {
-        let mapping = ParallelUnitMapping {
-            original_indices: vec![681, 1363, 2045, 2046, 2047],
-            data: vec![1, 2, 3, 1, 2],
-            ..Default::default()
-        };
-        let hash_filter = generate_hash_filter(&mapping, 1);
-        assert!(hash_filter.is_set(0).unwrap());
-        assert!(hash_filter.is_set(681).unwrap());
-        assert!(!hash_filter.is_set(682).unwrap());
-        assert!(hash_filter.is_set(2046).unwrap());
-        assert!(!hash_filter.is_set(2047).unwrap());
     }
 }
