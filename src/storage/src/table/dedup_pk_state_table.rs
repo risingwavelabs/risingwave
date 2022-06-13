@@ -16,7 +16,6 @@ use std::collections::HashSet;
 use std::ops::RangeBounds;
 
 use itertools::Itertools;
-
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
@@ -121,7 +120,7 @@ impl<S: StateStore> DedupPkStateTable<S> {
     }
 
     /// Use order key to replace deduped pk datums
-    /// dedup_pk_row is the normal row, but with `None` values
+    /// `dedup_pk_row` is row with `None` values
     /// in place of pk datums.
     fn dedup_pk_row_to_row(&self, pk: &Row, dedup_pk_row: Row) -> Row {
         let mut inner = dedup_pk_row.0;
