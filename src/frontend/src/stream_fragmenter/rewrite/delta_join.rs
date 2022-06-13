@@ -222,10 +222,17 @@ impl StreamFragmenter {
         let i0_length = arrange_0.fields.len();
         let i1_length = arrange_1.fields.len();
 
-        let lookup_0_column_reordering = (i1_length..i1_length + i0_length)
-            .chain(0..i1_length)
-            .map(|x| output_indices[x] as _)
-            .collect_vec();
+        let lookup_0_column_reordering = {
+            let tmp: Vec<i32> = (i1_length..i1_length + i0_length)
+                .chain(0..i1_length)
+                .map(|x| x as _)
+                .collect_vec();
+            output_indices
+                .iter()
+                .map(|&x| tmp[x as usize])
+                .collect_vec()
+        };
+        dbg!(&lookup_0_column_reordering);
         // lookup left table by right stream
         let lookup_0 = self.build_lookup_for_delta_join(
             state,
@@ -245,8 +252,16 @@ impl StreamFragmenter {
                 arrangement_table_info: delta_join_node.left_info.clone(),
             },
         );
-
-        let lookup_1_column_reordering = (0..i0_length + i1_length).map(|x| output_indices[x] as _).collect_vec();
+        let lookup_1_column_reordering = {
+            let tmp: Vec<i32> = (0..i0_length + i1_length)
+                .chain(0..i1_length)
+                .map(|x| x as _)
+                .collect_vec();
+            output_indices
+                .iter()
+                .map(|&x| tmp[x as usize])
+                .collect_vec()
+        };
         // lookup right table by left stream
         let lookup_1 = self.build_lookup_for_delta_join(
             state,

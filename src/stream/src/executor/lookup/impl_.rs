@@ -177,11 +177,11 @@ impl<S: StateStore> LookupExecutor<S> {
         );
 
         // check whether output column mapping is valid.
-        assert_eq!(
-            column_mapping.len(),
-            output_column_length,
-            "column mapping mismatched"
-        );
+        // assert_eq!(
+        //     column_mapping.len(),
+        //     output_column_length,
+        //     "column mapping mismatched"
+        // );
 
         // resolve mapping from join keys in stream row -> joins keys for arrangement.
         let key_indices_mapping = arrangement_order_rules
