@@ -310,16 +310,14 @@ impl BatchPlanFragmenter {
     fn new_stage(
         &mut self,
         root: PlanRef,
-        parent_parallelism: Option<u32>,
+        _parent_parallelism: Option<u32>,
         exchange_info: Option<ExchangeInfo>,
     ) -> QueryStageRef {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
-        let parallelism = match parent_parallelism {
-            // Non-root node
-            Some(_) => self.worker_node_manager.worker_node_count(),
-            // Root node.
-            None => 1,
+        let parallelism = match root.distribution() {
+            Distribution::Single => 1,
+            _ => self.worker_node_manager.worker_node_count(),
         };
 
         let exchange_info = match exchange_info {
