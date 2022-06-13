@@ -15,8 +15,9 @@
 #![allow(clippy::mutable_key_type)]
 #![allow(dead_code)]
 
-use std::vec::Drain;
 use std::ops::Index;
+use std::vec::Drain;
+
 use futures::pin_mut;
 use futures::stream::StreamExt;
 use madsim::collections::BTreeMap;
@@ -280,7 +281,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         debug_assert!(!self.is_dirty());
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
-        while let Some(res) = state_table_iter.next().await{
+        while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
             println!("\nfill in cache res = {:?}", row);
             println!(

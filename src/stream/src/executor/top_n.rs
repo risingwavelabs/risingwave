@@ -834,7 +834,7 @@ mod tests {
             top_n_executor.next().await.unwrap().unwrap(),
             Message::Barrier(_)
         );
-
+        println!("---这里6---");
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),

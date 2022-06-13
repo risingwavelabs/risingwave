@@ -128,6 +128,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         } else {
             // Cache must always be non-empty when the state is not empty.
             debug_assert!(!self.top_n.is_empty(), "top_n is empty");
+            println!("\n\npop_top_element\n\n");
             // Similar as the comments in `retain_top_n`, it is actually popping
             // the element with the largest key.
             let key = match TOP_N_TYPE {
@@ -171,6 +172,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
     pub async fn insert(&mut self, key: OrderedRow, value: Row, _epoch: u64) -> Result<()> {
         let have_key_on_storage = self.total_count > self.top_n.len();
+        println!("top_n insert pk = {:?}", key);
         let need_to_flush = if have_key_on_storage {
             // It is impossible that the cache is empty.
             let bottom_key = self.bottom_element().unwrap().0;
@@ -228,6 +230,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
                 loop {
                     if let Some(top_n_count) = self.top_n_count && self.top_n.len() >= top_n_count {
+                        println!("top_n_count = {:?}", top_n_count);
                         break;
                     }
                     match state_table_iter.next().await {
@@ -235,11 +238,13 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                             let row = next_res.unwrap().into_owned();
                             let mut datums = vec![];
                             for pk_indice in &self.state_table.pk_indices {
-                                let a = row.index(*pk_indice).clone();
-                                datums.push(a);
+                                datums.push(row.index(*pk_indice).clone());
                             }
                             let pk = Row::new(datums);
-                            println!("\n*** scan and merge的时候, top_n_type= TOP_N_MIN , insert pk = {:?}",pk);
+                            println!(
+                                "\n*** scan and merge, top_n_type= TOP_N_MIN , insert pk = {:?}",
+                                pk
+                            );
                             let pk_ordered =
                                 OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
 
@@ -252,7 +257,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 }
             }
             TOP_N_MAX => {
-                let state_table_iter = self.state_table.iter_rev(epoch).await?;
+                let state_table_iter = self.state_table.iter(epoch).await?;
                 pin_mut!(state_table_iter);
 
                 loop {
@@ -264,11 +269,13 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                             let row = next_res.unwrap().into_owned();
                             let mut datums = vec![];
                             for pk_indice in &self.state_table.pk_indices {
-                                let a = row.index(*pk_indice).clone();
-                                datums.push(a);
+                                datums.push(row.index(*pk_indice).clone());
                             }
                             let pk = Row::new(datums);
-                            println!("\n*** scan and merge的时候, top_n_type= TOP_N_MAX, insert pk = {:?}",pk);
+                            println!(
+                                "\n*** scan and merge, top_n_type= TOP_N_MAX, insert pk = {:?}",
+                                pk
+                            );
                             let pk_ordered =
                                 OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
                             self.top_n.insert(pk_ordered, row);
@@ -290,6 +297,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         value: Row,
         epoch: u64,
     ) -> Result<Option<Row>> {
+        println!("top_n delete pk = {:?}", key);
         let prev_entry = self.top_n.remove(key);
         match TOP_N_TYPE {
             TOP_N_MIN => self
@@ -359,7 +367,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             self.retain_top_n();
             return Ok(());
         }
-
+        println!("\n\n\n------------------commit----------------\n\n");
         self.state_table.commit(epoch).await?;
 
         self.retain_top_n();

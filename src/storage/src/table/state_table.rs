@@ -95,12 +95,10 @@ impl<S: StateStore> StateTable<S> {
     /// write methods
     pub fn insert<const RVERSE: bool>(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        println!("\nwrite to storage pk = {:?}", pk);
         let pk_bytes = match RVERSE {
             true => reverse_serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
             false => serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
         };
-        println!("write to storage pk_bytes = {:?}\n", pk_bytes);
 
         self.mem_table.insert(pk_bytes, value)?;
         Ok(())
@@ -108,12 +106,10 @@ impl<S: StateStore> StateTable<S> {
 
     pub fn delete<const RVERSE: bool>(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
-        println!("\nwrite to storage pk = {:?}", pk);
         let pk_bytes = match RVERSE {
             true => reverse_serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
             false => serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
         };
-        println!("delete write to storage pk_bytes = {:?}\n", pk_bytes);
         self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }
@@ -152,18 +148,7 @@ impl<S: StateStore> StateTable<S> {
         ))
     }
 
-    pub async fn iter_rev(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
-        let cell_based_bounds = (Unbounded, Unbounded);
-        let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
-        let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
-        Ok(StateTableRowIter::into_stream_rev(
-            &self.keyspace,
-            self.column_descs.clone(),
-            mem_table_iter,
-            cell_based_bounds,
-            epoch,
-        ))
-    }
+    
 
     /// This function scans rows from the relational table with specific `pk_bounds`.
     pub async fn iter_with_pk_bounds<R, B>(
@@ -302,104 +287,15 @@ impl<S: StateStore> StateTableRowIter<S> {
                 (None, None) => break,
                 (Some(_), None) => {
                     let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+                    println!("\nonly exist in cell , return cell =  {:?}", row);
                     yield Cow::Owned(row);
                 }
                 (None, Some(_)) => {
+                    
                     let row_op = mem_table_iter.next().unwrap().1;
                     match row_op {
                         RowOp::Insert(row) | RowOp::Update((_, row)) => {
-                            yield Cow::Borrowed(row);
-                        }
-                        _ => {}
-                    }
-                }
-
-                (
-                    Some(Ok((cell_based_pk, cell_based_row))),
-                    Some((mem_table_pk, _mem_table_row_op)),
-                ) => {
-                    println!("\ncell_based_pk = {:?}", cell_based_pk);
-                    println!("mem_table_pk = {:?}\n", mem_table_pk);
-                    match cell_based_pk.cmp(mem_table_pk) {
-                        Ordering::Less => {
-                            // cell_based_table_item will be return
-                            let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
-                            yield Cow::Owned(row);
-                        }
-                        Ordering::Equal => {
-                            // mem_table_item will be return, while both cell_based_streaming_iter
-                            // and mem_table_iter need to execute next()
-                            // once.
-                            let row_op = mem_table_iter.next().unwrap().1;
-                            match row_op {
-                                RowOp::Insert(row) => yield Cow::Borrowed(row),
-                                RowOp::Delete(_) => {}
-                                RowOp::Update((old_row, new_row)) => {
-                                    debug_assert!(old_row == cell_based_row);
-                                    yield Cow::Borrowed(new_row);
-                                }
-                            }
-                            cell_based_table_iter.next().await.unwrap()?;
-                        }
-                        Ordering::Greater => {
-                            // mem_table_item will be return
-                            let row_op = mem_table_iter.next().unwrap().1;
-                            match row_op {
-                                RowOp::Insert(row) => yield Cow::Borrowed(row),
-                                RowOp::Delete(_) => {}
-                                RowOp::Update(_) => unreachable!(),
-                            }
-                        }
-                    }
-                }
-                (Some(_), Some(_)) => {
-                    // Throw the error.
-                    cell_based_table_iter.next().await.unwrap()?;
-                    mem_table_iter.next().unwrap();
-
-                    unreachable!()
-                }
-            }
-        }
-    }
-
-    #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
-    async fn into_stream_rev<'a>(
-        keyspace: &'a Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
-        mem_table_iter: Range<'a, Vec<u8>, RowOp>,
-        cell_based_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-    ) {
-        println!("一次rev next\n");
-        let cell_based_table_iter: futures::stream::Peekable<_> =
-            CellBasedTableStreamingIter::new_with_bounds(
-                keyspace,
-                table_descs,
-                cell_based_bounds,
-                epoch,
-            )
-            .await?
-            .into_stream()
-            .peekable();
-        pin_mut!(cell_based_table_iter);
-
-        let mut mem_table_iter = mem_table_iter.peekable();
-
-        loop {
-            match (
-                cell_based_table_iter.as_mut().peek().await,
-                mem_table_iter.peek(),
-            ) {
-                (None, None) => break,
-                (Some(_), None) => {
-                    let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
-                    yield Cow::Owned(row);
-                }
-                (None, Some(_)) => {
-                    let row_op = mem_table_iter.next().unwrap().1;
-                    match row_op {
-                        RowOp::Insert(row) | RowOp::Update((_, row)) => {
+                            println!("\nonly exist in mem , return mem =  {:?}", row);
                             yield Cow::Borrowed(row);
                         }
                         _ => {}
@@ -430,7 +326,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                                     println!("Equal write mem_item_insert = {:?}", row);
                                     yield Cow::Borrowed(row);
                                 }
-                                RowOp::Delete(_) => {}
+                                RowOp::Delete(_) => {println!("Equal Delete");}
                                 RowOp::Update((old_row, new_row)) => {
                                     debug_assert!(old_row == cell_based_row);
                                     println!("Equal write mem_item_update = {:?}", new_row);
@@ -463,6 +359,7 @@ impl<S: StateStore> StateTableRowIter<S> {
             }
         }
     }
+
 }
 
 fn err(rw: impl Into<RwError>) -> StorageError {
