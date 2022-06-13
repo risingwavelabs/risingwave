@@ -127,20 +127,21 @@ impl fmt::Display for StreamHashJoin {
         if self.append_only() {
             builder.field("append_only", &format_args!("{}", true));
         }
-        builder.field(
-            "output_indices: {}",
-            if self
-                .logical
-                .output_indices()
-                .iter()
-                .copied()
-                .eq(0..self.logical.internal_column_num())
-            {
-                "all".to_string()
-            } else {
-                format!("{:?}", self.logical.output_indices())
-            },
-        );
+        if self
+            .logical
+            .output_indices()
+            .iter()
+            .copied()
+            .eq(0..self.logical.internal_column_num())
+        {
+            builder.field("output_indices", &format_args!("all"));
+        } else {
+            builder.field(
+                "output_indices",
+                &format_args!("{:?}", self.logical.output_indices()),
+            );
+        }
+
         builder.finish()
     }
 }

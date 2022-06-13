@@ -14,9 +14,8 @@
   stream_plan: |
     StreamMaterialize { columns: [id, v2, v3, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1], append_only: true }
       StreamExchange { dist: HashShard([3, 4]), append_only: true }
-        StreamProject { exprs: [$0, $1, $4, $2, $5], appendonly: true }
-          StreamHashJoin { type: Inner, predicate: $0 = $3, append_only: true }
-            StreamExchange { dist: HashShard([0]), append_only: true }
-              StreamTableScan { table: t1, columns: [v1, v2, _row_id], pk_indices: [2], append_only: true }
-            StreamExchange { dist: HashShard([0]), append_only: true }
-              StreamTableScan { table: t2, columns: [v1, v3, _row_id], pk_indices: [2], append_only: true }
+        StreamHashJoin { type: Inner, predicate: $0 = $3, append_only: true, output_indices: [0, 1, 4, 2, 5] }
+          StreamExchange { dist: HashShard([0]), append_only: true }
+            StreamTableScan { table: t1, columns: [v1, v2, _row_id], pk_indices: [2], append_only: true }
+          StreamExchange { dist: HashShard([0]), append_only: true }
+            StreamTableScan { table: t2, columns: [v1, v3, _row_id], pk_indices: [2], append_only: true }
