@@ -197,7 +197,7 @@ impl LocalStreamManager {
 
     /// Use `prev_epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn initiate_barrier_collection(
+    pub async fn collect_barrier_and_sync(
         &self,
         prev_epoch: u64,
         need_sync: bool,
@@ -279,7 +279,7 @@ impl LocalStreamManager {
 
         self.initiate_barrier_send(barrier, actor_ids_to_send, actor_ids_to_collect)
             .await?;
-        self.initiate_barrier_collection(barrier.epoch.prev, false)
+        self.collect_barrier_and_sync(barrier.epoch.prev, false)
             .await;
         self.core.lock().drop_all_actors();
 

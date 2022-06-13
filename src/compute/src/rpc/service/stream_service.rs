@@ -154,7 +154,7 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
         let collect_result = self
             .mgr
-            .initiate_barrier_collection(req.prev_epoch, true)
+            .collect_barrier_and_sync(req.prev_epoch, true)
             .await;
 
         Ok(Response::new(BarrierCompleteResponse {
