@@ -360,7 +360,7 @@ impl BatchPlanFragmenter {
                     builder.root = Some(Arc::new(execution_plan_node));
                 }
                 // Check out the comments for `has_table_scan` in `QueryStage`.
-                builder.has_table_scan = node.node_type() == PlanNodeType::BatchSeqScan;
+                builder.has_table_scan |= node.node_type() == PlanNodeType::BatchSeqScan;
             }
         }
     }
