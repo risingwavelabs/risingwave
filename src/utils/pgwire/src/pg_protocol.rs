@@ -22,7 +22,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use crate::error::PsqlError;
 use crate::pg_extended::{PgPortal, PgStatement};
-use crate::pg_field_descriptor::TypeOid;
+use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FePasswordMessage,
     FeStartupMessage,
@@ -172,14 +172,43 @@ where
                     .collect();
 
                 // 2. Create the row description.
-                let session = self.session.clone().unwrap();
-                let rows_res = session.infer_return_type(query).await;
-                let rows = match rows_res {
-                    Ok(r) => r,
-                    Err(e) => {
-                        self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
-                        // TODO: Error handle needed modified later.
-                        unimplemented!();
+                let rows: Vec<PgFieldDescriptor> = if types.len() != 0 {
+                    query
+                        .split(&[' ', ',', ';'])
+                        .skip(1)
+                        .into_iter()
+                        .map(|x| {
+                            if let Some(str) = x.strip_prefix('$') {
+                                if let Ok(i) = str.parse() {
+                                    i
+                                } else {
+                                    -1
+                                }
+                            } else {
+                                -1
+                            }
+                        })
+                        .take_while(|x: &i32| x.is_positive())
+                        .map(|x| {
+                            // NOTE Make sure the type_description include all generic parametre
+                            // description we needed.
+                            assert!(((x - 1) as usize) < types.len());
+                            PgFieldDescriptor::new(
+                                String::new(),
+                                types[(x - 1) as usize].to_owned(),
+                            )
+                        })
+                        .collect()
+                } else {
+                    let session = self.session.clone().unwrap();
+                    let rows_res = session.infer_return_type(query).await;
+                    match rows_res {
+                        Ok(r) => r,
+                        Err(e) => {
+                            self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+                            // TODO: Error handle needed modified later.
+                            unimplemented!();
+                        }
                     }
                 };
 
