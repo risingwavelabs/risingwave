@@ -180,8 +180,8 @@ impl LocalQueryExecution {
                                         // to differentiate which one is primary and
                                         // should really read all the data.
                                         task_id: idx as u32,
-                                        stage_id: 0,
-                                        query_id: "local execution mode".to_string(),
+                                        stage_id: exchange_from_stage_id,
+                                        query_id: self.query.query_id.id.clone(),
                                     }),
                                     output_id: 0,
                                 }),
