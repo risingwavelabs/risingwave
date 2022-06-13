@@ -518,9 +518,6 @@ where
             .collect_vec();
         // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
         // epochs below specific watermark.
-        // let mut snapshots_change = !to_unpin.is_empty();
-        tracing::info!("Unpin epochs {:?}", to_unpin);
-
         for epoch in &to_unpin {
             context_pinned_snapshot.unpin_snapshot(*epoch);
         }
