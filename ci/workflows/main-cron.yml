@@ -5,6 +5,7 @@ steps:
     plugins:
       - docker-compose#v3.9.0:
           run: rw-build-env
+          user: buildkite-agent
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
@@ -15,6 +16,7 @@ steps:
     plugins:
       - docker-compose#v3.9.0:
           run: rw-build-env
+          user: buildkite-agent
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
@@ -26,6 +28,7 @@ steps:
     plugins:
       - docker-compose#v3.9.0:
           run: rw-build-env
+          user: buildkite-agent
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
@@ -40,6 +43,7 @@ steps:
             CODECOV_TOKEN: my-codecov-token
       - docker-compose#v3.9.0:
           run: rw-build-env
+          user: buildkite-agent
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
@@ -50,6 +54,7 @@ steps:
     plugins:
       - docker-compose#v3.9.0:
           run: rw-build-env
+          user: buildkite-agent
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 5
@@ -60,6 +65,7 @@ steps:
     plugins:
       - docker-compose#v3.9.0:
           run: rw-build-env
+          user: buildkite-agent
           config: ci/docker-compose.yml
       - shellcheck#v1.2.0:
           files: ./**/*.sh
