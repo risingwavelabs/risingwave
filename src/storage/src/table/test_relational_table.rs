@@ -30,8 +30,8 @@ use crate::memory::MemoryStateStore;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::StateStore;
 use crate::table::cell_based_table::{CellBasedTable, CellTableChunkIter};
-use crate::table::state_table::StateTable;
 use crate::table::dedup_pk_state_table::DedupPkStateTable;
+use crate::table::state_table::StateTable;
 use crate::table::TableIter;
 use crate::Keyspace;
 
@@ -1533,14 +1533,22 @@ async fn test_dedup_pk_table_write_with_various_reads() {
     state
         .insert(
             &Row(vec![Some(11_i32.into())]),
-            Row(vec![Some(1_i32.into()), Some(11_i32.into()), Some(111_i32.into())]),
+            Row(vec![
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
+            ]),
         )
         .unwrap();
 
     state
         .insert(
             &Row(vec![Some(22_i32.into())]),
-            Row(vec![Some(2_i32.into()), Some(22_i32.into()), Some(222_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
         )
         .unwrap();
 
@@ -1570,7 +1578,6 @@ async fn test_dedup_pk_table_write_with_various_reads() {
     assert!(actual_1.is_some());
     assert_eq!(actual_1.unwrap(), expected_1);
 }
-
 
 async fn test_dedup_cell_based_table_iter_with(
     row_ordered_descs: Vec<OrderedColumnDesc>,
