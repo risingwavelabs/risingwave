@@ -21,10 +21,9 @@ use mysql_async::*;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
-use crate::sink::Sink;
+use crate::sink::{Result, Sink, SinkError};
 
 pub struct MySQLConfig {
     pub endpoint: String,
@@ -75,7 +74,7 @@ impl fmt::Display for MySQLValue {
 }
 
 impl TryFrom<Datum> for MySQLValue {
-    type Error = RwError;
+    type Error = SinkError;
 
     fn try_from(datum: Datum) -> Result<MySQLValue> {
         if let Some(scalar) = datum {

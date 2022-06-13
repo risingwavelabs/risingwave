@@ -18,7 +18,8 @@ pub mod redis;
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, RwError};
+use thiserror::Error;
 
 use crate::sink::mysql::{MySQLConfig, MySQLSink};
 use crate::sink::redis::{RedisConfig, RedisSink};
@@ -54,5 +55,19 @@ impl Sink for SinkImpl {
             SinkImpl::MySQL(sink) => sink.write_batch(chunk, schema).await,
             SinkImpl::Redis(sink) => sink.write_batch(chunk, schema).await,
         }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, SinkError>;
+
+#[derive(Error, Debug)]
+pub enum SinkError {
+    #[error(transparent)]
+    MySQL(#[from] mysql_async::Error),
+}
+
+impl From<SinkError> for RwError {
+    fn from(e: SinkError) -> Self {
+        ErrorCode::SinkError(Box::new(e)).into()
     }
 }
