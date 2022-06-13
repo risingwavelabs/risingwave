@@ -73,17 +73,8 @@ impl ComputeNodeService {
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
 
-        let is_shared_backend = match (provide_minio.as_slice(), provide_aws_s3.as_slice()) {
-            ([], []) => {
-                cmd.arg("--state-store").arg("hummock+memory");
-                false
-            }
-            (provide_minio, provide_aws_s3) => {
-                add_storage_backend(&config.id, provide_minio, provide_aws_s3, cmd)?;
-                true
-            }
-        };
-
+        let is_shared_backend =
+            add_storage_backend(&config.id, provide_minio, provide_aws_s3, true, cmd)?;
         if provide_compute_node.len() > 1 && !is_shared_backend {
             return Err(anyhow!(
                 "should use a shared backend (e.g. MinIO) for multiple compute-node configuration. Consider adding `use: minio` in risedev config."
