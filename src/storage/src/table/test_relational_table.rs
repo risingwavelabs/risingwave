@@ -1418,7 +1418,7 @@ async fn test_multi_cell_based_table_iter() {
 }
 
 #[tokio::test]
-async fn test_dedup_pk_state_write_with_cell_based_read() {
+async fn test_dedup_pk_inner_state_write_with_cell_based_read() {
     // ---------- init state store
     let state_store = MemoryStateStore::new();
 
