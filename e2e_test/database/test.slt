@@ -1,7 +1,7 @@
 query T
 show schemas;
 ----
-dev
+public
 
 statement ok
 create table ddl_t (v1 int not null);
