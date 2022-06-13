@@ -278,7 +278,7 @@ impl HashMappingManagerCore {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
-    use risingwave_pb::common::{ParallelUnit, ParallelUnitType};
+    use risingwave_pb::common::{ParallelUnit, ParallelUnitType, VNodeBitmap};
 
     use super::{HashMappingInfo, HashMappingManager};
 
@@ -407,5 +407,62 @@ mod tests {
             .unwrap();
         less_counts.sort();
         assert_eq!(less_counts, vec![4u32, 5]);
+    }
+
+    #[test]
+    fn test_check_sst_deprecated() {
+        let parallel_unit_count = 6usize;
+        let parallel_units = (1..parallel_unit_count + 1)
+            .map(|id| ParallelUnit {
+                id: id as u32,
+                r#type: ParallelUnitType::Hash as i32,
+                worker_node_id: 1,
+            })
+            .collect_vec();
+        let hash_mapping_manager = HashMappingManager::new();
+
+        let fragment_id = 1u32;
+        hash_mapping_manager.build_fragment_hash_mapping(fragment_id, &parallel_units);
+        let vnode_mapping = hash_mapping_manager
+            .get_fragment_hash_mapping(&fragment_id)
+            .unwrap();
+
+        let table_id = 2u32;
+        hash_mapping_manager.set_fragment_state_table(fragment_id, table_id);
+        assert_eq!(
+            hash_mapping_manager
+                .get_table_hash_mapping(&table_id)
+                .unwrap(),
+            vnode_mapping
+        );
+
+        let full_bitmap = VNodeBitmap {
+            table_id,
+            bitmap: [u8::MAX; VIRTUAL_NODE_COUNT / u8::BITS as usize].to_vec(),
+        };
+        assert_eq!(
+            hash_mapping_manager.check_sst_deprecated(&[full_bitmap]),
+            true
+        );
+
+        let mut bitmap = [0; VIRTUAL_NODE_COUNT / u8::BITS as usize].to_vec();
+        for i in 0..VIRTUAL_NODE_COUNT / parallel_unit_count {
+            bitmap[i / u8::BITS as usize] |= 1 << (i % u8::BITS as usize);
+        }
+        let fresh_bitmap = VNodeBitmap { table_id, bitmap };
+        assert_eq!(
+            hash_mapping_manager.check_sst_deprecated(&[fresh_bitmap]),
+            false
+        );
+
+        bitmap = [0; VIRTUAL_NODE_COUNT / u8::BITS as usize].to_vec();
+        for i in 0..VIRTUAL_NODE_COUNT / parallel_unit_count + 1 {
+            bitmap[i / u8::BITS as usize] |= 1 << (i % u8::BITS as usize);
+        }
+        let stale_bitmap = VNodeBitmap { table_id, bitmap };
+        assert_eq!(
+            hash_mapping_manager.check_sst_deprecated(&[stale_bitmap]),
+            true
+        );
     }
 }
