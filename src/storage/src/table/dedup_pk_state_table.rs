@@ -86,8 +86,16 @@ impl<S: StateStore> DedupPkStateTable<S> {
     }
 
     /// Use order key to replace deduped pk datums
-    fn dedup_pk_row_to_row(&self, _pk: &Row, dedup_pk_row: Row) -> Row {
-        dedup_pk_row
+    /// dedup_pk_row is the normal row, but with `None` values
+    /// in place of pk datums.
+    fn dedup_pk_row_to_row(&self, pk: &Row, dedup_pk_row: Row) -> Row {
+        let mut inner = dedup_pk_row.0;
+        for (pk_idx, datum) in pk.0.iter().enumerate() {
+            if let Some(row_idx) = self.pk_to_row_mapping[pk_idx] {
+                inner[row_idx] = datum.clone();
+            }
+        }
+        Row(inner)
     }
 
     fn dedup_pk_row_and_raw_key_to_row(
