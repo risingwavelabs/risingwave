@@ -203,33 +203,46 @@ impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix(
         &self,
-        pk_prefix: Row,
+        pk_prefix: Option<&Row>,
         prefix_serializer: OrderedRowSerializer,
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
-        let key_bytes = serialize_pk(&pk_prefix, &prefix_serializer);
-        let start_key_with_prefix = self.keyspace.prefixed_key(&key_bytes);
-        let cell_based_bounds = (
-            Included(start_key_with_prefix.clone()),
-            Excluded(next_key(start_key_with_prefix.as_slice())),
-        );
+        if let Some(pk_prefix) = pk_prefix.as_ref() {
+            let key_bytes = serialize_pk(pk_prefix, &prefix_serializer);
+            let start_key_with_prefix = self.keyspace.prefixed_key(&key_bytes);
+            let cell_based_bounds = (
+                Included(start_key_with_prefix.clone()),
+                Excluded(next_key(start_key_with_prefix.as_slice())),
+            );
 
-        let mem_table_bounds = (
-            Included(key_bytes.clone()),
-            Excluded(next_key(key_bytes.as_slice())),
-        );
-        let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
-        Ok(StateTableRowIter::into_stream(
-            &self.keyspace,
-            self.column_descs.clone(),
-            mem_table_iter,
-            cell_based_bounds,
-            epoch,
-        ))
+            let mem_table_bounds = (
+                Included(key_bytes.clone()),
+                Excluded(next_key(key_bytes.as_slice())),
+            );
+            let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
+            Ok(StateTableRowIter::into_stream(
+                &self.keyspace,
+                self.column_descs.clone(),
+                mem_table_iter,
+                cell_based_bounds,
+                epoch,
+            ))
+        } else {
+            let cell_based_bounds = (Unbounded, Unbounded);
+            let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
+            let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
+            Ok(StateTableRowIter::into_stream(
+                &self.keyspace,
+                self.column_descs.clone(),
+                mem_table_iter,
+                cell_based_bounds,
+                epoch,
+            ))
+        }
     }
 }
 
-pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>> + 'a;
+pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>>;
 
 struct StateTableRowIter<S: StateStore> {
     _phantom: PhantomData<S>,

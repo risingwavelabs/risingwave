@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId, TABLE_SOURCE_PK_COLID};
 
-#[allow(non_snake_case, non_upper_case_globals)]
+#[expect(non_snake_case, non_upper_case_globals)]
 pub mod WithOptions {
     pub const AppenOnly: &str = "appendonly";
 }

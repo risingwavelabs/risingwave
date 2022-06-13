@@ -85,7 +85,6 @@ pub struct SharedBufferUploader {
 }
 
 impl SharedBufferUploader {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
@@ -203,7 +202,7 @@ impl SharedBufferUploader {
 
         let uploaded_sst_info: Vec<SstableInfo> = tables
             .into_iter()
-            .map(|(sst, vnode_bitmaps)| SstableInfo {
+            .map(|(sst, unit_id, vnode_bitmaps)| SstableInfo {
                 id: sst.id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
                     left: sst.meta.smallest_key.clone(),
@@ -212,6 +211,7 @@ impl SharedBufferUploader {
                 }),
                 file_size: sst.meta.estimated_size as u64,
                 vnode_bitmaps,
+                unit_id,
             })
             .collect();
 

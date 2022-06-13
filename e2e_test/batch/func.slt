@@ -148,3 +148,13 @@ query I
 select char_length('abcdefghijklmnopqrstuvwxyz');
 ----
 26
+
+query I
+select repeat('hello', 3);
+----
+hellohellohello
+
+query I
+select repeat('hello', -1);
+----
+(empty)

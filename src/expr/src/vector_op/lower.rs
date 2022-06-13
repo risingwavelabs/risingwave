@@ -14,13 +14,11 @@
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn lower(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer
-        .write_ref(&s.to_lowercase())
-        .map_err(ExprError::Array)
+    writer.write_ref(&s.to_lowercase()).map_err(Into::into)
 }
 
 #[cfg(test)]

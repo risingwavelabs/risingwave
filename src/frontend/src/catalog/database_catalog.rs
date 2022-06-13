@@ -22,7 +22,7 @@ use crate::catalog::{DatabaseId, SchemaId};
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,

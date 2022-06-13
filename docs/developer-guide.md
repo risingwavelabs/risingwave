@@ -276,7 +276,7 @@ Before running end-to-end tests, you will need to start a full cluster first:
 Then run the end-to-end tests (replace `**/*.slt` with the test case directories and files available):
 
 ```shell
-./risedev slt -p 4566 -d dev -u root './e2e_test/streaming/**/*.slt'
+./risedev slt -p 4566 -d dev  './e2e_test/streaming/**/*.slt'
 ```
 
 After running e2e tests, you may kill the cluster and clean data.

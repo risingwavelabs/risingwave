@@ -182,12 +182,13 @@ where
     ongoing: bool,
     group_value: Option<T::OwnedItem>,
 }
+
 impl<T> GeneralSortedGrouper<T>
 where
     T: Array,
     for<'a> T::RefItem<'a>: Eq,
 {
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn new(ongoing: bool, group_value: Option<T::OwnedItem>) -> Self {
         Self {
             ongoing,
@@ -243,7 +244,9 @@ where
     }
 
     pub fn output_concrete(&self, builder: &mut T::Builder) -> Result<()> {
-        builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))
+        builder
+            .append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))
+            .map_err(Into::into)
     }
 }
 

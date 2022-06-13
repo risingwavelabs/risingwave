@@ -36,6 +36,7 @@
 #![feature(custom_test_frameworks)]
 #![feature(result_option_inspect)]
 #![feature(generators)]
+#![feature(lint_reasons)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
 pub mod cell_based_row_deserializer;
