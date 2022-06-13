@@ -73,25 +73,12 @@ impl ComputeNodeService {
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
 
-        let is_shared_backend = match (
-            config.enable_in_memory_kv_state_backend,
-            provide_minio.as_slice(),
-            provide_aws_s3.as_slice(),
-        ) {
-            (true, [], []) => {
-                cmd.arg("--state-store").arg("in-memory");
-                false
-            }
-            (true, _, _) => {
-                return Err(anyhow!(
-                    "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
-                ));
-            }
-            (false, [], []) => {
+        let is_shared_backend = match (provide_minio.as_slice(), provide_aws_s3.as_slice()) {
+            ([], []) => {
                 cmd.arg("--state-store").arg("hummock+memory");
                 false
             }
-            (false, provide_minio, provide_aws_s3) => {
+            (provide_minio, provide_aws_s3) => {
                 add_storage_backend(&config.id, provide_minio, provide_aws_s3, cmd)?;
                 true
             }
