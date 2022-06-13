@@ -25,6 +25,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 
 use super::StreamingAggStateImpl;
+use crate::executor::error::StreamExecutorResult;
 
 const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
 const NUM_OF_REGISTERS: usize = 1 << INDEX_BITS; // number of registers available
@@ -217,7 +218,7 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         match visibility {
             None => {
                 for (op, datum) in ops.iter().zip_eq(data[0].iter()) {
@@ -243,7 +244,7 @@ impl StreamingAggStateImpl for StreamingApproxCountDistinct {
         Ok(())
     }
 
-    fn get_output(&self) -> Result<Datum> {
+    fn get_output(&self) -> StreamExecutorResult<Datum> {
         let m = NUM_OF_REGISTERS as f64;
         let mut mean = 0.0;
 
