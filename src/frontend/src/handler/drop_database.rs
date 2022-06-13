@@ -96,7 +96,7 @@ mod tests {
             .await
             .unwrap();
 
-        frontend.run_sql("DROP SCHEMA database.dev").await.unwrap();
+        frontend.run_sql("DROP SCHEMA database.public").await.unwrap();
 
         frontend.run_sql("DROP DATABASE database").await.unwrap();
 
