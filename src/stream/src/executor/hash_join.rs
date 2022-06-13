@@ -384,10 +384,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .iter()
             .map(|field| field.data_type.clone())
             .collect();
-        let actual_output_data_types = output_indices
-            .iter()
-            .map(|&idx| original_output_data_types[idx].clone())
-            .collect();
         let col_l_datatypes = input_l
             .schema()
             .fields
@@ -430,10 +426,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
+        dbg!(&output_indices, &original_schema, &actual_schema);
         Self {
             input_l: Some(input_l),
             input_r: Some(input_r),
-            output_data_types: actual_output_data_types,
+            output_data_types: original_output_data_types,
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
@@ -479,6 +476,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let input_l = self.input_l.take().unwrap();
         let input_r = self.input_r.take().unwrap();
         let aligned_stream = barrier_align(input_l.execute(), input_r.execute());
+        dbg!(
+            &self.output_indices,
+            &self.output_data_types,
+            &self.schema()
+        );
         #[for_await]
         for msg in aligned_stream {
             match msg? {
@@ -496,6 +498,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         yield chunk.map_err(StreamExecutorError::hash_join_error).map(
                             |v| match v {
                                 Message::Chunk(chunk) => {
+                                    dbg!(
+                                        chunk
+                                            .columns()
+                                            .iter()
+                                            .map(|col| col.array_ref().get_ident())
+                                            .collect_vec(),
+                                        chunk
+                                            .clone()
+                                            .reorder_columns(&self.output_indices)
+                                            .columns()
+                                            .iter()
+                                            .map(|col| col.array_ref().get_ident())
+                                            .collect_vec(),
+                                    );
                                     Message::Chunk(chunk.reorder_columns(&self.output_indices))
                                 }
                                 barrier @ Message::Barrier(_) => barrier,

@@ -210,6 +210,7 @@ impl StreamFragmenter {
             Some(NodeBody::DeltaIndexJoin(node)) => node,
             _ => unreachable!(),
         };
+        let output_indices = &delta_join_node.output_indices;
 
         let arrange_0 = arrange_0_frag.node.as_ref().unwrap();
         let arrange_1 = arrange_1_frag.node.as_ref().unwrap();
@@ -221,6 +222,10 @@ impl StreamFragmenter {
         let i0_length = arrange_0.fields.len();
         let i1_length = arrange_1.fields.len();
 
+        let lookup_0_column_reordering = (i1_length..i1_length + i0_length)
+            .chain(0..i1_length)
+            .map(|x| output_indices[x] as _)
+            .collect_vec();
         // lookup left table by right stream
         let lookup_0 = self.build_lookup_for_delta_join(
             state,
@@ -236,14 +241,12 @@ impl StreamFragmenter {
                 } else {
                     Some(ArrangementTableId::IndexId(delta_join_node.left_table_id))
                 },
-                column_mapping: (i1_length..i1_length + i0_length)
-                    .chain(0..i1_length)
-                    .map(|x| x as _)
-                    .collect_vec(),
+                column_mapping: lookup_0_column_reordering,
                 arrangement_table_info: delta_join_node.left_info.clone(),
             },
         );
 
+        let lookup_1_column_reordering = (0..i0_length + i1_length).map(|x| output_indices[x] as _).collect_vec();
         // lookup right table by left stream
         let lookup_1 = self.build_lookup_for_delta_join(
             state,
@@ -259,7 +262,7 @@ impl StreamFragmenter {
                 } else {
                     Some(ArrangementTableId::IndexId(delta_join_node.right_table_id))
                 },
-                column_mapping: (0..i0_length + i1_length).map(|x| x as _).collect_vec(),
+                column_mapping: lookup_1_column_reordering,
                 arrangement_table_info: delta_join_node.right_info.clone(),
             },
         );
