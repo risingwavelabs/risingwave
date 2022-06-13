@@ -49,7 +49,6 @@ impl HummockSnapshotManager {
             core_guard.epoch_to_query_ids.insert(epoch, HashSet::new());
         }
         let last_pinned = core_guard.last_pinned;
-        tracing::info!("Pin epoch {} for query {:?}", last_pinned, &query_id);
         core_guard
             .epoch_to_query_ids
             .get_mut(&last_pinned)
@@ -59,7 +58,6 @@ impl HummockSnapshotManager {
     }
 
     pub async fn unpin_snapshot(&self, epoch: u64, query_id: &QueryId) -> Result<()> {
-        tracing::info!("Unpin epoch {} for query {:?}", epoch, &query_id);
         let min_epoch = async {
             // Decrease the ref count of corresponding epoch. If all last pinned epoch is dropped,
             // mark as outdated.
