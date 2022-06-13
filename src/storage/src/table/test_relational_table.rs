@@ -1433,12 +1433,10 @@ async fn test_dedup_pk_state_write_with_cell_based_read() {
     // ---------- declare pk
     let order_types = vec![OrderType::Descending];
     let pk_index = vec![1_usize];
-    let pk_ordered_descs = vec![
-        OrderedColumnDesc {
-            column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
-            order: OrderType::Descending,
-        },
-    ];
+    let pk_ordered_descs = vec![OrderedColumnDesc {
+        column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        order: OrderType::Descending,
+    }];
 
     // ---------- declare partial rows
     let column_descs = vec![
@@ -1474,7 +1472,11 @@ async fn test_dedup_pk_state_write_with_cell_based_read() {
     let epoch: u64 = 0; // TODO: Is this reliable epoch? How does state table determine epoch?
     let mut iter = table.iter_with_pk(epoch, &pk_ordered_descs).await.unwrap();
     // ---------- Read + Deserialize from storage
-    let expected = Row(vec![Some(1_i32.into()), Some(11_i32.into()), Some(111_i32.into())]);
+    let expected = Row(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]);
     let actual = iter.next().await.unwrap();
     assert!(actual.is_some());
     assert_eq!(actual.unwrap(), expected);
