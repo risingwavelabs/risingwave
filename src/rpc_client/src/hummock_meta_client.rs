@@ -16,7 +16,8 @@ use async_trait::async_trait;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use tonic::Streaming;
 
@@ -26,10 +27,12 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()>;
     async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch>;
     async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()>;
+    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
     async fn get_new_table_id(&self) -> Result<HummockSSTableId>;
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark like ssbench.
     async fn commit_epoch(&self, epoch: HummockEpoch, sstables: Vec<SstableInfo>) -> Result<()>;
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
+    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>>;
 }

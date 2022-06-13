@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, RwError, ToErrorStr};
-use risingwave_hummock_sdk::HummockContextId;
+use risingwave_hummock_sdk::compaction_group::Prefix;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use thiserror::Error;
 
 use crate::storage::meta_store;
@@ -32,6 +33,10 @@ pub enum Error {
     CompactorBusy(HummockContextId),
     #[error("compaction task {0} already assigned to compactor {1}")]
     CompactionTaskAlreadyAssigned(u64, HummockContextId),
+    #[error("compaction group {0} not found")]
+    InvalidCompactionGroup(CompactionGroupId),
+    #[error("compaction group member {0} not found")]
+    InvalidCompactionGroupMember(Prefix),
     #[error("internal error: {0}")]
     InternalError(String),
 }
@@ -77,6 +82,12 @@ impl From<Error> for ErrorCode {
                     "compaction task {} already assigned to compactor {}",
                     task_id, context_id
                 ))
+            }
+            Error::InvalidCompactionGroup(group_id) => {
+                ErrorCode::InternalError(format!("invalid compaction group {}", group_id))
+            }
+            Error::InvalidCompactionGroupMember(prefix) => {
+                ErrorCode::InternalError(format!("invalid compaction group member {}", prefix))
             }
         }
     }

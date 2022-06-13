@@ -345,7 +345,7 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo install $tool
@@ -434,7 +434,10 @@ script = """
 #!@shell
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
-cargo hakari generate
+
+# cargo hakari will generate new Cargo.toml regardless whether the original Cargo.toml is correct or not.
+# So we always verify before generate, so as not to change the modified time of Cargo.toml.
+(cargo hakari verify > /dev/null) || cargo hakari generate
 test $? -eq 0 || exit 1
 """
 
@@ -488,11 +491,6 @@ script = """
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
 description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
-
-[tasks.apply-ci-template]
-category = "RiseDev - Check"
-command = ".github/workflow-template/generate.sh"
-description = "Update CI workflow by applying templates"
 
 [tasks.c]
 alias = "check"

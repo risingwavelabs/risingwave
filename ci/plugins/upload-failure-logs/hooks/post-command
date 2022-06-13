@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -euo pipefail
+
+if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
+  mkdir risedev-logs && cp .risingwave/log/* risedev-logs
+  zip -q -r risedev-logs.zip risedev-logs/
+  buildkite-agent artifact upload "risedev-logs/*"
+  buildkite-agent artifact upload risedev-logs.zip
+fi

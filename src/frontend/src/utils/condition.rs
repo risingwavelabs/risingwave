@@ -14,10 +14,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::ops::Bound;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
+use super::ScanRange;
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
@@ -65,6 +67,12 @@ impl Condition {
     pub fn true_cond() -> Self {
         Self {
             conjunctions: vec![],
+        }
+    }
+
+    pub fn false_cond() -> Self {
+        Self {
+            conjunctions: vec![ExprImpl::literal_bool(false)],
         }
     }
 
@@ -146,7 +154,7 @@ impl Condition {
                     subset_indices.push(idx);
                 }
             }
-            if subset_indices.len() != 2 || (only_eq && Self::as_eq_cond(&expr).is_none()) {
+            if subset_indices.len() != 2 || (only_eq && expr.as_eq_cond().is_none()) {
                 non_eq_join.push(expr);
             } else {
                 // The key has the canonical ordering (lower, higher)
@@ -169,23 +177,6 @@ impl Condition {
         )
     }
 
-    /// Returns the `InputRefs` of an Equality predicate if it matches
-    /// ordered by the canonical ordering (lower, higher), else returns None
-    fn as_eq_cond(expr: &ExprImpl) -> Option<(InputRef, InputRef)> {
-        if let ExprImpl::FunctionCall(function_call) = expr.clone()
-            && function_call.get_expr_type() == ExprType::Equal
-            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.decompose_as_binary()
-        {
-            if x.index() < y.index() {
-                Some((*x, *y))
-            } else {
-                Some((*y, *x))
-            }
-        } else {
-            None
-        }
-    }
-
     #[must_use]
     /// For [`EqJoinPredicate`], separate equality conditions which connect left columns and right
     /// columns from other conditions.
@@ -206,7 +197,7 @@ impl Condition {
             let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
             if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                 others.push(expr)
-            } else if let Some(columns) = Self::as_eq_cond(&expr) {
+            } else if let Some(columns) = expr.as_eq_cond() {
                 eq_keys.push(columns);
             } else {
                 others.push(expr)
@@ -236,6 +227,119 @@ impl Condition {
         .into_iter()
         .next_tuple()
         .unwrap()
+    }
+
+    /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
+    pub fn split_to_scan_range(
+        self,
+        order_column_ids: &[usize],
+        num_cols: usize,
+    ) -> (ScanRange, Self) {
+        let mut col_idx_to_pk_idx = vec![None; num_cols];
+        order_column_ids
+            .iter()
+            .enumerate()
+            .for_each(|(idx, pk_idx)| {
+                col_idx_to_pk_idx[*pk_idx] = Some(idx);
+            });
+
+        // The i-th group only has exprs that reference the i-th PK column.
+        // The last group contains all the other exprs.
+        let mut groups = vec![vec![]; order_column_ids.len() + 1];
+        for (key, group) in &self.conjunctions.into_iter().group_by(|expr| {
+            let input_bits = expr.collect_input_refs(num_cols);
+            if input_bits.count_ones(..) == 1 {
+                let col_idx = input_bits.ones().next().unwrap();
+                col_idx_to_pk_idx[col_idx].unwrap_or(order_column_ids.len())
+            } else {
+                order_column_ids.len()
+            }
+        }) {
+            groups[key].extend(group);
+        }
+
+        let mut scan_range = ScanRange::full_table_scan();
+        let mut other_conds = groups.pop().unwrap();
+
+        for i in 0..order_column_ids.len() {
+            let group = std::mem::take(&mut groups[i]);
+            if group.is_empty() {
+                groups.push(other_conds);
+                return (
+                    scan_range,
+                    Self {
+                        conjunctions: groups[i + 1..].concat(),
+                    },
+                );
+            }
+            let mut lb = vec![];
+            let mut ub = vec![];
+            let mut eq_cond = None;
+            for expr in group {
+                if let Some((input_ref, lit)) = expr.as_eq_const() {
+                    assert_eq!(input_ref.index, order_column_ids[i]);
+                    if let Some(l) = eq_cond && l != lit {
+                        // Always false
+                        return (
+                            ScanRange::full_table_scan(),
+                            Self::false_cond(),
+                        );
+                    }
+                    eq_cond = Some(lit);
+                } else if let Some((input_ref, op, lit)) = expr.as_comparison_const() {
+                    assert_eq!(input_ref.index, order_column_ids[i]);
+                    match op {
+                        ExprType::LessThan => {
+                            ub.push((Bound::Excluded(lit), expr));
+                        }
+                        ExprType::LessThanOrEqual => {
+                            ub.push((Bound::Included(lit), expr));
+                        }
+                        ExprType::GreaterThan => {
+                            lb.push((Bound::Excluded(lit), expr));
+                        }
+                        ExprType::GreaterThanOrEqual => {
+                            lb.push((Bound::Included(lit), expr));
+                        }
+                        _ => unreachable!(),
+                    }
+                } else {
+                    other_conds.push(expr);
+                }
+            }
+
+            match eq_cond {
+                Some(lit) => {
+                    scan_range.eq_conds.push(lit);
+                    // TODO: simplify bounds
+                    other_conds.extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
+                }
+                None => {
+                    if lb.len() > 1 || ub.len() > 1 {
+                        // TODO: simplify bounds
+                        other_conds
+                            .extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
+                        break;
+                    } else if !lb.is_empty() || !ub.is_empty() {
+                        scan_range.range = (
+                            lb.first()
+                                .map(|(bound, _)| (bound.clone()))
+                                .unwrap_or(Bound::Unbounded),
+                            ub.first()
+                                .map(|(bound, _)| (bound.clone()))
+                                .unwrap_or(Bound::Unbounded),
+                        )
+                    }
+                }
+            }
+        }
+
+        (
+            scan_range,
+            Self {
+                conjunctions: other_conds,
+            },
+        )
     }
 
     /// Split the condition expressions into `N` groups.

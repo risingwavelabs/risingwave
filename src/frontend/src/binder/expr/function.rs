@@ -42,6 +42,7 @@ impl Binder {
                 "avg" => Some(AggKind::Avg),
                 "string_agg" => Some(AggKind::StringAgg),
                 "single_value" => Some(AggKind::SingleValue),
+                "approx_count_distinct" => Some(AggKind::ApproxCountDistinct),
                 _ => None,
             };
             if let Some(kind) = agg_kind {
@@ -65,6 +66,10 @@ impl Binder {
                 "nullif" => {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case
+                }
+                "concat" => {
+                    Self::rewrite_concat_to_concat_ws(&mut inputs)?;
+                    ExprType::ConcatWs
                 }
                 "concat_ws" => ExprType::ConcatWs,
                 "split_part" => ExprType::SplitPart,
@@ -94,6 +99,9 @@ impl Binder {
                     inputs = Self::rewrite_two_bool_inputs(inputs)?;
                     ExprType::NotEqual
                 }
+                "char_length" => ExprType::CharLength,
+                "character_length" => ExprType::CharLength,
+                "repeat" => ExprType::Repeat,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
@@ -109,6 +117,18 @@ impl Binder {
                 112.into(),
             )
             .into())
+        }
+    }
+
+    fn rewrite_concat_to_concat_ws(inputs: &mut Vec<ExprImpl>) -> Result<()> {
+        if inputs.is_empty() {
+            Err(ErrorCode::BindError(
+                "Function `Concat` takes at least 1 arguments (0 given)".to_string(),
+            )
+            .into())
+        } else {
+            inputs.insert(0, ExprImpl::literal_varchar("".to_string()));
+            Ok(())
         }
     }
 

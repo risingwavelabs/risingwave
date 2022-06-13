@@ -17,6 +17,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::error::Result;
+use risingwave_common::session_config::QUERY_MODE;
 use risingwave_sqlparser::ast::Statement;
 use tracing::info;
 
@@ -24,11 +25,10 @@ use crate::binder::{Binder, BoundStatement};
 use crate::config::QueryMode;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
-use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
-use crate::scheduler::{ExecutionContext, ExecutionContextRef, LocalQueryExecution};
+use crate::scheduler::{
+    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
+};
 use crate::session::OptimizerContext;
-
-pub static QUERY_MODE: &str = "query_mode";
 
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);

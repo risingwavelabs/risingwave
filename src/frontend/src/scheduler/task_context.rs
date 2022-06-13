@@ -15,8 +15,8 @@
 use std::sync::Arc;
 
 use risingwave_batch::executor::BatchMetrics;
-use risingwave_batch::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
-use risingwave_common::error::{Result, RwError};
+use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
+use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_source::SourceManagerRef;
 
@@ -29,7 +29,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         todo!()
     }
 
-    fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
+    fn is_local_addr(&self, _peer_addr: &HostAddr) -> bool {
         todo!()
     }
 

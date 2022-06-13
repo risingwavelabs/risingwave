@@ -27,6 +27,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn flush(&self) -> Result<()>;
 
     async fn unpin_snapshot(&self, epoch: u64) -> Result<()>;
+
+    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -43,5 +45,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn unpin_snapshot(&self, epoch: u64) -> Result<()> {
         self.0.unpin_snapshot(&[epoch]).await
+    }
+
+    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()> {
+        self.0.unpin_snapshot_before(epoch).await
     }
 }

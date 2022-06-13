@@ -1,10 +1,11 @@
 [package]
 edition = "2021"
 name = "risingwave_batch"
-version = "0.1.7"
+version = "0.1.9"
 
 [dependencies]
 anyhow = "1"
+async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 byteorder = "1"

@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
-use risingwave_common::error::Result;
+
+use crate::Result;
 
 /// Note: the behavior of `rtrim` in `PostgreSQL` and `trim_end` (or `trim_right`) in Rust
 /// are actually different when the string is in right-to-left languages like Arabic or Hebrew.
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[inline(always)]
 pub fn rtrim(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer.write_ref(s.trim_end())
+    writer.write_ref(s.trim_end()).map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -37,10 +38,10 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1)?;
+            let builder = Utf8ArrayBuilder::new(1).unwrap();
             let writer = builder.writer();
             let guard = rtrim(s, writer)?;
-            let array = guard.into_inner().finish()?;
+            let array = guard.into_inner().finish().unwrap();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }

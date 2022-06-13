@@ -158,6 +158,7 @@ message UpdateMutation {
 
 message AddMutation {
   repeated DispatcherMutation mutations = 1;
+  repeated SourceChangeSplit splits = 2;
 }
 
 message SourceChangeSplitMutation {

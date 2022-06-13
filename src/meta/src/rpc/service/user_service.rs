@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{tonic_err, Result as RwResult};
-use risingwave_pb::user::grant_privilege::{GrantSource, GrantTable, Target};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_pb::user::user_service_server::UserService;
 use risingwave_pb::user::{
     CreateUserRequest, CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilege,
@@ -21,28 +21,28 @@ use risingwave_pb::user::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::{CatalogManagerRef, UserManager};
+use crate::manager::{CatalogManagerRef, UserInfoManagerRef};
 use crate::storage::MetaStore;
 
 // TODO: Change user manager as a part of the catalog manager, to ensure that operations on Catalog
 // and User are transactional.
 pub struct UserServiceImpl<S: MetaStore> {
     catalog_manager: CatalogManagerRef<S>,
-    user_manager: UserManager<S>,
+    user_manager: UserInfoManagerRef<S>,
 }
 
 impl<S> UserServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(catalog_manager: CatalogManagerRef<S>, user_manager: UserManager<S>) -> Self {
+    pub fn new(catalog_manager: CatalogManagerRef<S>, user_manager: UserInfoManagerRef<S>) -> Self {
         Self {
             catalog_manager,
             user_manager,
         }
     }
 
-    /// Expands `GrantPrivilege` with target `GrantAllTables` or `GrantAllSources` to specific
+    /// Expands `GrantPrivilege` with object `GrantAllTables` or `GrantAllSources` to specific
     /// tables and sources, and set `with_grant_option` inside when grant privilege to a user.
     async fn expand_privilege(
         &self,
@@ -51,40 +51,26 @@ where
     ) -> RwResult<Vec<GrantPrivilege>> {
         let mut expanded_privileges = Vec::new();
         for privilege in privileges {
-            if let Some(Target::GrantAllTables(target)) = &privilege.target {
-                let tables = self
-                    .catalog_manager
-                    .list_tables(target.database_id, target.schema_id)
-                    .await?;
+            if let Some(Object::AllTablesSchemaId(schema_id)) = &privilege.object {
+                let tables = self.catalog_manager.list_tables(*schema_id).await?;
                 for table_id in tables {
                     let mut privilege = privilege.clone();
-                    privilege.target = Some(Target::GrantTable(GrantTable {
-                        database_id: target.database_id,
-                        schema_id: target.schema_id,
-                        table_id,
-                    }));
+                    privilege.object = Some(Object::TableId(table_id));
                     if let Some(true) = with_grant_option {
                         privilege
-                            .privilege_with_opts
+                            .action_with_opts
                             .iter_mut()
                             .for_each(|p| p.with_grant_option = true);
                     }
                     expanded_privileges.push(privilege);
                 }
-            } else if let Some(Target::GrantAllSources(target)) = &privilege.target {
-                let sources = self
-                    .catalog_manager
-                    .list_sources(target.database_id, target.schema_id)
-                    .await?;
+            } else if let Some(Object::AllSourcesSchemaId(source_id)) = &privilege.object {
+                let sources = self.catalog_manager.list_sources(*source_id).await?;
                 for source_id in sources {
                     let mut privilege = privilege.clone();
-                    privilege.target = Some(Target::GrantSource(GrantSource {
-                        database_id: target.database_id,
-                        schema_id: target.schema_id,
-                        source_id,
-                    }));
+                    privilege.object = Some(Object::SourceId(source_id));
                     if let Some(with_grant_option) = with_grant_option {
-                        privilege.privilege_with_opts.iter_mut().for_each(|p| {
+                        privilege.action_with_opts.iter_mut().for_each(|p| {
                             p.with_grant_option = with_grant_option;
                         });
                     }
@@ -93,7 +79,7 @@ where
             } else {
                 let mut privilege = privilege.clone();
                 if let Some(with_grant_option) = with_grant_option {
-                    privilege.privilege_with_opts.iter_mut().for_each(|p| {
+                    privilege.action_with_opts.iter_mut().for_each(|p| {
                         p.with_grant_option = with_grant_option;
                     });
                 }
@@ -114,14 +100,15 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
     ) -> Result<Response<CreateUserResponse>, Status> {
         let req = request.into_inner();
         let user = req.get_user().map_err(tonic_err)?;
-        self.user_manager
+        let version = self
+            .user_manager
             .create_user(user)
             .await
             .map_err(tonic_err)?;
 
         Ok(Response::new(CreateUserResponse {
             status: None,
-            version: 0, // TODO: fill version when supported in notification manager.
+            version,
         }))
     }
 
@@ -132,14 +119,15 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
     ) -> Result<Response<DropUserResponse>, Status> {
         let req = request.into_inner();
         let user_name = req.name;
-        self.user_manager
+        let version = self
+            .user_manager
             .drop_user(&user_name)
             .await
             .map_err(tonic_err)?;
 
         Ok(Response::new(DropUserResponse {
             status: None,
-            version: 0, // TODO: fill version when supported in notification manager.
+            version,
         }))
     }
 
@@ -149,19 +137,19 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         request: Request<GrantPrivilegeRequest>,
     ) -> Result<Response<GrantPrivilegeResponse>, Status> {
         let req = request.into_inner();
-        let user_name = req.get_user_name();
         let new_privileges = self
             .expand_privilege(req.get_privileges(), Some(req.with_grant_option))
             .await
             .map_err(tonic_err)?;
-        self.user_manager
-            .grant_privilege(user_name, &new_privileges)
+        let version = self
+            .user_manager
+            .grant_privilege(&req.users, &new_privileges)
             .await
             .map_err(tonic_err)?;
 
         Ok(Response::new(GrantPrivilegeResponse {
             status: None,
-            version: 0, // TODO: fill version when supported in notification manager.
+            version,
         }))
     }
 
@@ -171,20 +159,20 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         request: Request<RevokePrivilegeRequest>,
     ) -> Result<Response<RevokePrivilegeResponse>, Status> {
         let req = request.into_inner();
-        let user_name = req.get_user_name();
         let privileges = self
             .expand_privilege(req.get_privileges(), None)
             .await
             .map_err(tonic_err)?;
         let revoke_grant_option = req.revoke_grant_option;
-        self.user_manager
-            .revoke_privilege(user_name, &privileges, revoke_grant_option)
+        let version = self
+            .user_manager
+            .revoke_privilege(&req.users, &privileges, revoke_grant_option)
             .await
             .map_err(tonic_err)?;
 
         Ok(Response::new(RevokePrivilegeResponse {
             status: None,
-            version: 0, // TODO: fill version when supported in notification manager.
+            version,
         }))
     }
 }

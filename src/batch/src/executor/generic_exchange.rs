@@ -24,8 +24,9 @@ use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
-use risingwave_rpc_client::{ExchangeSource, GrpcExchangeSource};
+use risingwave_rpc_client::ExchangeSource;
 
+use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
@@ -53,7 +54,6 @@ pub trait CreateSource: Send {
     async fn create_source(
         context: impl BatchTaskContext,
         prost_source: &ProstExchangeSource,
-        task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>>;
 }
 
@@ -64,15 +64,16 @@ impl CreateSource for DefaultCreateSource {
     async fn create_source(
         context: impl BatchTaskContext,
         prost_source: &ProstExchangeSource,
-        task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>> {
         let peer_addr = prost_source.get_host()?.into();
+        let task_output_id = prost_source.get_task_output_id()?;
+        let task_id = TaskId::from(task_output_id.get_task_id()?);
 
         if context.is_local_addr(&peer_addr) {
-            trace!("Exchange locally [{:?}]", prost_source.get_task_output_id());
+            trace!("Exchange locally [{:?}]", task_output_id);
 
             Ok(Box::new(LocalExchangeSource::create(
-                prost_source.get_task_output_id()?.try_into()?,
+                task_output_id.try_into()?,
                 context,
                 task_id,
             )?))
@@ -80,12 +81,11 @@ impl CreateSource for DefaultCreateSource {
             trace!(
                 "Exchange remotely from {} [{:?}]",
                 &peer_addr,
-                prost_source.get_task_output_id()
+                task_output_id,
             );
 
             Ok(Box::new(
-                GrpcExchangeSource::create(peer_addr, prost_source.get_task_output_id()?.clone())
-                    .await?,
+                GrpcExchangeSource::create(prost_source.clone()).await?,
             ))
         }
     }
@@ -97,7 +97,12 @@ pub struct GenericExchangeExecutorBuilder {}
 impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(
+            inputs.is_empty(),
+            "Exchange executor should not have children!"
+        );
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Exchange
@@ -142,8 +147,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> GenericExchangeExecutor<CS
         let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
 
         for prost_source in &self.sources {
-            let source =
-                CS::create_source(self.context.clone(), prost_source, self.task_id.clone()).await?;
+            let source = CS::create_source(self.context.clone(), prost_source).await?;
             sources.push(source);
         }
 
@@ -208,7 +212,6 @@ mod tests {
             async fn create_source(
                 _: impl BatchTaskContext,
                 _: &ProstExchangeSource,
-                _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let mut rng = rand::thread_rng();
                 let i = rng.gen_range(1..=100000);

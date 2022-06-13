@@ -23,11 +23,11 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DecimalArray, F32Array,
-    F64Array, I16Array, I32Array, I64Array, Row, Utf8Array,
+    F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
+    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::AggKind;
@@ -69,12 +69,14 @@ pub trait StreamingAggState<A: Array>: Send + Sync + 'static {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &A,
-    ) -> Result<()>;
+    ) -> StreamExecutorResult<()>;
 }
 
 /// `StreamingAggFunction` allows us to get output from a streaming state.
 pub trait StreamingAggFunction<B: ArrayBuilder>: Send + Sync + 'static {
-    fn get_output_concrete(&self) -> Result<Option<<B::ArrayType as Array>::OwnedItem>>;
+    fn get_output_concrete(
+        &self,
+    ) -> StreamExecutorResult<Option<<B::ArrayType as Array>::OwnedItem>>;
 }
 
 /// `StreamingAggStateImpl` erases the associated type information of
@@ -87,10 +89,10 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-    ) -> Result<()>;
+    ) -> StreamExecutorResult<()>;
 
     /// Get the output value
-    fn get_output(&self) -> Result<Datum>;
+    fn get_output(&self) -> StreamExecutorResult<Datum>;
 
     /// Get the builder of the state output
     fn new_builder(&self) -> ArrayBuilderImpl;
@@ -117,7 +119,7 @@ pub fn create_streaming_agg_state(
     agg_type: &AggKind,
     return_type: &DataType,
     datum: Option<Datum>,
-) -> Result<Box<dyn StreamingAggStateImpl>> {
+) -> StreamExecutorResult<Box<dyn StreamingAggStateImpl>> {
     macro_rules! gen_unary_agg_state_match {
         ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr,
             [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
@@ -160,6 +162,17 @@ pub fn create_streaming_agg_state(
                     (Count, decimal, int64, StreamingCountAgg::<DecimalArray>),
                     (Count, boolean, int64, StreamingCountAgg::<BoolArray>),
                     (Count, varchar, int64, StreamingCountAgg::<Utf8Array>),
+                    (Count, interval, int64, StreamingCountAgg::<IntervalArray>),
+                    (Count, date, int64, StreamingCountAgg::<NaiveDateArray>),
+                    (
+                        Count,
+                        timestamp,
+                        int64,
+                        StreamingCountAgg::<NaiveDateTimeArray>
+                    ),
+                    (Count, time, int64, StreamingCountAgg::<NaiveTimeArray>),
+                    (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
+                    (Count, list, int64, StreamingCountAgg::<ListArray>),
                     // Sum
                     (Sum, int64, int64, StreamingSumAgg::<I64Array, I64Array>),
                     (
@@ -261,11 +274,10 @@ pub fn create_streaming_agg_state(
                 }
                 (AggKind::Count, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
                 _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        "unsupported aggregate type".to_string(),
-                        None.into(),
-                    )
-                    .into())
+                    return Err(StreamExecutorError::not_implemented(
+                        "unsupported aggregate type",
+                        None,
+                    ))
                 }
             }
         }
@@ -330,6 +342,52 @@ pub fn generate_agg_schema(
     Schema { fields }
 }
 
+/// Infer column desc for state table.
+/// The column desc layout is
+/// [ `group_key` (only for hash agg) / `sort_key` (only for simple agg) / `value`(the agg call
+/// return type)].
+/// This is the Row layout insert into state table.
+/// For different agg call, different executor (hash agg or simple agg), the layout will be
+/// different.
+pub fn generate_column_descs(
+    agg_call: &AggCall,
+    group_keys: &[usize],
+    pk_indices: &[usize],
+    agg_schema: &Schema,
+    input_ref: &dyn Executor,
+) -> Vec<ColumnDesc> {
+    let mut column_descs = Vec::with_capacity(group_keys.len() + 1);
+    let mut next_column_id = 0;
+
+    // Define a closure for DRY.
+    let mut add_column_desc = |data_type: DataType| {
+        column_descs.push(ColumnDesc::unnamed(
+            ColumnId::new(next_column_id),
+            data_type,
+        ));
+        next_column_id += 1;
+    };
+
+    for (idx, _) in group_keys.iter().enumerate() {
+        add_column_desc(agg_schema.fields[idx].data_type.clone());
+    }
+
+    // For max, min, the table descs should include sort key.
+    // The added columns should be (sort_key, pk from input data).
+    if (agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min) && !agg_call.append_only {
+        // Add value as part of sort key.
+        add_column_desc(agg_call.return_type.clone());
+
+        for pk_idx in pk_indices {
+            add_column_desc(input_ref.schema().fields[*pk_idx].data_type.clone());
+        }
+    }
+
+    // Agg value should also be part of state table.
+    add_column_desc(agg_call.return_type.clone());
+
+    column_descs
+}
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
 pub async fn generate_managed_agg_state<S: StateStore>(
@@ -368,15 +426,11 @@ pub async fn generate_managed_agg_state<S: StateStore>(
             key,
             &state_tables[idx],
         )
-        .await
-        .map_err(StreamExecutorError::agg_state_error)?;
+        .await?;
 
         if idx == ROW_COUNT_COLUMN {
             // For the rowcount state, we should record the rowcount.
-            let output = managed_state
-                .get_output(epoch)
-                .await
-                .map_err(StreamExecutorError::agg_state_error)?;
+            let output = managed_state.get_output(epoch).await?;
             row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
         }
 

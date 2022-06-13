@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bytes::{Buf, BufMut, Bytes};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::consistent_hash::VirtualNode;
 
 use super::{HummockError, HummockResult};
 use crate::storage_value::{StorageValue, ValueMeta, VALUE_META_SIZE};

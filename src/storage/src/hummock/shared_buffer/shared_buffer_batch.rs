@@ -145,12 +145,10 @@ impl SharedBufferBatch {
         &self.inner
     }
 
-    #[allow(dead_code)]
     pub fn start_key(&self) -> &[u8] {
         &self.inner.first().unwrap().0
     }
 
-    #[allow(dead_code)]
     pub fn end_key(&self) -> &[u8] {
         &self.inner.last().unwrap().0
     }

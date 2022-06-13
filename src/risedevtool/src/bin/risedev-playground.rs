@@ -173,7 +173,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = PrometheusService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api http://{}:{}/", c.address, c.port));
@@ -184,7 +185,8 @@ fn task_main(
                 let mut service = ComputeNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
 
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api grpc://{}:{}/", c.address, c.port));
@@ -194,7 +196,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = MetaNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "api grpc://{}:{}/, dashboard http://{}:{}/",
@@ -206,7 +209,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = FrontendService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api postgres://{}:{}/", c.address, c.port));
@@ -214,7 +218,7 @@ fn task_main(
                 writeln!(
                     log_buffer,
                     "* Run {} to start Postgres interactive shell.",
-                    style(format!("psql -h localhost -p {}", c.port))
+                    style(format!("psql -h localhost -p {} -d dev -U root", c.port))
                         .blue()
                         .bold()
                 )?;
@@ -224,7 +228,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = CompactorService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("compactor {}:{}", c.address, c.port));
@@ -234,7 +239,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = GrafanaService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("dashboard http://{}:{}/", c.address, c.port));
@@ -244,7 +250,11 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = JaegerService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.dashboard_port, false)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(
+                    c.dashboard_address.clone(),
+                    c.dashboard_port,
+                    false,
+                )?;
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "dashboard http://{}:{}/",
@@ -279,7 +289,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = ZooKeeperService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("zookeeper {}:{}", c.address, c.port));

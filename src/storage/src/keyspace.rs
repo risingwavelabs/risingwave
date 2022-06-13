@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::consistent_hash::{VNodeBitmap, VirtualNode};
 use risingwave_hummock_sdk::key::next_key;
 
 use crate::error::StorageResult;
@@ -28,37 +31,18 @@ pub struct Keyspace<S: StateStore> {
 
     /// Encoded representation for all segments.
     prefix: Vec<u8>,
+
+    /// Records vnodes that the keyspace owns and the id of state table. Currently, it will be None
+    /// in batch, and might be refactored later.
+    vnode_bitmap: Option<VNodeBitmap>,
 }
 
 impl<S: StateStore> Keyspace<S> {
     /// Creates a shared root [`Keyspace`] for all executors of the same operator.
     ///
     /// By design, all executors of the same operator should share the same keyspace in order to
-    /// support scaling out, and ensure not to overlap with each other. So we use `operator_id`
+    /// support scaling out, and ensure not to overlap with each other. So we use `table_id`
     /// here.
-    ///
-    /// Note: when using shared keyspace, be caution to scan the keyspace since states of other
-    /// executors might be scanned as well.
-    pub fn shared_executor_root(store: S, operator_id: u64) -> Self {
-        let prefix = {
-            let mut buf = BytesMut::with_capacity(9);
-            buf.put_u8(b's');
-            buf.put_u64(operator_id);
-            buf.to_vec()
-        };
-        Self { store, prefix }
-    }
-
-    /// Creates a root [`Keyspace`] for an executor.
-    pub fn executor_root(store: S, executor_id: u64) -> Self {
-        let prefix = {
-            let mut buf = BytesMut::with_capacity(9);
-            buf.put_u8(b'e');
-            buf.put_u64(executor_id);
-            buf.to_vec()
-        };
-        Self { store, prefix }
-    }
 
     /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
@@ -68,7 +52,45 @@ impl<S: StateStore> Keyspace<S> {
             buf.put_u32(id.table_id);
             buf.to_vec()
         };
-        Self { store, prefix }
+        Self {
+            store,
+            prefix,
+            vnode_bitmap: None,
+        }
+    }
+
+    /// Creates a root [`Keyspace`] for a table with default vnode (i.e. only no.1 vnode is
+    /// present). This is used for singleton stateful executor.
+    pub fn table_root_with_default_vnodes(store: S, id: &TableId) -> Self {
+        let prefix = {
+            let mut buf = BytesMut::with_capacity(5);
+            buf.put_u8(b't');
+            buf.put_u32(id.table_id);
+            buf.to_vec()
+        };
+        let vnode_bitmap = VNodeBitmap::new_with_default_bitmap(id.table_id);
+        Self {
+            store,
+            prefix,
+            vnode_bitmap: Some(vnode_bitmap),
+        }
+    }
+
+    /// Creates a root [`Keyspace`] for a table with specific vnodes. This is used for non-singleton
+    /// stateful executor.
+    pub fn table_root_with_vnodes(store: S, id: &TableId, bitmap_inner: Vec<u8>) -> Self {
+        let prefix = {
+            let mut buf = BytesMut::with_capacity(5);
+            buf.put_u8(b't');
+            buf.put_u32(id.table_id);
+            buf.to_vec()
+        };
+        let vnode_bitmap = VNodeBitmap::new(id.table_id, bitmap_inner);
+        Self {
+            store,
+            prefix,
+            vnode_bitmap: Some(vnode_bitmap),
+        }
     }
 
     /// Appends more bytes to the prefix and returns a new `Keyspace`
@@ -79,6 +101,7 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store: self.store.clone(),
             prefix,
+            vnode_bitmap: self.vnode_bitmap.clone(),
         }
     }
 
@@ -100,7 +123,7 @@ impl<S: StateStore> Keyspace<S> {
     /// Treats the keyspace as a single key, and gets its value.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
     pub async fn value(&self, epoch: u64) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefix, epoch).await
+        self.store.get(&self.prefix, epoch, None).await
     }
 
     /// Concatenates this keyspace and the given key to produce a prefixed key.
@@ -111,26 +134,30 @@ impl<S: StateStore> Keyspace<S> {
     /// Gets from the keyspace with the `prefixed_key` of given key.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
     pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefixed_key(key), epoch).await
+        self.store.get(&self.prefixed_key(key), epoch, None).await
     }
 
-    /// Scans `limit` keys from the keyspace using an inclusive `start_key` and get their values. If
-    /// `limit` is None, all keys of the given prefix will be scanned. Note that the prefix of this
-    /// keyspace will be stripped. The returned values are based on a snapshot corresponding to
-    /// the given `epoch`
-    pub async fn scan_with_start_key(
+    pub async fn get_with_vnode(
         &self,
-        start_key: Vec<u8>,
-        limit: Option<usize>,
+        key: impl AsRef<[u8]>,
         epoch: u64,
-    ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let start_key_with_prefix = [self.prefix.as_slice(), start_key.as_slice()].concat();
-        let range = start_key_with_prefix..next_key(self.prefix.as_slice());
-        let mut pairs = self.store.scan(range, limit, epoch).await?;
-        pairs
-            .iter_mut()
-            .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
-        Ok(pairs)
+        vnode: VirtualNode,
+    ) -> StorageResult<Option<Bytes>> {
+        if self.vnode_bitmap.is_some() {
+            let vnode_bitmap = VNodeBitmap::new_with_single_vnode(
+                self.vnode_bitmap.as_ref().unwrap().table_id(),
+                vnode,
+            );
+            self.store
+                .get(&self.prefixed_key(key), epoch, Some(&vnode_bitmap))
+                .await
+        } else {
+            // FIXME(Yuanxin): Due to some limitations, we have to take into consideration the
+            // situation where `self.vnode_bitmap` is None. We should assert
+            // `self.vnode_bitmap.is_some()` later when all stateful executors (as well as batch)
+            // pass in their vnodes.
+            self.store.get(&self.prefixed_key(key), epoch, None).await
+        }
     }
 
     /// Scans `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
@@ -142,7 +169,10 @@ impl<S: StateStore> Keyspace<S> {
         epoch: u64,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
-        let mut pairs = self.store.scan(range, limit, epoch).await?;
+        let mut pairs = self
+            .store
+            .scan(range, limit, epoch, self.vnode_bitmap.clone())
+            .await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -153,7 +183,9 @@ impl<S: StateStore> Keyspace<S> {
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     async fn iter_inner(&'_ self, epoch: u64) -> StorageResult<S::Iter> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
-        self.store.iter(range, epoch).await
+        self.store
+            .iter(range, epoch, self.vnode_bitmap.clone())
+            .await
     }
 
     pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
@@ -165,9 +197,50 @@ impl<S: StateStore> Keyspace<S> {
         Ok(strip_prefix_iterator)
     }
 
+    pub async fn iter_with_range<R, B>(
+        &self,
+        pk_bounds: R,
+        epoch: u64,
+    ) -> StorageResult<StripPrefixIterator<S::Iter>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        let start = match pk_bounds.start_bound() {
+            Included(k) => Included(Bytes::copy_from_slice(k.as_ref())),
+            Excluded(k) => Excluded(Bytes::copy_from_slice(k.as_ref())),
+            Unbounded => Unbounded,
+        };
+        let end = match pk_bounds.end_bound() {
+            Included(k) => Included(Bytes::copy_from_slice(k.as_ref())),
+            Excluded(k) => Excluded(Bytes::copy_from_slice(k.as_ref())),
+            Unbounded => Unbounded,
+        };
+        let range = (start, end);
+        let iter = self
+            .store
+            .iter(range, epoch, self.vnode_bitmap.clone())
+            .await?;
+        let strip_prefix_iterator = StripPrefixIterator {
+            iter,
+            prefix_len: self.prefix.len(),
+        };
+        Ok(strip_prefix_iterator)
+    }
+
     /// Gets the underlying state store.
     pub fn state_store(&self) -> S {
         self.store.clone()
+    }
+
+    pub fn vnode_bitmap(&self) -> &VNodeBitmap {
+        self.vnode_bitmap.as_ref().unwrap()
+    }
+
+    /// Current only works for streaming.
+    pub fn table_id(&self) -> u32 {
+        assert!(self.vnode_bitmap.is_some());
+        self.vnode_bitmap.as_ref().unwrap().table_id()
     }
 }
 

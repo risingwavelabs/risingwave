@@ -23,13 +23,14 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::{ClusterManagerRef, WorkerKey};
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification};
+use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
+    user_manager: UserInfoManagerRef<S>,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -40,11 +41,13 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
+        user_manager: UserInfoManagerRef<S>,
     ) -> Self {
         Self {
             env,
             catalog_manager,
             cluster_manager,
+            user_manager,
         }
     }
 }
@@ -81,6 +84,9 @@ where
                 let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
                 let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
+                let user_guard = self.user_manager.get_user_core_guard().await;
+                let users = user_guard.values().cloned().collect::<Vec<_>>();
+
                 // Send the snapshot on subscription. After that we will send only updates.
                 let meta_snapshot = MetaSnapshot {
                     nodes,
@@ -88,6 +94,7 @@ where
                     schema,
                     source,
                     table,
+                    users,
                     view: Default::default(),
                 };
                 tx.send(Ok(SubscribeResponse {

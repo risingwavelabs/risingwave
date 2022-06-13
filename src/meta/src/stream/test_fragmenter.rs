@@ -33,6 +33,7 @@ use risingwave_pb::stream_plan::{
     SimpleAggNode, SourceNode, StreamNode,
 };
 
+use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
@@ -111,7 +112,6 @@ fn make_stream_node() -> StreamNode {
             table_ref_id: Some(table_ref_id),
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
-            stream_source_state: None,
         })),
         pk_indices: vec![2],
         ..Default::default()
@@ -262,7 +262,9 @@ async fn test_fragmenter() -> Result<()> {
 
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
+    let compaction_group_manager = Arc::new(CompactionGroupManager::new(env.clone()).await?);
+    let fragment_manager =
+        Arc::new(FragmentManager::new(env.clone(), compaction_group_manager).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = StreamFragmenter::build_graph(stream_node);
@@ -274,13 +276,19 @@ async fn test_fragmenter() -> Result<()> {
         &mut ctx,
     )
     .await?;
-    let table_fragments = TableFragments::new(TableId::default(), graph);
+    let table_fragments =
+        TableFragments::new(TableId::default(), graph, ctx.internal_table_id_set.clone());
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
+    let mut internal_table_ids = table_fragments.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
+    assert_eq!(4, internal_table_ids.len());
+    internal_table_ids.sort();
+    let expected_internal_table_ids = vec![0, 1, 2, 3];
+    assert_eq!(expected_internal_table_ids, internal_table_ids);
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);

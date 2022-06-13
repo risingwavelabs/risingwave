@@ -288,17 +288,15 @@ impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
 impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         context: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(context.plan_node().get_children().len() == 2);
+        ensure!(
+            inputs.len() == 2,
+            "HashJoinExecutorBuilder should have 2 children!"
+        );
 
-        let left_child = context
-            .clone_for_plan(&context.plan_node.get_children()[0])
-            .build()
-            .await?;
-        let right_child = context
-            .clone_for_plan(&context.plan_node.get_children()[1])
-            .build()
-            .await?;
+        let left_child = inputs.remove(0);
+        let right_child = inputs.remove(0);
 
         let hash_join_node = try_match_expand!(
             context.plan_node().get_node_body().unwrap(),
@@ -404,6 +402,7 @@ mod tests {
     struct DataChunkMerger {
         data_types: Vec<DataType>,
         array_builders: Vec<ArrayBuilderImpl>,
+        array_len: usize,
     }
 
     impl DataChunkMerger {
@@ -411,11 +410,12 @@ mod tests {
             let array_builders = data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(1024))
-                .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+                .try_collect()?;
 
             Ok(Self {
                 data_types,
                 array_builders,
+                array_len: 0,
             })
         }
 
@@ -424,6 +424,7 @@ mod tests {
             for idx in 0..self.array_builders.len() {
                 self.array_builders[idx].append_array(data_chunk.column_at(idx).array_ref())?;
             }
+            self.array_len += data_chunk.capacity();
 
             Ok(())
         }
@@ -433,9 +434,9 @@ mod tests {
                 .array_builders
                 .into_iter()
                 .map(|array_builder| array_builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                .collect::<Result<Vec<Column>>>()?;
+                .try_collect()?;
 
-            DataChunk::try_from(columns)
+            Ok(DataChunk::new(columns, self.array_len))
         }
     }
 

@@ -3,14 +3,13 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-echo "--- Install required tools"
-rustup default "$(cat ./rust-toolchain)"
+source ci/scripts/common.env.sh
 
 echo "--- Generate RiseDev CI config"
 cp risedev-components.ci.env risedev-components.user.env
 
 echo "--- Run unit tests in deterministic simulation mode"
-~/cargo-make/makers stest \
+cargo make stest \
     --no-fail-fast \
     -p risingwave_batch \
     -p risingwave_common \

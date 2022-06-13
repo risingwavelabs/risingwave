@@ -35,7 +35,7 @@ impl StreamSource {
             logical.schema().clone(),
             logical.pk_indices().to_vec(),
             Distribution::SomeShard,
-            false, // TODO: determine the `append-only` field of source
+            logical.source_catalog().append_only,
         );
         Self { base, logical }
     }
@@ -53,12 +53,18 @@ impl_plan_tree_node_for_leaf! { StreamSource }
 
 impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "StreamSource {{ source: {},  columns: [{}] }}",
-            self.logical.source_catalog.name,
-            self.column_names().join(", ")
-        )
+        let mut builder = f.debug_struct("StreamSource");
+        builder
+            .field("source", &self.logical.source_catalog.name)
+            .field(
+                "columns",
+                &format_args!("[{}]", &self.column_names().join(", ")),
+            );
+
+        if self.append_only() {
+            builder.field("append_only", &format_args!("{}", true));
+        }
+        builder.finish()
     }
 }
 
@@ -79,7 +85,6 @@ impl ToStreamProst for StreamSource {
                 .map(|c| c.column_id().into())
                 .collect(),
             source_type: self.logical.source_catalog.source_type as i32,
-            stream_source_state: None,
         })
     }
 }

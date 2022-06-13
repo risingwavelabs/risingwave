@@ -12,19 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind, Result};
+use std::ops::Sub;
+use std::str;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use crate::error::PsqlError;
+use crate::pg_extended::{PgPortal, PgStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
-    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FeStartupMessage,
+    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FePasswordMessage,
+    FeStartupMessage,
 };
 use crate::pg_response::PgResponse;
-use crate::pg_server::{Session, SessionManager};
+use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -53,7 +58,7 @@ enum PgProtocolState {
 
 // Truncate 0 from C string in Bytes and stringify it (returns slice, no allocations)
 // PG protocol strings are always C strings.
-fn cstr_to_str(b: &Bytes) -> Result<&str> {
+pub fn cstr_to_str(b: &Bytes) -> Result<&str> {
     let without_null = if b.last() == Some(&0) {
         &b[..b.len() - 1]
     } else {
@@ -78,15 +83,35 @@ where
         }
     }
 
-    pub async fn process(&mut self, unnamed_query_string: &mut Bytes) -> Result<bool> {
-        if self.do_process(unnamed_query_string).await? {
+    pub async fn process(
+        &mut self,
+        unnamed_statement: &mut PgStatement,
+        unnamed_portal: &mut PgPortal,
+        named_statements: &mut HashMap<String, PgStatement>,
+        named_portals: &mut HashMap<String, PgPortal>,
+    ) -> Result<bool> {
+        if self
+            .do_process(
+                unnamed_statement,
+                unnamed_portal,
+                named_statements,
+                named_portals,
+            )
+            .await?
+        {
             return Ok(true);
         }
 
         Ok(self.is_terminate())
     }
 
-    async fn do_process(&mut self, unnamed_query_string: &mut Bytes) -> Result<bool> {
+    async fn do_process(
+        &mut self,
+        unnamed_statement: &mut PgStatement,
+        unnamed_portal: &mut PgPortal,
+        named_statements: &mut HashMap<String, PgStatement>,
+        named_portals: &mut HashMap<String, PgPortal>,
+    ) -> Result<bool> {
         let msg = match self.read_message().await {
             Ok(msg) => msg,
             Err(e) => {
@@ -108,10 +133,21 @@ where
                     })?;
             }
             FeMessage::Startup(msg) => {
-                self.process_startup_msg(msg).map_err(|e| {
+                if let Err(e) = self.process_startup_msg(msg) {
                     tracing::error!("failed to set up pg session: {}", e);
-                    e
-                })?;
+                    self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(e)))?;
+                    self.flush().await?;
+                    return Ok(true);
+                }
+                self.state = PgProtocolState::Regular;
+            }
+            FeMessage::Password(msg) => {
+                if let Err(e) = self.process_password_msg(msg) {
+                    tracing::error!("failed to authenticate session: {}", e);
+                    self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(e)))?;
+                    self.flush().await?;
+                    return Ok(true);
+                }
                 self.state = PgProtocolState::Regular;
             }
             FeMessage::Query(query_msg) => {
@@ -127,29 +163,129 @@ where
                 self.process_terminate();
             }
             FeMessage::Parse(m) => {
-                *unnamed_query_string = m.query_string;
+                let query = cstr_to_str(&m.query_string).unwrap();
+
+                // 1. Create the types description.
+                let type_ids = m.type_ids;
+                let types: Vec<TypeOid> = type_ids
+                    .into_iter()
+                    .map(|x| TypeOid::as_type(x).unwrap())
+                    .collect();
+
+                // 2. Create the row description.
+                let rows: Vec<PgFieldDescriptor> = query
+                    .split(&[' ', ',', ';'])
+                    .skip(1)
+                    .into_iter()
+                    .map(|x| {
+                        if let Some(str) = x.strip_prefix('$') {
+                            if let Ok(i) = str.parse() {
+                                i
+                            } else {
+                                -1
+                            }
+                        } else {
+                            -1
+                        }
+                    })
+                    .take_while(|x: &i32| x.is_positive())
+                    .map(|x| {
+                        // NOTE Make sure the type_description include all generic parametre
+                        // description we needed.
+                        assert!((x.sub(1) as usize) < types.len());
+                        PgFieldDescriptor::new(String::new(), types[x.sub(1) as usize].to_owned())
+                    })
+                    .collect();
+
+                // 3. Create the statement.
+                let statement = PgStatement::new(
+                    cstr_to_str(&m.statement_name).unwrap().to_string(),
+                    m.query_string,
+                    types,
+                    rows,
+                );
+
+                // 4. Insert the statement.
+                let name = statement.name();
+                if name.is_empty() {
+                    *unnamed_statement = statement;
+                } else {
+                    named_statements.insert(name, statement);
+                }
                 self.write_message(&BeMessage::ParseComplete).await?;
             }
-            FeMessage::Bind(_) => {
+            FeMessage::Bind(m) => {
+                let statement_name = cstr_to_str(&m.statement_name).unwrap().to_string();
+                // 1. Get statement.
+                let statement = if statement_name.is_empty() {
+                    unnamed_statement
+                } else {
+                    // NOTE Error handle method may need to modified.
+                    named_statements.get(&statement_name).expect("statement_name managed by client_driver, hence assume statement name always valid.")
+                };
+
+                // 2. Instance the statement to get the portal.
+                let portal_name = cstr_to_str(&m.portal_name).unwrap().to_string();
+                let portal = statement.instance(portal_name.clone(), &m.params);
+
+                // 3. Insert the Portal.
+                if portal_name.is_empty() {
+                    *unnamed_portal = portal;
+                } else {
+                    named_portals.insert(portal_name, portal);
+                }
                 self.write_message(&BeMessage::BindComplete).await?;
             }
-            FeMessage::Execute(_) => {
-                self.process_query_msg(cstr_to_str(unnamed_query_string), true)
+            FeMessage::Execute(m) => {
+                // 1. Get portal.
+                let portal_name = cstr_to_str(&m.portal_name).unwrap().to_string();
+                let portal = if m.portal_name.is_empty() {
+                    unnamed_portal
+                } else {
+                    // NOTE Error handle need modify later.
+                    named_portals.get(&portal_name).expect("statement_name managed by client_driver, hence assume statement name always valid")
+                };
+
+                // 2. Execute instance statement using portal.
+                self.process_query_msg(cstr_to_str(&portal.query_string()), true)
                     .await?;
+
                 // NOTE there is no ReadyForQuery message.
             }
-            FeMessage::Describe(_) => {
-                self.write_message_no_flush(&BeMessage::ParameterDescription)?;
+            FeMessage::Describe(m) => {
                 // FIXME: Introduce parser to analyze statements and bind data type. Here just
                 // hard-code a VARCHAR.
-                self.write_message(&BeMessage::RowDescription(&[PgFieldDescriptor::new(
-                    "VARCHAR".to_string(),
-                    TypeOid::Varchar,
-                )]))
-                .await?;
+
+                // 1. Get statement.
+                let name = cstr_to_str(&m.query_name).unwrap().to_string();
+                let statement = if name.is_empty() {
+                    unnamed_statement
+                } else {
+                    // NOTE Error handle need modify later.
+                    named_statements.get(&name).unwrap()
+                };
+
+                // 2. Send parameter description.
+                self.write_message(&BeMessage::ParameterDescription(&statement.type_desc()))
+                    .await?;
+
+                // 3. Send row description.
+                self.write_message(&BeMessage::RowDescription(&statement.row_desc()))
+                    .await?;
             }
             FeMessage::Sync => {
                 self.write_message(&BeMessage::ReadyForQuery).await?;
+            }
+            FeMessage::Close(m) => {
+                let name = cstr_to_str(&m.query_name).unwrap().to_string();
+                if m.kind == b'S' {
+                    named_statements.remove_entry(&name);
+                } else if m.kind == b'P' {
+                    named_portals.remove_entry(&name);
+                } else {
+                    // NOTE Error handle need modify later.
+                }
+                self.write_message(&BeMessage::CloseComplete).await?;
             }
         }
         self.flush().await?;
@@ -163,10 +299,40 @@ where
         }
     }
 
-    fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
-        // TODO: Replace `DEFAULT_DATABASE_NAME` with true database name in `FeStartupMessage`.
-        self.session = Some(self.session_mgr.connect("dev").map_err(IoError::other)?);
-        self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
+    fn process_startup_msg(&mut self, msg: FeStartupMessage) -> Result<()> {
+        let db_name = msg
+            .config
+            .get("database")
+            .cloned()
+            .unwrap_or_else(|| "dev".to_string());
+        let user_name = msg
+            .config
+            .get("user")
+            .cloned()
+            .unwrap_or_else(|| "root".to_string());
+
+        let session = self
+            .session_mgr
+            .connect(&db_name, &user_name)
+            .map_err(IoError::other)?;
+        match session.user_authenticator() {
+            UserAuthenticator::None => {
+                self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
+                self.write_parameter_status_msg_no_flush()?;
+                self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
+            }
+            UserAuthenticator::ClearText(_) => {
+                self.write_message_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
+            }
+            UserAuthenticator::MD5WithSalt { salt, .. } => {
+                self.write_message_no_flush(&BeMessage::AuthenticationMD5Password(salt))?;
+            }
+        }
+        self.session = Some(session);
+        Ok(())
+    }
+
+    fn write_parameter_status_msg_no_flush(&mut self) -> Result<()> {
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ClientEncoding("utf8"),
         ))?;
@@ -176,6 +342,16 @@ where
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ServerVersion("9.5.0"),
         ))?;
+        Ok(())
+    }
+
+    fn process_password_msg(&mut self, msg: FePasswordMessage) -> Result<()> {
+        let authenticator = self.session.as_ref().unwrap().user_authenticator();
+        if !authenticator.authenticate(&msg.password) {
+            return Err(IoError::new(ErrorKind::InvalidInput, "Invalid password"));
+        }
+        self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
+        self.write_parameter_status_msg_no_flush()?;
         self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }

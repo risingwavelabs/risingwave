@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use risingwave_common::hash::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::consistent_hash::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::ParallelUnit;
 
 use super::TableId;
@@ -91,7 +89,18 @@ impl HashMappingManager {
             .map(|info| info.vnode_mapping.clone())
     }
 
+    pub fn set_need_consolidation(&self, newflag: bool) {
+        let mut core = self.core.lock();
+        core.need_sst_consolidation = newflag;
+    }
+
+    pub fn get_need_consolidation(&self) -> bool {
+        let core = self.core.lock();
+        core.need_sst_consolidation
+    }
+
     /// For test.
+    #[cfg(test)]
     fn get_fragment_mapping_info(&self, fragment_id: &FragmentId) -> Option<HashMappingInfo> {
         let core = self.core.lock();
         core.hash_mapping_infos.get(fragment_id).cloned()
@@ -105,12 +114,15 @@ struct HashMappingInfo {
     /// Hash mapping from virtual node to parallel unit.
     vnode_mapping: Vec<ParallelUnitId>,
     /// Mapping from parallel unit to virtual node.
+    #[cfg_attr(not(test), expect(dead_code))]
     owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>>,
     /// Mapping from vnode count to parallel unit, aiming to maintain load balance.
+    #[cfg_attr(not(test), expect(dead_code))]
     load_balancer: BTreeMap<usize, Vec<ParallelUnitId>>,
 }
 
 struct HashMappingManagerCore {
+    need_sst_consolidation: bool,
     /// Mapping from fragment to hash mapping information. One fragment will have exactly one vnode
     /// mapping, which describes the data distribution of the fragment.
     hash_mapping_infos: HashMap<FragmentId, HashMappingInfo>,
@@ -121,6 +133,7 @@ struct HashMappingManagerCore {
 impl HashMappingManagerCore {
     fn new() -> Self {
         Self {
+            need_sst_consolidation: true,
             hash_mapping_infos: HashMap::new(),
             state_table_fragment_mapping: HashMap::new(),
         }
@@ -212,7 +225,7 @@ impl HashMappingManagerCore {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ParallelUnit, ParallelUnitType};
 
     use super::{HashMappingInfo, HashMappingManager};

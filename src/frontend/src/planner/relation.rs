@@ -20,13 +20,13 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundWindowTableFunction,
-    Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundTableFunction, BoundWindowTableFunction,
+    FunctionType, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    LogicalGenerateSeries, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
-    LogicalSource, PlanRef,
+    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSource,
+    LogicalTableFunction, PlanRef,
 };
 use crate::planner::Planner;
 
@@ -39,12 +39,15 @@ impl Planner {
             Relation::Join(join) => self.plan_join(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::GenerateSeriesFunction(gs) => self.plan_generate_series_function(*gs),
+            Relation::TableFunction(gs) => match gs.func_type {
+                FunctionType::Generate => self.plan_generate_series_function(*gs),
+                FunctionType::Unnest => self.plan_unnest_function(*gs),
+            },
         }
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
-        LogicalScan::create(
+        Ok(LogicalScan::create(
             base_table.name,
             Rc::new(base_table.table_catalog.table_desc()),
             base_table
@@ -54,6 +57,7 @@ impl Planner {
                 .collect(),
             self.ctx(),
         )
+        .into())
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
@@ -89,7 +93,7 @@ impl Planner {
 
     pub(super) fn plan_generate_series_function(
         &mut self,
-        table_function: BoundGenerateSeriesFunction,
+        table_function: BoundTableFunction,
     ) -> Result<PlanRef> {
         let schema = Schema::new(vec![Field::with_name(
             table_function.data_type,
@@ -102,10 +106,23 @@ impl Planner {
             return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
         };
 
-        Ok(LogicalGenerateSeries::create(
+        Ok(LogicalTableFunction::create_generate_series(
             start,
             stop,
             step,
+            schema,
+            self.ctx(),
+        ))
+    }
+
+    pub(super) fn plan_unnest_function(
+        &mut self,
+        table_function: BoundTableFunction,
+    ) -> Result<PlanRef> {
+        let schema = Schema::new(vec![Field::with_name(table_function.data_type, "unnest")]);
+
+        Ok(LogicalTableFunction::create_unnest(
+            table_function.args,
             schema,
             self.ctx(),
         ))

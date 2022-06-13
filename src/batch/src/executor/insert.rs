@@ -131,7 +131,9 @@ impl InsertExecutor {
 impl BoxedExecutorBuilder for InsertExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        ensure!(inputs.len() == 1, "Insert executor should 1 child!");
         let insert_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Insert
@@ -139,20 +141,13 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
         let table_id = TableId::from(&insert_node.table_source_ref_id);
 
-        let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(String::from(
-                "Child interpreting error",
-            )))
-        })?;
-        let child = source.clone_for_plan(proto_child).build().await?;
-
         Ok(Box::new(Self::new(
             table_id,
             source
                 .context()
                 .source_manager_ref()
                 .ok_or_else(|| InternalError("Source manager not found".to_string()))?,
-            child,
+            inputs.remove(0),
         )))
     }
 }
@@ -303,7 +298,9 @@ mod tests {
         // Data will be materialized in associated streaming task.
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
-        let store_content = store.scan(full_range, None, epoch).await?;
+        let store_content = store
+            .scan(full_range, None, epoch, Default::default())
+            .await?;
         assert!(store_content.is_empty());
 
         handle.await.unwrap();

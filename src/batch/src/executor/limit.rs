@@ -18,7 +18,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -42,8 +41,9 @@ pub struct LimitExecutor {
 impl BoxedExecutorBuilder for LimitExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 1);
+        ensure!(inputs.len() == 1, "LimitExecutor should have only 1 child!");
 
         let limit_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::Limit)?;
@@ -51,16 +51,12 @@ impl BoxedExecutorBuilder for LimitExecutor {
         let limit = limit_node.get_limit() as usize;
         let offset = limit_node.get_offset() as usize;
 
-        if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build().await?;
-            return Ok(Box::new(Self {
-                child,
-                limit,
-                offset,
-                identity: source.plan_node().get_identity().clone(),
-            }));
-        }
-        Err(InternalError("Limit must have one child".to_string()).into())
+        Ok(Box::new(Self {
+            child: inputs.remove(0),
+            limit,
+            offset,
+            identity: source.plan_node().get_identity().clone(),
+        }))
     }
 }
 

@@ -24,11 +24,10 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, List
 use risingwave_pb::expr::ListValue as ProstListValue;
 
 use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, RowRef,
-    NULL_VAL_FOR_HASH,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
+    RowRef, NULL_VAL_FOR_HASH,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::error::Result;
 use crate::types::{
     display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
 };
@@ -48,12 +47,12 @@ impl ArrayBuilder for ListArrayBuilder {
     type ArrayType = ListArray;
 
     #[cfg(not(test))]
-    fn new(_capacity: usize) -> Result<Self> {
+    fn new(_capacity: usize) -> ArrayResult<Self> {
         panic!("Must use with_meta.")
     }
 
     #[cfg(test)]
-    fn new(capacity: usize) -> Result<Self> {
+    fn new(capacity: usize) -> ArrayResult<Self> {
         Self::with_meta(
             capacity,
             ArrayMeta::List {
@@ -63,7 +62,7 @@ impl ArrayBuilder for ListArrayBuilder {
         )
     }
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> ArrayResult<Self> {
         if let ArrayMeta::List { datatype } = meta {
             Ok(Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
@@ -77,7 +76,7 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<ListRef<'_>>) -> Result<()> {
+    fn append(&mut self, value: Option<ListRef<'_>>) -> ArrayResult<()> {
         match value {
             None => {
                 self.bitmap.append(false);
@@ -98,7 +97,7 @@ impl ArrayBuilder for ListArrayBuilder {
         Ok(())
     }
 
-    fn append_array(&mut self, other: &ListArray) -> Result<()> {
+    fn append_array(&mut self, other: &ListArray) -> ArrayResult<()> {
         self.bitmap.append_bitmap(&other.bitmap);
         let last = *self.offsets.last().unwrap();
         self.offsets
@@ -108,7 +107,7 @@ impl ArrayBuilder for ListArrayBuilder {
         Ok(())
     }
 
-    fn finish(self) -> Result<ListArray> {
+    fn finish(self) -> ArrayResult<ListArray> {
         Ok(ListArray {
             bitmap: self.bitmap.finish(),
             offsets: self.offsets,
@@ -120,7 +119,7 @@ impl ArrayBuilder for ListArrayBuilder {
 }
 
 impl ListArrayBuilder {
-    pub fn append_row_ref(&mut self, row: RowRef) -> Result<()> {
+    pub fn append_row_ref(&mut self, row: RowRef) -> ArrayResult<()> {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
         self.offsets.push(last + row.size());
@@ -202,7 +201,7 @@ impl Array for ListArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> Result<super::ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayResult<super::ArrayBuilderImpl> {
         let array_builder = ListArrayBuilder::with_meta(
             capacity,
             ArrayMeta::List {
@@ -220,7 +219,7 @@ impl Array for ListArray {
 }
 
 impl ListArray {
-    pub fn from_protobuf(array: &ProstArray) -> Result<ArrayImpl> {
+    pub fn from_protobuf(array: &ProstArray) -> ArrayResult<ArrayImpl> {
         ensure!(
             array.values.is_empty(),
             "Must have no buffer in a list array"
@@ -239,12 +238,12 @@ impl ListArray {
         Ok(arr.into())
     }
 
-    #[cfg(test)]
+    // Used for testing purposes
     pub fn from_slices(
         null_bitmap: &[bool],
         values: Vec<Option<ArrayImpl>>,
         value_type: DataType,
-    ) -> Result<ListArray> {
+    ) -> ArrayResult<ListArray> {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
         let mut offsets = vec![0];
@@ -285,7 +284,7 @@ impl ListArray {
 
 #[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
 pub struct ListValue {
-    values: Vec<Datum>,
+    values: Box<[Datum]>,
 }
 
 impl fmt::Display for ListValue {
@@ -313,7 +312,9 @@ impl Ord for ListValue {
 
 impl ListValue {
     pub fn new(values: Vec<Datum>) -> Self {
-        Self { values }
+        Self {
+            values: values.into_boxed_slice(),
+        }
     }
 
     pub fn values(&self) -> &[Datum] {
@@ -350,6 +351,25 @@ impl<'a> ListRef<'a> {
                 .map(|o| arr.value.value_at(o))
                 .collect(),
             ListRef::ValueRef { val } => val.values.iter().map(to_datum_ref).collect(),
+        }
+    }
+
+    pub fn value_at(&self, index: usize) -> ArrayResult<DatumRef<'a>> {
+        match self {
+            ListRef::Indexed { arr, .. } => {
+                if index <= arr.value.len() {
+                    Ok(arr.value.value_at(index - 1))
+                } else {
+                    Ok(None)
+                }
+            }
+            ListRef::ValueRef { val } => {
+                if let Some(datum) = val.values().iter().nth(index - 1) {
+                    Ok(to_datum_ref(datum))
+                } else {
+                    Ok(None)
+                }
+            }
         }
     }
 }

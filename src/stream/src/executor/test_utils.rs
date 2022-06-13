@@ -15,6 +15,7 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::consistent_hash::VNODE_BITMAP_LEN;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 use tokio::sync::mpsc;
@@ -132,7 +133,12 @@ impl Executor for MockSource {
 }
 
 pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
-    Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
+    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+    Keyspace::table_root_with_vnodes(
+        MemoryStateStore::new(),
+        &TableId::from(0x2333),
+        bitmap_inner,
+    )
 }
 
 /// `row_nonnull` builds a `Row` with concrete values.
@@ -153,9 +159,11 @@ pub fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<Keyspace<MemoryStateS
     let mut returned_vec = vec![];
     let mem_state = MemoryStateStore::new();
     for idx in 0..num_ks {
-        returned_vec.push(Keyspace::table_root(
+        let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+        returned_vec.push(Keyspace::table_root_with_vnodes(
             mem_state.clone(),
             &TableId::new(idx as u32),
+            bitmap_inner,
         ));
     }
     returned_vec

@@ -14,7 +14,9 @@
 
 pub mod agg;
 pub mod arithmetic_op;
+pub mod array_access;
 pub mod ascii;
+pub mod bitwise_op;
 pub mod cast;
 pub mod cmp;
 pub mod conjunction;
@@ -25,6 +27,7 @@ pub mod lower;
 pub mod ltrim;
 pub mod md5;
 pub mod position;
+pub mod repeat;
 pub mod replace;
 pub mod round;
 pub mod rtrim;

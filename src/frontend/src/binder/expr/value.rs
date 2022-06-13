@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Decimal, IntervalUnit, ScalarImpl};
 use risingwave_expr::vector_op::cast::str_parse;
 use risingwave_sqlparser::ast::{DateTimeField, Expr, Value};
 
 use crate::binder::Binder;
-use crate::expr::{align_types, ExprImpl, ExprType, FunctionCall, Literal};
+use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
 
 impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
@@ -71,33 +72,41 @@ impl Binder {
         // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-INTERVAL-INPUT
         let unit = leading_field.unwrap_or(DateTimeField::Second);
         use DateTimeField::*;
-        let interval = (|| match unit {
+        let tokens = parse_interval(&s)?;
+        // Todo: support more syntax
+        if tokens.len() > 2 {
+            return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+        }
+        let num = match tokens.get(0) {
+            Some(TimeStrToken::Num(num)) => *num,
+            _ => {
+                return Err(
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
+                );
+            }
+        };
+        let interval_unit = match tokens.get(1) {
+            Some(TimeStrToken::TimeUnit(unit)) => unit,
+            _ => &unit,
+        };
+
+        let interval = (|| match interval_unit {
             Year => {
-                let years = s.parse::<i32>().ok()?;
-                let months = years.checked_mul(12)?;
-                Some(IntervalUnit::from_month(months))
+                let months = num.checked_mul(12)?;
+                Some(IntervalUnit::from_month(months as i32))
             }
-            Month => {
-                let months = s.parse::<i32>().ok()?;
-                Some(IntervalUnit::from_month(months))
-            }
-            Day => {
-                let days = s.parse::<i32>().ok()?;
-                Some(IntervalUnit::from_days(days))
-            }
+            Month => Some(IntervalUnit::from_month(num as i32)),
+            Day => Some(IntervalUnit::from_days(num as i32)),
             Hour => {
-                let hours = s.parse::<i64>().ok()?;
-                let ms = hours.checked_mul(3600 * 1000)?;
+                let ms = num.checked_mul(3600 * 1000)?;
                 Some(IntervalUnit::from_millis(ms))
             }
             Minute => {
-                let minutes = s.parse::<i64>().ok()?;
-                let ms = minutes.checked_mul(60 * 1000)?;
+                let ms = num.checked_mul(60 * 1000)?;
                 Some(IntervalUnit::from_millis(ms))
             }
             Second => {
-                let seconds = s.parse::<i64>().ok()?;
-                let ms = seconds.checked_mul(1000)?;
+                let ms = num.checked_mul(1000)?;
                 Some(IntervalUnit::from_millis(ms))
             }
         })()
@@ -131,11 +140,110 @@ impl Binder {
         .into();
         Ok(expr)
     }
+
+    pub(super) fn bind_array_index(&mut self, obj: Expr, indexs: Vec<Expr>) -> Result<ExprImpl> {
+        let obj = self.bind_expr(obj)?;
+        match obj.return_type() {
+            DataType::List {
+                datatype: return_type,
+            } => {
+                let mut indexs = indexs
+                    .into_iter()
+                    .map(|e| self.bind_expr(e))
+                    .collect::<Result<Vec<ExprImpl>>>()?;
+                indexs.insert(0, obj);
+
+                let expr: ExprImpl =
+                    FunctionCall::new_unchecked(ExprType::ArrayAccess, indexs, *return_type).into();
+                Ok(expr)
+            }
+            _ => panic!("Should be a List"),
+        }
+    }
+
+    /// `Row(...)` is represented as an function call at the binder stage.
+    pub(super) fn bind_row(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
+        let exprs = exprs
+            .into_iter()
+            .map(|e| self.bind_expr(e))
+            .collect::<Result<Vec<ExprImpl>>>()?;
+        let data_type = DataType::Struct {
+            fields: exprs.iter().map(|e| e.return_type()).collect_vec().into(),
+        };
+        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
+        Ok(expr)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TimeStrToken {
+    Num(i64),
+    TimeUnit(DateTimeField),
+}
+
+fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+    if !c.is_empty() {
+        match c.parse::<i64>() {
+            Ok(num) => {
+                t.push(TimeStrToken::Num(num));
+            }
+            Err(_) => {
+                return Err(
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", c)).into(),
+                );
+            }
+        }
+        c.clear();
+    }
+    Ok(())
+}
+
+fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+    if !c.is_empty() {
+        t.push(TimeStrToken::TimeUnit(c.parse()?));
+        c.clear();
+    }
+    Ok(())
+}
+
+pub fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
+    let s = s.trim();
+    let mut tokens = Vec::new();
+    let mut num_buf = "".to_string();
+    let mut char_buf = "".to_string();
+    for (i, c) in s.chars().enumerate() {
+        match c {
+            '-' => {
+                num_buf.push(c);
+            }
+            c if c.is_ascii_digit() => {
+                convert_unit(&mut char_buf, &mut tokens)?;
+                num_buf.push(c);
+            }
+            c if c.is_ascii_alphabetic() => {
+                convert_digit(&mut num_buf, &mut tokens)?;
+                char_buf.push(c);
+            }
+            chr if chr.is_ascii_whitespace() => {
+                convert_unit(&mut char_buf, &mut tokens)?;
+                convert_digit(&mut num_buf, &mut tokens)?;
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
+                    i, s, c
+                )).into());
+            }
+        }
+    }
+    convert_digit(&mut num_buf, &mut tokens)?;
+    convert_unit(&mut char_buf, &mut tokens)?;
+
+    Ok(tokens)
 }
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
 
@@ -190,7 +298,7 @@ mod tests {
     fn test_array_expr() {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
-            vec![ExprImpl::literal_int(1)],
+            vec![ExprImpl::literal_int(11)],
             DataType::List {
                 datatype: Box::new(DataType::Int32),
             },
@@ -204,5 +312,80 @@ mod tests {
             }
             _ => panic!("unexpected type"),
         };
+    }
+
+    #[test]
+    fn test_array_index_expr() {
+        let array_expr = FunctionCall::new_unchecked(
+            ExprType::Array,
+            vec![ExprImpl::literal_int(11), ExprImpl::literal_int(22)],
+            DataType::List {
+                datatype: Box::new(DataType::Int32),
+            },
+        )
+        .into();
+
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::ArrayAccess,
+            vec![array_expr, ExprImpl::literal_int(1)],
+            DataType::Int32,
+        )
+        .into();
+
+        let expr_pb = expr.to_expr_proto();
+        let expr = build_from_prost(&expr_pb).unwrap();
+        assert_eq!(expr.return_type(), DataType::Int32);
+    }
+
+    #[test]
+    fn test_bind_interval() {
+        use super::*;
+
+        let mut binder = mock_binder();
+        let values = vec![
+            "1 hour",
+            "1 h",
+            "1 year",
+            "6 second",
+            "2 minutes",
+            "1 month",
+        ];
+        let data = vec![
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_ymd(1, 0, 0))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_millis(6 * 1000))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(2))),
+                DataType::Interval,
+            )),
+            Ok(Literal::new(
+                Some(ScalarImpl::Interval(IntervalUnit::from_month(1))),
+                DataType::Interval,
+            )),
+        ];
+
+        for i in 0..values.len() {
+            let value = Value::Interval {
+                value: values[i].to_string(),
+                leading_field: None,
+                leading_precision: None,
+                last_field: None,
+                fractional_seconds_precision: None,
+            };
+            assert_eq!(binder.bind_value(value), data[i]);
+        }
     }
 }

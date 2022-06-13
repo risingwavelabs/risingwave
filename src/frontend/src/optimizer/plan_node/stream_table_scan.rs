@@ -44,7 +44,7 @@ impl StreamTableScan {
             logical.base.pk_indices.clone(),
             // follows upstream distribution from TableCatalog
             Distribution::HashShard(logical.map_distribution_keys()),
-            false, // TODO: determine the `append-only` field of table scan
+            logical.table_desc().appendonly,
         );
         Self {
             base,
@@ -70,13 +70,19 @@ impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "StreamTableScan {{ table: {}, columns: [{}], pk_indices: {:?} }}",
-            self.logical.table_name(),
-            self.logical.column_names().join(", "),
-            self.base.pk_indices
-        )
+        let mut builder = f.debug_struct("StreamTableScan");
+        builder
+            .field("table", &format_args!("{}", self.logical.table_name()))
+            .field(
+                "columns",
+                &format_args!("[{}]", self.logical.column_names().join(", ")),
+            )
+            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices));
+
+        if self.append_only() {
+            builder.field("append_only", &format_args!("{}", true));
+        }
+        builder.finish()
     }
 }
 
@@ -92,9 +98,15 @@ impl StreamTableScan {
         use risingwave_pb::stream_plan::*;
 
         let batch_plan_node = BatchPlanNode {
-            table_ref_id: Some(TableRefId {
-                table_id: self.logical.table_desc().table_id.table_id as i32,
-                schema_ref_id: Default::default(),
+            table_desc: Some(CellBasedTableDesc {
+                table_id: self.logical.table_desc().table_id.into(),
+                order_key: self
+                    .logical
+                    .table_desc()
+                    .order_desc
+                    .iter()
+                    .map(|v| v.into())
+                    .collect(),
             }),
             column_descs: self
                 .schema()

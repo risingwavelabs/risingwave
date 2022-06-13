@@ -33,6 +33,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
 #![feature(drain_filter)]
+#![feature(lint_reasons)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 extern crate core;
@@ -107,46 +108,56 @@ fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
     risingwave_common::config::load_config(&opts.config_path)
 }
 
-/// Start meta node
-pub async fn start(opts: MetaNodeOpts) {
-    let compute_config = load_config(&opts);
-    let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
-    let listen_addr = opts.listen_addr.parse().unwrap();
-    let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
-    let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-    let backend = match opts.backend {
-        Backend::Etcd => MetaStoreBackend::Etcd {
-            endpoints: opts
-                .etcd_endpoints
-                .split(',')
-                .map(|x| x.to_string())
-                .collect(),
-        },
-        Backend::Mem => MetaStoreBackend::Mem,
-    };
-    let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
-    let checkpoint_interval =
-        Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
+use std::future::Future;
+use std::pin::Pin;
 
-    tracing::info!("Meta server listening at {}", listen_addr);
-    let add_info = AddressInfo {
-        addr: meta_addr,
-        listen_addr,
-        prometheus_addr,
-        dashboard_addr,
-        ui_path: opts.dashboard_ui_path,
-    };
-    let (join_handle, _shutdown_send) = rpc_serve(
-        add_info,
-        backend,
-        max_heartbeat_interval,
-        opts.meta_leader_lease_secs,
-        MetaOpts {
-            enable_recovery: !opts.disable_recovery,
-            checkpoint_interval,
-        },
-    )
-    .await
-    .unwrap();
-    join_handle.await.unwrap();
+/// Start meta node
+
+pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    // WARNING: don't change the function signature. Making it `async fn` will cause
+    // slow compile in release mode.
+    Box::pin(async move {
+        let compute_config = load_config(&opts);
+        let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
+        let listen_addr = opts.listen_addr.parse().unwrap();
+        let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
+        let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
+        let backend = match opts.backend {
+            Backend::Etcd => MetaStoreBackend::Etcd {
+                endpoints: opts
+                    .etcd_endpoints
+                    .split(',')
+                    .map(|x| x.to_string())
+                    .collect(),
+            },
+            Backend::Mem => MetaStoreBackend::Mem,
+        };
+        let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
+        let checkpoint_interval =
+            Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
+
+        tracing::info!("Meta server listening at {}", addr);
+        let add_info = AddressInfo {
+           addr: meta_addr,
+           listen_addr,
+           prometheus_addr,
+           dashboard_addr,
+           ui_path: opts.dashboard_ui_path,
+        };
+        let (join_handle, _shutdown_send) = rpc_serve(
+            add_info,
+            prometheus_addr,
+            dashboard_addr,
+            backend,
+            max_heartbeat_interval,
+            opts.meta_leader_lease_secs,
+            MetaOpts {
+                enable_recovery: !opts.disable_recovery,
+                checkpoint_interval,
+            },
+        )
+        .await
+        .unwrap();
+        join_handle.await.unwrap();
+    })
 }

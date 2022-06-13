@@ -117,11 +117,9 @@ impl HashAggExecutorBuilder {
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 1);
-
-        let proto_child = &source.plan_node().get_children()[0];
-        let child = source.clone_for_plan(proto_child).build().await?;
+        ensure!(inputs.len() == 1, "HashAggExecutor should have 1 child!");
 
         let hash_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -129,7 +127,12 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
         )?;
 
         let identity = source.plan_node().get_identity().clone();
-        Self::deserialize(hash_agg_node, child, source.task_id.clone(), identity)
+        Self::deserialize(
+            hash_agg_node,
+            inputs.remove(0),
+            source.task_id.clone(),
+            identity,
+        )
     }
 }
 
@@ -212,13 +215,13 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         let mut result = groups.into_iter();
         let cardinality = DEFAULT_CHUNK_BUFFER_SIZE;
         loop {
-            let mut group_builders = self
+            let mut group_builders: Vec<_> = self
                 .group_key_types
                 .iter()
                 .map(|datatype| datatype.create_array_builder(cardinality))
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
 
-            let mut agg_builders = self
+            let mut agg_builders: Vec<_> = self
                 .agg_factories
                 .iter()
                 .map(|agg_factory| {
@@ -226,11 +229,13 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                         .get_return_type()
                         .create_array_builder(cardinality)
                 })
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
 
             let mut has_next = false;
+            let mut array_len = 0;
             for (key, states) in result.by_ref().take(cardinality) {
                 has_next = true;
+                array_len += 1;
                 key.deserialize_to_builders(&mut group_builders[..])?;
                 states
                     .into_iter()
@@ -247,7 +252,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
                 .collect::<Result<Vec<_>>>()?;
 
-            let output = DataChunk::builder().columns(columns).build();
+            let output = DataChunk::new(columns, array_len);
             yield output;
         }
     }

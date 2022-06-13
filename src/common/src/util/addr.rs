@@ -17,7 +17,7 @@ use std::str::FromStr;
 
 use risingwave_pb::common::HostAddress as ProstHostAddress;
 
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{internal_error, Result};
 
 /// General host address and port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -45,24 +45,14 @@ impl TryFrom<&str> for HostAddr {
     type Error = crate::error::RwError;
 
     fn try_from(s: &str) -> Result<Self> {
-        let mut parts = s.split(':');
-        let host = parts.next().ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError("Invalid host address".into()))
-        })?;
-        let port = parts.next().ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError("Invalid host address".into()))
-        })?;
-        if parts.next().is_some() {
-            return Err(RwError::from(ErrorCode::InternalError(
-                "Invalid host address".into(),
-            )));
-        }
-        let port = port
-            .parse::<u16>()
-            .map_err(|_| RwError::from(ErrorCode::InternalError("Invalid host address".into())))?;
+        let addr = url::Url::parse(&format!("http://{}", s))
+            .map_err(|e| internal_error(format!("{}: {}", e, s)))?;
         Ok(HostAddr {
-            host: host.to_string(),
-            port,
+            host: addr
+                .host()
+                .ok_or_else(|| internal_error("invalid host"))?
+                .to_string(),
+            port: addr.port().ok_or_else(|| internal_error("invalid port"))?,
         })
     }
 }

@@ -15,7 +15,6 @@
 //! For expression that only accept one value as input (e.g. CAST)
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type as ProstType;
 
@@ -25,6 +24,7 @@ use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
 use crate::vector_op::ascii::ascii;
+use crate::vector_op::bitwise_op::general_bitnot;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
@@ -36,6 +36,7 @@ use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
+use crate::{ExprError, Result};
 
 /// This macro helps to create cast expression.
 /// It receives all the combinations of `gen_cast` and generates corresponding match cases
@@ -61,11 +62,7 @@ macro_rules! gen_cast_impl {
                 ),
             )*
             _ => {
-                return Err(ErrorCode::NotImplemented(format!(
-                    "CAST({:?} AS {:?}) not supported yet!",
-                    $child.return_type(), $ret
-                ), 1632.into())
-                .into());
+                return Err(ExprError::Cast2($child.return_type(), $ret));
             }
         }
     };
@@ -173,10 +170,7 @@ macro_rules! gen_unary_impl {
                 ),
             )*
             _ => {
-                return Err(ErrorCode::NotImplemented(format!(
-                    "{:?} is not supported on ({:?}, {:?})", $expr_name, $child.return_type(), $ret,
-                ), 112.into())
-                .into());
+                return Err(ExprError::UnsupportedFunction(format!("{}({:?}) -> {:?}", $expr_name, $child.return_type(), $ret)));
             }
         }
     };
@@ -288,6 +282,11 @@ pub fn new_unary_expr(
             return_type,
             ascii,
         )),
+        (ProstType::CharLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+            child_expr,
+            return_type,
+            length_default,
+        )),
         (ProstType::Neg, _, _) => {
             gen_unary_atm_expr! { "Neg", child_expr, return_type, general_neg,
                 {
@@ -302,6 +301,15 @@ pub fn new_unary_expr(
                 }
             }
         }
+        (ProstType::BitwiseNot, _, _) => {
+            gen_unary_impl! {
+                [ "BitwiseNot", child_expr, return_type],
+                { int16, int16, general_bitnot },
+                { int32, int32, general_bitnot },
+                { int64, int64, general_bitnot },
+
+            }
+        }
         (ProstType::Ceil, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, ceil_f64, ceil_decimal}
         }
@@ -312,11 +320,10 @@ pub fn new_unary_expr(
             gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         }
         (expr, ret, child) => {
-            return Err(ErrorCode::NotImplemented(format!(
-                "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
+            return Err(ExprError::UnsupportedFunction(format!(
+                "{:?}({:?}) -> {:?}",
                 expr, child, ret
-            ), 112.into())
-            .into());
+            )));
         }
     };
 
@@ -324,7 +331,7 @@ pub fn new_unary_expr(
 }
 
 pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryExpression::<Utf8Array, I64Array, _>::new(
+    Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         return_type,
         length_default,

@@ -41,6 +41,7 @@
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(unzip_option)]
+#![feature(allocator_api)]
 
 #[macro_use]
 extern crate log;

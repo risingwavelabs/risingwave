@@ -29,6 +29,8 @@ use tokio::task::JoinHandle;
 use crate::catalog::root_catalog::Catalog;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::HummockSnapshotManagerRef;
+use crate::user::user_manager::UserInfoManager;
+use crate::user::UserInfoVersion;
 
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
@@ -40,18 +42,23 @@ pub(crate) struct ObserverManager {
     worker_node_manager: WorkerNodeManagerRef,
     catalog: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
+    user_info_manager: Arc<RwLock<UserInfoManager>>,
+    user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 impl ObserverManager {
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         meta_client: MetaClient,
         addr: HostAddr,
         worker_node_manager: WorkerNodeManagerRef,
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
+        user_info_manager: Arc<RwLock<UserInfoManager>>,
+        user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         let rx = meta_client
@@ -65,13 +72,17 @@ impl ObserverManager {
             worker_node_manager,
             catalog,
             catalog_updated_tx,
+            user_info_manager,
+            user_info_updated_tx,
             hummock_snapshot_manager,
         }
     }
 
     pub fn handle_snapshot_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         let mut catalog_guard = self.catalog.write();
+        let mut user_guard = self.user_info_manager.write();
         catalog_guard.clear();
+        user_guard.clear();
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
                 for db in snapshot.database {
@@ -85,6 +96,9 @@ impl ObserverManager {
                 }
                 for source in snapshot.source {
                     catalog_guard.create_source(source)
+                }
+                for user in snapshot.users {
+                    user_guard.create_user(user)
                 }
                 self.worker_node_manager.refresh_worker_node(snapshot.nodes);
             }
@@ -144,6 +158,31 @@ impl ObserverManager {
         self.catalog_updated_tx.send(resp.version).unwrap();
     }
 
+    fn handle_user_notification(&mut self, resp: SubscribeResponse) {
+        let Some(info) = resp.info.as_ref() else {
+            return;
+        };
+
+        let mut user_guard = self.user_info_manager.write();
+        match info {
+            Info::User(user) => match resp.operation() {
+                Operation::Add => user_guard.create_user(user.clone()),
+                Operation::Delete => user_guard.drop_user(&user.name),
+                Operation::Update => user_guard.update_user(user.clone()),
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            _ => unreachable!(),
+        }
+        assert!(
+            resp.version > user_guard.version(),
+            "resp version={:?}, current version={:?}",
+            resp.version,
+            user_guard.version()
+        );
+        user_guard.set_version(resp.version);
+        self.user_info_updated_tx.send(resp.version).unwrap();
+    }
+
     pub async fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
@@ -155,6 +194,9 @@ impl ObserverManager {
             }
             Info::Node(node) => {
                 self.update_worker_node_manager(resp.operation(), node.clone());
+            }
+            Info::User(_) => {
+                self.handle_user_notification(resp);
             }
             Info::Snapshot(_) => {
                 panic!(
