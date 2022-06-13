@@ -190,7 +190,6 @@ impl Compactor {
             task_id: 0,
             target_level: 0,
             is_target_ultimate_and_leveling: false,
-            metrics: None,
             task_status: false,
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
@@ -298,37 +297,47 @@ impl Compactor {
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
         tracing::info!("Ready to handle compaction task: {}", compact_task.task_id,);
-        let mut compaction_read_bytes = compact_task.input_ssts[0]
+        let group_label = compact_task.compaction_group_id.to_string();
+        let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
+        let compaction_read_bytes = compact_task.input_ssts[0]
             .table_infos
             .iter()
             .map(|t| t.file_size)
-            .sum();
-        if let Some(metrics) = compact_task.metrics.as_mut() {
-            if let Some(read) = metrics.read_level_n.as_mut() {
-                read.level_idx = compact_task.input_ssts[0].level_idx;
-                read.cnt = compact_task.input_ssts[0].table_infos.len() as u64;
-                read.size_kb = compaction_read_bytes / 1024;
-            }
-        }
+            .sum::<u64>();
+        context
+            .stats
+            .compact_read_current_level
+            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
+            .inc_by(compaction_read_bytes);
+        context
+            .stats
+            .compact_read_sstn_current_level
+            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
+            .inc_by(compact_task.input_ssts[0].table_infos.len() as u64);
+        context
+            .stats
+            .compact_frequency
+            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
+            .inc();
+
         if compact_task.input_ssts.len() > 1 {
             let sec_level_read_bytes: u64 = compact_task.input_ssts[1]
                 .table_infos
                 .iter()
                 .map(|t| t.file_size)
                 .sum();
-            if let Some(metrics) = compact_task.metrics.as_mut() {
-                if let Some(read) = metrics.read_level_nplus1.as_mut() {
-                    read.level_idx = compact_task.input_ssts[1].level_idx;
-                    read.cnt = compact_task.input_ssts[1].table_infos.len() as u64;
-                    read.size_kb = sec_level_read_bytes / 1024;
-                }
-            }
-            compaction_read_bytes += sec_level_read_bytes;
+            let next_level_label = compact_task.input_ssts[1].level_idx.to_string();
+            context
+                .stats
+                .compact_read_next_level
+                .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+                .inc_by(sec_level_read_bytes);
+            context
+                .stats
+                .compact_read_sstn_next_level
+                .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+                .inc_by(compact_task.input_ssts[1].table_infos.len() as u64);
         }
-        context
-            .stats
-            .compaction_read_bytes
-            .inc_by(compaction_read_bytes);
 
         let timer = context
             .stats
@@ -465,16 +474,20 @@ impl Compactor {
                 self.compact_task.sorted_output_ssts.push(sst_info);
             }
         }
+
+        let group_label = self.compact_task.compaction_group_id.to_string();
+        let level_label = self.compact_task.target_level.to_string();
         self.context
             .stats
-            .compaction_write_bytes
+            .compact_write_bytes
+            .with_label_values(&[group_label.as_str(), level_label.as_str()])
             .inc_by(compaction_write_bytes);
-        if let Some(metrics) = self.compact_task.metrics.as_mut() {
-            if let Some(write) = metrics.write.as_mut() {
-                write.cnt = self.compact_task.sorted_output_ssts.len() as u64;
-                write.size_kb = compaction_write_bytes / 1024;
-            }
-        }
+        self.context
+            .stats
+            .compact_write_sstn
+            .with_label_values(&[group_label.as_str(), level_label.as_str()])
+            .inc_by(self.compact_task.sorted_output_ssts.len() as u64);
+
         if let Err(e) = self
             .context
             .hummock_meta_client
