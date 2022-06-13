@@ -31,6 +31,7 @@ use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::StateStore;
 use crate::table::cell_based_table::{CellBasedTable, CellTableChunkIter};
 use crate::table::state_table::StateTable;
+use crate::table::dedup_pk_state_table::DedupPkStateTable;
 use crate::table::TableIter;
 use crate::Keyspace;
 
@@ -1496,6 +1497,80 @@ async fn test_dedup_pk_inner_state_write_with_cell_based_read() {
     assert!(actual_1.is_some());
     assert_eq!(actual_1.unwrap(), expected_1);
 }
+
+#[tokio::test]
+async fn test_dedup_pk_table_write_with_various_reads() {
+    // ---------- init state store
+    let state_store = MemoryStateStore::new();
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
+
+    // ---------- declare table layout
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let actual_column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+
+    // ---------- declare pk
+    let order_types = vec![OrderType::Descending];
+    let pk_index = vec![1_usize];
+    let pk_ordered_descs = vec![OrderedColumnDesc {
+        column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        order: OrderType::Descending,
+    }];
+
+    // ---------- Init state table interface
+    let mut state = DedupPkStateTable::new(
+        keyspace.clone(),
+        actual_column_descs.clone(),
+        order_types.clone(),
+        None,
+        pk_index,
+    );
+
+    // ---------- Init table for reads
+    state
+        .insert(
+            &Row(vec![Some(11_i32.into())]),
+            Row(vec![Some(1_i32.into()), Some(11_i32.into()), Some(111_i32.into())]),
+        )
+        .unwrap();
+
+    state
+        .insert(
+            &Row(vec![Some(22_i32.into())]),
+            Row(vec![Some(2_i32.into()), Some(22_i32.into()), Some(222_i32.into())]),
+        )
+        .unwrap();
+
+    state.commit(0).await.unwrap();
+
+    // ---------- Init reader
+    let table = CellBasedTable::new_for_test(keyspace.clone(), actual_column_descs, order_types);
+    let epoch: u64 = 0;
+    let mut iter = table.iter_with_pk(epoch, &pk_ordered_descs).await.unwrap();
+
+    // ---------- Read + Deserialize from storage
+    let expected_2 = Row(vec![
+        Some(2_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+    ]);
+    let actual_2 = iter.next().await.unwrap();
+    assert!(actual_2.is_some());
+    assert_eq!(actual_2.unwrap(), expected_2);
+
+    let expected_1 = Row(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]);
+    let actual_1 = iter.next().await.unwrap();
+    assert!(actual_1.is_some());
+    assert_eq!(actual_1.unwrap(), expected_1);
+}
+
 
 async fn test_dedup_cell_based_table_iter_with(
     row_ordered_descs: Vec<OrderedColumnDesc>,

@@ -115,7 +115,7 @@ impl<S: StateStore> DedupPkStateTable<S> {
             .0
             .into_iter()
             .enumerate()
-            .filter(|(i, _)| self.dedupped_datum_indices.contains(i))
+            .filter(|(i, _)| !self.dedupped_datum_indices.contains(i))
             .map(|(_, d)| d)
             .collect())
     }
