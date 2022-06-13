@@ -1343,7 +1343,7 @@ where
     }
 
     /// Sends a compaction request to compaction scheduler.
-    fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
+    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
         if let Some(sender) = self.compaction_scheduler.read().as_ref() {
             return sender.try_send(compaction_group);
         }

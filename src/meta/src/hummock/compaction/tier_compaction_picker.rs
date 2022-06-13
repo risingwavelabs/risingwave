@@ -165,6 +165,7 @@ impl CompactionPicker for LevelCompactionPicker {
         let next_task_id = self.compact_task_id;
 
         if levels[select_level].table_infos.is_empty() {
+            println!("levels[select_level] {} table empty", select_level);
             return None;
         }
 
@@ -175,6 +176,7 @@ impl CompactionPicker for LevelCompactionPicker {
             &level_handlers[target_level],
         );
         if select_level_inputs.is_empty() {
+            println!("select_level_inputs empty");
             return None;
         }
 

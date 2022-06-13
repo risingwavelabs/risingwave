@@ -225,4 +225,29 @@ where
         };
         Ok(Response::new(resp))
     }
+
+    async fn trigger_manual_compaction(
+        &self,
+        request: Request<TriggerManualCompactionRequest>,
+    ) -> Result<Response<TriggerManualCompactionResponse>, Status> {
+        let compaction_group_id = request.into_inner().compaction_group_id;
+        let result_state = match self
+            .hummock_manager
+            .try_send_compaction_request(compaction_group_id)
+        {
+            true => None,
+
+            false => {
+                return Err(tonic_err(ErrorCode::InternalError(format!(
+                    "try_send_compaction_request error compaction_group_id {}",
+                    compaction_group_id
+                ))));
+            }
+        };
+
+        let resp = TriggerManualCompactionResponse {
+            status: result_state,
+        };
+        Ok(Response::new(resp))
+    }
 }
