@@ -4075,6 +4075,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
+ "tokio-retry",
  "tracing",
  "workspace-hack",
 ]
