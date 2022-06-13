@@ -24,15 +24,6 @@ message SourceNode {
   plan_common.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
-  // split allocation information,
-  // and in the future will distinguish between `StreamSource` and `TableSource`
-  // so that there is no need to put many fields that are not common into the same SourceNode structure
-  StreamSourceState stream_source_state = 4;
-}
-
-message StreamSourceState {
-  string split_type = 1;
-  repeated bytes stream_source_splits = 2;
 }
 
 message ProjectNode {
@@ -164,7 +155,7 @@ message ChainNode {
 // BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan_common.
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
 message BatchPlanNode {
-  plan_common.TableRefId table_ref_id = 1;
+  plan_common.CellBasedTableDesc table_desc = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
   repeated uint32 distribution_keys = 3;
   common.ParallelUnitMapping hash_mapping = 4;

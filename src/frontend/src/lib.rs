@@ -34,6 +34,9 @@
 #![feature(drain_filter)]
 #![feature(if_let_guard)]
 #![feature(assert_matches)]
+#![feature(map_first_last)]
+#![feature(lint_reasons)]
+
 #[macro_use]
 pub mod catalog;
 pub mod binder;
@@ -42,7 +45,7 @@ pub mod handler;
 pub mod observer;
 pub mod optimizer;
 pub mod planner;
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub mod scheduler;
 pub mod session;
 pub mod stream_fragmenter;

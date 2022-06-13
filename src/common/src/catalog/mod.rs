@@ -24,9 +24,9 @@ pub use schema::{test_utils as schema_test_utils, Field, Schema};
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "dev";
-
-pub const DEFAULT_SUPPER_USER: &str = "risingwave";
-pub const DEFAULT_SUPPER_USER_PASSWORD: &str = "risingwave";
+pub const DEFAULT_SUPPER_USER: &str = "root";
+// This is for compatibility with customized utils for PostgreSQL.
+pub const DEFAULT_SUPPER_USER_FOR_PG: &str = "postgres";
 
 pub type CatalogVersion = u64;
 

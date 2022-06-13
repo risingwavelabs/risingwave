@@ -114,7 +114,7 @@ impl LocalQueryExecution {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(&*e))
+                    .map(|e| self.convert_plan_node(e))
                     .collect::<Result<Vec<PlanNodeProst>>>()?;
 
                 Ok(PlanNodeProst {

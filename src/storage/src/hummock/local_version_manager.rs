@@ -57,7 +57,7 @@ struct BufferTracker {
 }
 
 impl BufferTracker {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.upload_size.load(Relaxed) == 0
     }
@@ -141,7 +141,7 @@ impl LocalVersionManager {
         ));
 
         // Uploader shared buffer to S3.
-        let mut uploader = SharedBufferUploader::new(
+        let uploader = SharedBufferUploader::new(
             options.clone(),
             sstable_store,
             hummock_meta_client,

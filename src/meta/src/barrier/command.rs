@@ -18,9 +18,12 @@ use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::SplitImpl;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{AddMutation, DispatcherMutation, NothingMutation, StopMutation};
+use risingwave_pb::data::{
+    AddMutation, DispatcherMutation, NothingMutation, SourceChangeSplit, StopMutation,
+};
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
@@ -60,6 +63,7 @@ pub enum Command {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
         dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
+        source_state: HashMap<ActorId, Vec<SplitImpl>>,
     },
 }
 
@@ -80,7 +84,7 @@ impl Command {
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<'a, S> {
+pub struct CommandContext<'a, S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
     client_pool: StreamClientPoolRef,
@@ -95,7 +99,7 @@ pub struct CommandContext<'a, S> {
     command: Command,
 }
 
-impl<'a, S> CommandContext<'a, S> {
+impl<'a, S: MetaStore> CommandContext<'a, S> {
     pub fn new(
         fragment_manager: FragmentManagerRef<S>,
         client_pool: StreamClientPoolRef,
@@ -129,7 +133,11 @@ where
                 Mutation::Stop(StopMutation { actors })
             }
 
-            Command::CreateMaterializedView { dispatches, .. } => {
+            Command::CreateMaterializedView {
+                dispatches,
+                source_state,
+                ..
+            } => {
                 let mutations = dispatches
                     .iter()
                     .map(
@@ -140,7 +148,24 @@ where
                         },
                     )
                     .collect();
-                Mutation::Add(AddMutation { mutations })
+
+                let splits = source_state
+                    .iter()
+                    .filter(|(_, splits)| !splits.is_empty())
+                    .map(|(actor_id, splits)| {
+                        let split_type = splits.iter().next().unwrap().get_type();
+                        SourceChangeSplit {
+                            actor_id: *actor_id,
+                            split_type,
+                            source_splits: splits
+                                .iter()
+                                .map(|split| split.to_json_bytes().to_vec())
+                                .collect(),
+                        }
+                    })
+                    .collect();
+
+                Mutation::Add(AddMutation { mutations, splits })
             }
         };
 
@@ -194,6 +219,7 @@ where
                 table_fragments,
                 dispatches,
                 table_sink_map,
+                source_state: _,
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {

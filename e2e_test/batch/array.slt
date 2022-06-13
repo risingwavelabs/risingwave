@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table lt (v1 int[][]);
 
 statement ok
@@ -42,6 +45,17 @@ query I
 select min(v1) from lt;
 ----
 [[1],[2,3]]
+
+statement ok
+create materialized view mv as select min(v1) as m from lt;
+
+query I
+select * from mv;
+----
+[[1],[2,3]]
+
+statement ok
+drop materialized view mv;
 
 statement ok
 drop table lt;

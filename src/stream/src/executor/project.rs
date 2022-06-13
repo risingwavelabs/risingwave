@@ -24,7 +24,6 @@ use super::{
     Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
     StreamExecutorResult,
 };
-use crate::executor::error::StreamExecutorError;
 
 pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;
 
@@ -89,18 +88,14 @@ impl SimpleExecutor for SimpleProjectExecutor {
         &mut self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
+        let chunk = chunk.compact()?;
 
         let (data_chunk, ops) = chunk.into_parts();
 
         let projected_columns = self
             .exprs
             .iter_mut()
-            .map(|expr| {
-                expr.eval(&data_chunk)
-                    .map(Column::new)
-                    .map_err(StreamExecutorError::eval_error)
-            })
+            .map(|expr| expr.eval(&data_chunk).map(Column::new))
             .collect::<Result<Vec<Column>, _>>()?;
 
         let new_chunk = StreamChunk::new(ops, projected_columns, None);

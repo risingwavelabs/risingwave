@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::{
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
-use crate::user::{encrypt_default, try_extract};
+use crate::user::user_authentication::{encrypt_default, encrypted_password};
 
 fn make_prost_user_info(name: ObjectName, options: &CreateUserWithOptions) -> Result<UserInfo> {
     let mut user_info = UserInfo {
@@ -46,7 +46,7 @@ fn make_prost_user_info(name: ObjectName, options: &CreateUserWithOptions) -> Re
             }
             CreateUserOption::Password(opt) => {
                 if let Some(password) = opt {
-                    user_info.auth_info = try_extract(&user_info.name, &password.0);
+                    user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                 }
             }
         }

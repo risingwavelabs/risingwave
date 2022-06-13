@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::sync::Arc;
 
@@ -53,6 +53,7 @@ pub fn default_config_for_test() -> StorageConfig {
         disable_remote_compactor: false,
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
+        share_buffer_upload_concurrency: 1,
     }
 }
 

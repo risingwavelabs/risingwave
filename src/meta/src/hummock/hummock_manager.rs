@@ -30,9 +30,9 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, CompactionConfig, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
-    SstableIdInfo, SstableInfo,
+    CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
+    HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
+    SstableInfo,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::RwLock;
@@ -68,10 +68,8 @@ pub struct HummockManager<S: MetaStore> {
 
     metrics: Arc<MetaMetrics>,
 
-    /// `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
+    // `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
     compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
-    // TODO: refactor to remove this field
-    config: Arc<CompactionConfig>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -80,7 +78,6 @@ pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
 struct Compaction {
     /// Compaction task that is already assigned to a compactor
     compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
-    // TODO: may want fine-grained lock for each compaction group
     /// `CompactStatus` of each compaction group
     compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
     /// Available compaction task ids for use
@@ -162,7 +159,6 @@ where
         metrics: Arc<MetaMetrics>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> Result<HummockManager<S>> {
-        let config = compaction_group_manager.config().clone();
         let instance = HummockManager {
             env,
             versioning: RwLock::new(Default::default()),
@@ -171,7 +167,6 @@ where
             cluster_manager,
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
-            config: Arc::new(config),
         };
 
         instance.load_meta_store_state().await?;
@@ -236,7 +231,16 @@ where
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
-            for l in 0..self.config.max_level {
+            // TODO #2065: Initialize independent levels via corresponding compaction group' config.
+            // Currently all SSTs belongs to `StateDefault`.
+            let max_level = self
+                .compaction_group_manager
+                .compaction_group(StaticCompactionGroupId::StateDefault.into())
+                .await
+                .unwrap()
+                .compaction_config()
+                .max_level;
+            for l in 0..max_level {
                 init_version.levels.push(Level {
                     level_idx: (l + 1) as u32,
                     level_type: LevelType::Nonoverlapping as i32,
@@ -538,7 +542,7 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
-        // TODO: remove this line after split levels by compaction group.
+        // TODO #2065: Remove this line after split levels by compaction group.
         // All SSTs belongs to `StateDefault` currently.
         if compaction_group_id != u64::from(StaticCompactionGroupId::StateDefault) {
             return Ok(None);
@@ -573,6 +577,10 @@ where
             task_id as HummockCompactionTaskId,
             compaction_group_id,
         );
+        let existing_table_ids_from_meta = self
+            .compaction_group_manager
+            .internal_table_ids_by_compation_group_id(compaction_group_id)
+            .await?;
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
@@ -590,22 +598,28 @@ where
                         .flat_map(|v| v.snapshot_id.clone())
                         .fold(max_committed_epoch, std::cmp::min)
                 };
+
+                // to get all relational table_id from sst_info
+                let table_ids = compact_task
+                    .input_ssts
+                    .iter()
+                    .flat_map(|level| {
+                        level
+                            .table_infos
+                            .iter()
+                            .flat_map(|sst_info| {
+                                sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
+                            })
+                            .collect_vec()
+                    })
+                    .collect::<HashSet<u32>>();
+
                 if compact_task.target_level != 0 {
-                    let table_ids = compact_task
-                        .input_ssts
-                        .iter()
-                        .flat_map(|level| {
-                            level
-                                .table_infos
-                                .iter()
-                                .flat_map(|sst_info| {
-                                    sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
-                                })
-                                .collect_vec()
-                        })
-                        .collect::<HashSet<u32>>();
                     compact_task.vnode_mappings.reserve_exact(table_ids.len());
-                    for table_id in table_ids {
+                }
+
+                for table_id in table_ids {
+                    if compact_task.target_level != 0 {
                         if let Some(vnode_mapping) = self
                             .env
                             .hash_mapping_manager()
@@ -619,6 +633,11 @@ where
                             };
                             compact_task.vnode_mappings.push(compressed_mapping);
                         }
+                    }
+
+                    // to found exist table_id from
+                    if existing_table_ids_from_meta.contains(&table_id) {
+                        compact_task.existing_table_ids.push(table_id);
                     }
                 }
 

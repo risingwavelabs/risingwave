@@ -21,7 +21,7 @@ pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
 
 /// `VNodeBitmap` is a bitmap of vnodes for a state table, which indicates the vnodes that the state
 /// table owns.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct VNodeBitmap {
     /// Id of state table that the bitmap belongs to.
     table_id: u32,
@@ -41,6 +41,30 @@ impl From<risingwave_pb::common::VNodeBitmap> for VNodeBitmap {
 impl VNodeBitmap {
     pub fn new(table_id: u32, bitmap: Vec<u8>) -> Self {
         Self { table_id, bitmap }
+    }
+
+    /// Returns a `VNodeBitmap` with default bitmap. Used for state table of singleton executor.
+    pub fn new_with_default_bitmap(table_id: u32) -> Self {
+        let mut bitmap = [0u8; VNODE_BITMAP_LEN];
+        // Only no.0 vnode is present in default bitmap.
+        bitmap[0] = 1;
+        Self {
+            table_id,
+            bitmap: bitmap.to_vec(),
+        }
+    }
+
+    /// Returns a `VNodeBitmap` with only one vnode present.
+    pub fn new_with_single_vnode(table_id: u32, vnode: VirtualNode) -> Self {
+        // Make sure the vnode is valid.
+        assert!(vnode < VIRTUAL_NODE_COUNT as VirtualNode);
+        // Construct vnode bitmap.
+        let mut bitmap = [0u8; VNODE_BITMAP_LEN];
+        bitmap[(vnode >> 3) as usize] |= 1 << (vnode & 0b111);
+        Self {
+            table_id,
+            bitmap: bitmap.to_vec(),
+        }
     }
 
     /// Checks whether the bitmap overlaps with the given bitmaps. Two bitmaps overlap only when
@@ -63,6 +87,11 @@ impl VNodeBitmap {
             }
         }
         false
+    }
+
+    /// Returns the id of state table that the `VNodeBitmap` belongs to.
+    pub fn table_id(&self) -> u32 {
+        self.table_id
     }
 }
 

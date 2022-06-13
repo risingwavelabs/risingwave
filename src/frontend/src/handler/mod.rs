@@ -40,7 +40,6 @@ pub mod drop_user;
 mod explain;
 mod flush;
 pub mod handle_privilege;
-#[allow(dead_code)]
 pub mod query;
 mod set;
 mod show;
@@ -56,9 +55,12 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             is_materialized,
             stmt,
         } => create_source::handle_create_source(context, is_materialized, stmt).await,
-        Statement::CreateTable { name, columns, .. } => {
-            create_table::handle_create_table(context, name, columns).await
-        }
+        Statement::CreateTable {
+            name,
+            columns,
+            with_options,
+            ..
+        } => create_table::handle_create_table(context, name, columns, with_options).await,
         Statement::CreateDatabase {
             db_name,
             if_not_exists,

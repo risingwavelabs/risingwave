@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::session_config::DELTA_JOIN;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
@@ -42,8 +43,6 @@ pub struct StreamHashJoin {
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
 }
-
-pub static DELTA_JOIN: &str = "RW_FORCE_DELTA_JOIN";
 
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
@@ -116,16 +115,20 @@ impl StreamHashJoin {
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ type: {:?}, predicate: {}, output_indices: {} }}",
-            if self.is_delta {
-                "StreamDeltaHashJoin"
-            } else {
-                "StreamHashJoin"
-            },
-            self.logical.join_type(),
-            self.eq_join_predicate(),
+        let mut builder = if self.is_delta {
+            f.debug_struct("StreamDeltaHashJoin")
+        } else {
+            f.debug_struct("StreamHashJoin")
+        };
+        builder
+            .field("type", &format_args!("{:?}", self.logical.join_type()))
+            .field("predicate", &format_args!("{}", self.eq_join_predicate()));
+
+        if self.append_only() {
+            builder.field("append_only", &format_args!("{}", true));
+        }
+        builder.field(
+            "output_indices: {}",
             if self
                 .logical
                 .output_indices()
@@ -136,8 +139,9 @@ impl fmt::Display for StreamHashJoin {
                 "all".to_string()
             } else {
                 format!("{:?}", self.logical.output_indices())
-            }
-        )
+            },
+        );
+        builder.finish()
     }
 }
 

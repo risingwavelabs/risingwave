@@ -1,7 +1,12 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 SET QUERY_MODE TO local;
 
 #include ./boolean.slt.part
 
 statement ok
 SET QUERY_MODE TO distributed;
+
+# This test should not be running in parallel mode

@@ -33,6 +33,9 @@ pub struct TableDesc {
     pub distribution_keys: Vec<usize>,
     /// Column indices for primary keys.
     pub pks: Vec<usize>,
+
+    /// Whether the table source is append-only
+    pub appendonly: bool,
 }
 
 impl TableDesc {
@@ -47,6 +50,13 @@ impl TableDesc {
                 }),
                 return_type: None,
             })
+            .collect()
+    }
+
+    pub fn order_column_ids(&self) -> Vec<usize> {
+        self.order_desc
+            .iter()
+            .map(|col| (col.column_desc.column_id.get_id() as usize))
             .collect()
     }
 }

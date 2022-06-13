@@ -76,7 +76,7 @@ impl StreamChunkBuilder {
         let column_builders = data_types
             .iter()
             .map(|datatype| datatype.create_array_builder(reduced_capacity))
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
         Ok(Self {
             ops,
             column_builders,

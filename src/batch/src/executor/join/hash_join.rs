@@ -425,7 +425,7 @@ mod tests {
             let array_builders = data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(1024))
-                .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+                .try_collect()?;
 
             Ok(Self {
                 data_types,
@@ -449,7 +449,7 @@ mod tests {
                 .array_builders
                 .into_iter()
                 .map(|array_builder| array_builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                .collect::<Result<Vec<Column>>>()?;
+                .try_collect()?;
 
             Ok(DataChunk::new(columns, self.array_len))
         }

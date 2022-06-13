@@ -141,6 +141,14 @@ pub fn count_str(r: Option<i64>, i: Option<&str>) -> Result<Option<i64>> {
     count(r, i)
 }
 
+pub fn count_struct(r: Option<i64>, i: Option<StructRef<'_>>) -> Result<Option<i64>> {
+    count(r, i)
+}
+
+pub fn count_list(r: Option<i64>, i: Option<ListRef<'_>>) -> Result<Option<i64>> {
+    count(r, i)
+}
+
 pub struct SingleValue {
     count: usize,
 }

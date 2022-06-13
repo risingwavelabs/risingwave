@@ -28,6 +28,8 @@ mod sstable;
 pub use sstable::*;
 
 pub mod compaction_executor;
+#[expect(dead_code)]
+mod compaction_group_client;
 pub mod compactor;
 #[cfg(test)]
 mod compactor_tests;
@@ -44,7 +46,6 @@ pub mod sstable_store;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
-pub mod test_runner;
 #[cfg(test)]
 pub(crate) mod test_utils;
 mod utils;

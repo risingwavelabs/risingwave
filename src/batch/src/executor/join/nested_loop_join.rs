@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
+use risingwave_common::array::{DataChunk, Row, Vis};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, DatumRef};
@@ -159,10 +159,10 @@ impl NestedLoopJoinExecutor {
         num_tuples: usize,
         data_types: &[DataType],
     ) -> Result<DataChunk> {
-        let mut output_array_builders = data_types
+        let mut output_array_builders: Vec<_> = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(num_tuples))
-            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+            .try_collect()?;
         for _i in 0..num_tuples {
             for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
                 builder.append_datum_ref(*datum_ref)?;
@@ -173,7 +173,7 @@ impl NestedLoopJoinExecutor {
         let result_columns = output_array_builders
             .into_iter()
             .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .collect::<Result<Vec<Column>>>()?;
+            .try_collect()?;
 
         Ok(DataChunk::new(result_columns, num_tuples))
     }

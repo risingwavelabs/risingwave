@@ -31,6 +31,13 @@
 #![feature(backtrace)]
 #![feature(fn_traits)]
 #![feature(assert_matches)]
+#![feature(let_else)]
+#![feature(lint_reasons)]
 
+pub mod error;
 pub mod expr;
 pub mod vector_op;
+
+pub use error::ExprError;
+pub use risingwave_common::{bail, ensure};
+pub type Result<T> = std::result::Result<T, ExprError>;
