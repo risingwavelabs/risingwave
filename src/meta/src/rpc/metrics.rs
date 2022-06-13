@@ -18,9 +18,9 @@ use std::sync::Arc;
 use hyper::{Body, Request, Response};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Encoder, Histogram,
-    HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry, TextEncoder,
+    register_histogram_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry, Encoder, Histogram, HistogramVec, IntGauge, IntGaugeVec,
+    Registry, TextEncoder,
 };
 use tower::make::Shared;
 use tower::ServiceBuilder;
@@ -40,22 +40,9 @@ pub struct MetaMetrics {
     pub uncommitted_sst_num: IntGauge,
     /// num of SSTs in each level
     pub level_sst_num: IntGaugeVec,
-    /// num of SSTs to be merged to next level in each level
+    // /// num of SSTs to be merged to next level in each level
     pub level_compact_cnt: IntGaugeVec,
-    /// GBs read from current level during history compactions to next level
-    pub level_compact_read_curr: HistogramVec,
-    /// GBs read from next level during history compactions to next level
-    pub level_compact_read_next: HistogramVec,
-    /// GBs written into next level during history compactions to next level
-    pub level_compact_write: HistogramVec,
-    /// num of SSTs read from current level during history compactions to next level
-    pub level_compact_read_sstn_curr: HistogramVec,
-    /// num of SSTs read from next level during history compactions to next level
-    pub level_compact_read_sstn_next: HistogramVec,
-    /// num of SSTs written into next level during history compactions to next level
-    pub level_compact_write_sstn: HistogramVec,
-    /// num of compactions from each level to next level
-    pub level_compact_frequency: IntCounterVec,
+
     pub level_file_size: IntGaugeVec,
     /// hummock version size
     pub version_size: IntGauge,
@@ -109,66 +96,6 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let level_compact_read_curr = register_histogram_vec_with_registry!(
-            "storage_level_compact_read_curr",
-            "GBs read from current level during history compactions to next level",
-            &["level_index"],
-            exponential_buckets(1.0, 2.0, 24).unwrap(), // max 16GB
-            registry
-        )
-        .unwrap();
-
-        let level_compact_read_next = register_histogram_vec_with_registry!(
-            "storage_level_compact_read_next",
-            "KBs read from next level during history compactions to next level",
-            &["level_index"],
-            exponential_buckets(1.0, 2.0, 24).unwrap(), // max 16GB
-            registry
-        )
-        .unwrap();
-
-        let level_compact_write = register_histogram_vec_with_registry!(
-            "storage_level_compact_write",
-            "KBs written into next level during history compactions to next level",
-            &["level_index"],
-            exponential_buckets(1.0, 2.0, 24).unwrap(), // max 16GB
-            registry
-        )
-        .unwrap();
-
-        let level_compact_read_sstn_curr = register_histogram_vec_with_registry!(
-            "storage_level_compact_read_sstn_curr",
-            "num of SSTs read from current level during history compactions to next level",
-            &["level_index"],
-            exponential_buckets(1.0, 2.0, 10).unwrap(), // max 1000
-            registry
-        )
-        .unwrap();
-
-        let level_compact_read_sstn_next = register_histogram_vec_with_registry!(
-            "storage_level_compact_read_sstn_next",
-            "num of SSTs read from next level during history compactions to next level",
-            &["level_index"],
-            registry
-        )
-        .unwrap();
-
-        let level_compact_write_sstn = register_histogram_vec_with_registry!(
-            "storage_level_compact_write_sstn",
-            "num of SSTs written into next level during history compactions to next level",
-            &["level_index"],
-            registry
-        )
-        .unwrap();
-
-        let level_compact_frequency = register_int_counter_vec_with_registry!(
-            "storage_level_compact_frequency",
-            "num of compactions from each level to next level",
-            &["level_index"],
-            registry
-        )
-        .unwrap();
-
         let version_size =
             register_int_gauge_with_registry!("version_size", "version size", registry).unwrap();
         let level_file_size = register_int_gauge_vec_with_registry!(
@@ -189,13 +116,6 @@ impl MetaMetrics {
             uncommitted_sst_num,
             level_sst_num,
             level_compact_cnt,
-            level_compact_read_curr,
-            level_compact_read_next,
-            level_compact_write,
-            level_compact_read_sstn_curr,
-            level_compact_read_sstn_next,
-            level_compact_write_sstn,
-            level_compact_frequency,
             level_file_size,
             version_size,
         }
