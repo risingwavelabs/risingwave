@@ -197,11 +197,6 @@ def section_compaction(panels):
                 "storage_level_compact_cnt", "L{{level_index}}"
             ),
         ]),
-        panels.timeseries_bytes("Hummock Version Size", [
-            panels.target(
-                "version_size", "version size"
-            ),
-        ]),
         panels.timeseries_bytes_per_sec("KBs Read from Next Level", [
             panels.target(
                 "sum(rate(storage_level_compact_read_next[1m])) by (le, level_index)", "L{{level_index}} read"
@@ -229,7 +224,12 @@ def section_compaction(panels):
         ]),
         panels.timeseries_ops("Count of SSTs Read from Next Level", [
             panels.target(
-                "sum(rate(storage_level_compact_read_sstn_next[1m])) by (le, level_index))", "L{{level_index}} read"
+                "sum(rate(storage_level_compact_read_sstn_next[1m])) by (le, level_index)", "L{{level_index}} read"
+            ),
+        ]),
+        panels.timeseries_bytes("Hummock Version Size", [
+            panels.target(
+                "version_size", "version size"
             ),
         ]),
     ]

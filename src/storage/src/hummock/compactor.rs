@@ -484,7 +484,7 @@ impl Compactor {
             .inc_by(compaction_write_bytes);
         self.context
             .stats
-            .compact_read_sstn_current_level
+            .compact_write_sstn
             .with_label_values(&[group_label.as_str(), level_label.as_str()])
             .inc_by(self.compact_task.sorted_output_ssts.len() as u64);
 
