@@ -35,11 +35,11 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::group_builder::KeyValueGroupingImpl::VirtualNode;
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
 use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
 use crate::hummock::compaction_executor::CompactionExecutor;
+use crate::hummock::group_builder::KeyValueGrouping;
 use crate::hummock::iterator::ReadOptions;
 use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -138,7 +138,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, Vec<VNodeBitmap>)>);
+pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<VNodeBitmap>)>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -153,7 +153,7 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         payload: &UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
+    ) -> HummockResult<Vec<(Sstable, u64, Vec<VNodeBitmap>)>> {
         let mut start_user_keys = payload
             .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
@@ -255,7 +255,7 @@ impl Compactor {
             let mut level0 = Vec::with_capacity(parallelism);
 
             for (_, sst) in output_ssts {
-                for (table, _) in &sst {
+                for (table, _, _) in &sst {
                     compactor
                         .context
                         .stats
@@ -449,7 +449,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, vnode_bitmaps) in ssts {
+            for (sst, unit_id, vnode_bitmaps) in ssts {
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -459,6 +459,7 @@ impl Compactor {
                     }),
                     file_size: sst.meta.estimated_size as u64,
                     vnode_bitmaps,
+                    unit_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
@@ -512,11 +513,11 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let builder = SSTableBuilder::new(self.context.options.as_ref().into());
+                let builder = SSTableBuilder::new(table_id, self.context.options.as_ref().into());
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
-                Ok((table_id, builder))
+                Ok(builder)
             },
-            VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
+            VirtualNodeGrouping::new(vnode2unit),
             self.context.sstable_store.clone(),
         );
 
@@ -548,11 +549,12 @@ impl Compactor {
             vnode_bitmaps,
             upload_join_handle,
             data_len,
+            unit_id,
         } in sealed_builders
         {
             let sst = Sstable { id: table_id, meta };
             let len = data_len;
-            ssts.push((sst.clone(), vnode_bitmaps));
+            ssts.push((sst.clone(), unit_id, vnode_bitmaps));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
@@ -784,8 +786,8 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    async fn compact_and_build_sst<B, F>(
-        sst_builder: &mut GroupedSstableBuilder<B>,
+    async fn compact_and_build_sst<B, G, F>(
+        sst_builder: &mut GroupedSstableBuilder<B, G>,
         kr: KeyRange,
         mut iter: BoxedForwardHummockIterator,
         has_user_key_overlap: bool,
@@ -794,7 +796,8 @@ impl Compactor {
     ) -> HummockResult<()>
     where
         B: Clone + Fn() -> F,
-        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+        G: KeyValueGrouping,
+        F: Future<Output = HummockResult<SSTableBuilder>>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;
