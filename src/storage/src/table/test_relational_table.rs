@@ -1505,7 +1505,12 @@ async fn test_dedup_pk_table_write_and_reads() {
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
 
     // ---------- declare table layout
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2), ColumnId::from(3)];
+    let column_ids = vec![
+        ColumnId::from(0),
+        ColumnId::from(1),
+        ColumnId::from(2),
+        ColumnId::from(3),
+    ];
     let actual_column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Float64), // test memcomparable != value enc
@@ -1515,17 +1520,7 @@ async fn test_dedup_pk_table_write_and_reads() {
 
     // ---------- declare pk
     let order_types = vec![OrderType::Descending, OrderType::Ascending];
-    let pk_index = vec![1_usize, 3_usize];
-    let pk_ordered_descs = vec![
-        OrderedColumnDesc {
-            column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Float64),
-            order: OrderType::Descending,
-        },
-        OrderedColumnDesc {
-            column_desc: ColumnDesc::unnamed(ColumnId::from(3), DataType::Int32),
-            order: OrderType::Ascending,
-        },
-    ];
+    let pk_indices = vec![1_usize, 3_usize];
 
     // ---------- Init state table interface
     let mut state = DedupPkStateTable::new(
@@ -1533,23 +1528,17 @@ async fn test_dedup_pk_table_write_and_reads() {
         actual_column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
 
-    let key_1 = Row(vec![
-        Some(11.001_f64.into()),
-        Some(1111_i32.into()),
-    ]);
+    let key_1 = Row(vec![Some(11.001_f64.into()), Some(1111_i32.into())]);
     let row_1 = Row(vec![
         Some(1_i32.into()),
         Some(11.001_f64.into()),
         Some("111".to_string().into()),
         Some(1111_i32.into()),
     ]);
-    let key_2 = Row(vec![
-        Some(22.001_f64.into()),
-        Some(2222_i32.into()),
-    ]);
+    let key_2 = Row(vec![Some(22.001_f64.into()), Some(2222_i32.into())]);
     let row_2 = Row(vec![
         Some(2_i32.into()),
         Some(22.001_f64.into()),
@@ -1558,19 +1547,9 @@ async fn test_dedup_pk_table_write_and_reads() {
     ]);
 
     // ---------- write-write-read-read
-    state
-        .insert(
-            &key_1,
-            row_1.clone(),
-        )
-        .unwrap();
+    state.insert(&key_1, row_1.clone()).unwrap();
 
-    state
-        .insert(
-            &key_2,
-            row_2.clone(),
-        )
-        .unwrap();
+    state.insert(&key_2, row_2.clone()).unwrap();
 
     // get_row read-read
     let row_1_actual = state.get_row(&key_1, 0).await.unwrap();
