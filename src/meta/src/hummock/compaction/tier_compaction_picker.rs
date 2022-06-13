@@ -78,9 +78,13 @@ impl TierCompactionPicker {
             let mut select_level_inputs = vec![table.clone()];
 
             let mut no_selected_files = vec![];
+            let max_compaction_bytes = std::cmp::min(
+                self.config.max_compaction_bytes,
+                self.config.max_bytes_for_level_base,
+            );
 
             for other in &levels[0].table_infos[idx + 1..] {
-                if compaction_bytes >= self.config.max_compaction_bytes {
+                if compaction_bytes >= max_compaction_bytes {
                     break;
                 }
 
@@ -403,7 +407,8 @@ impl LevelCompactionPicker {
                         // we only extend L0 files when write-amplification does not increase.
                         let inc_compaction_size =
                             target_level_ssts.calc_inc_compaction_size(&tables);
-                        if select_compaction_bytes > self.config.min_compaction_bytes
+                        if select_unit != u64::MAX
+                            && select_compaction_bytes > self.config.min_compaction_bytes
                             && (target_level_ssts.compaction_bytes + inc_compaction_size)
                                 / (select_compaction_bytes + other.file_size)
                                 > target_level_ssts.compaction_bytes / select_compaction_bytes
@@ -418,15 +423,10 @@ impl LevelCompactionPicker {
             }
 
             // do not schedule tasks with big write-amplification
-            if select_compaction_bytes < self.config.min_compaction_bytes
-                && select_compaction_bytes * 4 < target_level_ssts.compaction_bytes
-            {
-                continue;
-            }
-
-            // do not schedule tasks with small data to base level
             if select_compaction_bytes < self.config.max_bytes_for_level_base / 2
-                && select_level_ssts.len() < self.config.level0_tier_compact_file_number as usize
+                && (select_compaction_bytes * 4 < target_level_ssts.compaction_bytes
+                    || select_level_ssts.len()
+                        < self.config.level0_tier_compact_file_number as usize)
             {
                 continue;
             }
