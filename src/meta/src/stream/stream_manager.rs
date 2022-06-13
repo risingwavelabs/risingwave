@@ -612,16 +612,18 @@ where
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
     pub async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()> {
-        self.barrier_manager
-            .run_command(Command::DropMaterializedView(*table_id))
-            .await?;
-
         let table_fragments = self
             .fragment_manager
             .select_table_fragments_by_table_id(table_id)
             .await?;
-        let mut source_fragments = Default::default();
+
+        let mut source_fragments = HashMap::new();
         fetch_source_fragments(&mut source_fragments, &table_fragments);
+
+        self.barrier_manager
+            .run_command(Command::DropMaterializedView(*table_id))
+            .await?;
+
         let mut actor_ids = HashSet::new();
         for fragment_ids in source_fragments.values() {
             for fragment_id in fragment_ids {

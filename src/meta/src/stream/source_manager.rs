@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -301,6 +302,17 @@ where
     ) {
         if let Some(source_fragments) = source_fragments {
             for (source_id, fragment_ids) in source_fragments {
+                if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
+                    let managed_fragment_ids = entry.get_mut();
+                    for fragment_id in &fragment_ids {
+                        managed_fragment_ids.remove(fragment_id);
+                    }
+
+                    if managed_fragment_ids.is_empty() {
+                        entry.remove();
+                    }
+                }
+
                 if let Some(managed_fragment_ids) = self.source_fragments.get_mut(&source_id) {
                     for fragment_id in fragment_ids {
                         managed_fragment_ids.remove(&fragment_id);
