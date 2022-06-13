@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::ops::Index;
 
 use futures::pin_mut;
@@ -25,14 +23,10 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
-use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::variants::*;
-use super::PkAndRowIterator;
-use crate::executor::managed_state::top_n::deserialize_pk;
 use crate::executor::PkIndices;
 
 /// This state is used for several ranges (e.g `[0, offset)`, `[offset+limit, +inf)` of elements in
@@ -56,14 +50,8 @@ pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     total_count: usize,
     /// Number of entries to retain in memory after each flush.
     top_n_count: Option<usize>,
-    /// The keyspace to operate on.
-    keyspace: Keyspace<S>,
-    /// `DataType`s use for deserializing `Row`.
-    data_types: Vec<DataType>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
-    /// For deserializing `Row`.
-    cell_based_row_deserializer: CellBasedRowDeserializer,
 }
 
 impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
@@ -73,7 +61,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         keyspace: Keyspace<S>,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
-        cell_based_row_deserializer: CellBasedRowDeserializer,
+        _cell_based_row_deserializer: CellBasedRowDeserializer,
         pk_indices: PkIndices,
     ) -> Self {
         let order_type = ordered_row_deserializer.clone().order_types;
@@ -84,17 +72,13 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table =
-            StateTable::new(keyspace.clone(), column_descs, order_type, None, pk_indices);
+        let state_table = StateTable::new(keyspace, column_descs, order_type, None, pk_indices);
         Self {
             top_n: BTreeMap::new(),
             state_table,
             total_count,
             top_n_count,
-            keyspace,
-            data_types,
             ordered_row_deserializer,
-            cell_based_row_deserializer,
         }
     }
 
@@ -128,7 +112,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         } else {
             // Cache must always be non-empty when the state is not empty.
             debug_assert!(!self.top_n.is_empty(), "top_n is empty");
-            println!("\n\npop_top_element\n\n");
             // Similar as the comments in `retain_top_n`, it is actually popping
             // the element with the largest key.
             let key = match TOP_N_TYPE {
@@ -172,7 +155,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
     pub async fn insert(&mut self, key: OrderedRow, value: Row, _epoch: u64) -> Result<()> {
         let have_key_on_storage = self.total_count > self.top_n.len();
-        println!("top_n insert pk = {:?}", key);
         let need_to_flush = if have_key_on_storage {
             // It is impossible that the cache is empty.
             let bottom_key = self.bottom_element().unwrap().0;
@@ -222,7 +204,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // This `order` is defined by the order between two `OrderedRow`.
         // We have to scan all because the top n on the storage may have been deleted by the flush
         // buffer.
-        println!("\n-------------scan_and_merge-----------\n");
         match TOP_N_TYPE {
             TOP_N_MIN => {
                 let state_table_iter = self.state_table.iter(epoch).await?;
@@ -230,7 +211,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
                 loop {
                     if let Some(top_n_count) = self.top_n_count && self.top_n.len() >= top_n_count {
-                        println!("top_n_count = {:?}", top_n_count);
                         break;
                     }
                     match state_table_iter.next().await {
@@ -241,10 +221,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                                 datums.push(row.index(*pk_indice).clone());
                             }
                             let pk = Row::new(datums);
-                            println!(
-                                "\n*** scan and merge, top_n_type= TOP_N_MIN , insert pk = {:?}",
-                                pk
-                            );
                             let pk_ordered =
                                 OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
 
@@ -272,10 +248,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                                 datums.push(row.index(*pk_indice).clone());
                             }
                             let pk = Row::new(datums);
-                            println!(
-                                "\n*** scan and merge, top_n_type= TOP_N_MAX, insert pk = {:?}",
-                                pk
-                            );
                             let pk_ordered =
                                 OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
                             self.top_n.insert(pk_ordered, row);
@@ -297,7 +269,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         value: Row,
         epoch: u64,
     ) -> Result<Option<Row>> {
-        println!("top_n delete pk = {:?}", key);
         let prev_entry = self.top_n.remove(key);
         match TOP_N_TYPE {
             TOP_N_MIN => self
@@ -330,11 +301,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         pin_mut!(state_table_iter);
         while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
-            println!("\nfill in cache res = {:?}", row);
-            println!(
-                "\nself.state_table.pk_indices = {:?}",
-                self.state_table.pk_indices
-            );
             let mut datums = vec![];
             for pk_indice in &self.state_table.pk_indices {
                 let a = row.index(*pk_indice).clone();
@@ -342,10 +308,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             }
             let pk = Row::new(datums);
             let pk_ordered = OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
-            // let mut pk_bytes = pk.serialize_with_order(
-            // &self.ordered_row_deserializer.order_types).unwrap(); println!("fill in
-            // cache pk_bytes = {:?}", pk_bytes); let pk =
-            //     deserialize_pk::<TOP_N_TYPE>(&mut pk_bytes, &mut self.ordered_row_deserializer)?;
             let prev_row = self.top_n.insert(pk_ordered, row.clone());
             if let Some(prev_row) = prev_row {
                 debug_assert_eq!(prev_row, row);
@@ -367,7 +329,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             self.retain_top_n();
             return Ok(());
         }
-        println!("\n\n\n------------------commit----------------\n\n");
         self.state_table.commit(epoch).await?;
 
         self.retain_top_n();

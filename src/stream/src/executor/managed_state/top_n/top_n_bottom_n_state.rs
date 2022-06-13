@@ -16,7 +16,6 @@
 #![allow(dead_code)]
 
 use std::ops::Index;
-use std::vec::Drain;
 
 use futures::pin_mut;
 use futures::stream::StreamExt;
@@ -27,13 +26,10 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
-use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::variants::TOP_N_MIN;
-use super::PkAndRowIterator;
 use crate::executor::managed_state::top_n::deserialize_pk;
 use crate::executor::PkIndices;
 
@@ -203,7 +199,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         };
         insert_to_cache.insert(key.clone(), value.clone());
         self.state_table
-            .insert::<false>(&key.clone().into_row(), value.clone())
+            .insert::<false>(&key.into_row(), value)
             .unwrap();
         self.total_count += 1;
     }
@@ -236,24 +232,17 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         let mut kv_pairs = vec![];
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
-        loop {
-            match state_table_iter.next().await {
-                Some(next_res) => {
-                    let row = next_res.unwrap().into_owned();
-                    let mut pk_bytes = vec![];
-                    for pk_indice in &self.state_table.pk_indices {
-                        pk_bytes.append(&mut row.serialize_datum(*pk_indice).unwrap());
-                    }
-                    let pk = deserialize_pk::<TOP_N_MIN>(
-                        &mut pk_bytes.clone(),
-                        &mut self.ordered_row_deserializer,
-                    )?;
-                    kv_pairs.push((pk, row));
-                }
-                None => {
-                    break;
-                }
+        while let Some(next_res) = state_table_iter.next().await {
+            let row = next_res.unwrap().into_owned();
+            let mut pk_bytes = vec![];
+            for pk_indice in &self.state_table.pk_indices {
+                pk_bytes.append(&mut row.serialize_datum(*pk_indice).unwrap());
             }
+            let pk = deserialize_pk::<TOP_N_MIN>(
+                &mut pk_bytes.clone(),
+                &mut self.ordered_row_deserializer,
+            )?;
+            kv_pairs.push((pk, row));
         }
 
         // The reason we can split the `kv_pairs` without caring whether the key to be inserted is
@@ -283,11 +272,6 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         pin_mut!(state_table_iter);
         while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
-            println!("\nfill in cache res = {:?}", row);
-            println!(
-                "\nself.state_table.pk_indices = {:?}",
-                self.state_table.pk_indices
-            );
             let mut datums = vec![];
             for pk_indice in &self.state_table.pk_indices {
                 let a = row.index(*pk_indice).clone();
