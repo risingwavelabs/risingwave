@@ -232,6 +232,10 @@ impl StageGraph {
         self.child_edges.get(stage_id).unwrap()
     }
 
+    pub fn get_child_stages(&self, stage_id: &StageId) -> Option<&HashSet<StageId>> {
+        self.child_edges.get(stage_id)
+    }
+
     /// Returns stage ids in topology order, e.g. child stage always appears before parent.
     pub fn stage_ids_by_topo_order(&self) -> impl Iterator<Item = StageId> {
         let mut stack = Vec::with_capacity(self.stages.len());
@@ -299,7 +303,7 @@ impl StageGraphBuilder {
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
     pub fn split(mut self, batch_node: PlanRef) -> Result<Query> {
-        let root_stage = self.new_stage(batch_node.clone(), None, None);
+        let root_stage = self.new_stage(batch_node.clone(), Distribution::Single.to_prost(1));
         let stage_graph = self.stage_graph_builder.build(root_stage.id);
         Ok(Query {
             stage_graph,
@@ -307,25 +311,12 @@ impl BatchPlanFragmenter {
         })
     }
 
-    fn new_stage(
-        &mut self,
-        root: PlanRef,
-        parent_parallelism: Option<u32>,
-        exchange_info: Option<ExchangeInfo>,
-    ) -> QueryStageRef {
+    fn new_stage(&mut self, root: PlanRef, exchange_info: ExchangeInfo) -> QueryStageRef {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
-        let parallelism = match parent_parallelism {
-            // Non-root node
-            Some(_) => self.worker_node_manager.worker_node_count(),
-            // Root node.
-            None => 1,
-        };
-
-        let exchange_info = match exchange_info {
-            Some(info) => info,
-            // Root stage, the exchange info should always be Single
-            None => Distribution::Single.to_prost(1),
+        let parallelism = match root.distribution() {
+            Distribution::Single => 1,
+            _ => self.worker_node_manager.worker_node_count(),
         };
 
         let mut builder = QueryStageBuilder::new(
@@ -375,12 +366,8 @@ impl BatchPlanFragmenter {
         parent_exec_node: Option<&mut ExecutionPlanNode>,
     ) {
         let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
-        let child_exchange_info = Some(node.distribution().to_prost(builder.parallelism));
-        let child_stage = self.new_stage(
-            node.inputs()[0].clone(),
-            Some(builder.parallelism),
-            child_exchange_info,
-        );
+        let child_exchange_info = node.distribution().to_prost(builder.parallelism);
+        let child_stage = self.new_stage(node.inputs()[0].clone(), child_exchange_info);
         execution_plan_node.stage_id = Some(child_stage.id);
 
         if let Some(parent) = parent_exec_node {
