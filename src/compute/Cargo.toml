@@ -21,19 +21,19 @@ itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 madsim = "=0.2.0-alpha.3"
+maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 paste = "1"
-maplit = "1.0.2"
 prometheus = { version = "0.13" }
 prost = "0.10"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
+risingwave_connector = { path = "../connector" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
-risingwave_connector = { path = "../connector" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
 serde = { version = "1", features = ["derive"] }

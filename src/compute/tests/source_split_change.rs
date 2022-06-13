@@ -34,17 +34,21 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
-    Barrier, Executor, MaterializeExecutor, Mutation, SourceExecutor,
+    Barrier, Executor, MaterializeExecutor, Mutation, SourceExecutor, AddOutput,
 };
+use risingwave_connector::datagen::DatagenSplit;
 use risingwave_stream::task::ActorId;
 use tokio::sync::mpsc::unbounded_channel;
 
 fn mock_stream_source_info() -> StreamSourceInfo {
     let properties: HashMap<String, String> = hashmap! {
-        "kafka.brokers".to_string() => "127.0.0.1:29092".to_string(),
-        "kafka.topic".to_string() => "kafka_1_partition_topic".to_string(),
-        "connector".to_string() => "kafka".to_string(),
-        "kafka.scan.startup.mode".to_string() => "earliest".to_string(),
+        "connector".to_string() => "datagen".to_string(),
+        "fields.v1.min".to_string() => "1".to_string(),
+        "fields.v1.max".to_string() => "1000".to_string(),
+        "fields.v1.seed".to_string() => "12345".to_string(),
+        "fields.v2.min".to_string() => "1".to_string(),
+        "fields.v2.max".to_string() => "1000".to_string(),
+        "fields.v2.seed".to_string() => "12345".to_string(),
     };
 
     let columns = vec![
@@ -74,7 +78,7 @@ fn mock_stream_source_info() -> StreamSourceInfo {
         ProstColumnCatalog {
             column_desc: Some(ProstColumnDesc {
                 column_type: Some(ProstDataType {
-                    type_name: TypeName::Varchar as i32,
+                    type_name: TypeName::Float as i32,
                     ..Default::default()
                 }),
                 column_id: 2,
@@ -123,7 +127,7 @@ async fn test_split_change_mutation() -> Result<()> {
     let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let schema = get_schema(&column_ids, &source_desc);
-    let pk_indices = vec![0 as usize];
+    let pk_indices = vec![0_usize];
     let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
 
     let source_exec = SourceExecutor::new(
@@ -139,12 +143,6 @@ async fn test_split_change_mutation() -> Result<()> {
         1,
         "SourceExecutor".to_string(),
         Arc::new(StreamingMetrics::unused()),
-        vec![SplitImpl::Kafka(KafkaSplit::new(
-            0,
-            Some(0),
-            None,
-            "kafka_3_partition_topic".to_string(),
-        ))],
         u64::MAX,
     )?;
 
@@ -160,8 +158,22 @@ async fn test_split_change_mutation() -> Result<()> {
     .execute();
 
     let curr_epoch = 1919;
+    let init_barrier = Barrier::new_test_barrier(curr_epoch).with_mutation(
+        Mutation::AddOutput(AddOutput {
+            map: HashMap::new(),
+            splits: hashmap! {
+                ActorId::default() => vec![SplitImpl::Datagen(
+                    DatagenSplit {
+                        split_index: 0,
+                        split_num: 3,
+                        start_offset: None,
+                    }
+                )],
+            },
+        })
+    );
     barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch))
+        .send(init_barrier)
         .unwrap();
 
     println!("{:?}", materialize.next().await); // barrier
@@ -169,12 +181,21 @@ async fn test_split_change_mutation() -> Result<()> {
 
     let change_split_mutation = Barrier::new_test_barrier(curr_epoch + 1).with_mutation(Mutation::SourceChangeSplit(
         hashmap!{
-            ActorId::default() => Some(vec![SplitImpl::Kafka(KafkaSplit::new(
-                0,
-                Some(0),
-                None,
-                "kafka_3_partition_topic".to_string(),
-            )), SplitImpl::Kafka(KafkaSplit::new(1, Some(0), None, "kafka_3_partition_topic".to_string()))])
+            ActorId::default() => Some(vec![
+                SplitImpl::Datagen(
+                    DatagenSplit {
+                        split_index: 0,
+                        split_num: 3,
+                        start_offset: None,
+                    }
+                ), SplitImpl::Datagen(
+                    DatagenSplit {
+                        split_index: 1,
+                        split_num: 3,
+                        start_offset: None,
+                    }
+                )
+            ])
         }
     ));
     barrier_tx.send(change_split_mutation).unwrap();
