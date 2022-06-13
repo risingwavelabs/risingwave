@@ -14,13 +14,14 @@
 
 use std::backtrace::Backtrace;
 
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::array::ArrayError;
+use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
+use risingwave_expr::ExprError;
 use risingwave_storage::error::StorageError;
-use thiserror::Error;
 
 use super::Barrier;
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 enum StreamExecutorErrorInner {
     #[error("Storage error: {0}")]
     Storage(
@@ -32,24 +33,18 @@ enum StreamExecutorErrorInner {
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
 
-    #[error("Executor v1 error: {0}")]
-    ExecutorV1(RwError),
-
     #[error("Chunk operation error: {0}")]
-    EvalError(RwError),
+    EvalError(BoxedError),
 
-    #[error("Aggregate state error: {0}")]
-    AggStateError(RwError),
+    // TODO: remove this after state table is fully used
+    #[error("Serialize/deserialize error: {0}")]
+    SerdeError(BoxedError),
 
-    #[error("Input error: {0}")]
-    InputError(RwError),
-
-    #[error("TopN state error: {0}")]
-    TopNStateError(RwError),
-
+    // TODO: remove this
     #[error("Hash join error: {0}")]
     HashJoinError(RwError),
 
+    // TODO: remove this
     #[error("Source error: {0}")]
     SourceError(RwError),
 
@@ -58,6 +53,12 @@ enum StreamExecutorErrorInner {
 
     #[error("Failed to align barrier: expected {0:?} but got {1:?}")]
     AlignBarrier(Box<Barrier>, Box<Barrier>),
+
+    #[error("Feature is not yet implemented: {0}, {1}")]
+    NotImplemented(String, TrackingIssue),
+
+    #[error(transparent)]
+    Internal(anyhow::Error),
 }
 
 impl StreamExecutorError {
@@ -65,24 +66,12 @@ impl StreamExecutorError {
         StreamExecutorErrorInner::Storage(error.into()).into()
     }
 
-    pub fn executor_v1(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::ExecutorV1(error.into()).into()
-    }
-
-    pub fn eval_error(error: impl Into<RwError>) -> Self {
+    pub fn eval_error(error: impl Error) -> Self {
         StreamExecutorErrorInner::EvalError(error.into()).into()
     }
 
-    pub fn agg_state_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::AggStateError(error.into()).into()
-    }
-
-    pub fn input_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::InputError(error.into()).into()
-    }
-
-    pub fn top_n_state_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::TopNStateError(error.into()).into()
+    pub fn serde_error(error: impl Error) -> Self {
+        StreamExecutorErrorInner::SerdeError(error.into()).into()
     }
 
     pub fn hash_join_error(error: impl Into<RwError>) -> Self {
@@ -104,9 +93,13 @@ impl StreamExecutorError {
     pub fn invalid_argument(error: impl Into<String>) -> Self {
         StreamExecutorErrorInner::InvalidArgument(error.into()).into()
     }
+
+    pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
+        StreamExecutorErrorInner::NotImplemented(error.into(), issue.into()).into()
+    }
 }
 
-#[derive(Error)]
+#[derive(thiserror::Error)]
 #[error("{inner}")]
 pub struct StreamExecutorError {
     #[from]
@@ -133,9 +126,36 @@ impl std::fmt::Debug for StreamExecutorError {
     }
 }
 
+/// Storage error.
 impl From<StorageError> for StreamExecutorError {
     fn from(s: StorageError) -> Self {
         Self::storage(s)
+    }
+}
+
+// Chunk operation error.
+impl From<ArrayError> for StreamExecutorError {
+    fn from(e: ArrayError) -> Self {
+        Self::eval_error(e)
+    }
+}
+impl From<ExprError> for StreamExecutorError {
+    fn from(e: ExprError) -> Self {
+        Self::eval_error(e)
+    }
+}
+
+/// Internal error.
+impl From<anyhow::Error> for StreamExecutorError {
+    fn from(a: anyhow::Error) -> Self {
+        StreamExecutorErrorInner::Internal(a).into()
+    }
+}
+
+/// Serialize/deserialize error.
+impl From<memcomparable::Error> for StreamExecutorError {
+    fn from(m: memcomparable::Error) -> Self {
+        Self::serde_error(m)
     }
 }
 
@@ -150,10 +170,12 @@ pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::bail;
+
     use super::*;
 
     fn func_return_error() -> StreamExecutorResult<()> {
-        Err(ErrorCode::InternalError("test_error".into())).map_err(StreamExecutorError::executor_v1)
+        bail!("test_error")
     }
 
     #[test]

@@ -140,8 +140,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     // FIXME(ZBW): use a better error type
                     self.state_table
                         .commit_with_value_meta(b.epoch.prev)
-                        .await
-                        .map_err(StreamExecutorError::executor_v1)?;
+                        .await?;
                     Message::Barrier(b)
                 }
             }

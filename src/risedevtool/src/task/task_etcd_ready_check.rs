@@ -20,7 +20,7 @@ use crate::{EtcdConfig, ExecuteContext, Task};
 #[derive(Deserialize)]
 struct HealthResponse {
     health: String,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     reason: String,
 }
 
