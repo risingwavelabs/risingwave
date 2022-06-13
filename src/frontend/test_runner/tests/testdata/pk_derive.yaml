@@ -60,3 +60,44 @@
           StreamHashAgg { group_keys: [$0], aggs: [count, min($1)] }
             StreamExchange { dist: HashShard([0]) }
               StreamTableScan { table: t, columns: [id, v, _row_id], pk_indices: [2] }
+- sql: |
+    create table t (v1 varchar, v2 varchar, v3 varchar);
+    select
+        *
+    from
+        t
+    group by
+        v1,
+        v2,
+        v3;
+  optimized_logical_plan: |
+    LogicalAgg { group_keys: [0, 1, 2], agg_calls: [] }
+      LogicalScan { table: t, columns: [v1, v2, v3] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, v2, v3, agg#0(hidden)], pk_columns: [v1, v2, v3] }
+      StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count] }
+        StreamExchange { dist: HashShard([0, 1, 2]) }
+          StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
+- sql: |
+    create table t (v1 varchar, v2 varchar, v3 varchar);
+    create materialized view mv as
+    select
+        *
+    from
+        t
+    group by
+        v1,
+        v2,
+        v3;
+    select
+        v1
+    from
+        mv
+    where
+        v3 = 'world' or v3 = 'hello';
+  optimized_logical_plan: |
+    LogicalScan { table: mv, output_columns: [v1], required_columns: [$0:v1, $2:v3], predicate: (($2 = 'world':Varchar) OR ($2 = 'hello':Varchar)) }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, v2(hidden), v3(hidden)], pk_columns: [v1, v2, v3] }
+      StreamFilter { predicate: (($2 = 'world':Varchar) OR ($2 = 'hello':Varchar)) }
+        StreamTableScan { table: mv, columns: [v1, v2, v3], pk_indices: [0, 1, 2] }
