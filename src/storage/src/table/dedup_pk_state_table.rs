@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::ops::RangeBounds;
+
+use itertools::Itertools;
 
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
@@ -30,7 +33,13 @@ use crate::{Keyspace, StateStore};
 pub struct DedupPkStateTable<S: StateStore> {
     inner: StateTable<S>,
     pk_decoder: OrderedRowDeserializer,
-    dedupped_datum_indices: Vec<usize>,
+
+    /// indices of datums already in pk
+    dedupped_datum_indices: HashSet<usize>,
+
+    /// maps pk datums by their index to their row idx.
+    /// Not all pk datums have corresponding positions
+    /// in row, hence the optional.
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
@@ -42,15 +51,40 @@ impl<S: StateStore> DedupPkStateTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        // create a new state table, but only with partial decs
+        // -------- init decoder
         let data_types = pk_indices
             .iter()
             .map(|i| column_descs[*i].data_type.clone())
             .collect();
-        let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
-        let dedupped_datum_indices = todo!();
-        let pk_to_row_mapping = todo!();
-        let partial_column_descs = column_descs; // TODO: update this
+        let pk_decoder = OrderedRowDeserializer::new(data_types, order_types.clone());
+
+        // -------- construct dedup pk decoding info
+        let pk_to_row_mapping = pk_indices
+            .iter()
+            .map(|&i| {
+                let column_desc = &column_descs[i];
+                if column_desc.data_type.mem_cmp_eq_value_enc() {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        let dedupped_datum_indices = pk_to_row_mapping
+            .iter()
+            .copied()
+            .flatten()
+            .collect::<HashSet<_>>();
+
+        // -------- init inner StateTable
+        let partial_column_descs = column_descs
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !dedupped_datum_indices.contains(i))
+            .map(|(_, d)| d.clone())
+            .collect();
+
         let inner = StateTable::new(
             keyspace,
             partial_column_descs,
@@ -58,6 +92,7 @@ impl<S: StateStore> DedupPkStateTable<S> {
             dist_key_indices,
             pk_indices,
         );
+
         Self {
             inner,
             pk_decoder,
