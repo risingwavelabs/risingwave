@@ -299,10 +299,10 @@ where
     v3 = 'world';
 
 statement ok
-drop materialized view mv;
+drop materialized view mv2;
 
 statement ok
-drop materialized view mv2;
+drop materialized view mv;
 
 statement ok
 drop table t;
