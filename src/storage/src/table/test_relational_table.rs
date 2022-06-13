@@ -1417,6 +1417,69 @@ async fn test_multi_cell_based_table_iter() {
     assert!(res_2_2.is_none());
 }
 
+#[tokio::test]
+async fn test_dedup_pk_state_write_with_cell_based_read() {
+    // ---------- init state store
+    let state_store = MemoryStateStore::new();
+
+    // ---------- declare table layout
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let actual_column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+
+    // ---------- declare pk
+    let order_types = vec![OrderType::Descending];
+    let pk_index = vec![1_usize];
+    let pk_ordered_descs = vec![
+        OrderedColumnDesc {
+            column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+            order: OrderType::Descending,
+        },
+    ];
+
+    // ---------- declare partial rows
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
+
+    // ---------- Init state table interface
+    let mut state = StateTable::new(
+        keyspace.clone(),
+        column_descs.clone(),
+        order_types.clone(),
+        None,
+        pk_index,
+    );
+
+    // ---------- Init table for reads
+    state
+        .insert(
+            &Row(vec![Some(11_i32.into())]),
+            Row(vec![Some(1_i32.into()), Some(111_i32.into())]),
+        )
+        .unwrap();
+
+    state.commit(0).await.unwrap();
+
+    // ---------- Init table for reads
+    let table = CellBasedTable::new_for_test(keyspace.clone(), actual_column_descs, order_types);
+
+    // ---------- Init reader
+    let epoch: u64 = 0; // TODO: Is this reliable epoch? How does state table determine epoch?
+    let mut iter = table.iter_with_pk(epoch, &pk_ordered_descs).await.unwrap();
+    // ---------- Read + Deserialize from storage
+    let expected = Row(vec![Some(1_i32.into()), Some(11_i32.into()), Some(111_i32.into())]);
+    let actual = iter.next().await.unwrap();
+    assert!(actual.is_some());
+    assert_eq!(actual.unwrap(), expected);
+}
+
 async fn test_dedup_cell_based_table_iter_with(
     row_ordered_descs: Vec<OrderedColumnDesc>,
     pk_indices: Vec<usize>,
