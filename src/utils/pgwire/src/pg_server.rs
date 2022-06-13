@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
 
@@ -37,7 +38,10 @@ pub trait SessionManager: Send + Sync + 'static {
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
     async fn run_statement(self: Arc<Self>, sql: &str) -> Result<PgResponse, BoxedError>;
-
+    async fn infer_return_type(
+        self: Arc<Self>,
+        sql: &str,
+    ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
     fn user_authenticator(&self) -> &UserAuthenticator;
 }
 
@@ -134,6 +138,7 @@ mod tests {
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
+    use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionManager, UserAuthenticator};
     use crate::types::Row;
@@ -186,6 +191,17 @@ mod tests {
 
         fn user_authenticator(&self) -> &UserAuthenticator {
             &UserAuthenticator::None
+        }
+
+        async fn infer_return_type(
+            self: Arc<Self>,
+            sql: &str,
+        ) -> Result<Vec<PgFieldDescriptor>, super::BoxedError> {
+            let count = sql.split(&[' ', ',', ';']).skip(1).count();
+            Ok(vec![
+                PgFieldDescriptor::new("".to_string(), TypeOid::Varchar,);
+                count
+            ])
         }
     }
 
