@@ -13,20 +13,21 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
-use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
+use std::{fmt, iter};
 
+use auto_enums::auto_enum;
 use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
+use super::ArrayResult;
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{Row, RowRef};
 use crate::array::ArrayBuilderImpl;
-use crate::buffer::Bitmap;
-use crate::error::{Result, RwError};
+use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
-use crate::types::{DataType, NaiveDateTimeWrapper};
+use crate::types::{DataType, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
@@ -56,6 +57,40 @@ impl From<usize> for Vis {
     }
 }
 
+impl Vis {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Vis::Bitmap(b) => b.is_empty(),
+            Vis::Compact(c) => *c == 0,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Vis::Bitmap(b) => b.len(),
+            Vis::Compact(c) => *c,
+        }
+    }
+
+    pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
+        match self {
+            Vis::Bitmap(b) => b.is_set(idx),
+            Vis::Compact(c) => {
+                ensure!(idx <= *c);
+                Ok(true)
+            }
+        }
+    }
+
+    #[auto_enum(Iterator)]
+    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
+        match self {
+            Vis::Bitmap(b) => b.iter(),
+            Vis::Compact(c) => iter::repeat(true).take(*c),
+        }
+    }
+}
+
 impl DataChunk {
     /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
     /// or a simple cardinality number.
@@ -81,11 +116,11 @@ impl DataChunk {
     }
 
     /// Build a `DataChunk` with rows.
-    pub fn from_rows(rows: &[Row], data_types: &[DataType]) -> Result<Self> {
+    pub fn from_rows(rows: &[Row], data_types: &[DataType]) -> ArrayResult<Self> {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<ArrayResult<Vec<_>>>()?;
 
         for row in rows {
             for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
@@ -96,7 +131,7 @@ impl DataChunk {
         let new_arrays = array_builders
             .into_iter()
             .map(|builder| builder.finish())
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<ArrayResult<Vec<_>>>()?;
 
         let new_columns = new_arrays
             .into_iter()
@@ -197,7 +232,7 @@ impl DataChunk {
 
     /// `compact` will convert the chunk to compact format.
     /// Compact format means that `visibility == None`.
-    pub fn compact(self) -> Result<Self> {
+    pub fn compact(self) -> ArrayResult<Self> {
         match &self.vis2 {
             Vis::Compact(_) => Ok(self),
             Vis::Bitmap(visibility) => {
@@ -213,13 +248,13 @@ impl DataChunk {
                             .compact(visibility, cardinality)
                             .map(|array| Column::new(Arc::new(array)))
                     })
-                    .collect::<Result<Vec<_>>>()?;
+                    .collect::<ArrayResult<Vec<_>>>()?;
                 Ok(Self::new(columns, cardinality))
             }
         }
     }
 
-    pub fn from_protobuf(proto: &ProstDataChunk) -> Result<Self> {
+    pub fn from_protobuf(proto: &ProstDataChunk) -> ArrayResult<Self> {
         let mut columns = vec![];
         for any_col in proto.get_columns() {
             let cardinality = proto.get_cardinality() as usize;
@@ -236,7 +271,7 @@ impl DataChunk {
     ///
     /// Currently, `rechunk` would ignore visibility map. May or may not support it later depending
     /// on the demand
-    pub fn rechunk(chunks: &[DataChunk], each_size_limit: usize) -> Result<Vec<DataChunk>> {
+    pub fn rechunk(chunks: &[DataChunk], each_size_limit: usize) -> ArrayResult<Vec<DataChunk>> {
         assert!(each_size_limit > 0);
         // Corner case: one of the `chunks` may have 0 length
         // remove the chunks with zero physical length here,
@@ -299,10 +334,7 @@ impl DataChunk {
             if new_chunk_require == 0 {
                 let new_columns: Vec<Column> = array_builders
                     .drain(..)
-                    .map(|builder| {
-                        let array = builder.finish()?;
-                        Ok::<_, RwError>(Column::new(Arc::new(array)))
-                    })
+                    .map(|builder| builder.finish().map(Into::into))
                     .try_collect()?;
 
                 array_builders = new_columns
@@ -325,7 +357,7 @@ impl DataChunk {
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
-    ) -> Result<Vec<HashCode>> {
+    ) -> ArrayResult<Vec<HashCode>> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
@@ -343,7 +375,7 @@ impl DataChunk {
     /// * `pos` - Index of look up tuple
     /// * `RowRef` - Reference of data tuple
     /// * bool - whether this tuple is visible
-    pub fn row_at(&self, pos: usize) -> Result<(RowRef<'_>, bool)> {
+    pub fn row_at(&self, pos: usize) -> ArrayResult<(RowRef<'_>, bool)> {
         let row = self.row_at_unchecked_vis(pos);
         let vis = match &self.vis2 {
             Vis::Bitmap(bitmap) => bitmap.is_set(pos)?,
@@ -409,10 +441,6 @@ impl fmt::Debug for DataChunk {
 
 /// Test utilities for [`DataChunk`].
 pub trait DataChunkTestExt {
-    fn from_pretty(s: &str) -> Self;
-}
-
-impl DataChunkTestExt for DataChunk {
     /// Parse a chunk from string.
     ///
     /// # Format
@@ -441,6 +469,18 @@ impl DataChunkTestExt for DataChunk {
     /// //     T: str
     /// //    TS: Timestamp
     /// ```
+    fn from_pretty(s: &str) -> Self;
+
+    /// Insert one invisible hole after every record.
+    fn with_invisible_holes(self) -> Self
+    where
+        Self: Sized;
+
+    /// Panic if the chunk is invalid.
+    fn assert_valid(&self);
+}
+
+impl DataChunkTestExt for DataChunk {
     fn from_pretty(s: &str) -> Self {
         use crate::types::ScalarImpl;
 
@@ -460,7 +500,7 @@ impl DataChunkTestExt for DataChunk {
                 _ => todo!("unsupported type: {c:?}"),
             })
             .map(|ty| ty.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()
+            .collect::<ArrayResult<Vec<_>>>()
             .unwrap();
         let mut visibility = vec![];
         for mut line in lines {
@@ -527,7 +567,47 @@ impl DataChunkTestExt for DataChunk {
         } else {
             Vis::Bitmap(Bitmap::try_from(visibility).unwrap())
         };
-        DataChunk::new(columns, vis)
+        let chunk = DataChunk::new(columns, vis);
+        chunk.assert_valid();
+        chunk
+    }
+
+    fn with_invisible_holes(self) -> Self
+    where
+        Self: Sized,
+    {
+        let (cols, vis) = self.into_parts();
+        let n = vis.len();
+        let mut new_vis = BitmapBuilder::with_capacity(n * 2);
+        for b in vis.iter() {
+            new_vis.append(b);
+            new_vis.append(false);
+        }
+        let new_cols = cols
+            .into_iter()
+            .map(|col| {
+                let arr = col.array_ref();
+                let mut builder = arr.create_builder(n * 2).unwrap();
+                for v in arr.iter() {
+                    builder.append_datum(&v.to_owned_datum()).unwrap();
+                    builder.append_null().unwrap();
+                }
+
+                Column::new(builder.finish().unwrap().into())
+            })
+            .collect();
+        let chunk = DataChunk::new(new_cols, Vis::Bitmap(new_vis.finish()));
+        chunk.assert_valid();
+        chunk
+    }
+
+    fn assert_valid(&self) {
+        let cols = self.columns();
+        let vis = &self.vis2;
+        let n = vis.len();
+        for col in cols.iter() {
+            assert_eq!(col.array().len(), n);
+        }
     }
 }
 

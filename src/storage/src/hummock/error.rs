@@ -31,7 +31,7 @@ enum HummockErrorInner {
     EncodeError(String),
     #[error("Decode error {0}.")]
     DecodeError(String),
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     #[error("Mock error {0}.")]
     MockError(String),
     #[error("ObjectStore failed with IO error {0}.")]

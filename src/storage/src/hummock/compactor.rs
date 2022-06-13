@@ -35,11 +35,11 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::group_builder::KeyValueGroupingImpl::VirtualNode;
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
 use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
 use crate::hummock::compaction_executor::CompactionExecutor;
+use crate::hummock::group_builder::KeyValueGrouping;
 use crate::hummock::iterator::ReadOptions;
 use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -98,6 +98,7 @@ trait CompactionFilter {
     }
 }
 
+#[derive(Default, Clone)]
 pub struct DummyCompactionFilter;
 impl CompactionFilter for DummyCompactionFilter {}
 
@@ -107,6 +108,7 @@ pub struct StateCleanUpCompactionFilter {
 }
 
 impl StateCleanUpCompactionFilter {
+    #[expect(unused)]
     fn new(table_id_set: HashSet<u32>) -> Self {
         StateCleanUpCompactionFilter {
             existing_table_ids: table_id_set,
@@ -381,8 +383,11 @@ impl Compactor {
             );
         }
 
-        let compaction_filter =
-            StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
+        // TODO: Temporarily disable StateCleanUpCompactionFilter, because meta is not providing the
+        // correct `existing_table_ids` in 9a34de40.
+        let compaction_filter = DummyCompactionFilter::default();
+        // let compaction_filter =
+        // StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
@@ -508,11 +513,11 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let builder = SSTableBuilder::new(self.context.options.as_ref().into());
+                let builder = SSTableBuilder::new(table_id, self.context.options.as_ref().into());
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
-                Ok((table_id, builder))
+                Ok(builder)
             },
-            VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
+            VirtualNodeGrouping::new(vnode2unit),
             self.context.sstable_store.clone(),
         );
 
@@ -574,11 +579,12 @@ impl Compactor {
             vnode_bitmaps,
             upload_join_handle,
             data_len,
+            unit_id,
         } in sealed_builders
         {
             let sst = Sstable { id: table_id, meta };
             let len = data_len;
-            ssts.push((sst.clone(), vnode_bitmaps));
+            ssts.push((sst.clone(), unit_id, vnode_bitmaps));
             upload_join_handles.push(upload_join_handle);
 >>>>>>> main
 
@@ -811,8 +817,8 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    async fn compact_and_build_sst<B, F>(
-        sst_builder: &mut GroupedSstableBuilder<B>,
+    async fn compact_and_build_sst<B, G, F>(
+        sst_builder: &mut GroupedSstableBuilder<B, G>,
         kr: KeyRange,
         mut iter: BoxedForwardHummockIterator,
         has_user_key_overlap: bool,
@@ -821,7 +827,8 @@ impl Compactor {
     ) -> HummockResult<()>
     where
         B: Clone + Fn() -> F,
-        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+        G: KeyValueGrouping,
+        F: Future<Output = HummockResult<SSTableBuilder>>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;

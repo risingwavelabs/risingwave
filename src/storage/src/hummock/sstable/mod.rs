@@ -31,6 +31,7 @@ pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
 use risingwave_hummock_sdk::HummockSSTableId;
+#[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 pub mod group_builder;
@@ -85,6 +86,7 @@ impl Sstable {
         8 /* id */ + self.meta.encoded_size()
     }
 
+    #[cfg(test)]
     pub fn get_sstable_info(&self) -> SstableInfo {
         SstableInfo {
             id: self.id,
@@ -95,7 +97,7 @@ impl Sstable {
             }),
             file_size: self.meta.estimated_size as u64,
             vnode_bitmaps: vec![],
-            unit_id: u64::MAX,
+            unit_id: 0,
         }
     }
 }

@@ -33,6 +33,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
 #![feature(drain_filter)]
+#![feature(lint_reasons)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 mod barrier;

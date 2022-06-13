@@ -841,7 +841,6 @@ mod tests {
                     cluster_manager.clone(),
                     meta_metrics.clone(),
                     compaction_group_manager.clone(),
-                    fragment_manager.clone(),
                 )
                 .await?,
             );

@@ -120,13 +120,8 @@ impl TierCompactionPicker {
                 }
             }
 
-<<<<<<< wallace/fix-compact
-            if select_level_inputs.len() < self.config.level0_tier_compact_file_number {
-                idx += 1;
-=======
             if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize {
-                idx = next_offset;
->>>>>>> main
+                idx += 1;
                 continue;
             }
 
@@ -832,5 +827,47 @@ pub mod tests {
         assert_eq!(ret.select_level.table_infos[1].id, 2);
         assert_eq!(ret.target_level.table_infos[0].id, 4);
         assert_eq!(ret.target_level.table_infos[1].id, 5);
+    }
+
+    #[test]
+    fn test_compact_with_write_amplification_limit_2() {
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .min_compaction_bytes(32)
+                .build(),
+        );
+        let picker =
+            LevelCompactionPicker::new(0, 1, config, Arc::new(RangeOverlapStrategy::default()));
+
+        let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 10, 16, 2),
+                    generate_table(2, 1, 48, 64, 2),
+                    generate_table(3, 1, 320, 330, 2),
+                ],
+                total_file_size: 0,
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(4, 1, 10, 50, 2),
+                    generate_table(5, 1, 64, 256, 2),
+                    generate_table(6, 1, 320, 900, 2),
+                ],
+                total_file_size: 0,
+            },
+        ];
+
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+        assert_eq!(ret.select_level.table_infos.len(), 3);
+        assert_eq!(ret.select_level.table_infos.len(), 3);
     }
 }

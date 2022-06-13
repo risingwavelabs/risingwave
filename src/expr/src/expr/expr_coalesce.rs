@@ -40,10 +40,7 @@ impl Expression for CoalesceExpression {
             .iter()
             .map(|c| c.eval(input))
             .collect::<Result<Vec<_>>>()?;
-        let mut builder = self
-            .return_type
-            .create_array_builder(input.cardinality())
-            .map_err(ExprError::Array)?;
+        let mut builder = self.return_type.create_array_builder(input.cardinality())?;
 
         let len = children_array[0].len();
         for i in 0..len {
@@ -55,9 +52,9 @@ impl Expression for CoalesceExpression {
                     break;
                 }
             }
-            builder.append_datum(&data).map_err(ExprError::Array)?;
+            builder.append_datum(&data)?;
         }
-        Ok(Arc::new(builder.finish().map_err(ExprError::Array)?))
+        Ok(Arc::new(builder.finish()?))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

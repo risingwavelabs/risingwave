@@ -20,8 +20,6 @@ use log::error;
 use risingwave_common::error::{internal_error, Result as RwResult};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
-#[allow(unused_imports)]
-use serde::{Deserialize, Serialize};
 
 use crate::{SplitImpl, SplitMetaData};
 
@@ -123,6 +121,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_storage::memory::MemoryStateStore;
+    use serde::{Deserialize, Serialize};
 
     use super::*;
 

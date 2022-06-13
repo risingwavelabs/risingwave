@@ -29,7 +29,6 @@ use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
-use crate::stream::FragmentManager;
 
 pub async fn add_test_tables<S>(
     hummock_manager: &HummockManager<S>,
@@ -111,6 +110,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
                     bitmap: vec![],
                 },
             ],
+            unit_id: 0,
         });
     }
     sst_info
@@ -158,16 +158,8 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
-<<<<<<< wallace/fix-compact
-    let config = CompactionConfig {
-        level0_tier_compact_file_number: 1,
-        min_compaction_bytes: 1,
-        max_bytes_for_level_base: 1,
-        ..Default::default()
-    };
-=======
+
     let config = CompactionConfigBuilder::new()
-        .level0_tigger_file_numer(2)
         .level0_tier_compact_file_number(1)
         .min_compaction_bytes(1)
         .max_bytes_for_level_base(1)
@@ -182,14 +174,12 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
->>>>>>> main
     let hummock_manager = Arc::new(
         HummockManager::new(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
             compaction_group_manager,
-            fragment_manager.clone(),
         )
         .await
         .unwrap(),

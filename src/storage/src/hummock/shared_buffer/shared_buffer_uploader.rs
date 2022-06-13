@@ -86,7 +86,6 @@ pub struct SharedBufferUploader {
 }
 
 impl SharedBufferUploader {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
@@ -213,7 +212,7 @@ impl SharedBufferUploader {
                 }),
                 file_size: sst.meta.estimated_size as u64,
                 vnode_bitmaps,
-                unit_id: DEFAULT_KEY_VALUE_GROUP_ID,
+                unit_id: u64::MAX,
             })
             .collect();
 

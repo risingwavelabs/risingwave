@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter;
+
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
 use crate::Result;
 
 #[inline(always)]
-pub fn trim(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer.write_ref(s.trim()).map_err(Into::into)
+pub fn repeat(s: &str, count: i32, writer: BytesWriter) -> Result<BytesGuard> {
+    let repeated = iter::repeat(s)
+        .take(count.try_into().unwrap_or(0))
+        .flat_map(|s| s.chars());
+    writer.write_from_char_iter(repeated).map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -28,16 +33,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_trim() -> Result<()> {
-        let cases = [
-            (" Hello\tworld\t", "Hello\tworld"),
-            (" 空I ❤️ databases空 ", "空I ❤️ databases空"),
+    fn test_repeat() -> Result<()> {
+        let cases = vec![
+            ("hello, world", 1, "hello, world"),
+            ("114514", 3, "114514114514114514"),
+            ("ssss", 0, ""),
+            ("ssss", -114514, ""),
         ];
 
-        for (s, expected) in cases {
+        for (s, count, expected) in cases {
             let builder = Utf8ArrayBuilder::new(1).unwrap();
             let writer = builder.writer();
-            let guard = trim(s, writer)?;
+            let guard = repeat(s, count, writer).unwrap();
             let array = guard.into_inner().finish().unwrap();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);

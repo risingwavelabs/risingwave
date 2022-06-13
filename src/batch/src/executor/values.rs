@@ -93,7 +93,7 @@ impl ValuesExecutor {
                 let columns = array_builders
                     .into_iter()
                     .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                    .collect::<Result<Vec<Column>>>()?;
+                    .try_collect()?;
 
                 let chunk = DataChunk::new(columns, chunk_size);
 

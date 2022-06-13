@@ -18,7 +18,6 @@ use crate::optimizer::rule::BoxedRule;
 use crate::optimizer::PlanRef;
 
 /// Traverse order of [`HeuristicOptimizer`]
-#[allow(dead_code)]
 pub enum ApplyOrder {
     TopDown,
     BottomUp,
