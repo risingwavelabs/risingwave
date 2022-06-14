@@ -36,7 +36,6 @@ use super::*;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-///
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct IntervalUnit {
     months: i32,
@@ -240,23 +239,9 @@ impl PartialOrd for IntervalUnit {
         if self.eq(other) {
             Some(Ordering::Equal)
         } else {
-            let day1 = self.months * 30 + self.days;
-            let day2 = other.months * 30 + other.days;
-            match day1.cmp(&day2){
-                Ordering::Less => {
-                    Some(Ordering::Less)
-                }
-                Ordering::Equal => {
-                    if self.ms > other.ms {
-                        Some(Ordering::Greater)
-                    } else {
-                        Some(Ordering::Less)
-                    }
-                }
-                Ordering::Greater => {
-                    Some(Ordering::Greater)
-                }
-            }
+            let diff = *self - *other;
+            let days = (diff.months * 30 + diff.days) as i64;
+            Some((days * 86400000 + diff.ms).cmp(&0))
         }
     }
 }
@@ -271,11 +256,9 @@ impl Hash for IntervalUnit {
 
 impl PartialEq for IntervalUnit {
     fn eq(&self, other: &Self) -> bool {
-        if self.months * 30 + self.days != other.months * 30 + other.days {
-            false
-        } else{
-            self.ms == other.ms
-        }
+        let diff = *self - *other;
+        let days = (diff.months * 30 + diff.days) as i64;
+        days * 86400000 + diff.ms == 0
     }
 }
 
