@@ -144,7 +144,7 @@ impl Query {
         &self.query_id
     }
 
-    pub fn stage_has_table_scan(&self) -> Vec<StageId> {
+    pub fn stages_with_table_scan(&self) -> Vec<StageId> {
         self.stage_graph
             .stages
             .iter()
@@ -360,7 +360,7 @@ impl BatchPlanFragmenter {
                     builder.root = Some(Arc::new(execution_plan_node));
                 }
                 // Check out the comments for `has_table_scan` in `QueryStage`.
-                builder.has_table_scan = node.node_type() == PlanNodeType::BatchSeqScan;
+                builder.has_table_scan |= node.node_type() == PlanNodeType::BatchSeqScan;
             }
         }
     }
@@ -402,8 +402,8 @@ mod tests {
 
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, PlanNodeType,
-        ToBatch,
+        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
+        LogicalScan, PlanNodeType, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
@@ -419,8 +419,9 @@ mod tests {
         //
         //    HashJoin
         //     /    \
-        //   Scan  Scan
-        //
+        //   Scan  Filter
+        //          |
+        //         Scan
         let ctx = OptimizerContext::mock().await;
 
         let batch_plan_node: PlanRef = LogicalScan::create(
@@ -453,6 +454,13 @@ mod tests {
         )
         .to_batch()
         .unwrap();
+        let batch_filter = BatchFilter::new(LogicalFilter::new(
+            batch_plan_node.clone(),
+            Condition {
+                conjunctions: vec![],
+            },
+        ))
+        .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
@@ -460,7 +468,7 @@ mod tests {
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
-            batch_plan_node.clone(),
+            batch_filter,
             Order::default(),
             Distribution::HashShard(vec![0, 1]),
         )
@@ -582,6 +590,7 @@ mod tests {
         assert_eq!(root_exchange.root.stage_id, Some(1));
         assert!(matches!(root_exchange.root.node, NodeBody::Exchange(_)));
         assert_eq!(root_exchange.parallelism, 1);
+        assert!(!root_exchange.has_table_scan);
 
         let join_node = query.stage_graph.stages.get(&1).unwrap();
         assert_eq!(join_node.root.node_type(), PlanNodeType::BatchHashJoin);
@@ -604,15 +613,18 @@ mod tests {
         ));
         assert_eq!(join_node.root.children[1].stage_id, Some(3));
         assert_eq!(0, join_node.root.children[1].children.len());
+        assert!(!join_node.has_table_scan);
 
         let scan_node1 = query.stage_graph.stages.get(&2).unwrap();
         assert_eq!(scan_node1.root.node_type(), PlanNodeType::BatchSeqScan);
         assert_eq!(scan_node1.root.stage_id, None);
         assert_eq!(0, scan_node1.root.children.len());
+        assert!(scan_node1.has_table_scan);
         let scan_node2 = query.stage_graph.stages.get(&3).unwrap();
-        assert_eq!(scan_node2.root.node_type(), PlanNodeType::BatchSeqScan);
+        assert_eq!(scan_node2.root.node_type(), PlanNodeType::BatchFilter);
         assert_eq!(scan_node2.root.stage_id, None);
-        assert_eq!(0, scan_node2.root.children.len());
+        assert_eq!(1, scan_node2.root.children.len());
+        assert!(scan_node2.has_table_scan);
     }
 
     fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {
