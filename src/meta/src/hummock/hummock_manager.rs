@@ -817,8 +817,11 @@ where
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
-        sstables: Vec<SstableInfo>,
+        sstables: Vec<(CompactionGroupId, SstableInfo)>,
     ) -> Result<()> {
+        // TODO #2065: add SSTs to corresponding compaction groups' levels.
+        let sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
+
         let mut versioning_guard = self.versioning.write().await;
         let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();

@@ -181,7 +181,7 @@ async fn test_hummock_compaction_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     hummock_manager
-        .commit_epoch(epoch, original_tables.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
         .await
         .unwrap();
 
@@ -295,7 +295,7 @@ async fn test_hummock_table() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
-        .commit_epoch(epoch, original_tables.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
         .await
         .unwrap();
 
@@ -349,7 +349,7 @@ async fn test_hummock_transaction() {
 
         // Commit epoch1
         hummock_manager
-            .commit_epoch(epoch1, tables_in_epoch1.clone())
+            .commit_epoch(epoch1, to_grouped_sstable_info(&tables_in_epoch1))
             .await
             .unwrap();
         committed_tables.extend(tables_in_epoch1.clone());
@@ -396,7 +396,7 @@ async fn test_hummock_transaction() {
 
         // Commit epoch2
         hummock_manager
-            .commit_epoch(epoch2, tables_in_epoch2.clone())
+            .commit_epoch(epoch2, to_grouped_sstable_info(&tables_in_epoch2))
             .await
             .unwrap();
         committed_tables.extend(tables_in_epoch2);
@@ -559,7 +559,7 @@ async fn test_hummock_manager_basic() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
-        .commit_epoch(epoch, original_tables.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
         .await
         .unwrap();
 
@@ -660,7 +660,7 @@ async fn test_retryable_pin_version() {
         );
         // Increase the version
         hummock_manager
-            .commit_epoch(epoch, test_tables.clone())
+            .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
             .await
             .unwrap();
         epoch += 1;
@@ -693,7 +693,7 @@ async fn test_retryable_pin_version() {
         );
         // Increase the version
         hummock_manager
-            .commit_epoch(epoch, test_tables.clone())
+            .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
             .await
             .unwrap();
         epoch += 1;
@@ -731,7 +731,7 @@ async fn test_pin_snapshot_response_lost() {
     );
     // [ ] -> [ e0 ]
     hummock_manager
-        .commit_epoch(epoch, test_tables.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
         .await
         .unwrap();
     epoch += 1;
@@ -758,7 +758,7 @@ async fn test_pin_snapshot_response_lost() {
     );
     // [ e0:pinned ] -> [ e0:pinned, e1 ]
     hummock_manager
-        .commit_epoch(epoch, test_tables.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
         .await
         .unwrap();
     epoch += 1;
@@ -794,7 +794,7 @@ async fn test_pin_snapshot_response_lost() {
     );
     // [ e0, e1:pinned ] -> [ e0, e1:pinned, e2 ]
     hummock_manager
-        .commit_epoch(epoch, test_tables.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
         .await
         .unwrap();
     epoch += 1;
@@ -821,7 +821,7 @@ async fn test_pin_snapshot_response_lost() {
     );
     // [ e0, e1:pinned, e2:pinned ] -> [ e0, e1:pinned, e2:pinned, e3 ]
     hummock_manager
-        .commit_epoch(epoch, test_tables.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
         .await
         .unwrap();
     epoch += 1;
@@ -847,7 +847,7 @@ async fn test_print_compact_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
-        .commit_epoch(epoch, original_tables.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
         .await
         .unwrap();
 
@@ -876,7 +876,7 @@ async fn test_invalid_sst_id() {
     let epoch = 1;
     let ssts = generate_test_tables(epoch, vec![HummockSSTableId::MAX]);
     let error = hummock_manager
-        .commit_epoch(epoch, ssts.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&ssts))
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InternalError(_)));
@@ -910,7 +910,7 @@ async fn test_mark_orphan_ssts() {
     );
     // Cannot commit_epoch for marked SST ids.
     let error = hummock_manager
-        .commit_epoch(epoch, ssts.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&ssts))
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InternalError(_)));

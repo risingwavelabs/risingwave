@@ -21,7 +21,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use super::iterator::{
@@ -227,7 +227,7 @@ impl HummockStorage {
                                 return Ok(v);
                             }
                         }
-                        UncommittedData::Sst(table_info) => {
+                        UncommittedData::Sst((_, table_info)) => {
                             let table = self
                                 .sstable_store
                                 .sstable(table_info.id, &mut stats)
@@ -446,7 +446,7 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<(CompactionGroupId, SstableInfo)> {
         self.local_version_manager.get_uncommitted_ssts(epoch)
     }
 }

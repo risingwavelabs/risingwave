@@ -29,6 +29,7 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_hummock_sdk::CompactionGroupId;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
@@ -39,7 +40,7 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 pub struct CollectResult {
     pub create_mview_progress: Vec<ProstCreateMviewProgress>,
 
-    pub synced_sstables: Vec<SstableInfo>,
+    pub synced_sstables: Vec<(CompactionGroupId, SstableInfo)>,
 }
 
 enum BarrierState {

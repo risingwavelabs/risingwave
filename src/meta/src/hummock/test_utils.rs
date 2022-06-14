@@ -18,7 +18,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockSSTableId};
 use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
@@ -29,6 +29,12 @@ use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
+
+pub fn to_grouped_sstable_info(ssts: &[SstableInfo]) -> Vec<(CompactionGroupId, SstableInfo)> {
+    ssts.iter()
+        .map(|sst| (StaticCompactionGroupId::StateDefault.into(), sst.clone()))
+        .collect_vec()
+}
 
 pub async fn add_test_tables<S>(
     hummock_manager: &HummockManager<S>,
@@ -46,7 +52,7 @@ where
     ];
     let test_tables = generate_test_tables(epoch, table_ids);
     hummock_manager
-        .commit_epoch(epoch, test_tables.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
         .await
         .unwrap();
     // Current state: {v0: [], v1: [test_tables]}
@@ -80,7 +86,7 @@ where
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
     hummock_manager
-        .commit_epoch(epoch, test_tables_3.clone())
+        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables_3))
         .await
         .unwrap();
     // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables], v3:

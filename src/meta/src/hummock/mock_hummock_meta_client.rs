@@ -17,7 +17,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId,
+};
 use risingwave_pb::hummock::{
     CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableInfo,
     SubscribeCompactTasksResponse, VacuumTask,
@@ -116,7 +118,11 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(|e| e.into())
     }
 
-    async fn commit_epoch(&self, epoch: HummockEpoch, sstables: Vec<SstableInfo>) -> Result<()> {
+    async fn commit_epoch(
+        &self,
+        epoch: HummockEpoch,
+        sstables: Vec<(CompactionGroupId, SstableInfo)>,
+    ) -> Result<()> {
         self.hummock_manager
             .commit_epoch(epoch, sstables)
             .await

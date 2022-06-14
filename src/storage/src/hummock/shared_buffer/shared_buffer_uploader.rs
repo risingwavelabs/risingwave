@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use futures::{FutureExt, StreamExt};
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch};
+use risingwave_hummock_sdk::{get_local_sst_id, CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::{mpsc, oneshot};
@@ -34,7 +34,7 @@ use crate::monitor::StateStoreMetrics;
 
 pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
 pub(crate) type UploadTaskResult =
-    BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<SstableInfo>>>;
+    BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<(CompactionGroupId, SstableInfo)>>>;
 
 #[derive(Debug)]
 pub struct UploadTask {
@@ -169,7 +169,7 @@ impl SharedBufferUploader {
         _epoch: HummockEpoch,
         is_local: bool,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<SstableInfo>> {
+    ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
         if payload.is_empty() {
             return Ok(vec![]);
         }
@@ -202,18 +202,23 @@ impl SharedBufferUploader {
         )
         .await?;
 
-        let uploaded_sst_info: Vec<SstableInfo> = tables
+        let uploaded_sst_info = tables
             .into_iter()
-            .map(|(sst, unit_id, vnode_bitmaps)| SstableInfo {
-                id: sst.id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: sst.meta.smallest_key.clone(),
-                    right: sst.meta.largest_key.clone(),
-                    inf: false,
-                }),
-                file_size: sst.meta.estimated_size as u64,
-                vnode_bitmaps,
-                unit_id,
+            .map(|(compaction_group_id, sst, unit_id, vnode_bitmaps)| {
+                (
+                    compaction_group_id,
+                    SstableInfo {
+                        id: sst.id,
+                        key_range: Some(risingwave_pb::hummock::KeyRange {
+                            left: sst.meta.smallest_key.clone(),
+                            right: sst.meta.largest_key.clone(),
+                            inf: false,
+                        }),
+                        file_size: sst.meta.estimated_size as u64,
+                        vnode_bitmaps,
+                        unit_id,
+                    },
+                )
             })
             .collect();
 

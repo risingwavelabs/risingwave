@@ -135,7 +135,9 @@ mod tests {
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
-    use crate::hummock::test_utils::{generate_test_tables, setup_compute_env};
+    use crate::hummock::test_utils::{
+        generate_test_tables, setup_compute_env, to_grouped_sstable_info,
+    };
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::storage::MetaStore;
 
@@ -151,7 +153,7 @@ mod tests {
             vec![hummock_manager_ref.get_new_table_id().await.unwrap()],
         );
         hummock_manager_ref
-            .commit_epoch(epoch, original_tables)
+            .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
             .await
             .unwrap();
     }

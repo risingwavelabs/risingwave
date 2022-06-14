@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
 use futures::future::{try_join_all, BoxFuture};
-use futures::{stream, FutureExt, StreamExt};
+use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
@@ -151,7 +151,7 @@ impl Compactor {
     pub async fn compact_shared_buffer_by_compaction_group(
         context: Arc<CompactorContext>,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, u64, Vec<VNodeBitmap>)>> {
+    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, u64, Vec<VNodeBitmap>)>> {
         let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
         for uncommitted_list in payload {
             let mut next_inner = HashSet::new();
@@ -174,8 +174,18 @@ impl Compactor {
         }
 
         let mut futures = vec![];
-        for group in grouped_payload.into_values() {
-            futures.push(Compactor::compact_shared_buffer(context.clone(), group));
+        for (id, group_payload) in grouped_payload {
+            let id_copy = id;
+            futures.push(
+                Compactor::compact_shared_buffer(context.clone(), group_payload).map_ok(
+                    move |results| {
+                        results
+                            .into_iter()
+                            .map(move |result| (id_copy, result.0, result.1, result.2))
+                            .collect_vec()
+                    },
+                ),
+            );
         }
         // Note that the output is reordered compared with input `payload`.
         let result = try_join_all(futures)
