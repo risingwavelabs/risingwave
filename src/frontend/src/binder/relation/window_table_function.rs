@@ -76,9 +76,8 @@ impl Binder {
             )
             .into()),
         }?;
-        let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
 
-        let base = self.bind_table_or_source(&schema_name, &table_name, None)?;
+        let base = self.bind_relation_by_name(table_name.clone(), None)?;
 
         let Some(time_col_arg) = args.next() else {
             return Err(ErrorCode::BindError(
@@ -117,6 +116,7 @@ impl Binder {
                 .into_iter(),
             ).collect::<Result<Vec<_>>>()?;
 
+        let (_, table_name) = Self::resolve_table_name(table_name)?;
         self.bind_context(columns, table_name.clone(), alias)?;
 
         let exprs: Vec<_> = args
