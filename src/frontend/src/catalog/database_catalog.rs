@@ -65,6 +65,11 @@ impl DatabaseCatalog {
     pub fn id(&self) -> DatabaseId {
         self.id
     }
+
+    pub fn owner(&self) -> String {
+        return self.owner.clone()
+    }
+
 }
 impl From<&ProstDatabase> for DatabaseCatalog {
     fn from(db: &ProstDatabase) -> Self {

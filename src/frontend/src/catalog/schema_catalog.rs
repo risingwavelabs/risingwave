@@ -124,6 +124,11 @@ impl SchemaCatalog {
     pub fn id(&self) -> SchemaId {
         self.id
     }
+
+    pub fn owner(&self) -> String {
+        self.owner.clone()
+    }
+
 }
 
 impl From<&ProstSchema> for SchemaCatalog {
