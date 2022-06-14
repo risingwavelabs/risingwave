@@ -15,7 +15,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::btree_map::Range;
 use std::ops::Bound::{Excluded, Included, Unbounded};
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Index, RangeBounds};
 use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
@@ -38,11 +38,7 @@ use crate::{Keyspace, StateStore};
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
     keyspace: Keyspace<S>,
-
     column_mapping: Arc<ColumnDescMapping>,
-
-    /// Ordering of primary key (for assertion)
-    order_types: Vec<OrderType>,
 
     /// buffer key/values
     mem_table: MemTable,
@@ -50,7 +46,6 @@ pub struct StateTable<S: StateStore> {
     /// Relation layer
     cell_based_table: CellBasedTable<S>,
 
-    #[expect(dead_code)]
     pk_indices: Vec<usize>,
 }
 
@@ -67,7 +62,6 @@ impl<S: StateStore> StateTable<S> {
         Self {
             keyspace,
             column_mapping: Arc::new(make_column_desc_index(column_descs)),
-            order_types: order_types.clone(),
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
                 cell_based_keyspace,
@@ -96,16 +90,24 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
-        assert_eq!(self.order_types.len(), pk.size());
-        let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+    pub fn insert(&mut self, value: Row) -> StorageResult<()> {
+        let mut datums = vec![];
+        for pk_indice in &self.pk_indices {
+            datums.push(value.index(*pk_indice).clone());
+        }
+        let pk = Row::new(datums);
+        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         self.mem_table.insert(pk_bytes, value)?;
         Ok(())
     }
 
-    pub fn delete(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
-        assert_eq!(self.order_types.len(), pk.size());
-        let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+    pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
+        let mut datums = vec![];
+        for pk_indice in &self.pk_indices {
+            datums.push(old_value.index(*pk_indice).clone());
+        }
+        let pk = Row::new(datums);
+        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }
