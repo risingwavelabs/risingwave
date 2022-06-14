@@ -132,7 +132,10 @@ impl<S: StateStore> StateTable<S> {
 
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
-        let cell_based_bounds = (Unbounded, Unbounded);
+        let cell_based_bounds = (
+            Included(self.keyspace.key().to_vec()),
+            Excluded(next_key(self.keyspace.key())),
+        );
         let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
         let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
         Ok(StateTableRowIter::new(
@@ -235,7 +238,10 @@ impl<S: StateStore> StateTable<S> {
             )
             .into_stream())
         } else {
-            let cell_based_bounds = (Unbounded, Unbounded);
+            let cell_based_bounds = (
+                Included(self.keyspace.key().to_vec()),
+                Excluded(next_key(self.keyspace.key())),
+            );
             let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
             let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
             Ok(StateTableRowIter::new(
@@ -280,9 +286,11 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     }
 
     /// This function scans kv pairs from the `shared_storage`(`cell_based_table`) and
-    /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is (Unbounded, Unbounded), all kv
-    /// pairs will be scanned. If a record exist in both `cell_based_table` and `mem_table`,
-    /// result `mem_table` is returned according to the operation(RowOp) on it.
+    /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is
+    /// (Included(prefix),Excluded(next_key(prefix))), all kv pairs within corresponding prefix will
+    /// be scanned. If a record exist in both `cell_based_table` and `mem_table`, result
+    /// `mem_table` is returned according to the operation(RowOp) on it.
+
     #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
     async fn into_stream(self) {
         let cell_based_table_iter: futures::stream::Peekable<_> =
