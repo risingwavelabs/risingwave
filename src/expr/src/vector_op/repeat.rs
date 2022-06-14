@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter;
-
 use risingwave_common::array::{BytesGuard, BytesWriter};
 
 use crate::Result;
 
 #[inline(always)]
 pub fn repeat(s: &str, count: i32, writer: BytesWriter) -> Result<BytesGuard> {
-    let repeated = iter::repeat(s)
-        .take(count.try_into().unwrap_or(0))
-        .flat_map(|s| s.chars());
-    writer.write_from_char_iter(repeated).map_err(Into::into)
+    let mut writer = writer.begin();
+    for _ in 0..count.try_into().unwrap_or(0) {
+        writer.write_ref(s)?;
+    }
+    writer.finish().map_err(Into::into)
 }
 
 #[cfg(test)]

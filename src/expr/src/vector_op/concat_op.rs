@@ -18,8 +18,10 @@ use crate::Result;
 
 #[inline(always)]
 pub fn concat_op(left: &str, right: &str, dst: BytesWriter) -> Result<BytesGuard> {
-    dst.write_from_char_iter(left.chars().chain(right.chars()))
-        .map_err(Into::into)
+    let mut writer = dst.begin();
+    writer.write_ref(left)?;
+    writer.write_ref(right)?;
+    writer.finish().map_err(Into::into)
 }
 
 #[cfg(test)]
