@@ -264,21 +264,6 @@ impl Row {
         Ok(serializer.into_inner())
     }
 
-    /// Serialize a datum in the row to a memcomparable bytes. The datum must not be null.
-    ///
-    /// !Panics
-    ///
-    /// * Panics when `datum_idx` is out of range.
-    pub fn serialize_datum_with_order(
-        &self,
-        datum_idx: usize,
-        order_type: OrderType,
-    ) -> Result<Vec<u8>, memcomparable::Error> {
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        serializer.set_reverse(order_type == OrderType::Descending);
-        serialize_datum_into(&self.0[datum_idx], &mut serializer)?;
-        Ok(serializer.into_inner())
-    }
 
     /// Serialize the row into a value encode bytes.
     ///
