@@ -28,7 +28,6 @@ use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -37,8 +36,8 @@ use super::{
     StreamExecutorResult,
 };
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_column_descs, generate_managed_agg_state,
-    get_key_len, AggCall, AggState,
+    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, generate_state_table,
+    AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -122,19 +121,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut state_tables = Vec::with_capacity(agg_calls.len());
         for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
-            let mut index = key_indices.clone();
-            if get_key_len(agg_call) == 1 {
-                index.push(index[index.len() - 1]);
-            }
-            let state_table = StateTable::new(
+            state_tables.push(generate_state_table(
                 ks.clone(),
-                generate_column_descs(agg_call, &key_indices, &pk_indices, &schema, input.as_ref()),
-                // Primary key includes group key.
-                vec![OrderType::Descending; key_indices.len() + get_key_len(agg_call)],
-                Some(key_indices.clone()),
-                index,
-            );
-            state_tables.push(state_table);
+                agg_call,
+                &key_indices,
+                &pk_indices,
+                &schema,
+                input.as_ref(),
+            ));
         }
 
         Ok(Self {
@@ -772,7 +766,7 @@ mod tests {
         ];
 
         let hash_agg =
-            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![2], 1);
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -859,7 +853,7 @@ mod tests {
         ];
 
         let hash_agg =
-            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![2], 1);
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier

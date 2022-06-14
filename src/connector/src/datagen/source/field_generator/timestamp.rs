@@ -15,7 +15,7 @@
 use anyhow::Result;
 use chrono::prelude::*;
 use chrono::Duration;
-use parse_duration::parse;
+use humantime::parse_duration;
 use rand::{thread_rng, Rng};
 use serde_json::{json, Value};
 
@@ -31,7 +31,7 @@ impl TimestampField {
         let local_now = Local::now().naive_local();
         // std duration
         let max_past = if let Some(max_past_option) = max_past_option {
-            parse(&max_past_option)?
+            parse_duration(&max_past_option)?
         } else {
             // default max_past = 1 day
             DEFAULT_MAX_PAST
