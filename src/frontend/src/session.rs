@@ -554,9 +554,24 @@ impl Session for SessionImpl {
 
     async fn infer_return_type(
         self: Arc<Self>,
-        _sql: &str,
+        sql: &str,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
-        unimplemented!()
+        // Parse sql.
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
+            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        // With pgwire, there would be at most 1 statement in the vec.
+        assert!(stmts.len() <= 1);
+        if stmts.is_empty() {
+            return Ok(vec![]);
+        }
+        let stmt = stmts.swap_remove(0);
+        let rsp = handle(self, stmt).await.map_err(|e| {
+            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        Ok(rsp.get_row_desc())
     }
 
     fn user_authenticator(&self) -> &UserAuthenticator {
