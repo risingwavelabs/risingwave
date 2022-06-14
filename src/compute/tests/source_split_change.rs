@@ -177,7 +177,6 @@ async fn test_split_change_mutation() -> Result<()> {
         .unwrap();
 
     println!("{:?}", materialize.next().await); // barrier
-    println!("{:?}", materialize.next().await);
 
     let change_split_mutation = Barrier::new_test_barrier(curr_epoch + 1).with_mutation(Mutation::SourceChangeSplit(
         hashmap!{
@@ -201,6 +200,8 @@ async fn test_split_change_mutation() -> Result<()> {
     barrier_tx.send(change_split_mutation).unwrap();
 
     println!("{:?}", materialize.next().await); // barrier
-    println!("{:?}", materialize.next().await);
+    let v1 = materialize.next().await.unwrap()?;
+    let v2 = materialize.next().await.unwrap()?;
+    
     Ok(())
 }
