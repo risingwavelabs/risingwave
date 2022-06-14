@@ -208,7 +208,7 @@ impl ParseTo for CreateSinkStatement {
 
         p.expect_keyword(Keyword::FROM)?;
         impl_parse_to!(materialized_view: ObjectName, p);
-        
+
         impl_parse_to!(with_properties: WithProperties, p);
         Ok(Self {
             if_not_exists,

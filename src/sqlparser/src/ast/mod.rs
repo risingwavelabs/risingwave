@@ -620,7 +620,7 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
-    Sink { schema: Option<Ident> },
+    Sink { _schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
@@ -648,7 +648,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
-            ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
+            ShowObject::Sink { _schema } => write!(f, "SINKS{}", fmt_schema(_schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
@@ -754,9 +754,7 @@ pub enum Statement {
         stmt: CreateSourceStatement,
     },
     /// CREATE SINK
-    CreateSink {
-        stmt: CreateSinkStatement,
-    },
+    CreateSink { stmt: CreateSinkStatement },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -1096,13 +1094,7 @@ impl fmt::Display for Statement {
                     ""
                 }
             ),
-            Statement::CreateSink {
-                stmt,
-            } => write!(
-                f,
-                "CREATE SINK {}",
-                stmt,
-            ),
+            Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
