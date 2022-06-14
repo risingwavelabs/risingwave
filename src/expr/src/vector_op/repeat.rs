@@ -19,7 +19,7 @@ use crate::Result;
 #[inline(always)]
 pub fn repeat(s: &str, count: i32, writer: BytesWriter) -> Result<BytesGuard> {
     let mut writer = writer.begin();
-    for _ in 0..count.try_into().unwrap_or(0) {
+    for _ in 0..count {
         writer.write_ref(s)?;
     }
     writer.finish().map_err(Into::into)
