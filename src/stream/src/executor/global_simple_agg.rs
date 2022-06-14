@@ -20,13 +20,14 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::*;
 use crate::executor::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_column_descs, generate_managed_agg_state,
-    get_key_len, AggCall, AggState,
+    AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
@@ -107,13 +108,24 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         // Create state tables for each agg call.
         let mut state_tables = Vec::with_capacity(agg_calls.len());
         for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
+            let table_desc =
+                generate_column_descs(agg_call, &key_indices, &pk_indices, &schema, input.as_ref());
+            let relational_pk_len = table_desc.len() - 1;
             let state_table = StateTable::new(
                 ks.clone(),
-                generate_column_descs(agg_call, &key_indices, &pk_indices, &schema, input.as_ref()),
+                table_desc,
                 // Primary key do not includes group key.
-                vec![OrderType::Descending; get_key_len(agg_call)],
+                vec![
+                    // Now we only infer order type for min/max in a naive way.
+                    if agg_call.kind == AggKind::Max {
+                        OrderType::Descending
+                    } else {
+                        OrderType::Ascending
+                    };
+                    relational_pk_len
+                ],
                 None,
-                pk_indices.clone(),
+                (0..relational_pk_len).collect(),
             );
             state_tables.push(state_table);
         }

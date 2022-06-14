@@ -352,8 +352,8 @@ pub fn generate_agg_schema(
 
 /// Infer column desc for state table.
 /// The column desc layout is
-/// [ `group_key` (only for hash agg) / `sort_key` (only for simple agg) / `value`(the agg call
-/// return type)].
+/// [ `group_key` (only for hash agg) / `sort_key` (only for max/mix without append only) /
+/// `value`(the agg call return type)].
 /// This is the Row layout insert into state table.
 /// For different agg call, different executor (hash agg or simple agg), the layout will be
 /// different.
