@@ -20,7 +20,7 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;

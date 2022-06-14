@@ -16,7 +16,6 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
@@ -29,7 +28,7 @@ use risingwave_pb::task_service::{
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
-use crate::error::{Result, RpcError};
+use crate::error::Result;
 
 #[derive(Clone)]
 pub struct ComputeClient {

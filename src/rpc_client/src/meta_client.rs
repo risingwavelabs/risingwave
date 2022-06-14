@@ -519,8 +519,7 @@ macro_rules! grpc_meta_client_impl {
                         .to_owned()
                         .$fn_name(request)
                         .await?
-                        .into_inner()
-                        .into())
+                        .into_inner())
                 }
             }
         })*

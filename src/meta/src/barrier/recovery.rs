@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use log::{debug, error};
-use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::Epoch as ProstEpoch;

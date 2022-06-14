@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::{ExchangeSource as ProstExchangeSource, TaskOutputId};
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};

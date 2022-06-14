@@ -20,7 +20,7 @@ use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::catalog::TableId;
 use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
-use risingwave_common::error::{internal_error, Result, ToRwResult};
+use risingwave_common::error::{internal_error, Result};
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
