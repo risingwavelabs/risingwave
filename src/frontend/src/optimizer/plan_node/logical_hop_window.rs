@@ -172,7 +172,7 @@ impl LogicalHopWindow {
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         write!(
             f,
-            "{} {{ time_col: {} slide: {} size: {} output_indices: {} }}",
+            "{} {{ time_col: {}, slide: {}, size: {}, output_indices: {} }}",
             name,
             InputRefDisplay(self.time_col.index),
             self.window_slide,
