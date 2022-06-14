@@ -34,7 +34,9 @@ use risingwave_hummock_sdk::key::next_key;
 
 use super::mem_table::RowOp;
 use super::TableIter;
-use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
+use crate::cell_based_row_deserializer::{
+    make_column_desc_index, CellBasedRowDeserializer, ColumnDescMapping,
+};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
@@ -57,9 +59,14 @@ pub struct CellBasedTable<S: StateStore> {
     column_descs: Vec<ColumnDesc>,
 
     /// Mapping from column id to column index
+    /// TODO: all CellBasedTable users should have a pk serializer, we should remove this option.
     pub pk_serializer: Option<OrderedRowSerializer>,
 
+    /// Used for serializing the row.
     cell_based_row_serializer: CellBasedRowSerializer,
+
+    /// Used for deserializing the row.
+    mapping: Arc<ColumnDescMapping>,
 
     column_ids: Vec<ColumnId>,
 
@@ -103,6 +110,7 @@ impl<S: StateStore> CellBasedTable<S> {
         Self {
             keyspace,
             schema,
+            mapping: Arc::new(make_column_desc_index(column_descs.clone())),
             column_descs,
             pk_serializer: ordered_row_serializer,
             cell_based_row_serializer: CellBasedRowSerializer::new(),
@@ -150,12 +158,9 @@ impl<S: StateStore> CellBasedTable<S> {
             })
             .unwrap_or_default();
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let serialized_pk = &serialize_pk(pk, pk_serializer)[..];
-        let sentinel_key = [
-            serialized_pk,
-            &serialize_column_id(&SENTINEL_CELL_ID).map_err(err)?,
-        ]
-        .concat();
+        let serialized_pk = serialize_pk(pk, pk_serializer);
+        let sentinel_key =
+            serialize_pk_and_column_id(&serialized_pk, &SENTINEL_CELL_ID).map_err(err)?;
         let mut get_res = Vec::new();
 
         let sentinel_cell = self
@@ -170,14 +175,13 @@ impl<S: StateStore> CellBasedTable<S> {
             get_res.push((sentinel_key, sentinel_cell.unwrap()));
         }
         for column_id in &self.column_ids {
-            let key = [serialized_pk, &serialize_column_id(column_id).map_err(err)?].concat();
+            let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
             let state_store_get_res = self.keyspace.get_with_vnode(&key, epoch, vnode).await?;
             if let Some(state_store_get_res) = state_store_get_res {
                 get_res.push((key, state_store_get_res));
             }
         }
-        let mut cell_based_row_deserializer =
-            CellBasedRowDeserializer::new(self.column_descs.clone());
+        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
         for (key, value) in get_res {
             let deserialize_res = cell_based_row_deserializer
                 .deserialize(&Bytes::from(key), &value)
@@ -212,8 +216,7 @@ impl<S: StateStore> CellBasedTable<S> {
             .state_store()
             .scan(start_key..end_key, None, epoch, Some(vnode_bitmap))
             .await?;
-        let mut cell_based_row_deserializer =
-            CellBasedRowDeserializer::new(self.column_descs.clone());
+        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
         for (key, value) in state_store_range_scan_res {
             cell_based_row_deserializer
                 .deserialize(&key, &value)
@@ -338,7 +341,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&self, epoch: u64) -> StorageResult<CellBasedTableRowIter<S>> {
-        CellBasedTableRowIter::new(&self.keyspace, self.column_descs.clone(), epoch).await
+        CellBasedTableRowIter::new(&self.keyspace, self.mapping.clone(), epoch).await
     }
 
     pub async fn iter_with_pk(
@@ -348,7 +351,7 @@ impl<S: StateStore> CellBasedTable<S> {
     ) -> StorageResult<DedupPkCellBasedTableRowIter<S>> {
         DedupPkCellBasedTableRowIter::new(
             self.keyspace.clone(),
-            self.column_descs.clone(),
+            self.mapping.clone(),
             epoch,
             pk_descs,
         )
@@ -423,7 +426,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
         CellBasedTableRowIter::new_with_bounds(
             &self.keyspace,
-            self.column_descs.clone(),
+            self.mapping.clone(),
             (start_key, end_key),
             epoch,
         )
@@ -448,7 +451,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
         CellBasedTableRowIter::new_with_bounds(
             &self.keyspace,
-            self.column_descs.clone(),
+            self.mapping.clone(),
             (start_key, next_key),
             epoch,
         )
@@ -461,7 +464,7 @@ impl<S: StateStore> CellBasedTable<S> {
         &self,
         epoch: u64,
     ) -> StorageResult<CellBasedTableStreamingIter<S>> {
-        CellBasedTableStreamingIter::new(&self.keyspace, self.column_descs.clone(), epoch).await
+        CellBasedTableStreamingIter::new(&self.keyspace, self.mapping.clone(), epoch).await
     }
 
     pub fn schema(&self) -> &Schema {
@@ -479,13 +482,13 @@ pub struct CellBasedTableRowIter<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
     /// Cell-based row deserializer
-    cell_based_row_deserializer: CellBasedRowDeserializer,
+    cell_based_row_deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
     pub(super) async fn new(
         keyspace: &Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
+        table_descs: Arc<ColumnDescMapping>,
         epoch: u64,
     ) -> StorageResult<Self> {
         keyspace.state_store().wait_epoch(epoch).await?;
@@ -503,7 +506,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
 
     async fn new_with_bounds<R, B>(
         keyspace: &Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
+        table_descs: Arc<ColumnDescMapping>,
         serialized_pk_bounds: R,
         epoch: u64,
     ) -> StorageResult<Self>
@@ -583,7 +586,7 @@ pub struct DedupPkCellBasedTableRowIter<S: StateStore> {
 impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
     pub async fn new(
         keyspace: Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
+        table_descs: Arc<ColumnDescMapping>,
         epoch: u64,
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<Self> {
@@ -600,11 +603,12 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
             .unzip();
         let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
 
+        // TODO: pre-calculate this instead of calculate it every time when creating new iterator
         let col_id_to_row_idx: HashMap<ColumnId, usize> = table_descs
             .iter()
-            .enumerate()
-            .map(|(idx, desc)| (desc.column_id, idx))
+            .map(|(column_id, (_, idx))| (*column_id, *idx))
             .collect();
+
         let pk_to_row_mapping = pk_descs
             .iter()
             .map(|d| {
@@ -694,13 +698,13 @@ pub struct CellBasedTableStreamingIter<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
     /// Cell-based row deserializer
-    cell_based_row_deserializer: CellBasedRowDeserializer,
+    cell_based_row_deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
 impl<S: StateStore> CellBasedTableStreamingIter<S> {
     pub async fn new(
         keyspace: &Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
+        table_descs: Arc<ColumnDescMapping>,
         epoch: u64,
     ) -> StorageResult<Self> {
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
@@ -714,7 +718,7 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
 
     pub async fn new_with_bounds<R, B>(
         keyspace: &Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
+        table_descs: Arc<ColumnDescMapping>,
         pk_bounds: R,
         epoch: u64,
     ) -> StorageResult<Self>

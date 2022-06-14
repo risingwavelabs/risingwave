@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use either::Either;
 use futures::stream::PollNext;
 use futures::StreamExt;
@@ -21,7 +23,9 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::{
+    CellBasedRowDeserializer, ColumnDescMapping,
+};
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::error::StreamExecutorError;
@@ -81,7 +85,7 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
     pub serializer: OrderedRowSerializer,
 
     /// Deserializer for the arrangement
-    pub deserializer: CellBasedRowDeserializer,
+    pub deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
 /// Message from the `arrange_join_stream`.
