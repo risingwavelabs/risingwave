@@ -24,7 +24,7 @@ pub struct UserInfoManager {
     users: HashMap<UserName, UserInfo>,
 }
 
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for UserInfoManager {
     fn default() -> Self {
         UserInfoManager {

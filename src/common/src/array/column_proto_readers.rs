@@ -12,21 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{self, Cursor, Read};
+use std::io::{Cursor, Read};
 
+use anyhow::anyhow;
 use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
 use risingwave_pb::data::Array as ProstArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayMeta, BoolArray, IntervalArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, IntervalArrayBuilder,
     NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
     PrimitiveArrayItemType,
 };
 use crate::buffer::Bitmap;
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
 use crate::types::interval::IntervalUnit;
 use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 
@@ -36,7 +35,7 @@ use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>(
     array: &ProstArray,
     cardinality: usize,
-) -> Result<ArrayImpl> {
+) -> ArrayResult<ArrayImpl> {
     ensure!(
         array.get_values().len() == 1,
         "Must have only 1 buffer in a numeric array"
@@ -64,7 +63,7 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
     Ok(arr.into())
 }
 
-pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
+pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
     ensure!(
         array.get_values().len() == 1,
         "Must have only 1 buffer in a bool array"
@@ -79,57 +78,47 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> Result<ArrayIm
     Ok(arr.into())
 }
 
-fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateWrapper> {
+fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateWrapper> {
     match cursor.read_i32::<BigEndian>() {
         Ok(days) => NaiveDateWrapper::from_protobuf(days),
-        Err(e) => Err(RwError::from(InternalError(format!(
-            "Failed to read i32 from NaiveDate buffer: {}",
-            e
-        )))),
+        Err(e) => bail!("Failed to read i32 from NaiveDate buffer: {}", e),
     }
 }
 
-fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> Result<NaiveTimeWrapper> {
+fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveTimeWrapper> {
     match cursor.read_i64::<BigEndian>() {
         Ok(t) => NaiveTimeWrapper::from_protobuf(t),
-        Err(e) => Err(RwError::from(InternalError(format!(
-            "Failed to read i64 from NaiveTime buffer: {}",
-            e
-        )))),
+        Err(e) => bail!("Failed to read i64 from NaiveTime buffer: {}", e),
     }
 }
 
-fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper> {
+fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTimeWrapper> {
     match cursor.read_i64::<BigEndian>() {
         Ok(t) => NaiveDateTimeWrapper::from_protobuf(t),
-        Err(e) => Err(RwError::from(InternalError(format!(
-            "Failed to read i64 from NaiveDateTime buffer: {}",
-            e
-        )))),
+        Err(e) => bail!("Failed to read i64 from NaiveDateTime buffer: {}", e),
     }
 }
 
-pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> Result<IntervalUnit> {
-    {
+pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
+    let mut read = || {
         let months = cursor.read_i32::<BigEndian>()?;
         let days = cursor.read_i32::<BigEndian>()?;
         let ms = cursor.read_i64::<BigEndian>()?;
 
-        Ok(IntervalUnit::new(months, days, ms))
+        Ok::<_, std::io::Error>(IntervalUnit::new(months, days, ms))
+    };
+
+    match read() {
+        Ok(iu) => Ok(iu),
+        Err(e) => bail!("Failed to read IntervalUnit from buffer: {}", e),
     }
-    .map_err(|e: io::Error| {
-        RwError::from(InternalError(format!(
-            "Failed to read IntervalUnit from buffer: {}",
-            e
-        )))
-    })
 }
 
 macro_rules! read_one_value_array {
     ($({ $type:ident, $builder:ty }),*) => {
         paste! {
             $(
-            pub fn [<read_ $type:snake _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
+            pub fn [<read_ $type:snake _array>](array: &ProstArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
                 ensure!(
                     array.get_values().len() == 1,
                     "Must have only 1 buffer in a {} array", stringify!($type)
@@ -162,17 +151,17 @@ read_one_value_array! {
     { NaiveDateTime, NaiveDateTimeArrayBuilder }
 }
 
-fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> Result<i64> {
-    let offset = offset_cursor
-        .read_i64::<BigEndian>()
-        .map_err(|e| InternalError(format!("failed to read i64 from offset buffer: {}", e)))?;
-    Ok(offset)
+fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {
+    match offset_cursor.read_i64::<BigEndian>() {
+        Ok(offset) => Ok(offset),
+        Err(e) => bail!("failed to read i64 from offset buffer: {}", e),
+    }
 }
 
 pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     array: &ProstArray,
     cardinality: usize,
-) -> Result<ArrayImpl> {
+) -> ArrayResult<ArrayImpl> {
     ensure!(
         array.get_values().len() == 2,
         "Must have exactly 2 buffers in a string array"
@@ -197,10 +186,12 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
             prev_offset = offset;
             buf.resize(length, Default::default());
             data_cursor.read_exact(buf.as_mut_slice()).map_err(|e| {
-                InternalError(format!(
+                anyhow!(
                     "failed to read str from data buffer: {} [length={}, offset={}]",
-                    e, length, offset
-                ))
+                    e,
+                    length,
+                    offset
+                )
             })?;
             let v = R::read(buf.as_slice())?;
             builder.append(Some(v))?;

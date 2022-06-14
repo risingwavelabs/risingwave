@@ -16,10 +16,9 @@ use std::hash::{Hash, Hasher};
 
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::error::Result;
 
 #[derive(Debug)]
 pub struct BoolArray {
@@ -33,7 +32,7 @@ impl BoolArray {
         Self { bitmap, data }
     }
 
-    pub fn from_slice(data: &[Option<bool>]) -> Result<Self> {
+    pub fn from_slice(data: &[Option<bool>]) -> ArrayResult<Self> {
         let mut builder = <Self as Array>::Builder::new(data.len())?;
         for i in data {
             builder.append(*i)?;
@@ -103,7 +102,7 @@ impl Array for BoolArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
         let array_builder = BoolArrayBuilder::new(capacity)?;
         Ok(ArrayBuilderImpl::Bool(array_builder))
     }
@@ -119,14 +118,14 @@ pub struct BoolArrayBuilder {
 impl ArrayBuilder for BoolArrayBuilder {
     type ArrayType = BoolArray;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> ArrayResult<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: BitmapBuilder::with_capacity(capacity),
         })
     }
 
-    fn append(&mut self, value: Option<bool>) -> Result<()> {
+    fn append(&mut self, value: Option<bool>) -> ArrayResult<()> {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -140,7 +139,7 @@ impl ArrayBuilder for BoolArrayBuilder {
         Ok(())
     }
 
-    fn append_array(&mut self, other: &BoolArray) -> Result<()> {
+    fn append_array(&mut self, other: &BoolArray) -> ArrayResult<()> {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -152,7 +151,7 @@ impl ArrayBuilder for BoolArrayBuilder {
         Ok(())
     }
 
-    fn finish(self) -> Result<BoolArray> {
+    fn finish(self) -> ArrayResult<BoolArray> {
         Ok(BoolArray {
             bitmap: self.bitmap.finish(),
             data: self.data.finish(),

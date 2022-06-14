@@ -68,7 +68,7 @@ DROP SCHEMA db1.schema1;
 
 # Drop schema
 statement ok
-DROP SCHEMA db1.dev;
+DROP SCHEMA db1.public;
 
 # Drop database
 statement ok

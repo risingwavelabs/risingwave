@@ -42,7 +42,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
+use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
     INVALID_TIMESTAMP,
@@ -51,7 +51,6 @@ use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::FragmentManagerRef;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -71,8 +70,6 @@ pub struct HummockManager<S: MetaStore> {
 
     // `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
     compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
-    // for compaction to get some info (e.g. existing_table_ids)
-    fragment_manager: FragmentManagerRef<S>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -161,7 +158,6 @@ where
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
     ) -> Result<HummockManager<S>> {
         let instance = HummockManager {
             env,
@@ -171,7 +167,6 @@ where
             cluster_manager,
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
-            fragment_manager,
         };
 
         instance.load_meta_store_state().await?;
@@ -523,9 +518,6 @@ where
             .collect_vec();
         // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
         // epochs below specific watermark.
-        // let mut snapshots_change = !to_unpin.is_empty();
-        tracing::info!("Unpin epochs {:?}", to_unpin);
-
         for epoch in &to_unpin {
             context_pinned_snapshot.unpin_snapshot(*epoch);
         }
@@ -582,7 +574,10 @@ where
             task_id as HummockCompactionTaskId,
             compaction_group_id,
         );
-        let existing_table_ids_from_meta = self.fragment_manager.existing_table_ids().await?;
+        let existing_table_ids_from_meta = self
+            .compaction_group_manager
+            .internal_table_ids_by_compation_group_id(compaction_group_id)
+            .await?;
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
@@ -806,9 +801,6 @@ where
                 ))?,
             self.versioning.read().await.current_version_ref(),
         );
-        if let Some(ref compact_task_metrics) = compact_task.metrics {
-            trigger_rw_stat(&self.metrics, compact_task_metrics);
-        }
 
         self.try_send_compaction_request(compact_task.compaction_group_id);
 

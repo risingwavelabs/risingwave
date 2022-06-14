@@ -29,7 +29,6 @@ use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
-use crate::stream::FragmentManager;
 
 pub async fn add_test_tables<S>(
     hummock_manager: &HummockManager<S>,
@@ -110,6 +109,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
                     bitmap: vec![],
                 },
             ],
+            unit_id: 0,
         });
     }
     sst_info
@@ -168,18 +168,13 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
-    let fragment_manager = Arc::new(
-        FragmentManager::new(env.clone(), compaction_group_manager.clone())
-            .await
-            .unwrap(),
-    );
+
     let hummock_manager = Arc::new(
         HummockManager::new(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
             compaction_group_manager,
-            fragment_manager.clone(),
         )
         .await
         .unwrap(),

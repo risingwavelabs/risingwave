@@ -20,16 +20,16 @@ use std::vec::Drain;
 use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::GeneralCellBasedRowDeserializer;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::variants::TOP_N_MIN;
 use super::PkAndRowIterator;
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 
 /// This state is used for `[offset, offset+limit)` part in the `TopNExecutor`.
 ///
@@ -57,7 +57,7 @@ pub struct ManagedTopNBottomNState<S: StateStore> {
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
     /// For deserializing `Row`.
-    cell_based_row_deserializer: CellBasedRowDeserializer,
+    cell_based_row_deserializer: GeneralCellBasedRowDeserializer,
 }
 
 impl<S: StateStore> ManagedTopNBottomNState<S> {
@@ -67,7 +67,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         keyspace: Keyspace<S>,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
-        cell_based_row_deserializer: CellBasedRowDeserializer,
+        cell_based_row_deserializer: GeneralCellBasedRowDeserializer,
     ) -> Self {
         Self {
             top_n: BTreeMap::new(),
@@ -114,7 +114,10 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn pop_top_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_top_element(
+        &mut self,
+        epoch: u64,
+    ) -> StreamExecutorResult<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -129,7 +132,10 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn pop_bottom_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_bottom_element(
+        &mut self,
+        epoch: u64,
+    ) -> StreamExecutorResult<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -187,7 +193,11 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         self.total_count += 1;
     }
 
-    pub async fn delete(&mut self, key: &OrderedRow, epoch: u64) -> Result<Option<Row>> {
+    pub async fn delete(
+        &mut self,
+        key: &OrderedRow,
+        epoch: u64,
+    ) -> StreamExecutorResult<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
         FlushStatus::do_delete(self.flush_buffer.entry(key.clone()));
@@ -205,7 +215,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     }
 
     /// The same as the one in `ManagedTopNState`.
-    pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
+    pub async fn scan_and_merge(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         let iter = self.keyspace.iter(epoch).await?;
         let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_MIN>::new(
             iter,
@@ -264,7 +274,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// We can fill in the cache from storage only when state is not dirty, i.e. right after
     /// `flush`.
-    pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
+    pub async fn fill_in_cache(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         debug_assert!(!self.is_dirty());
         let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_MIN>::new(
             self.keyspace.iter(epoch).await?,
@@ -280,7 +290,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// `Flush` can be called by the executor when it receives a barrier and thus needs to
     /// checkpoint.
-    pub async fn flush(&mut self, epoch: u64) -> Result<()> {
+    pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             // We don't retain `n` elements as we have a all-or-nothing policy for now.
             return Ok(());
@@ -296,7 +306,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             let column_ids = (0..self.data_types.len() as i32)
                 .map(ColumnId::from)
                 .collect::<Vec<_>>();
-            let bytes = serialize_pk_and_row_state(&pk_buf, &row, &column_ids)?;
+            let bytes = serialize_pk_and_row_state(&pk_buf, &row, &column_ids)
+                .map_err(StreamExecutorError::serde_error)?;
             for (key, value) in bytes {
                 match value {
                     // TODO(Yuanxin): Implement value meta
@@ -336,6 +347,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
@@ -356,7 +368,7 @@ mod tests {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
+        let cell_based_row_deserializer = make_cell_based_row_deserializer(table_column_descs);
 
         ManagedTopNBottomNState::new(
             Some(1),

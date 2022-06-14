@@ -17,16 +17,16 @@ use std::cmp::Ordering;
 use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::GeneralCellBasedRowDeserializer;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::variants::*;
 use super::PkAndRowIterator;
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 
 /// This state is used for several ranges (e.g `[0, offset)`, `[offset+limit, +inf)` of elements in
 /// the `AppendOnlyTopNExecutor` and `TopNExecutor`. For these ranges, we only care about one of the
@@ -56,7 +56,7 @@ pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
     /// For deserializing `Row`.
-    cell_based_row_deserializer: CellBasedRowDeserializer,
+    cell_based_row_deserializer: GeneralCellBasedRowDeserializer,
 }
 
 impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
@@ -66,7 +66,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         keyspace: Keyspace<S>,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
-        cell_based_row_deserializer: CellBasedRowDeserializer,
+        cell_based_row_deserializer: GeneralCellBasedRowDeserializer,
     ) -> Self {
         Self {
             top_n: BTreeMap::new(),
@@ -104,7 +104,10 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
     }
 
-    pub async fn pop_top_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_top_element(
+        &mut self,
+        epoch: u64,
+    ) -> StreamExecutorResult<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -146,7 +149,12 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
     }
 
-    pub async fn insert(&mut self, key: OrderedRow, value: Row, _epoch: u64) -> Result<()> {
+    pub async fn insert(
+        &mut self,
+        key: OrderedRow,
+        value: Row,
+        _epoch: u64,
+    ) -> StreamExecutorResult<()> {
         let have_key_on_storage = self.total_count > self.top_n.len();
         let need_to_flush = if have_key_on_storage {
             // It is impossible that the cache is empty.
@@ -176,7 +184,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ///
     /// This function scans kv pairs from the storage, and properly deal with them
     /// according to the flush buffer.
-    pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
+    pub async fn scan_and_merge(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         // For a key scanned from the storage,
         // 1. Not touched by flush buffer. Do nothing.
         // 2. Deleted by flush buffer. Do not go into cache.
@@ -283,7 +291,11 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         Ok(())
     }
 
-    pub async fn delete(&mut self, key: &OrderedRow, epoch: u64) -> Result<Option<Row>> {
+    pub async fn delete(
+        &mut self,
+        key: &OrderedRow,
+        epoch: u64,
+    ) -> StreamExecutorResult<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
         FlushStatus::do_delete(self.flush_buffer.entry(key.clone()));
         self.total_count -= 1;
@@ -301,7 +313,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     /// We don't need to care about whether `self.top_n` is empty or not as the key is unique.
     /// An element with duplicated key scanned from the storage would just override the element with
     /// the same key in the cache, and their value must be the same.
-    pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
+    pub async fn fill_in_cache(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         debug_assert!(!self.is_dirty());
         let iter = self.keyspace.iter(epoch).await?;
         let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_TYPE>::new(
@@ -325,7 +337,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         &mut self,
         iterator: impl Iterator<Item = (OrderedRow, FlushStatus<Row>)>,
         epoch: u64,
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         let mut write_batch = self.keyspace.state_store().start_write_batch();
         let mut local = write_batch.prefixify(&self.keyspace);
         for (pk, cells) in iterator {
@@ -338,7 +350,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             let column_ids = (0..self.data_types.len() as i32)
                 .map(ColumnId::from)
                 .collect::<Vec<_>>();
-            let bytes = serialize_pk_and_row_state(&pk_buf, &row, &column_ids)?;
+            let bytes = serialize_pk_and_row_state(&pk_buf, &row, &column_ids)
+                .map_err(StreamExecutorError::serde_error)?;
             for (key, value) in bytes {
                 match value {
                     // TODO(Yuanxin): Implement value meta
@@ -356,7 +369,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ///
     /// TODO: `Flush` should also be called internally when `top_n` and `flush_buffer` exceeds
     /// certain limit.
-    pub async fn flush(&mut self, epoch: u64) -> Result<()> {
+    pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             self.retain_top_n();
             return Ok(());
@@ -383,6 +396,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
@@ -404,7 +418,7 @@ mod tests {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
+        let cell_based_row_deserializer = make_cell_based_row_deserializer(table_column_descs);
 
         ManagedTopNState::<S, TOP_N_TYPE>::new(
             Some(2),
