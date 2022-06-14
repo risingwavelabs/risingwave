@@ -34,16 +34,16 @@ use crate::{Keyspace, StateStore};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 #[derive(Clone)]
-pub struct StateTable<S: StateStore, SER: CellSerializer, DE: CellDeserializer> {
+pub struct StateTable<S: StateStore, SER: CellSerializer> {
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTable<S, SER, DE>,
+    cell_based_table: CellBasedTable<S, SER>,
 
     pk_indices: Vec<usize>,
 }
-impl<S: StateStore, SER: CellSerializer, DE: CellDeserializer> StateTable<S, SER, DE> {
+impl<S: StateStore, SER: CellSerializer> StateTable<S, SER> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
