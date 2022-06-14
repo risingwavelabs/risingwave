@@ -84,7 +84,7 @@ pub async fn rpc_serve(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> Result<(JoinHandle<()>, Sender<()>)> {
-    Ok(match meta_store_backend {
+    match meta_store_backend {
         MetaStoreBackend::Etcd { endpoints } => {
             let client = EtcdClient::connect(
                 endpoints,
@@ -96,50 +96,34 @@ pub async fn rpc_serve(
             .await
             .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
-            let info = register_leader_for_meta(
-                address_info.addr.clone(),
-                meta_store.clone(),
-                lease_interval_secs,
-            )
-            .await?;
-            let env = MetaSrvEnv::<EtcdMetaStore>::new(opts, meta_store.clone(), info).await;
             rpc_serve_with_store(
-                env,
-                address_info.listen_addr,
-                address_info.prometheus_addr,
-                address_info.dashboard_addr,
+                meta_store,
+                address_info,
                 max_heartbeat_interval,
-                address_info.ui_path,
+                lease_interval_secs,
+                opts,
             )
             .await
         }
         MetaStoreBackend::Mem => {
             let meta_store = Arc::new(MemStore::default());
-            let info = register_leader_for_meta(
-                address_info.addr.clone(),
-                meta_store.clone(),
-                lease_interval_secs,
-            )
-            .await?;
-            let env = MetaSrvEnv::<MemStore>::new(opts, meta_store.clone(), info).await;
             rpc_serve_with_store(
-                env,
-                address_info.listen_addr,
-                address_info.prometheus_addr,
-                address_info.dashboard_addr,
+                meta_store,
+                address_info,
                 max_heartbeat_interval,
-                address_info.ui_path,
+                lease_interval_secs,
+                opts,
             )
             .await
         }
-    })
+    }
 }
 
 pub async fn register_leader_for_meta<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
     lease_time: u64,
-) -> Result<MetaLeaderInfo> {
+) -> Result<(MetaLeaderInfo, JoinHandle<()>, Sender<()>)> {
     let mut tick_interval = tokio::time::interval(Duration::from_secs(lease_time / 2));
     loop {
         tick_interval.tick().await;
@@ -231,7 +215,9 @@ pub async fn register_leader_for_meta<S: MetaStore>(
             continue;
         }
         let leader = leader_info.clone();
-        tokio::spawn(async move {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let handle = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(lease_time));
             loop {
                 let mut txn = Transaction::default();
                 let lease_info = MetaLeaseInfo {
@@ -262,23 +248,37 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         }
                     }
                 }
-                tokio::time::interval(Duration::from_secs(lease_time))
-                    .tick()
-                    .await;
+
+                tokio::select! {
+                        biased;
+                    // Shutdown
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Barrier manager is shutting down");
+                        return;
+                    }
+                    // Wait for the minimal interval,
+                    _ = ticker.tick() => {},
+                }
             }
         });
-        return Ok(leader);
+        return Ok((leader, handle, shutdown_tx));
     }
 }
 
 pub async fn rpc_serve_with_store<S: MetaStore>(
-    env: MetaSrvEnv<S>,
-    addr: SocketAddr,
-    prometheus_addr: Option<SocketAddr>,
-    dashboard_addr: Option<SocketAddr>,
+    meta_store: Arc<S>,
+    mut address_info: AddressInfo,
     max_heartbeat_interval: Duration,
-    ui_path: Option<String>,
-) -> (JoinHandle<()>, Sender<()>) {
+    lease_interval_secs: u64,
+    opts: MetaOpts,
+) -> Result<(JoinHandle<()>, Sender<()>)> {
+    let (info, lease_handle, lease_shutdown) = register_leader_for_meta(
+        address_info.addr.clone(),
+        meta_store.clone(),
+        lease_interval_secs,
+    )
+    .await?;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
     let compaction_group_manager =
         Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let fragment_manager = Arc::new(
@@ -305,7 +305,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap(),
     );
 
-    if let Some(dashboard_addr) = dashboard_addr {
+    if let Some(dashboard_addr) = address_info.dashboard_addr.take() {
         let dashboard_service = DashboardService {
             dashboard_addr,
             cluster_manager: cluster_manager.clone(),
@@ -313,7 +313,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             meta_store: env.meta_store_ref(),
         };
         // TODO: join dashboard service back to local thread.
-        tokio::spawn(dashboard_service.serve(ui_path));
+        tokio::spawn(dashboard_service.serve(address_info.ui_path));
     }
 
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
@@ -390,21 +390,19 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let notification_srv =
         NotificationServiceImpl::new(env, catalog_manager, cluster_manager.clone(), user_manager);
 
-    if let Some(prometheus_addr) = prometheus_addr {
+    if let Some(prometheus_addr) = address_info.prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
     }
 
-    let mut sub_tasks = vec![];
-    sub_tasks.extend(
-        hummock::start_hummock_workers(
-            hummock_manager,
-            compactor_manager,
-            vacuum_trigger,
-            notification_manager,
-            compaction_scheduler,
-        )
-        .await,
-    );
+    let mut sub_tasks = hummock::start_hummock_workers(
+        hummock_manager,
+        compactor_manager,
+        vacuum_trigger,
+        notification_manager,
+        compaction_scheduler,
+    )
+    .await;
+    sub_tasks.push((lease_handle, lease_shutdown));
     #[cfg(not(test))]
     {
         sub_tasks.push(
@@ -424,7 +422,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
-            .serve_with_shutdown(addr, async move {
+            .serve_with_shutdown(address_info.listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
                     _ = &mut shutdown_recv => {
@@ -444,5 +442,5 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .unwrap();
     });
 
-    (join_handle, shutdown_send)
+    Ok((join_handle, shutdown_send))
 }
