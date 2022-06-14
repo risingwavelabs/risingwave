@@ -167,7 +167,7 @@ mod tests {
             is_target_ultimate_and_leveling: false,
             task_status: false,
             vnode_mappings: vec![],
-            compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
+            compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
         }
     }

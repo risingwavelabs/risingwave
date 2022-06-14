@@ -21,6 +21,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
@@ -235,6 +236,7 @@ impl LocalVersionManager {
             self.flush_shared_buffer().await?;
         }
 
+        // TODO #2065: use correct compaction group id
         let batch = SharedBufferBatch::new_with_size(
             sorted_items,
             epoch,
@@ -244,6 +246,7 @@ impl LocalVersionManager {
             } else {
                 self.buffer_tracker.upload_size.clone()
             },
+            StaticCompactionGroupId::StateDefault.into(),
         );
 
         // Try get shared buffer with version read lock
@@ -569,6 +572,7 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::HummockVersion;
@@ -709,6 +713,7 @@ mod tests {
                 LocalVersionManager::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
                 epochs[i],
                 buffer_tracker.clone(),
+                StaticCompactionGroupId::StateDefault.into(),
             );
             assert_eq!(
                 local_version

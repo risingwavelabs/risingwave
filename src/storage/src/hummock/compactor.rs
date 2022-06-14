@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
 use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
@@ -147,10 +147,49 @@ impl Compactor {
         }
     }
 
+    /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
+    pub async fn compact_shared_buffer_by_compaction_group(
+        context: Arc<CompactorContext>,
+        payload: UploadTaskPayload,
+    ) -> HummockResult<Vec<(Sstable, u64, Vec<VNodeBitmap>)>> {
+        let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
+        for uncommitted_list in payload {
+            let mut next_inner = HashSet::new();
+            for uncommitted in uncommitted_list {
+                let batch = match &uncommitted {
+                    UncommittedData::Sst(_) => {
+                        panic!("expect UncommittedData::Batch")
+                    }
+                    UncommittedData::Batch(batch) => batch,
+                };
+                let group = grouped_payload
+                    .entry(batch.compaction_group_id())
+                    .or_insert_with(std::vec::Vec::new);
+                if !next_inner.contains(&batch.compaction_group_id()) {
+                    group.push(vec![]);
+                    next_inner.insert(batch.compaction_group_id());
+                }
+                group.last_mut().unwrap().push(uncommitted);
+            }
+        }
+
+        let mut futures = vec![];
+        for group in grouped_payload.into_values() {
+            futures.push(Compactor::compact_shared_buffer(context.clone(), group));
+        }
+        // Note that the output is reordered compared with input `payload`.
+        let result = try_join_all(futures)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect_vec();
+        Ok(result)
+    }
+
     /// For compaction from shared buffer to level 0, this is the only function gets called.
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
-        payload: &UploadTaskPayload,
+        payload: UploadTaskPayload,
     ) -> HummockResult<Vec<(Sstable, u64, Vec<VNodeBitmap>)>> {
         let mut start_user_keys = payload
             .iter()
@@ -210,7 +249,7 @@ impl Compactor {
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let iter = build_ordered_merge_iter::<ForwardIter>(
-                payload,
+                &payload,
                 sstable_store.clone(),
                 stats.clone(),
                 &mut local_stats,

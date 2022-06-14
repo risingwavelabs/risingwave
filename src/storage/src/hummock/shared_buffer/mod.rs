@@ -433,6 +433,7 @@ mod tests {
 
     use bytes::Bytes;
     use futures::executor::block_on;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 
     use super::*;
@@ -464,8 +465,12 @@ mod tests {
             ));
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
-        let batch =
-            SharedBufferBatch::new(shared_buffer_items, epoch, Arc::new(AtomicUsize::new(0)));
+        let batch = SharedBufferBatch::new(
+            shared_buffer_items,
+            epoch,
+            Arc::new(AtomicUsize::new(0)),
+            StaticCompactionGroupId::StateDefault.into(),
+        );
         if is_replicate {
             shared_buffer.replicate_batch(batch.clone());
         } else {

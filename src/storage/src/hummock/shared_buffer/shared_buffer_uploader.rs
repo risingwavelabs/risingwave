@@ -146,12 +146,10 @@ impl SharedBufferUploader {
                     "failed due to previous failure",
                 ))
             } else {
-                self.flush(epoch, is_local, &payload)
-                    .await
-                    .inspect_err(|e| {
-                        error!("Failed to flush shared buffer: {:?}", e);
-                        failed = true;
-                    })
+                self.flush(epoch, is_local, payload).await.inspect_err(|e| {
+                    error!("Failed to flush shared buffer: {:?}", e);
+                    failed = true;
+                })
             };
             assert!(
                 task_results.insert((epoch, order_index), result).is_none(),
@@ -170,7 +168,7 @@ impl SharedBufferUploader {
         &self,
         _epoch: HummockEpoch,
         is_local: bool,
-        payload: &UploadTaskPayload,
+        payload: UploadTaskPayload,
     ) -> HummockResult<Vec<SstableInfo>> {
         if payload.is_empty() {
             return Ok(vec![]);
@@ -198,7 +196,11 @@ impl SharedBufferUploader {
             compaction_executor: self.compaction_executor.as_ref().cloned(),
         };
 
-        let tables = Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), payload).await?;
+        let tables = Compactor::compact_shared_buffer_by_compaction_group(
+            Arc::new(mem_compactor_ctx),
+            payload,
+        )
+        .await?;
 
         let uploaded_sst_info: Vec<SstableInfo> = tables
             .into_iter()
