@@ -980,7 +980,7 @@ async fn test_trigger_manual_compaction() {
         let result = hummock_manager
             .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
             .await;
-        assert_eq!((), result.unwrap());
+        assert!(result.is_ok());
     }
 
     let task_id: u64 = 2;

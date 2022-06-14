@@ -21,7 +21,7 @@ pub async fn trigger_manual_compaction(compaction_group_id: u64) -> anyhow::Resu
     let meta_client = meta_opts.create_meta_client().await?;
     let result = meta_client
         .trigger_manual_compaction(compaction_group_id)
-        .await?;
+        .await;
     println!("{:#?}", result);
     Ok(())
 }

@@ -36,15 +36,13 @@ impl Compactor {
         vacuum_task: Option<VacuumTask>,
     ) -> Result<()> {
         // TODO: compactor node backpressure
-        let result = self
-            .sender
+        self.sender
             .send(Ok(SubscribeCompactTasksResponse {
                 compact_task,
                 vacuum_task,
             }))
             .await
-            .map_err(|e| ErrorCode::InternalError(e.to_error_str()).into());
-        result
+            .map_err(|e| ErrorCode::InternalError(e.to_error_str()).into())
     }
 
     pub fn context_id(&self) -> HummockContextId {

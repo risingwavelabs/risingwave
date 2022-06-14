@@ -227,7 +227,6 @@ impl LevelSelector for DynamicLevelSelector {
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {
         let ctx = self.get_priority_levels(levels, level_handlers);
-        println!("ctx.score_levels {:?}", ctx.score_levels);
         for (score, select_level, target_level) in ctx.score_levels {
             if score <= SCORE_BASE {
                 return None;
