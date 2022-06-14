@@ -46,7 +46,7 @@ enum HummockCommands {
         tableid: u32,
     },
     TriggerManualCompaction {
-        #[clap(short, long = "compaction_group_id", default_value_t = u64::MAX)]
+        #[clap(short, long = "compaction-group-id", default_value_t = 2)]
         compaction_group_id: u64,
     },
 }

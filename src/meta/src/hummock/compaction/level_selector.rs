@@ -143,14 +143,6 @@ impl DynamicLevelSelector {
         for _ in first_non_empty_level..self.config.max_level as usize {
             cur_level_size /= self.config.max_bytes_for_level_multiplier;
         }
-        println!(
-            "before first_non_empty_level {} cur_level_size {} range {} {} max_level_size {}",
-            first_non_empty_level,
-            cur_level_size,
-            first_non_empty_level,
-            self.config.max_level,
-            max_level_size
-        );
 
         let base_level_size = if cur_level_size <= base_bytes_min {
             // Case 1. If we make target size of last level to be max_level_size,
@@ -167,8 +159,6 @@ impl DynamicLevelSelector {
             std::cmp::min(base_bytes_max, cur_level_size)
         };
 
-        println!("first_non_empty_level {} max_level_size {} l0_size {} base_bytes_max {} base_bytes_min {} cur_level_size {} base_level_size {} ctx.base_level {}", first_non_empty_level, max_level_size, l0_size, base_bytes_max, base_bytes_min, cur_level_size, base_level_size, ctx.base_level);
-
         let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
         let mut level_size = base_level_size;
         for i in ctx.base_level..=self.config.max_level as usize {
@@ -176,11 +166,6 @@ impl DynamicLevelSelector {
             // assume an hourglass shape where L1+ sizes are smaller than L0. This
             // causes compaction scoring, which depends on level sizes, to favor L1+
             // at the expense of L0, which may fill up and stall.
-
-            println!(
-                "level {} level_size {} base_bytes_max {}",
-                i, level_size, base_bytes_max
-            );
             ctx.level_max_bytes[i] = std::cmp::max(level_size, base_bytes_max);
             level_size = (level_size as f64 * level_multiplier) as u64;
         }
@@ -222,7 +207,6 @@ impl DynamicLevelSelector {
 
         // sort reverse to pick the largest one.
         ctx.score_levels.sort_by(|a, b| b.0.cmp(&a.0));
-        println!("ctx.score_levels {:?}", ctx.score_levels);
         ctx
     }
 }
@@ -242,25 +226,15 @@ impl LevelSelector for DynamicLevelSelector {
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {
-        println!("pick_compaction {}", task_id);
-
         let ctx = self.get_priority_levels(levels, level_handlers);
+        println!("ctx.score_levels {:?}", ctx.score_levels);
         for (score, select_level, target_level) in ctx.score_levels {
-            println!(
-                "score {} select_level {} target_level {} SCORE_BASE {}",
-                score, select_level, target_level, SCORE_BASE
-            );
             if score <= SCORE_BASE {
                 return None;
             }
             let picker = self.create_compaction_picker(select_level, target_level, task_id);
             if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
                 return Some(ret);
-            } else {
-                println!(
-                    "create_compaction_picker {} {} fail",
-                    select_level, target_level
-                );
             }
         }
         None
