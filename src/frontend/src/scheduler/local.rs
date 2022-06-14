@@ -15,13 +15,12 @@
 //! Local execution for batch query.
 use std::collections::HashMap;
 
-use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
+use risingwave_common::bail;
 use risingwave_common::error::RwError;
-use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -163,14 +162,23 @@ impl LocalQueryExecution {
                 match second_stage_plan.as_mut() {
                     Some(second_stage_plan) => {
                         let second_stage_plan_fragment = second_stage_plan.remove(&exchange_from_stage_id).expect("We expect child stage fragment for Exchange Operator running in the frontend");
-                        let mut exchange_node =
-                            try_match_expand!(execution_plan_node.node.clone(), NodeBody::Exchange)
-                                .map_err(|e| anyhow!(e))?;
+                        let mut node_body = execution_plan_node.node.clone();
+                        let sources = match &mut node_body {
+                            NodeBody::Exchange(exchange_node) => &mut exchange_node.sources,
+                            NodeBody::MergeSortExchange(merge_sort_exchange_node) => {
+                                &mut merge_sort_exchange_node
+                                    .exchange
+                                    .as_mut()
+                                    .expect("MergeSortExchangeNode must have a exchange node")
+                                    .sources
+                            }
+                            _ => unreachable!(),
+                        };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             epoch: self.epoch.expect("Local execution mode has not acquired the epoch when generating the plan.")
                         };
-                        exchange_node.sources.extend(
+                        sources.extend(
                             self.front_env
                                 .worker_node_manager()
                                 .list_worker_nodes()
@@ -201,7 +209,7 @@ impl LocalQueryExecution {
                             /// there is no children any more.
                             children: vec![],
                             identity: Uuid::new_v4().to_string(),
-                            node_body: Some(NodeBody::Exchange(exchange_node)),
+                            node_body: Some(node_body),
                         })
                     }
                     None => {
