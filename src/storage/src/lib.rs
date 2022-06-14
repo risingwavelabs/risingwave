@@ -47,6 +47,7 @@ pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
 pub mod cell_serializer;
 pub mod dedup_pk_cell_based_row_serializer;
+pub mod dedup_pk_cell_based_row_deserializer;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
