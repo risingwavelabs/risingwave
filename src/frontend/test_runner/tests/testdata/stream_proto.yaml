@@ -508,15 +508,6 @@
             isNullable: true
           columnId: 1
           name: sum
-    orderColumnIds:
-      - 0
-      - 1
-    orders:
-      - ASCENDING
-      - ASCENDING
-    pk:
-      - 0
-      - 1
     owner: root
 - sql: |
     /* test simple agg */
