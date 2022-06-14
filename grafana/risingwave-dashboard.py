@@ -202,13 +202,11 @@ def section_compaction(panels):
                 "sum(rate(storage_level_compact_read_next[1m])) by (le, level_index)", "L{{level_index}} read"
             ),
         ]),
-
         panels.timeseries_bytes_per_sec("KBs Read from Current Level", [
             panels.target(
                 "sum(rate(storage_level_compact_read_curr[1m])) by (le, level_index)", "L{{level_index}} read"
             ),
         ]),
-
         panels.timeseries_ops("Count of SSTs Read from Current Level", [
             panels.target(
                 "sum(rate(storage_level_compact_read_sstn_curr[1m])) by (le, level_index)", "L{{level_index}} read"

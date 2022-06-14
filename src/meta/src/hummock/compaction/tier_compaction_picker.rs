@@ -222,15 +222,13 @@ impl CompactionPicker for LevelCompactionPicker {
             &levels[target_level],
             &level_handlers[select_level],
             &level_handlers[target_level],
-            |unit_id| unit_id != u64::MAX,
         );
         if select_level_inputs.is_empty() {
-            let input_levels = self.select_input_files(
+            let input_levels = self.select_all_level0(
                 &levels[select_level],
                 &levels[target_level],
                 &level_handlers[select_level],
                 &level_handlers[target_level],
-                |unit_id| unit_id == u64::MAX,
             );
             if input_levels.0.is_empty() {
                 return None;
@@ -312,23 +310,64 @@ impl LevelCompactionPicker {
         Some(new_add_tables)
     }
 
-    fn select_input_files<F>(
+    fn select_all_level0(
         &self,
         select_level: &Level,
         target_level: &Level,
         select_level_handler: &LevelHandler,
         target_level_handler: &LevelHandler,
-        check_unit: F,
-    ) -> (Vec<SstableInfo>, Vec<SstableInfo>)
-    where
-        F: Fn(u64) -> bool,
-    {
+    ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
+        let mut info = self.overlap_strategy.create_overlap_info();
+        let mut select_level_ssts = vec![];
+        let mut select_compaction_bytes = 0;
+        for select_table in &select_level.table_infos {
+            if select_level_handler.is_pending_compact(&select_table.id)
+                || info.check_overlap(select_table)
+            {
+                info.update(select_table);
+                continue;
+            }
+            select_level_ssts.push(select_table.clone());
+            select_compaction_bytes += select_table.file_size;
+        }
+        let mut target_level_ssts = vec![];
+        while !select_level_ssts.is_empty() {
+            match self.pick_target_level_overlap_files(
+                &select_level_ssts,
+                target_level,
+                target_level_handler,
+            ) {
+                None => {
+                    let table = select_level_ssts.pop().unwrap();
+                    select_compaction_bytes -= table.file_size;
+                }
+                Some(tables) => {
+                    target_level_ssts = tables;
+                    break;
+                }
+            }
+        }
+        if select_level_ssts.is_empty()
+            || select_compaction_bytes < self.config.max_bytes_for_level_base
+        {
+            return (vec![], vec![]);
+        }
+        (select_level_ssts, target_level_ssts)
+    }
+
+    fn select_input_files(
+        &self,
+        select_level: &Level,
+        target_level: &Level,
+        select_level_handler: &LevelHandler,
+        target_level_handler: &LevelHandler,
+    ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
         let mut info = self.overlap_strategy.create_overlap_info();
         for idx in 0..select_level.table_infos.len() {
             let select_table = &select_level.table_infos[idx];
             let select_unit = select_table.unit_id;
 
-            if !check_unit(select_unit) || select_level_handler.is_pending_compact(&select_table.id)
+            if select_unit == u64::MAX || select_level_handler.is_pending_compact(&select_table.id)
             {
                 info.update(select_table);
                 continue;
@@ -364,7 +403,7 @@ impl LevelCompactionPicker {
                     continue;
                 }
 
-                if select_unit != u64::MAX && select_unit != other.unit_id {
+                if select_unit != other.unit_id {
                     no_selected_files.push(other);
                     continue;
                 }
@@ -407,8 +446,7 @@ impl LevelCompactionPicker {
                         // we only extend L0 files when write-amplification does not increase.
                         let inc_compaction_size =
                             target_level_ssts.calc_inc_compaction_size(&tables);
-                        if select_unit != u64::MAX
-                            && select_compaction_bytes > self.config.min_compaction_bytes
+                        if select_compaction_bytes > self.config.min_compaction_bytes
                             && (target_level_ssts.compaction_bytes + inc_compaction_size)
                                 / (select_compaction_bytes + other.file_size)
                                 > target_level_ssts.compaction_bytes / select_compaction_bytes
@@ -478,6 +516,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
                 .min_compaction_bytes(0)
+                .max_bytes_for_level_base(100)
                 .build(),
         );
         LevelCompactionPicker::new(0, 1, config, Arc::new(RangeOverlapStrategy::default()))
