@@ -77,6 +77,7 @@ pub struct CellBasedTable<S: StateStore, SER: CellSerializer, DE: CellDeserializ
     dist_key_indices: Option<Vec<usize>>,
 }
 
+
 impl<S: StateStore, SER: CellSerializer, DE: CellDeserializer> std::fmt::Debug for CellBasedTable<S, SER, DE> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CellBasedTable")
@@ -109,6 +110,8 @@ impl<S: StateStore, SER: CellSerializer, DE: CellDeserializer> CellBasedTable<S,
             cell_based_row_serializer: CellBasedRowSerializer::new(),
             column_ids,
             dist_key_indices,
+            cell_serializer: todo!(),
+            cell_deserializer: todo!(),
         }
     }
 
