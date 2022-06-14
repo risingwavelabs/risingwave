@@ -258,9 +258,10 @@ struct StateTableRowIter<S: StateStore> {
 /// It will merge the result of `mem_table_iter` and `cell_based_streaming_iter`.
 impl<S: StateStore> StateTableRowIter<S> {
     /// This function scans kv pairs from the `shared_storage`(`cell_based_table`) and
-    /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is (Unbounded, Unbounded), all kv
-    /// pairs will be scanned. If a record exist in both `cell_based_table` and `mem_table`,
-    /// result `mem_table` is returned according to the operation(RowOp) on it.
+    /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is
+    /// (Included(prefix),Excluded(next_key(prefix))), all kv pairs within corresponding prefix will
+    /// be scanned. If a record exist in both `cell_based_table` and `mem_table`, result
+    /// `mem_table` is returned according to the operation(RowOp) on it.
 
     #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
     async fn into_stream<'a>(
