@@ -754,9 +754,7 @@ pub enum Statement {
         stmt: CreateSourceStatement,
     },
     /// CREATE SINK
-    CreateSink {
-        stmt: CreateSinkStatement,
-    },
+    CreateSink { stmt: CreateSinkStatement },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -1096,13 +1094,7 @@ impl fmt::Display for Statement {
                     ""
                 }
             ),
-            Statement::CreateSink {
-                stmt,
-            } => write!(
-                f,
-                "CREATE SINK {}",
-                stmt,
-            ),
+            Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }

@@ -27,6 +27,7 @@ use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
+use risingwave_sink::MemSinkManager;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::compactor::Compactor;
@@ -136,6 +137,7 @@ pub async fn compute_node_serve(
         config.streaming.clone(),
     ));
     let source_mgr = Arc::new(MemSourceManager::new(worker_id));
+    let sink_mgr = Arc::new(MemSinkManager::new(worker_id));
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
@@ -153,6 +155,7 @@ pub async fn compute_node_serve(
     let stream_config = Arc::new(config.streaming.clone());
     let stream_env = StreamEnvironment::new(
         source_mgr,
+        sink_mgr,
         client_addr.clone(),
         stream_config,
         worker_id,

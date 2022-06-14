@@ -22,8 +22,8 @@ pub(crate) mod column_catalog;
 pub(crate) mod database_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
-pub(crate) mod source_catalog;
 pub(crate) mod sink_catalog;
+pub(crate) mod source_catalog;
 pub(crate) mod table_catalog;
 
 pub(crate) type SourceId = u32;

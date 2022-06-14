@@ -67,8 +67,7 @@ impl From<&ProstSink> for SinkCatalog {
             Some(Info::StreamSink(sink)) => (
                 SinkType::Sink,
                 sink.columns.clone(),
-                sink
-                    .pk_column_ids
+                sink.pk_column_ids
                     .iter()
                     .map(|id| ColumnId::new(*id))
                     .collect(),

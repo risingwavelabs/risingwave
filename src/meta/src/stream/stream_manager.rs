@@ -769,6 +769,20 @@ mod tests {
             unimplemented!()
         }
 
+        async fn create_sink(
+            &self,
+            _request: Request<CreateSinkRequest>,
+        ) -> std::result::Result<Response<CreateSinkResponse>, Status> {
+            unimplemented!()
+        }
+
+        async fn drop_sink(
+            &self,
+            _request: Request<DropSinkRequest>,
+        ) -> std::result::Result<Response<DropSinkResponse>, Status> {
+            unimplemented!()
+        }
+
         async fn force_stop_actors(
             &self,
             _request: Request<ForceStopActorsRequest>,
@@ -781,6 +795,13 @@ mod tests {
             _request: Request<SyncSourcesRequest>,
         ) -> std::result::Result<Response<SyncSourcesResponse>, Status> {
             Ok(Response::new(SyncSourcesResponse::default()))
+        }
+
+        async fn sync_sinks(
+            &self,
+            _request: Request<SyncSinksRequest>,
+        ) -> std::result::Result<Response<SyncSinksResponse>, Status> {
+            Ok(Response::new(SyncSinksResponse::default()))
         }
     }
 

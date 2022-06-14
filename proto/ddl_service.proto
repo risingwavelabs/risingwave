@@ -134,6 +134,8 @@ service DdlService {
   rpc DropSchema(DropSchemaRequest) returns (DropSchemaResponse);
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
+  rpc CreateSink(CreateSinkRequest) returns (CreateSinkResponse);
+  rpc DropSink(DropSinkRequest) returns (DropSinkResponse);
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);

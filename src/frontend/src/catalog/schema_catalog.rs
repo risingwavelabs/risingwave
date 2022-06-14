@@ -15,11 +15,13 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
-use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
+use risingwave_pb::catalog::{
+    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
+};
 use risingwave_pb::stream_plan::source_node::SourceType;
 
-use super::source_catalog::SourceCatalog;
 use super::sink_catalog::SinkCatalog;
+use super::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::SchemaId;
 
@@ -69,6 +71,21 @@ impl SchemaCatalog {
         self.source_by_name.remove(&name).unwrap();
     }
 
+    pub fn create_sink(&mut self, prost: ProstSink) {
+        let name = prost.name.clone();
+        let id = prost.id;
+
+        self.sink_by_name
+            .try_insert(name.clone(), SinkCatalog::from(&prost))
+            .unwrap();
+        self.sink_name_by_id.try_insert(id, name).unwrap();
+    }
+
+    pub fn drop_sink(&mut self, id: SinkId) {
+        let name = self.sink_name_by_id.remove(&id).unwrap();
+        self.sink_by_name.remove(&name).unwrap();
+    }
+
     pub fn iter_table(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
@@ -105,13 +122,13 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
-    /// Iterate all sinks, including the materialized sinks.
-    pub fn iter_sink(&self) -> impl Iterator<Item = &SinkCatalog> {
-        self.sink_by_name
-            .iter()
-            .filter(|(_, v)| matches!(v.sink_type, SinkType::Sink))
-            .map(|(_, v)| v)
-    }
+    // /// Iterate all sinks, including the materialized sinks.
+    // pub fn iter_sink(&self) -> impl Iterator<Item = &SinkCatalog> {
+    //     self.sink_by_name
+    //         .iter()
+    //         .filter(|(_, v)| matches!(v.sink_type, SinkType::Sink))
+    //         .map(|(_, v)| v)
+    // }
 
     /// Iterate the materialized sources.
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &SourceCatalog> {

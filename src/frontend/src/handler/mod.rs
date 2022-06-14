@@ -25,6 +25,7 @@ mod create_database;
 pub mod create_index;
 pub mod create_mv;
 mod create_schema;
+pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
 pub mod create_user;
@@ -55,6 +56,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             is_materialized,
             stmt,
         } => create_source::handle_create_source(context, is_materialized, stmt).await,
+        Statement::CreateSink { stmt } => create_sink::handle_create_sink(context, stmt).await,
         Statement::CreateTable {
             name,
             columns,

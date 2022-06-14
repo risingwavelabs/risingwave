@@ -46,7 +46,7 @@ use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
-use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
+use crate::stream::{FragmentManager, GlobalStreamManager, SinkManager, SourceManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -181,6 +181,25 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         });
     }
 
+    let sink_manager = Arc::new(
+        SinkManager::new(
+            env.clone(),
+            cluster_manager.clone(),
+            barrier_manager.clone(),
+            catalog_manager.clone(),
+            fragment_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
+
+    {
+        let sink_manager = sink_manager.clone();
+        tokio::spawn(async move {
+            sink_manager.run().await.unwrap();
+        });
+    }
+
     let stream_manager = Arc::new(
         GlobalStreamManager::new(
             env.clone(),
@@ -208,6 +227,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         catalog_manager.clone(),
         stream_manager.clone(),
         source_manager,
+        sink_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
     );

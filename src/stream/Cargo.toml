@@ -37,6 +37,7 @@ risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_sink = { path = "../sink" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }

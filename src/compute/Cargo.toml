@@ -31,6 +31,7 @@ risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_sink = { path = "../sink" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
