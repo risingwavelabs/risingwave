@@ -182,7 +182,6 @@ impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize>
     }
 
     fn grow_at(&mut self, size: usize) {
-        // smooth growth size = 1 GiB
         let capacity = Self::grow_size_at(self.capacity, size);
         unsafe {
             let buffer = std::alloc::alloc_zeroed(std::alloc::Layout::from_size_align_unchecked(
