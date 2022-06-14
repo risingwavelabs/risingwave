@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -57,7 +58,7 @@ impl std::fmt::Debug for FunctionCall {
                 ExprType::Cast => {
                     assert_eq!(self.inputs.len(), 1);
                     self.inputs[0].fmt(f)?;
-                    return write!(f, "::{:?}", self.return_type);
+                    write!(f, "::{:?}", self.return_type)
                 }
                 ExprType::Add => debug_binary_op(f, "+", &self.inputs),
                 ExprType::Subtract => debug_binary_op(f, "-", &self.inputs),
@@ -144,7 +145,14 @@ impl FunctionCall {
                         // subsequent can be any type
                         _ => input.cast_explicit(DataType::Varchar),
                     })
-                    .collect::<Result<Vec<_>>>()?;
+                    .try_collect()?;
+                Ok(DataType::Varchar)
+            }
+            ExprType::ConcatOp => {
+                inputs = inputs
+                    .into_iter()
+                    .map(|input| input.cast_explicit(DataType::Varchar))
+                    .try_collect()?;
                 Ok(DataType::Varchar)
             }
 

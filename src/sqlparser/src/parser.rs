@@ -399,9 +399,7 @@ impl Parser {
                     op: UnaryOperator::Not,
                     expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
                 }),
-                Keyword::ROW => Ok(Expr::Row(
-                    self.parse_token_wrapped_exprs(&Token::LParen, &Token::RParen)?,
-                )),
+                Keyword::ROW => self.parse_row_expr(),
                 Keyword::ARRAY => Ok(Expr::Array(
                     self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
                 )),
@@ -958,7 +956,7 @@ impl Parser {
             Token::Minus => Some(BinaryOperator::Minus),
             Token::Mul => Some(BinaryOperator::Multiply),
             Token::Mod => Some(BinaryOperator::Modulo),
-            Token::StringConcat => Some(BinaryOperator::StringConcat),
+            Token::Concat => Some(BinaryOperator::Concat),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
             Token::Caret => Some(BinaryOperator::BitwiseXor),
             Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
@@ -1155,7 +1153,7 @@ impl Parser {
             Token::Caret | Token::Sharp | Token::ShiftRight | Token::ShiftLeft => Ok(22),
             Token::Ampersand => Ok(23),
             Token::Plus | Token::Minus => Ok(Self::PLUS_MINUS_PREC),
-            Token::Mul | Token::Div | Token::Mod | Token::StringConcat => Ok(40),
+            Token::Mul | Token::Div | Token::Mod | Token::Concat => Ok(40),
             Token::DoubleColon => Ok(50),
             Token::ExclamationMark => Ok(50),
             Token::LBracket => Ok(10),
@@ -1356,7 +1354,7 @@ impl Parser {
         let all = self.parse_keyword(Keyword::ALL);
         let distinct = self.parse_keyword(Keyword::DISTINCT);
         if all && distinct {
-            return parser_err!("Cannot specify both ALL and DISTINCT".to_string());
+            parser_err!("Cannot specify both ALL and DISTINCT".to_string())
         } else {
             Ok(distinct)
         }
@@ -2203,6 +2201,22 @@ impl Parser {
             Ok(vec![])
         } else {
             self.expected("a list of columns in parentheses", self.peek_token())
+        }
+    }
+
+    pub fn parse_row_expr(&mut self) -> Result<Expr, ParserError> {
+        if self.consume_token(&Token::LParen) {
+            if self.consume_token(&Token::RParen) {
+                Ok(Expr::Row(vec![]))
+            } else {
+                self.prev_token();
+                Ok(Expr::Row(self.parse_token_wrapped_exprs(
+                    &Token::LParen,
+                    &Token::RParen,
+                )?))
+            }
+        } else {
+            self.expected("(", self.peek_token())
         }
     }
 

@@ -16,10 +16,9 @@ use std::collections::HashMap;
 use std::mem::swap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
@@ -40,6 +39,8 @@ use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, QueryStageRef, StageId, TaskId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::SchedulerError::Internal;
+use crate::scheduler::{SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
@@ -47,11 +48,11 @@ enum StageState {
     Pending,
     Started {
         sender: Sender<StageMessage>,
-        handle: JoinHandle<Result<()>>,
+        handle: JoinHandle<SchedulerResult<()>>,
     },
     Running {
         _sender: Sender<StageMessage>,
-        _handle: JoinHandle<Result<()>>,
+        _handle: JoinHandle<SchedulerResult<()>>,
     },
     Completed,
     Failed,
@@ -67,7 +68,7 @@ pub enum StageEvent {
     /// Stage failed.
     Failed {
         id: StageId,
-        reason: RwError,
+        reason: SchedulerError,
     },
     Completed(StageId),
 }
@@ -155,7 +156,7 @@ impl StageExecution {
     }
 
     /// Starts execution of this stage, returns error if already started.
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&self) -> SchedulerResult<()> {
         let mut s = self.state.write().await;
         match &*s {
             &StageState::Pending => {
@@ -173,7 +174,7 @@ impl StageExecution {
                 };
                 let handle = spawn(async move {
                     if let Err(e) = runner.run().await {
-                        error!("Stage failed: {}", e);
+                        error!("Stage failed: {:?}", e);
                         Err(e)
                     } else {
                         Ok(())
@@ -195,7 +196,7 @@ impl StageExecution {
         }
     }
 
-    pub async fn stop(&self) -> Result<()> {
+    pub async fn stop(&self) -> SchedulerResult<()> {
         todo!()
     }
 
@@ -237,10 +238,10 @@ impl StageExecution {
 }
 
 impl StageRunner {
-    async fn run(self) -> Result<()> {
+    async fn run(self) -> SchedulerResult<()> {
         if let Err(e) = self.schedule_tasks().await {
             error!(
-                "Stage {:?}-{:?} failed to schedule tasks, error: {}",
+                "Stage {:?}-{:?} failed to schedule tasks, error: {:?}",
                 self.stage.query_id, self.stage.id, e
             );
             // TODO: We should cancel all scheduled tasks
@@ -273,9 +274,10 @@ impl StageRunner {
             .send(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
             .await
             .map_err(|e| {
-                InternalError(format!(
+                Internal(anyhow!(
                     "Failed to send stage scheduled event: {:?}, reason: {:?}",
-                    self.stage.id, e
+                    self.stage.id,
+                    e
                 ))
             })?;
 
@@ -283,19 +285,19 @@ impl StageRunner {
     }
 
     /// Send stage event to listener.
-    async fn send_event(&self, event: QueryMessage) -> Result<()> {
+    async fn send_event(&self, event: QueryMessage) -> SchedulerResult<()> {
         self.msg_sender.send(event).await.map_err(|e| {
             {
-                InternalError(format!(
+                Internal(anyhow!(
                     "Failed to send stage scheduled event: {:?}, reason: {:?}",
-                    self.stage.id, e
+                    self.stage.id,
+                    e
                 ))
             }
-            .into()
         })
     }
 
-    async fn schedule_tasks(&self) -> Result<()> {
+    async fn schedule_tasks(&self) -> SchedulerResult<()> {
         let mut futures = vec![];
         for id in 0..self.stage.parallelism {
             let task_id = TaskIdProst {
@@ -313,17 +315,23 @@ impl StageRunner {
         Ok(())
     }
 
-    async fn schedule_task(&self, task_id: TaskIdProst, plan_fragment: PlanFragment) -> Result<()> {
+    async fn schedule_task(
+        &self,
+        task_id: TaskIdProst,
+        plan_fragment: PlanFragment,
+    ) -> SchedulerResult<()> {
         let worker_node = self.worker_node_manager.next_random()?;
         let compute_client = self
             .compute_client_pool
             .get_client_for_addr(worker_node.host.as_ref().unwrap().into())
-            .await?;
+            .await
+            .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
         compute_client
             .create_task2(task_id, plan_fragment, self.epoch)
-            .await?;
+            .await
+            .map_err(|e| anyhow!(e))?;
 
         self.tasks[&t_id].inner.store(Arc::new(TaskStatus {
             _task_id: t_id,
@@ -393,7 +401,7 @@ impl StageRunner {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(&*e, task_id))
+                    .map(|e| self.convert_plan_node(e, task_id))
                     .collect();
 
                 PlanNodeProst {

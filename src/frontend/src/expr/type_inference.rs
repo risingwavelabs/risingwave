@@ -109,7 +109,6 @@ struct FuncSign {
 
 impl Eq for FuncSign {}
 
-#[allow(dead_code)]
 impl FuncSign {
     pub fn new(func: ExprType, inputs_type: Vec<DataTypeName>) -> Self {
         FuncSign { func, inputs_type }
@@ -327,10 +326,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     for e in [E::Trim, E::Ltrim, E::Rtrim] {
         map.insert(FuncSign::new(e, vec![T::Varchar, T::Varchar]), T::Varchar);
     }
-    map.insert(
-        FuncSign::new(E::Substr, vec![T::Varchar, T::Int32]),
-        T::Varchar,
-    );
+    for e in [E::Repeat, E::Substr] {
+        map.insert(FuncSign::new(e, vec![T::Varchar, T::Int32]), T::Varchar);
+    }
     map.insert(
         FuncSign::new(E::Substr, vec![T::Varchar, T::Int32, T::Int32]),
         T::Varchar,

@@ -94,7 +94,7 @@ fn valid_md5_password(password: &str) -> bool {
 }
 
 /// Encrypt "`password`+`name`" with SHA-256.
-#[allow(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 #[inline(always)]
 pub fn sha256_hash(name: &str, password: &str) -> Vec<u8> {
     let mut hasher = Sha256::new();

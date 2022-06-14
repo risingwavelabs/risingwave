@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::once;
+
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -68,7 +70,7 @@ impl Binder {
                     ExprType::Case
                 }
                 "concat" => {
-                    Self::rewrite_concat_to_concat_ws(&mut inputs)?;
+                    inputs = Self::rewrite_concat_to_concat_ws(inputs)?;
                     ExprType::ConcatWs
                 }
                 "concat_ws" => ExprType::ConcatWs,
@@ -101,6 +103,7 @@ impl Binder {
                 }
                 "char_length" => ExprType::CharLength,
                 "character_length" => ExprType::CharLength,
+                "repeat" => ExprType::Repeat,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
@@ -119,15 +122,17 @@ impl Binder {
         }
     }
 
-    fn rewrite_concat_to_concat_ws(inputs: &mut Vec<ExprImpl>) -> Result<()> {
+    fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         if inputs.is_empty() {
             Err(ErrorCode::BindError(
                 "Function `Concat` takes at least 1 arguments (0 given)".to_string(),
             )
             .into())
         } else {
-            inputs.insert(0, ExprImpl::literal_varchar("".to_string()));
-            Ok(())
+            let inputs = once(ExprImpl::literal_varchar("".to_string()))
+                .chain(inputs)
+                .collect();
+            Ok(inputs)
         }
     }
 

@@ -66,7 +66,7 @@ impl StoreLocalStatistic {
                 .inc_by(self.cache_meta_block_total);
         }
 
-        if self.cache_data_block_miss > 0 {
+        if self.cache_meta_block_miss > 0 {
             metrics
                 .sst_store_block_request_counts
                 .with_label_values(&["meta_miss"])

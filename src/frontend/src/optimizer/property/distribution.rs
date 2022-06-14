@@ -124,9 +124,8 @@ impl Distribution {
     /// valid.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
-            Distribution::Single => Default::default(),
+            Distribution::Single | Distribution::SomeShard => Default::default(),
             Distribution::HashShard(dists) => dists,
-            _ => unreachable!(),
         }
     }
 }

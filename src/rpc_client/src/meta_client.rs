@@ -66,6 +66,7 @@ use risingwave_pb::user::{
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
 
@@ -468,14 +469,34 @@ pub struct GrpcMetaClient {
 }
 
 impl GrpcMetaClient {
+    // Retry base interval in ms for connecting to meta server.
+    const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
+    // Max retry interval in ms for connecting to meta server.
+    const CONN_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
-        let channel = Endpoint::from_shared(addr.to_string())
-            .map_err(|e| InternalError(format!("{}", e)))?
-            .connect_timeout(Duration::from_secs(5))
-            .connect()
-            .await
-            .to_rw_result_with(|| format!("failed to connect to {}", addr))?;
+        let endpoint =
+            Endpoint::from_shared(addr.to_string()).map_err(|e| InternalError(format!("{}", e)))?;
+        let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
+            .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
+            .map(jitter);
+        let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
+            let endpoint = endpoint.clone();
+            endpoint
+                .connect_timeout(Duration::from_secs(5))
+                .connect()
+                .await
+                .map_err(|_e| {
+                    tracing::warn!(
+                        "Failed to connect to meta server: {}, wait for online.",
+                        addr
+                    );
+                })
+        })
+        .await
+        .expect("Retry connecting to meta server");
+
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let ddl_client = DdlServiceClient::new(channel.clone());

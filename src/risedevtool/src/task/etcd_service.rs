@@ -61,9 +61,11 @@ impl EtcdService {
             .arg("--max-txn-ops")
             .arg("999999")
             .arg("--auto-compaction-mode")
-            .arg("revision")
+            .arg("periodic")
             .arg("--auto-compaction-retention")
-            .arg("100");
+            .arg("1m")
+            .arg("--snapshot-count")
+            .arg("10000");
 
         if config.unsafe_no_fsync {
             cmd.arg("--unsafe-no-fsync");
