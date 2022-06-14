@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::SplitImpl;
 use risingwave_pb::common::ActorInfo;
@@ -203,7 +203,7 @@ where
                             request_id,
                             actor_ids: actors.to_owned(),
                         };
-                        client.drop_actors(request).await.to_rw_result()?;
+                        client.drop_actors(request).await?;
 
                         Ok::<_, RwError>(())
                     }
