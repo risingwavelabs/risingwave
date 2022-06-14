@@ -67,7 +67,7 @@ impl DatabaseCatalog {
     }
 
     pub fn owner(&self) -> String {
-        return self.owner.clone();
+        self.owner.clone()
     }
 }
 impl From<&ProstDatabase> for DatabaseCatalog {
