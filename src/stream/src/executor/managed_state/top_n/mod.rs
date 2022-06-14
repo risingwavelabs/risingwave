@@ -21,4 +21,3 @@ pub mod variants {
     pub const TOP_N_MIN: usize = 0;
     pub const TOP_N_MAX: usize = 1;
 }
-

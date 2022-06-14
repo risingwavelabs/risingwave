@@ -211,60 +211,29 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // This `order` is defined by the order between two `OrderedRow`.
         // We have to scan all because the top n on the storage may have been deleted by the flush
         // buffer.
-        match TOP_N_TYPE {
-            TOP_N_MIN => {
-                let state_table_iter = self.state_table.iter(epoch).await?;
-                pin_mut!(state_table_iter);
+        let state_table_iter = self.state_table.iter(epoch).await?;
+        pin_mut!(state_table_iter);
 
-                loop {
-                    if let Some(top_n_count) = self.top_n_count && self.top_n.len() >= top_n_count {
-                        break;
+        loop {
+            if let Some(top_n_count) = self.top_n_count && self.top_n.len() >= top_n_count {
+                    break;
+                }
+            match state_table_iter.next().await {
+                Some(next_res) => {
+                    let row = next_res.unwrap().into_owned();
+                    let mut datums = vec![];
+                    for pk_indice in &self.state_table.pk_indices {
+                        datums.push(row.index(*pk_indice).clone());
                     }
-                    match state_table_iter.next().await {
-                        Some(next_res) => {
-                            let row = next_res.unwrap().into_owned();
-                            let mut datums = vec![];
-                            for pk_indice in &self.state_table.pk_indices {
-                                datums.push(row.index(*pk_indice).clone());
-                            }
-                            let pk = Row::new(datums);
-                            let pk_ordered =
-                                OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
-                            self.top_n.insert(pk_ordered, row);
-                        }
-                        None => {
-                            break;
-                        }
-                    }
+                    let pk = Row::new(datums);
+                    let pk_ordered =
+                        OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+                    self.top_n.insert(pk_ordered, row);
+                }
+                None => {
+                    break;
                 }
             }
-            TOP_N_MAX => {
-                let state_table_iter = self.state_table.iter(epoch).await?;
-                pin_mut!(state_table_iter);
-
-                loop {
-                    if let Some(top_n_count) = self.top_n_count && self.top_n.len() >= top_n_count {
-                        break;
-                    }
-                    match state_table_iter.next().await {
-                        Some(next_res) => {
-                            let row = next_res.unwrap().into_owned();
-                            let mut datums = vec![];
-                            for pk_indice in &self.state_table.pk_indices {
-                                datums.push(row.index(*pk_indice).clone());
-                            }
-                            let pk = Row::new(datums);
-                            let pk_ordered =
-                                OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
-                            self.top_n.insert(pk_ordered, row);
-                        }
-                        None => {
-                            break;
-                        }
-                    }
-                }
-            }
-            _ => unreachable!(),
         }
         Ok(())
     }
