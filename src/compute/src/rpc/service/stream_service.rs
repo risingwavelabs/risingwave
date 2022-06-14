@@ -137,8 +137,7 @@ impl StreamService for StreamServiceImpl {
             Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
 
         self.mgr
-            .initiate_barrier_send(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
-            .await?;
+            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,

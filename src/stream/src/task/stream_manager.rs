@@ -83,14 +83,14 @@ pub struct LocalStreamManagerCore {
 
     /// Config of streaming engine
     pub(crate) config: StreamingConfig,
-
-    /// Save collect rx
-    collect_complete_receiver: HashMap<u64, oneshot::Receiver<CollectResult>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
 pub struct LocalStreamManager {
     core: Mutex<LocalStreamManagerCore>,
+
+    /// Save collect rx
+    collect_complete_receiver: Mutex<HashMap<u64, oneshot::Receiver<CollectResult>>>,
 }
 
 pub struct ExecutorParams {
@@ -141,6 +141,7 @@ impl LocalStreamManager {
     fn with_core(core: LocalStreamManagerCore) -> Self {
         Self {
             core: Mutex::new(core),
+            collect_complete_receiver: Mutex::new(HashMap::default()),
         }
     }
 
@@ -163,34 +164,21 @@ impl LocalStreamManager {
         Self::with_core(LocalStreamManagerCore::for_test())
     }
 
-    /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
+    /// Broadcast a barrier to all senders. save this receiver which will get notified when this
     /// barrier is finished.
-    fn send_barrier(
-        &self,
-        barrier: &Barrier,
-        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
-        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<oneshot::Receiver<CollectResult>> {
-        let core = self.core.lock();
-        let mut barrier_manager = core.context.lock_barrier_manager();
-        let rx = barrier_manager
-            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
-            .expect("no rx for local mode");
-        Ok(rx)
-    }
-
-    /// Broadcast a barrier to all senders and save collect rx. Returns when the barrier is sent to
-    /// all senders
-    pub async fn initiate_barrier_send(
+    pub fn send_barrier(
         &self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> Result<()> {
-        let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
-        self.core
+        let core = self.core.lock();
+        let mut barrier_manager = core.context.lock_barrier_manager();
+        let rx = barrier_manager
+            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
+            .expect("no rx for local mode");
+        self.collect_complete_receiver
             .lock()
-            .collect_complete_receiver
             .insert(barrier.epoch.prev, rx);
         Ok(())
     }
@@ -202,18 +190,7 @@ impl LocalStreamManager {
         prev_epoch: u64,
         need_sync: bool,
     ) -> CollectResult {
-        let rx = self
-            .core
-            .lock()
-            .collect_complete_receiver
-            .remove_entry(&prev_epoch)
-            .unwrap_or_else(|| {
-                panic!(
-                    "barrier collect complete receiver for prev epoch {} not exists",
-                    prev_epoch
-                )
-            })
-            .1;
+        let rx = self.get_collect_rx(prev_epoch);
         // Wait for all actors finishing this barrier.
         let mut collect_result = rx.await.unwrap();
 
@@ -236,6 +213,18 @@ impl LocalStreamManager {
         }
 
         collect_result
+    }
+
+    fn get_collect_rx(&self, prev_epoch: u64) -> oneshot::Receiver<CollectResult> {
+        self.collect_complete_receiver
+            .lock()
+            .remove(&prev_epoch)
+            .unwrap_or_else(|| {
+                panic!(
+                    "barrier collect complete receiver for prev epoch {} not exists",
+                    prev_epoch
+                )
+            })
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
@@ -277,8 +266,7 @@ impl LocalStreamManager {
             span: tracing::Span::none(),
         };
 
-        self.initiate_barrier_send(barrier, actor_ids_to_send, actor_ids_to_collect)
-            .await?;
+        self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
         self.collect_barrier_and_sync(barrier.epoch.prev, false)
             .await;
         self.core.lock().drop_all_actors();
@@ -390,7 +378,6 @@ impl LocalStreamManagerCore {
             streaming_metrics,
             compute_client_pool: ComputeClientPool::new(u64::MAX),
             config,
-            collect_complete_receiver: HashMap::default(),
         }
     }
 

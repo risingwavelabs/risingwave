@@ -389,7 +389,7 @@ where
                         "inject barrier request: {:?}", request
                     );
 
-                    // This RPC returns only if this worker node has inject this barrier.
+                    // This RPC returns only if this worker node has injected this barrier.
                     client
                         .inject_barrier(request)
                         .await
@@ -400,29 +400,37 @@ where
             }
         });
         try_join_all(inject_futures).await?;
-        let collect_futures = info.node_map.iter().filter_map(|(_, node)| {
-            let request_id = Uuid::new_v4().to_string();
-            let prev_epoch = command_context.prev_epoch.0;
-            async move {
-                let mut client = self.env.stream_client_pool().get(node).await?;
+        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
+            let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+            let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
+            if actor_ids_to_collect.is_empty() {
+                // No need to send or collect barrier for this node.
+                assert!(actor_ids_to_send.is_empty());
+                None
+            } else {
+                let request_id = Uuid::new_v4().to_string();
+                let prev_epoch = command_context.prev_epoch.0;
+                async move {
+                    let mut client = self.env.stream_client_pool().get(node).await?;
 
-                let request = BarrierCompleteRequest {
-                    request_id,
-                    prev_epoch,
-                };
-                tracing::trace!(
-                    target: "events::meta::barrier::barrier_complete",
-                    "inject barrier request: {:?}", request
-                );
+                    let request = BarrierCompleteRequest {
+                        request_id,
+                        prev_epoch,
+                    };
+                    tracing::trace!(
+                        target: "events::meta::barrier::barrier_complete",
+                        "barrier complete request: {:?}", request
+                    );
 
-                // This RPC returns only if this worker node has collected this barrier.
-                client
-                    .barrier_complete(request)
-                    .await
-                    .map(tonic::Response::<_>::into_inner)
-                    .to_rw_result()
+                    // This RPC returns only if this worker node has collected this barrier.
+                    client
+                        .barrier_complete(request)
+                        .await
+                        .map(tonic::Response::<_>::into_inner)
+                        .to_rw_result()
+                }
+                .into()
             }
-            .into()
         });
 
         try_join_all(collect_futures).await
