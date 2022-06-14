@@ -178,64 +178,6 @@ async fn test_basic() {
 }
 
 #[tokio::test]
-async fn test_vnode_filter() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let storage = HummockStorage::with_default_stats(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-    )
-    .await
-    .unwrap();
-
-    let val = Bytes::from(&b"value"[..]);
-    let table_count = 2;
-    let mut batch = Vec::with_capacity(table_count);
-    for table_id in 0..table_count as u32 {
-        let mut key = BytesMut::from(&b"t"[..]);
-        key.put_u32(table_id);
-        batch.push((key.freeze(), StorageValue::new_default_put(val.clone())));
-    }
-
-    let epoch: u64 = 1;
-    storage.ingest_batch(batch, epoch).await.unwrap();
-    storage.sync(Some(epoch)).await.unwrap();
-    meta_client
-        .commit_epoch(
-            epoch,
-            storage.local_version_manager.get_uncommitted_ssts(epoch),
-        )
-        .await
-        .unwrap();
-
-    let value_with_dummy_filter = storage
-        .get(&Bytes::from(&b"t\0\0\0\0"[..]), epoch)
-        .await
-        .unwrap();
-    assert_eq!(value_with_dummy_filter.unwrap(), Bytes::from(&b"value"[..]));
-
-    let value_with_blockall_filter = storage
-        .get(&Bytes::from(&b"t\0\0\0\0"[..]), epoch)
-        .await
-        .unwrap();
-    assert!(value_with_blockall_filter.is_none());
-
-    let value_with_mismatch_dummy_filter = storage
-        .get(&Bytes::from(&b"t\0\0\0\0"[..]), epoch)
-        .await
-        .unwrap();
-    assert!(value_with_mismatch_dummy_filter.is_none());
-}
-
-#[tokio::test]
 async fn test_state_store_sync() {
     let sstable_store = mock_sstable_store();
 

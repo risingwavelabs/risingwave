@@ -67,7 +67,7 @@ async fn test_failpoint_state_store_read_upload() {
 
     // Get the value after flushing to remote.
     let value = hummock_storage
-        .get(&anchor, 1, None)
+        .get(&anchor, 1)
         .await
         .unwrap()
         .unwrap();
@@ -93,14 +93,14 @@ async fn test_failpoint_state_store_read_upload() {
     sstable_store.clear_block_cache();
     fail::cfg(mem_read_err, "return").unwrap();
 
-    let result = hummock_storage.get(&anchor, 2, None).await;
+    let result = hummock_storage.get(&anchor, 2).await;
     assert!(result.is_err());
     let result = hummock_storage
-        .iter(..=b"ee".to_vec(), 2, Default::default())
+        .iter(..=b"ee".to_vec(), 2)
         .await;
     assert!(result.is_err());
 
-    let value = hummock_storage.get(b"ee".as_ref(), 2, None).await.unwrap();
+    let value = hummock_storage.get(b"ee".as_ref(), 2).await.unwrap();
     assert!(value.is_none());
     fail::remove(mem_read_err);
     // test the upload_error
@@ -129,7 +129,7 @@ async fn test_failpoint_state_store_read_upload() {
         .unwrap();
     assert_eq!(value, Bytes::from("111"));
     let mut iters = hummock_storage
-        .iter(..=b"ee".to_vec(), 5, Default::default())
+        .iter(..=b"ee".to_vec(), 5)
         .await
         .unwrap();
     let len = count_iter(&mut iters).await;
