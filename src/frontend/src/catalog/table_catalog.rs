@@ -51,6 +51,9 @@ pub struct TableCatalog {
     /// The appendonly attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
     /// on this to derive an append-only stream plan
     pub appendonly: bool,
+
+    //owner of table
+    pub owner: String,
 }
 
 impl TableCatalog {
@@ -188,6 +191,7 @@ impl From<ProstTable> for TableCatalog {
                 .collect_vec(),
             pks: tb.pk.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
+            owner: tb.owner,
         }
     }
 }
@@ -305,7 +309,8 @@ mod tests {
                     order: OrderType::Ascending
                 }],
                 distribution_keys: vec![],
-                appendonly: false
+                appendonly: false,
+                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             }
         );
     }
