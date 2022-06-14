@@ -9,7 +9,7 @@ abc
 query T
 select '2' || NULL;
 ----
-(empty)
+NULL
 
 query T
 select '1' || true;
