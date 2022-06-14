@@ -104,7 +104,6 @@ pub struct CellBasedTableExtended<S: StateStore, SER: CellSerializer> {
     pk_serializer: OrderedRowSerializer,
 
     /// Used for serializing the row.
-    // cell_based_row_serializer: CellBasedRowSerializer,
     cell_based_row_serializer: SER,
 
     /// Used for deserializing the row.
