@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package stream_plan;
 
-import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
@@ -154,8 +153,6 @@ message BatchPlanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
   repeated uint32 distribution_keys = 3;
-  common.ParallelUnitMapping hash_mapping = 4;
-  uint32 parallel_unit_id = 5;
 }
 
 message ArrangementInfo {
