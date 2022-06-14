@@ -218,6 +218,10 @@ impl<S: StateStore> StateTable<S> {
     pub fn pk_indices(&self) -> &[usize] {
         &self._pk_indices
     }
+
+    pub fn is_dirty(&self) -> bool {
+        !self.mem_table.buffer.is_empty()
+    }
 }
 
 pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;

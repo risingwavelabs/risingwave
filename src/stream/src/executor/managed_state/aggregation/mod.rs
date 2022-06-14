@@ -81,7 +81,11 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(&mut self, epoch: u64, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(
+        &mut self,
+        epoch: u64,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output().await,
             Self::Table(state) => state.get_output(epoch, state_table).await,

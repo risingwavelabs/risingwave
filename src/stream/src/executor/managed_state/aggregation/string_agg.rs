@@ -162,7 +162,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut StateTable<S>,
+        _state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
         for sort_key_index in &self.sort_key_indices {
@@ -209,7 +209,11 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         Ok(())
     }
 
-    async fn get_output(&mut self, epoch: u64, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
+    async fn get_output(
+        &mut self,
+        epoch: u64,
+        _state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Datum> {
         // We allow people to get output when the data is dirty.
         // As this is easier compared to `ManagedMinState` as we have a all-or-nothing cache policy
         // here.
@@ -246,7 +250,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
     fn flush(
         &mut self,
         write_batch: &mut WriteBatch<S>,
-        state_table: &mut StateTable<S>,
+        _state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             return Ok(());
@@ -261,7 +265,9 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                     // TODO(Yuanxin): Implement value meta
                     local.put(
                         key,
-                        StorageValue::new_default_put(serialize_cell(&Some(val)).map_err(StreamExecutorError::serde_error)?),
+                        StorageValue::new_default_put(
+                            serialize_cell(&Some(val)).map_err(StreamExecutorError::serde_error)?,
+                        ),
                     );
                 }
                 None => {
@@ -277,7 +283,6 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I64Array, Op, Utf8Array};
-    use risingwave_common::catalog::TableId;
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::{Keyspace, StateStore};
@@ -314,7 +319,7 @@ mod tests {
     }
 
     fn mock_state_table<S: StateStore>(keyspace: Keyspace<S>) -> StateTable<S> {
-        StateTable::new(keyspace.clone(), vec![], vec![], None, vec![])
+        StateTable::new(keyspace, vec![], vec![], None, vec![])
     }
 
     #[tokio::test]
@@ -340,7 +345,7 @@ mod tests {
                         .into(),
                 ],
                 epoch,
-                &mut state_table
+                &mut state_table,
             )
             .await
             .unwrap();
@@ -353,7 +358,9 @@ mod tests {
         );
 
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch, &mut state_table).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -371,7 +378,7 @@ mod tests {
                         .into(),
                 ],
                 epoch,
-                &mut state_table
+                &mut state_table,
             )
             .await
             .unwrap();
@@ -385,7 +392,9 @@ mod tests {
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch, &mut state_table).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -403,7 +412,7 @@ mod tests {
                         .into(),
                 ],
                 epoch,
-                &mut state_table
+                &mut state_table,
             )
             .await
             .unwrap();
@@ -418,7 +427,9 @@ mod tests {
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch, &mut state_table).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -455,7 +466,7 @@ mod tests {
                         .into(),
                 ],
                 epoch,
-                &mut state_table
+                &mut state_table,
             )
             .await
             .unwrap();
@@ -480,12 +491,15 @@ mod tests {
                     &I64Array::from_slice(&[Some(5), Some(6)]).unwrap().into(),
                 ],
                 epoch,
-                &mut state_table
+                &mut state_table,
             )
             .await
             .unwrap();
         assert!(managed_state.is_dirty());
-        assert_eq!(managed_state.get_output(epoch, &state_table).await.unwrap(), None,);
+        assert_eq!(
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
+            None,
+        );
         assert_eq!(managed_state.get_row_count(), 0);
 
         managed_state
@@ -499,14 +513,16 @@ mod tests {
                     &I64Array::from_slice(&[Some(7), Some(8)]).unwrap().into(),
                 ],
                 epoch,
-                &mut state_table
+                &mut state_table,
             )
             .await
             .unwrap();
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch, &mut state_table).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.get_row_count();
@@ -525,7 +541,7 @@ mod tests {
                     &I64Array::from_slice(&[Some(7), Some(9)]).unwrap().into(),
                 ],
                 epoch,
-                &mut state_table
+                &mut state_table,
             )
             .await
             .unwrap();
@@ -536,7 +552,9 @@ mod tests {
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch, &mut state_table).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -563,7 +581,7 @@ mod tests {
                         .into(),
                 ],
                 epoch,
-                &mut state_table
+                &mut state_table,
             )
             .await
             .unwrap();

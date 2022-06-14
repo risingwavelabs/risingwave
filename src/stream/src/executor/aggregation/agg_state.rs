@@ -45,7 +45,11 @@ impl<S: StateStore> Debug for AggState<S> {
 pub const ROW_COUNT_COLUMN: usize = 0;
 
 impl<S: StateStore> AggState<S> {
-    pub async fn row_count(&mut self, epoch: u64, state_table: &StateTable<S>) -> StreamExecutorResult<i64> {
+    pub async fn row_count(
+        &mut self,
+        epoch: u64,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<i64> {
         Ok(self.managed_states[ROW_COUNT_COLUMN]
             .get_output(epoch, state_table)
             .await?
@@ -104,7 +108,9 @@ impl<S: StateStore> AggState<S> {
             return Ok(0);
         }
 
-        let row_count = self.row_count(epoch, &state_table[0]).await?;
+        let row_count = self
+            .row_count(epoch, &state_table[ROW_COUNT_COLUMN])
+            .await?;
         let prev_row_count = self.prev_row_count();
 
         trace!(

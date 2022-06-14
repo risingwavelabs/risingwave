@@ -51,6 +51,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         }
     }
 
+    #[allow(dead_code)]
     fn is_reversed_order(&self) -> bool {
         match EXTREME_TYPE {
             variants::EXTREME_MAX => true,
@@ -62,6 +63,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
     /// Serialize key and `pk` (or, `row_id`s) into a sort key
     ///
     /// TODO: support `&K` instead of `K` as parameter.
+    #[allow(dead_code)]
     pub fn serialize(&self, key: Option<K>, pk: &ExtremePk) -> StreamExecutorResult<Vec<u8>> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serializer.set_reverse(self.is_reversed_order());
@@ -82,6 +84,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
     }
 
     /// Extract the pks from the sort key
+    #[allow(dead_code)]
     pub fn get_pk(&self, data: &[u8]) -> StreamExecutorResult<ExtremePk> {
         if self.pk_data_types.is_empty() {
             return Ok(ExtremePk::default());

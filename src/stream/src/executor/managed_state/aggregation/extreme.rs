@@ -25,15 +25,13 @@ use risingwave_common::hash::HashCode;
 use risingwave_common::types::{VirtualNode, *};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::storage_value::ValueMeta;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::executor::aggregation::{AggArgs, AggCall};
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkDataTypes;
 
 pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
@@ -69,28 +67,18 @@ where
     /// it's top n.
     top_n: BTreeMap<(Option<A::OwnedItem>, ExtremePk), Datum>,
 
-    /// The actions that will be taken on next flush
-    flush_buffer: BTreeMap<(Option<A::OwnedItem>, ExtremePk), FlushStatus<Datum>>,
-
     /// Number of items in the state including those not in top n cache but in state store.
     total_count: usize,
 
     /// Number of entries to retain in memory after each flush.
     top_n_count: Option<usize>,
 
-    /// Data type of the sort column
-    data_type: DataType,
-
     // TODO: Remove this phantom to get rid of S: StateStore.
     _phantom_data: PhantomData<S>,
 
     /// The sort key serializer
+    /// TODO: Remove this soon.
     serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
-
-    /// Computed via consistent hash. The value is to be set in value meta and used for grouping
-    /// the kv together in storage. Each extreme state will have the same value of virtual node,
-    /// since it is computed on group key.
-    vnode: VirtualNode,
 
     /// Primary key to look up in relational table. For value state, there is only one row.
     /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
@@ -115,7 +103,11 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
     ) -> StreamExecutorResult<()>;
 
     /// Get the output of the state. Must flush before getting output.
-    async fn get_output(&mut self, epoch: u64, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
+    async fn get_output(
+        &mut self,
+        epoch: u64,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Datum>;
 
     /// Check if this state needs a flush.
     fn is_dirty(&self) -> bool;
@@ -142,21 +134,20 @@ where
         top_n_count: Option<usize>,
         row_count: usize,
         pk_data_types: PkDataTypes,
-        group_key_hash_code: HashCode,
+        _group_key_hash_code: HashCode,
         pk: Option<&Row>,
     ) -> StreamExecutorResult<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
             top_n: BTreeMap::new(),
-            flush_buffer: BTreeMap::new(),
             total_count: row_count,
             // keyspace,
             _phantom_data: PhantomData::default(),
             top_n_count,
-            data_type: data_type.clone(),
+            // data_type: data_type.clone(),
             serializer: ExtremeSerializer::new(data_type, pk_data_types),
             group_key: pk.cloned(),
-            vnode: group_key_hash_code.to_vnode(),
+            // vnode: group_key_hash_code.to_vnode(),
         })
     }
 
@@ -234,20 +225,7 @@ where
                     .collect::<ExtremePk>(),
             );
 
-            // Assemble pk for relational table.
-            // let mut sort_key_vec = if let Some(group_key) = self.group_key.as_ref() {
-            //     group_key.0.to_vec()
-            // } else {
-            //     vec![]
-            // };
-            // let sort_key: Datum = key.map(|key| key.into());
-            // sort_key_vec.push(sort_key.clone());
-            // sort_key_vec.extend(composed_key.1.clone().into_iter());
-            // let relational_pk = Row::new(sort_key_vec.to_vec());
-            //
-            // // Assemble value for relational table. Should be relational pk + value.
-            // sort_key_vec.push(sort_key.clone());
-            // let relational_value = Row::new(sort_key_vec);
+            // Get relational pk and value.
             let sort_key = key.map(|key| key.into());
             let (relational_pk, relational_value) =
                 self.get_relational_pk_and_value(sort_key.clone(), composed_key.1.clone());
@@ -282,14 +260,11 @@ where
                     if do_insert {
                         self.top_n.insert(composed_key.clone(), value.clone());
                     }
-
-                    // FlushStatus::do_insert(self.flush_buffer.entry(composed_key), value);
                     state_table.insert(&relational_pk, relational_value)?;
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
                     self.top_n.remove(&composed_key);
-                    // FlushStatus::do_delete(self.flush_buffer.entry(composed_key));
                     state_table.delete(&relational_pk, relational_value)?;
                     self.total_count -= 1;
                 }
@@ -318,14 +293,18 @@ where
         None
     }
 
-    async fn get_output_inner(&mut self, epoch: u64, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
+    async fn get_output_inner(
+        &mut self,
+        epoch: u64,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Datum> {
         // To make things easier, we do not allow get_output before flushing. Otherwise we will need
         // to merge data from flush_buffer and state store, which is hard to implement.
         //
         // To make ExtremeState produce the correct result, the write batch must be flushed into the
         // state store before getting the output. Note that calling `.flush()` is not enough, as it
         // only generates a write batch without flushing to store.
-        debug_assert!(!self.is_dirty());
+        // debug_assert!(!state_table.is_dirty());
 
         // Firstly, check if datum is available in cache.
         if let Some(v) = self.get_output_from_cache() {
@@ -337,22 +316,15 @@ where
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
 
-            // let all_data_iter = if let Some(prefix) = self.group_key.as_ref() {
-            //     state_table
-            //         .iter_with_pk_prefix(
-            //             prefix.clone(),
-            //             OrderedRowSerializer::new(vec![OrderType::Ascending; prefix.size()]),
-            //             epoch,
-            //         )
-            //         .await?
-            // } else {
-            //     state_table.iter(epoch).await?
-            // };
             let all_data_iter = state_table
                 .iter_with_pk_prefix(
                     self.group_key.as_ref(),
                     OrderedRowSerializer::new(vec![
-                        OrderType::Ascending;
+                        if EXTREME_TYPE == variants::EXTREME_MAX {
+                            OrderType::Descending
+                        } else {
+                            OrderType::Ascending
+                        };
                         self.group_key
                             .as_ref()
                             .map_or(0, |key| key.size())
@@ -365,13 +337,15 @@ where
             for _ in 0..self.top_n_count.unwrap_or(usize::MAX) {
                 if let Some(inner) = all_data_iter.next().await {
                     let row = inner.unwrap().into_owned();
-                    let value = row[0].clone();
+                    let value = row[row.0.len() - 1].clone();
                     let mut key = ExtremePk::with_capacity(1);
-                    for pk_indice in state_table.pk_indices().iter().take(1) {
-                        key.push(row[*pk_indice].clone());
+                    let group_key_len = self.group_key.as_ref().map_or(0, |row| row.size());
+                    for pk_indice in group_key_len + 1..row.0.len() - 1 {
+                        key.push(row[pk_indice].clone());
                     }
                     let sort_key = value.map(|row| row.try_into().unwrap());
-                    self.top_n.insert((sort_key, key), row[0].clone());
+                    self.top_n
+                        .insert((sort_key, key), row[row.0.len() - 1].clone());
                 } else {
                     break;
                 }
@@ -386,45 +360,8 @@ where
     }
 
     /// Flush the internal state to a write batch.
-    fn flush_inner(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
-        // Generally, we require the state the be dirty before flushing. However, it is possible
-        // that after a sequence of operations, the flush buffer becomes empty. Then, the
-        // state becomes "dirty", but we do not need to flush anything.
-        if !self.is_dirty() {
-            self.retain_top_n();
-            return Ok(());
-        }
-
-        // let mut local = write_batch.prefixify(&self.keyspace);
-        let value_meta = ValueMeta::with_vnode(self.vnode);
-
-        // TODO: we can populate the cache while flushing, but that's hard.
-
-        for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
-            // let key_encoded = self.serializer.serialize(key.unwrap().clone(), &pks)?;
-            // let relational_pk = Row::new(vec![key.map(|key| key.into()),
-            // pks[0].as_ref().cloned()]);
-            let (relational_pk, relational_value) =
-                self.get_relational_pk_and_value(key.map(|key| key.into()), pks.clone());
-            match v.into_option() {
-                Some(v) => {
-                    // let value = Row::new(vec![v]);
-                    state_table.insert(&relational_pk, relational_value)?;
-                    // local.put(
-                    //     key_encoded,
-                    //     StorageValue::new_put(value_meta, serialize_cell(&v)?),
-                    // );
-                }
-                None => {
-                    // local.delete_with_value_meta(key_encoded, value_meta);
-                    state_table.delete(&relational_pk, relational_value)?;
-                    // state_table.delete_with_value_meta();
-                }
-            }
-        }
-
+    fn flush_inner(&mut self) -> StreamExecutorResult<()> {
         self.retain_top_n();
-
         Ok(())
     }
 
@@ -437,13 +374,12 @@ where
         } else {
             vec![]
         };
-        // let sort_key: Datum = sort_key.map(|key| key.into());
         sort_key_vec.push(sort_key.clone());
         sort_key_vec.extend(extreme_pk.into_iter());
         let relational_pk = Row::new(sort_key_vec.to_vec());
 
         // Assemble value for relational table. Should be relational pk + value.
-        sort_key_vec.push(sort_key.clone());
+        sort_key_vec.push(sort_key);
         let relational_value = Row::new(sort_key_vec);
 
         (relational_pk, relational_value)
@@ -469,21 +405,25 @@ where
             .await
     }
 
-    async fn get_output(&mut self, epoch: u64, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
+    async fn get_output(
+        &mut self,
+        epoch: u64,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Datum> {
         self.get_output_inner(epoch, state_table).await
     }
 
     /// Check if this state needs a flush.
     fn is_dirty(&self) -> bool {
-        !self.flush_buffer.is_empty()
+        unreachable!("Should not call this function anymore, check state table for dirty data");
     }
 
     fn flush(
         &mut self,
-        write_batch: &mut WriteBatch<S>,
-        state_table: &mut StateTable<S>,
+        _write_batch: &mut WriteBatch<S>,
+        _state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        self.flush_inner(state_table)
+        self.flush_inner()
     }
 }
 
@@ -578,16 +518,7 @@ mod tests {
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
-        let mut state_table = StateTable::new(
-            keyspace.clone(),
-            vec![
-                ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
-            ],
-            vec![],
-            None,
-            vec![1],
-        );
+        let mut state_table = state_table_create_helper(keyspace.clone(), 2, OrderType::Ascending);
 
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
@@ -600,7 +531,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!managed_state.is_dirty());
+        assert!(!state_table.is_dirty());
 
         let mut epoch: u64 = 0;
         // insert 0, 10, 20
@@ -616,7 +547,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(managed_state.is_dirty());
+        assert!(state_table.is_dirty());
 
         // flush to write batch and write to state store
         let mut write_batch = store.start_write_batch();
@@ -624,6 +555,7 @@ mod tests {
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
         write_batch.ingest(epoch).await.unwrap();
+        state_table.commit(epoch).await.unwrap();
 
         // The minimum should be 0
         assert_eq!(
@@ -655,6 +587,7 @@ mod tests {
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
         write_batch.ingest(epoch).await.unwrap();
+        state_table.commit(epoch).await.unwrap();
 
         // The minimum should be 0
         assert_eq!(
@@ -685,6 +618,7 @@ mod tests {
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
         write_batch.ingest(epoch).await.unwrap();
+        state_table.commit(epoch).await.unwrap();
 
         // The minimum should be 20
         assert_eq!(
@@ -711,6 +645,7 @@ mod tests {
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
         write_batch.ingest(epoch).await.unwrap();
+        state_table.commit(epoch).await.unwrap();
 
         // The minimum should be 25
         assert_eq!(
@@ -737,6 +672,7 @@ mod tests {
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
         write_batch.ingest(epoch).await.unwrap();
+        state_table.commit(epoch).await.unwrap();
 
         // The minimum should be 30
         assert_eq!(
@@ -787,19 +723,37 @@ mod tests {
         test_replicated_value_with_null::<{ variants::EXTREME_MAX }>().await
     }
 
+    fn state_table_create_helper<S: StateStore>(
+        keyspace: Keyspace<S>,
+        column_cnt: usize,
+        order_type: OrderType,
+    ) -> StateTable<S> {
+        let mut column_descs = Vec::with_capacity(column_cnt);
+        for id in 0..column_cnt {
+            column_descs.push(ColumnDesc::unnamed(
+                ColumnId::new(id as i32),
+                DataType::Int64,
+            ));
+        }
+        let relational_pk_len = column_descs.len() - 1;
+        StateTable::new(
+            keyspace,
+            column_descs,
+            vec![order_type; relational_pk_len],
+            None,
+            (0..relational_pk_len).collect(),
+        )
+    }
+
     async fn test_replicated_value_not_null<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
-        let mut state_table = StateTable::new(
-            keyspace.clone(),
-            vec![
-                ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
-            ],
-            vec![],
-            None,
-            vec![1],
-        );
+        let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
+            OrderType::Descending
+        } else {
+            OrderType::Ascending
+        };
+        let mut state_table = state_table_create_helper(keyspace.clone(), 3, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
@@ -812,7 +766,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!managed_state.is_dirty());
+        assert!(!state_table.is_dirty());
 
         let value_buffer =
             I64Array::from_slice(&[Some(1), Some(1), Some(4), Some(5), Some(1), Some(4)])
@@ -910,16 +864,12 @@ mod tests {
     async fn test_replicated_value_with_null<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
-        let mut state_table = StateTable::new(
-            keyspace.clone(),
-            vec![
-                ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
-            ],
-            vec![],
-            None,
-            vec![1],
-        );
+        let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
+            OrderType::Descending
+        } else {
+            OrderType::Ascending
+        };
+        let mut state_table = state_table_create_helper(keyspace.clone(), 3, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
@@ -932,7 +882,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!managed_state.is_dirty());
+        assert!(!state_table.is_dirty());
 
         let value_buffer =
             I64Array::from_slice(&[Some(1), Some(1), Some(4), Some(5), Some(1), Some(4)])
@@ -1059,15 +1009,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut state_table = StateTable::new(
-            keyspace.clone(),
-            vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
-            vec![],
-            None,
-            vec![],
-        );
+        let mut state_table = state_table_create_helper(keyspace.clone(), 2, OrderType::Ascending);
 
-        assert!(!managed_state.is_dirty());
+        assert!(!state_table.is_dirty());
 
         let value_buffer =
             I64Array::from_slice(&[Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)])
@@ -1154,13 +1098,19 @@ mod tests {
 
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
-        let mut state_table = StateTable::new(
-            keyspace.clone(),
-            vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
-            vec![],
-            None,
-            vec![],
-        );
+        // let mut state_table = StateTable::new(
+        //     keyspace.clone(),
+        //     vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
+        //     vec![],
+        //     None,
+        //     vec![],
+        // );
+        let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
+            OrderType::Descending
+        } else {
+            OrderType::Ascending
+        };
+        let mut state_table = state_table_create_helper(keyspace.clone(), 2, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
@@ -1229,6 +1179,7 @@ mod tests {
                 .flush(&mut write_batch, &mut state_table)
                 .unwrap();
             write_batch.ingest(epoch).await.unwrap();
+            state_table.commit(epoch).await.unwrap();
 
             let value = managed_state
                 .get_output(epoch, &state_table)
@@ -1275,15 +1226,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut state_table = StateTable::new(
-            keyspace.clone(),
-            vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
-            vec![],
-            None,
-            vec![],
-        );
+        let mut state_table = state_table_create_helper(keyspace.clone(), 2, OrderType::Ascending);
 
-        assert!(!managed_state.is_dirty());
+        assert!(!state_table.is_dirty());
 
         let value_buffer =
             I64Array::from_slice(&[Some(1), Some(2), Some(3), Some(4), Some(5), Some(7)])

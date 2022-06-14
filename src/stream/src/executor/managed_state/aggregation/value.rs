@@ -191,7 +191,7 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state =
+        let managed_state =
             ManagedValueState::new(create_test_count_state(), None, None, &state_table)
                 .await
                 .unwrap();
@@ -262,7 +262,7 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state =
+        let managed_state =
             ManagedValueState::new(create_test_max_agg_append_only(), None, None, &state_table)
                 .await
                 .unwrap();
