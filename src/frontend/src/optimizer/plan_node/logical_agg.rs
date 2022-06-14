@@ -304,7 +304,7 @@ impl LogicalAgg {
         );
         let pk_indices = match group_keys.is_empty() {
             // simple agg
-            true => (0..schema.len()).collect(),
+            true => vec![],
             // group agg
             false => group_keys.clone(),
         };
