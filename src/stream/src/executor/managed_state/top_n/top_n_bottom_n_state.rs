@@ -221,7 +221,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         self.total_count -= 1;
         // If we have nothing in both caches, we have to scan from the storage.
         if self.top_n.is_empty() && self.bottom_n.is_empty() && self.total_count > 0 {
-            self.scan_and_merge(epoch).await?;
+            self.scan_from_relational_table(epoch).await?;
         }
         let value = match (prev_top_n_entry, prev_bottom_n_entry) {
             (None, None) => None,
@@ -232,7 +232,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     }
 
     /// The same as the one in `ManagedTopNState`.
-    pub async fn scan_and_merge(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    pub async fn scan_from_relational_table(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         let mut kv_pairs = vec![];
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
@@ -248,8 +248,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
 
         // The reason we can split the `kv_pairs` withocut caring whether the key to be inserted is
-        // already in the top_n or bottom_n is that we would only trigger `scan_and_merge` when both
-        // caches are empty.
+        // already in the top_n or bottom_n is that we would only trigger
+        // `scan_from_relational_table` when both caches are empty.
 
         {
             let part1 = kv_pairs.drain(0..kv_pairs.len() / 2);

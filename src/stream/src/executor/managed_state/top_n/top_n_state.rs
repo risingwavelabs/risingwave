@@ -194,23 +194,9 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         Ok(())
     }
 
-    /// This function is a temporary implementation to bypass the about-to-be-implemented
-    /// transaction layer of Hummock.
-    ///
-    /// This function scans kv pairs from the storage, and properly deal with them
-    /// according to the flush buffer.
-    pub async fn scan_and_merge(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        // For a key scanned from the storage,
-        // 1. Not touched by flush buffer. Do nothing.
-        // 2. Deleted by flush buffer. Do not go into cache.
-        // 3. Overridden by flush buffer. Go into cache with the new value.
-        // We remark that:
-        // 1. if TOP_N_MIN, kv_pairs is sorted in ascending order.
-        // 2. if TOP_N_MAX, kv_pairs is sorted in descending order.
-        // while flush_buffer is always sorted in ascending order.
-        // This `order` is defined by the order between two `OrderedRow`.
-        // We have to scan all because the top n on the storage may have been deleted by the flush
-        // buffer.
+    /// This function scans rows by `StateTableRowIter` , which scan rows from the
+    /// `shared_storage`(`cell_based_table`) and memory(`mem_table`) .
+    pub async fn scan_from_relational_table(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
 
@@ -258,7 +244,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         self.total_count -= 1;
         // If we have nothing in the cache, we have to scan from the storage.
         if self.top_n.is_empty() && self.total_count > 0 {
-            self.scan_and_merge(epoch).await?;
+            self.scan_from_relational_table(epoch).await?;
             self.retain_top_n();
         }
         Ok(prev_entry)
