@@ -42,7 +42,7 @@ pub trait NumericFieldRandomGenerator {
     where
         Self: Sized;
 
-    fn generate(&mut self) -> Value;
+    fn generate(&mut self, offset: u64) -> Value;
 }
 
 /// fields that can be continuously generated impl this trait
@@ -156,18 +156,18 @@ impl FieldGeneratorImpl {
         }
     }
 
-    pub fn generate(&mut self) -> Value {
+    pub fn generate(&mut self, offset: u64) -> Value {
         match self {
             FieldGeneratorImpl::I16Sequence(f) => f.generate(),
             FieldGeneratorImpl::I32Sequence(f) => f.generate(),
             FieldGeneratorImpl::I64Sequence(f) => f.generate(),
             FieldGeneratorImpl::F32Sequence(f) => f.generate(),
             FieldGeneratorImpl::F64Sequence(f) => f.generate(),
-            FieldGeneratorImpl::I16Random(f) => f.generate(),
-            FieldGeneratorImpl::I32Random(f) => f.generate(),
-            FieldGeneratorImpl::I64Random(f) => f.generate(),
-            FieldGeneratorImpl::F32Random(f) => f.generate(),
-            FieldGeneratorImpl::F64Random(f) => f.generate(),
+            FieldGeneratorImpl::I16Random(f) => f.generate(offset),
+            FieldGeneratorImpl::I32Random(f) => f.generate(offset),
+            FieldGeneratorImpl::I64Random(f) => f.generate(offset),
+            FieldGeneratorImpl::F32Random(f) => f.generate(offset),
+            FieldGeneratorImpl::F64Random(f) => f.generate(offset),
             FieldGeneratorImpl::Varchar(f) => f.generate(),
             FieldGeneratorImpl::Timestamp(f) => f.generate(),
         }
@@ -197,7 +197,7 @@ mod tests {
 
         for step in 0..5 {
             for (index, i32_field) in i32_fields.iter_mut().enumerate() {
-                let value = i32_field.generate();
+                let value = i32_field.generate(0);
                 assert!(value.is_number());
                 let num = value.as_u64();
                 let expected_num = split_num * step + 1 + index as u64;

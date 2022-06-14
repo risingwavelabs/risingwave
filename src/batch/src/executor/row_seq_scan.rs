@@ -168,7 +168,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
-                let iter = table.iter_with_pk(source.epoch, &pk_descs).await?;
+                let iter = table.dedup_pk_iter(source.epoch, &pk_descs).await?;
                 ScanType::TableScan(iter)
             } else if pk_prefix_value.size() == pk_descs.len() {
                 keyspace.state_store().wait_epoch(source.epoch).await?;

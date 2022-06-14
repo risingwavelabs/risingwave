@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_common::error::Result;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
     CompactTask, CompactionGroup, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
     VacuumTask,
 };
 use tonic::Streaming;
+
+use crate::error::Result;
 
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {

@@ -62,16 +62,17 @@ impl DatagenEventGenerator {
             if now.elapsed().as_millis() >= DEFUALT_DATAGEN_INTERVAL {
                 break;
             }
+            let offset = self.events_so_far + i;
             let map: Map<String, Value> = self
                 .fields_map
                 .iter_mut()
-                .map(|(name, field_generator)| (name.to_string(), field_generator.generate()))
+                .map(|(name, field_generator)| (name.to_string(), field_generator.generate(offset)))
                 .collect();
 
             let value = Value::Object(map);
             let msg = SourceMessage {
                 payload: Some(Bytes::from(value.to_string())),
-                offset: (self.events_so_far + i).to_string(),
+                offset: offset.to_string(),
                 split_id: self.split_id.clone(),
             };
             generated_count += 1;

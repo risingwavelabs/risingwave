@@ -14,10 +14,11 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use moka::future::Cache;
-use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 
+use crate::error::Result;
 use crate::ComputeClient;
 
 #[derive(Clone)]
@@ -37,10 +38,7 @@ impl ComputeClientPool {
         self.cache
             .try_get_with(addr.clone(), async { ComputeClient::new(addr).await })
             .await
-            .map_err(|e| {
-                // TODO: change this to error when we completed failover and error handling
-                panic!("failed to create compute client: {:?}", e)
-            })
+            .map_err(|e| anyhow!("failed to create compute client: {:?}", e).into())
     }
 }
 

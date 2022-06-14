@@ -82,7 +82,7 @@ pub enum Token {
     /// Modulo Operator `%`
     Mod,
     /// String concatenation `||`
-    StringConcat,
+    Concat,
     /// Left parenthesis `(`
     LParen,
     /// Right parenthesis `)`
@@ -164,7 +164,7 @@ impl fmt::Display for Token {
             Token::Minus => f.write_str("-"),
             Token::Mul => f.write_str("*"),
             Token::Div => f.write_str("/"),
-            Token::StringConcat => f.write_str("||"),
+            Token::Concat => f.write_str("||"),
             Token::Mod => f.write_str("%"),
             Token::LParen => f.write_str("("),
             Token::RParen => f.write_str(")"),
@@ -501,7 +501,7 @@ impl<'a> Tokenizer<'a> {
                             chars.next(); // consume the second '|'
                             match chars.peek() {
                                 Some('/') => self.consume_and_return(chars, Token::PGCubeRoot),
-                                _ => Ok(Some(Token::StringConcat)),
+                                _ => Ok(Some(Token::Concat)),
                             }
                         }
                         // Bitshift '|' operator
@@ -807,7 +807,7 @@ mod tests {
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString(String::from("a")),
             Token::Whitespace(Whitespace::Space),
-            Token::StringConcat,
+            Token::Concat,
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString(String::from("b")),
         ];
