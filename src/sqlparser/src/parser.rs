@@ -1781,9 +1781,11 @@ impl Parser {
                     new_column_name,
                 }
             }
-        } else if self.parse_keywords(&[Keyword::OWNER,Keyword::TO]) {
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
             let owner_name: Ident = self.parse_identifier()?;
-            AlterTableOperation::ChangeOwner { new_owner_name: owner_name } 
+            AlterTableOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
             let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);

@@ -52,7 +52,7 @@ pub struct TableCatalog {
     /// on this to derive an append-only stream plan
     pub appendonly: bool,
 
-    //owner of table
+    // owner of table
     pub owner: String,
 }
 
@@ -262,7 +262,6 @@ mod tests {
                 .into(),
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
-
         }
         .into();
 

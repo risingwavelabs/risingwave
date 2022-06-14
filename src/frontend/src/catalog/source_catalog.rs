@@ -34,6 +34,7 @@ pub struct SourceCatalog {
     pub pk_col_ids: Vec<ColumnId>,
     pub source_type: SourceType,
     pub append_only: bool,
+    pub owner: String,
 }
 
 impl SourceCatalog {
@@ -91,6 +92,7 @@ impl From<&ProstSource> for SourceCatalog {
                 append_only = true;
             }
         }
+        let owner: String = prost.owner.clone();
 
         Self {
             id,
@@ -99,6 +101,7 @@ impl From<&ProstSource> for SourceCatalog {
             pk_col_ids,
             source_type,
             append_only,
+            owner,
         }
     }
 }
