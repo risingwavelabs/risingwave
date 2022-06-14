@@ -222,7 +222,6 @@ impl<S: StateStore> CellBasedTable<S> {
             // If value meta is computed here, then the cell based table is guaranteed to have
             // distribution keys. Also, it is guaranteed that distribution key indices will
             // not exceed the length of pk. So we simply do unwrap here.
-            println!("cell based write pk_bytes = {:?}\n", pk);
             match row_op {
                 RowOp::Insert(row) => {
                     let value_meta = if WITH_VALUE_META {
