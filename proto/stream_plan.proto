@@ -26,17 +26,6 @@ message SourceNode {
   SourceType source_type = 3;
 }
 
-// todo: StreamSourceNode or TableSourceNode
-message SinkNode {
-  enum SinkType {
-    TABLE = 0;
-    SINK = 1;
-  }
-  plan_common.TableRefId table_ref_id = 1;
-  repeated int32 column_ids = 2;
-  SinkType sink_type = 3;
-}
-
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
 }
@@ -240,7 +229,6 @@ message StreamNode {
     LookupUnionNode lookup_union = 117;
     UnionNode union = 118;
     DeltaIndexJoinNode delta_index_join = 119;
-    SinkNode sink = 120;
   }
   // The id for the operator.
   uint64 operator_id = 1;

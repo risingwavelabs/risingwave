@@ -87,11 +87,6 @@ pub async fn handle_show_object(
             .iter_materialized_source()
             .map(|t| t.name.clone())
             .collect(),
-        ShowObject::Sink { schema } => catalog_reader
-                .get_schema_by_name(session.database(), schema_or_default(&schema))?
-                .iter_source()
-                .map(|t| t.name.clone())
-                .collect(),
         ShowObject::Columns { table } => {
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);

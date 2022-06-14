@@ -23,11 +23,9 @@ pub(crate) mod database_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
 pub(crate) mod source_catalog;
-pub(crate) mod sink_catalog;
 pub(crate) mod table_catalog;
 
 pub(crate) type SourceId = u32;
-pub(crate) type SinkId = u32;
 
 pub(crate) type DatabaseId = u32;
 pub(crate) type SchemaId = u32;
@@ -58,7 +56,6 @@ pub fn is_row_id_column_name(name: &str) -> bool {
 }
 
 pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
-pub const TABLE_SINK_PK_COLID: ColumnId = ColumnId::new(0);
 
 /// Creates a row ID column (for implicit primary key).
 pub fn row_id_column_desc() -> ColumnDesc {

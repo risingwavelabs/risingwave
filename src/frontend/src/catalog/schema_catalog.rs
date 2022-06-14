@@ -19,12 +19,10 @@ use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::source_catalog::SourceCatalog;
-use super::sink_catalog::SinkCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::SchemaId;
 
 pub type SourceId = u32;
-pub type SinkId = u32;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -35,8 +33,6 @@ pub struct SchemaCatalog {
     table_name_by_id: HashMap<TableId, String>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
-    sink_by_name: HashMap<String, SinkCatalog>,
-    sink_name_by_id: HashMap<SinkId, String>,
 }
 
 impl SchemaCatalog {
@@ -105,14 +101,6 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
-    /// Iterate all sinks, including the materialized sinks.
-    pub fn iter_sink(&self) -> impl Iterator<Item = &SinkCatalog> {
-        self.sink_by_name
-            .iter()
-            .filter(|(_, v)| matches!(v.sink_type, SinkType::Sink))
-            .map(|(_, v)| v)
-    }
-
     /// Iterate the materialized sources.
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &SourceCatalog> {
         self.source_by_name
@@ -132,10 +120,6 @@ impl SchemaCatalog {
         self.source_by_name.get(source_name)
     }
 
-    pub fn get_sink_by_name(&self, sink_name: &str) -> Option<&SinkCatalog> {
-        self.sink_by_name.get(sink_name)
-    }
-
     pub fn id(&self) -> SchemaId {
         self.id
     }
@@ -150,8 +134,6 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
-            sink_by_name: HashMap::new(),
-            sink_name_by_id: HashMap::new(),
         }
     }
 }
