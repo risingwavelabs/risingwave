@@ -26,6 +26,7 @@ select concat('a', NULL);
 ----
 a
 
+# FIXME: should be '11.01At'
 query T
 select concat(1, 1.01, 'A', true, NULL);
 ----
@@ -35,11 +36,12 @@ statement error
 select concat();
 
 statement ok
-create table t (v1 smallint, v2 int, v3 decimal, v4 real, v5 double, v6 bool, v7 varchar);
+create table t (v1 smallint, v2 int, v3 decimal, v4 real, v5 double precision, v6 bool, v7 varchar);
 
 statement ok
 insert into t values (1, 2, 3.01, 4, 5.01, true, NULL);
 
+# FIXME: should be '123.0145.01t'
 query T
 select concat(v1, v2, v3, v4, v5, v6, v7) from t;
 ----
