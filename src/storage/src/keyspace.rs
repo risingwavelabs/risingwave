@@ -30,7 +30,7 @@ pub struct Keyspace<S: StateStore> {
     store: S,
 
     /// Encoded representation for all segments.
-    pub prefix: Vec<u8>,
+    prefix: Vec<u8>,
 
     /// Records vnodes that the keyspace owns and the id of state table. Currently, it will be None
     /// in batch, and might be refactored later.
