@@ -383,7 +383,7 @@ mod tests {
         ];
 
         let simple_agg = Box::new(
-            SimpleAggExecutor::new(Box::new(source), agg_calls, keyspace, vec![], 1, vec![])
+            SimpleAggExecutor::new(Box::new(source), agg_calls, keyspace, vec![2], 1, vec![])
                 .unwrap(),
         );
         let mut simple_agg = simple_agg.execute();

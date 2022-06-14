@@ -768,7 +768,7 @@ mod tests {
         ];
 
         let hash_agg =
-            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![2], 1);
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -855,7 +855,7 @@ mod tests {
         ];
 
         let hash_agg =
-            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![2], 1);
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
