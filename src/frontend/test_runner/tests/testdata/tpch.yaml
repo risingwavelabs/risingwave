@@ -1334,7 +1334,7 @@
   batch_plan: |
     BatchExchange { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC], dist: Single }
       BatchSort { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC] }
-        BatchHashAgg { group_keys: [$0, $1, $2], aggs: [count($3)] }
+        BatchHashAgg { group_keys: [$0, $1, $2], aggs: [count(distinct $3)] }
           BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
             BatchProject { exprs: [$1, $2, $3, $0] }
               BatchHashJoin { type: LeftAnti, predicate: $0 = $4 }
@@ -1352,7 +1352,7 @@
                       BatchScan { table: supplier, columns: [s_suppkey, s_comment] }
   stream_plan: |
     StreamMaterialize { columns: [p_brand, p_type, p_size, agg#0(hidden), supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
-      StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, count($3)] }
+      StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, count(distinct $3)] }
         StreamExchange { dist: HashShard([0, 1, 2]) }
           StreamProject { exprs: [$1, $2, $3, $0, $4, $5] }
             StreamHashJoin { type: LeftAnti, predicate: $0 = $6 }
