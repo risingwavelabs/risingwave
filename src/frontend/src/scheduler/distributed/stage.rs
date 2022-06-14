@@ -354,7 +354,7 @@ impl StageRunner {
                     .children
                     .iter()
                     .find(|child_stage| {
-                        child_stage.stage.id == execution_plan_node.stage_id.unwrap()
+                        child_stage.stage.id == execution_plan_node.source_stage_id.unwrap()
                     })
                     .map(|child_stage| child_stage.all_exchange_sources_for(task_id))
                     .unwrap();

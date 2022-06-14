@@ -56,11 +56,11 @@ pub struct ExecutionPlanNode {
 
     pub children: Vec<Arc<ExecutionPlanNode>>,
 
-    /// If this node is `BatchExchange`, we need `stage_id` so that when creating `PlanNode` we can
-    /// find `ExchangeSource` from scheduler.
+    /// The stage id of the source of `BatchExchange`.
+    /// Used to find `ExchangeSource` from scheduler when creating `PlanNode`.
     ///
     /// `None` when this node is not `BatchExchange`.
-    pub stage_id: Option<StageId>,
+    pub source_stage_id: Option<StageId>,
 }
 
 impl From<PlanRef> for ExecutionPlanNode {
@@ -71,7 +71,7 @@ impl From<PlanRef> for ExecutionPlanNode {
             node: plan_node.to_batch_prost_body(),
             children: vec![],
             schema: plan_node.schema().to_prost(),
-            stage_id: None,
+            source_stage_id: None,
         }
     }
 }
@@ -82,7 +82,7 @@ impl ExecutionPlanNode {
     }
 }
 
-/// `BatchPlanFragmenter` [`split`](Self::split) a query plan into fragments.
+/// `BatchPlanFragmenter` splits a query plan into fragments.
 pub struct BatchPlanFragmenter {
     query_id: QueryId,
     stage_graph_builder: StageGraphBuilder,
@@ -379,7 +379,7 @@ impl BatchPlanFragmenter {
         let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
         let child_exchange_info = node.distribution().to_prost(builder.parallelism);
         let child_stage = self.new_stage(node.inputs()[0].clone(), child_exchange_info);
-        execution_plan_node.stage_id = Some(child_stage.id);
+        execution_plan_node.source_stage_id = Some(child_stage.id);
 
         if let Some(parent) = parent_exec_node {
             parent.children.push(Arc::new(execution_plan_node));
@@ -592,7 +592,7 @@ mod tests {
         // Check plan node in each stages.
         let root_exchange = query.stage_graph.stages.get(&0).unwrap();
         assert_eq!(root_exchange.root.node_type(), PlanNodeType::BatchExchange);
-        assert_eq!(root_exchange.root.stage_id, Some(1));
+        assert_eq!(root_exchange.root.source_stage_id, Some(1));
         assert!(matches!(root_exchange.root.node, NodeBody::Exchange(_)));
         assert_eq!(root_exchange.parallelism, 1);
         assert!(!root_exchange.has_table_scan);
@@ -602,32 +602,33 @@ mod tests {
         assert_eq!(join_node.parallelism, 3);
 
         assert!(matches!(join_node.root.node, NodeBody::HashJoin(_)));
-        assert_eq!(join_node.root.stage_id, None);
+        assert_eq!(join_node.root.source_stage_id, None);
         assert_eq!(2, join_node.root.children.len());
 
         assert!(matches!(
             join_node.root.children[0].node,
             NodeBody::Exchange(_)
         ));
-        assert_eq!(join_node.root.children[0].stage_id, Some(2));
+        assert_eq!(join_node.root.children[0].source_stage_id, Some(2));
         assert_eq!(0, join_node.root.children[0].children.len());
 
         assert!(matches!(
             join_node.root.children[1].node,
             NodeBody::Exchange(_)
         ));
-        assert_eq!(join_node.root.children[1].stage_id, Some(3));
+        assert_eq!(join_node.root.children[1].source_stage_id, Some(3));
         assert_eq!(0, join_node.root.children[1].children.len());
         assert!(!join_node.has_table_scan);
 
         let scan_node1 = query.stage_graph.stages.get(&2).unwrap();
         assert_eq!(scan_node1.root.node_type(), PlanNodeType::BatchSeqScan);
-        assert_eq!(scan_node1.root.stage_id, None);
+        assert_eq!(scan_node1.root.source_stage_id, None);
         assert_eq!(0, scan_node1.root.children.len());
         assert!(scan_node1.has_table_scan);
+
         let scan_node2 = query.stage_graph.stages.get(&3).unwrap();
         assert_eq!(scan_node2.root.node_type(), PlanNodeType::BatchFilter);
-        assert_eq!(scan_node2.root.stage_id, None);
+        assert_eq!(scan_node2.root.source_stage_id, None);
         assert_eq!(1, scan_node2.root.children.len());
         assert!(scan_node2.has_table_scan);
     }
