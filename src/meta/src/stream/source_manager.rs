@@ -29,6 +29,8 @@ use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::data::barrier::Mutation;
+use risingwave_pb::data::{SourceChangeSplit, SourceChangeSplitMutation};
 use risingwave_pb::meta::{
     SourceActorInfo as ProstSourceActorInfo, SourceActorSplit as ProstSourceActorSplit,
 };
@@ -42,8 +44,9 @@ use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
+use tokio_retry::strategy::FixedInterval;
 
-use crate::barrier::BarrierManagerRef;
+use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::ClusterManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
@@ -208,7 +211,6 @@ where
         }
     }
 
-    #[allow(dead_code)]
     async fn diff(&mut self) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
         // first, list all fragment, so that we can get `FragmentId` -> `Vec<ActorId>` map
         let table_frags = self.fragment_manager.list_table_fragments().await?;
@@ -399,6 +401,9 @@ impl<S> SourceManager<S>
 where
     S: MetaStore,
 {
+    const SOURCE_RETRY_INTERVAL: Duration = Duration::from_secs(10);
+    const SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
+
     pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
@@ -478,17 +483,10 @@ where
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
     ) -> Result<()> {
-        {
-            let mut core = self.core.lock().await;
-            core.patch_diff(source_fragments, actor_splits.clone())
-                .await;
-        }
-
         let mut trx = Transaction::default();
-        if let Some(actor_splits) = actor_splits {
+        if let Some(actor_splits) = actor_splits.clone() {
             for (actor_id, splits) in actor_splits {
                 let source_actor_info = SourceActorInfo { actor_id, splits };
-
                 source_actor_info.upsert_in_transaction(&mut trx)?;
             }
         }
@@ -497,7 +495,12 @@ where
             .meta_store()
             .txn(trx)
             .await
-            .map_err(|e| internal_error(e.to_string()))
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        let mut core = self.core.lock().await;
+        core.patch_diff(source_fragments, actor_splits).await;
+
+        Ok(())
     }
 
     pub async fn pre_allocate_splits(
@@ -649,15 +652,55 @@ where
     }
 
     async fn tick(&self) -> Result<()> {
+        let diff = {
+            let mut core_guard = self.core.lock().await;
+            core_guard.diff().await?
+        };
+
+        if !diff.is_empty() {
+            let command = Command::Plain(Mutation::Splits(SourceChangeSplitMutation {
+                mutations: diff
+                    .iter()
+                    .filter(|(_, splits)| !splits.is_empty())
+                    .map(|(actor_id, splits)| SourceChangeSplit {
+                        actor_id: *actor_id,
+                        split_type: splits.first().unwrap().get_type(),
+                        source_splits: splits
+                            .iter()
+                            .map(|split| split.to_json_bytes().to_vec())
+                            .collect(),
+                    })
+                    .collect(),
+            }));
+
+            log::debug!("pushing down mutation {:#?}", command);
+
+            tokio_retry::Retry::spawn(FixedInterval::new(Self::SOURCE_RETRY_INTERVAL), || async {
+                let command = command.clone();
+                self.barrier_manager.run_command(command).await
+            })
+            .await
+            .expect("source manager barrier push down failed");
+
+            self.patch_update(None, Some(diff))
+                .await
+                .expect("patch update failed");
+        }
+
         Ok(())
     }
 
     pub async fn run(&self) -> Result<()> {
-        let mut ticker = time::interval(Duration::from_secs(1));
+        let mut ticker = time::interval(Self::SOURCE_TICK_INTERVAL);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            self.tick().await?;
+            if let Err(e) = self.tick().await {
+                log::error!(
+                    "error happened while running source manager tick: {}",
+                    e.to_string()
+                );
+            }
         }
     }
 }
