@@ -136,18 +136,16 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let checkpoint_interval =
             Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
 
-        tracing::info!("Meta server listening at {}", addr);
+        tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-           addr: meta_addr,
-           listen_addr,
-           prometheus_addr,
-           dashboard_addr,
-           ui_path: opts.dashboard_ui_path,
+            addr: meta_addr,
+            listen_addr,
+            prometheus_addr,
+            dashboard_addr,
+            ui_path: opts.dashboard_ui_path,
         };
         let (join_handle, _shutdown_send) = rpc_serve(
             add_info,
-            prometheus_addr,
-            dashboard_addr,
             backend,
             max_heartbeat_interval,
             opts.meta_leader_lease_secs,

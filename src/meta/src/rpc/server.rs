@@ -279,7 +279,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     max_heartbeat_interval: Duration,
     ui_path: Option<String>,
 ) -> (JoinHandle<()>, Sender<()>) {
-
     let compaction_group_manager =
         Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let fragment_manager = Arc::new(

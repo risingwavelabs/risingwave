@@ -100,7 +100,10 @@ pub enum Operation {
 
 /// Preconditions are checked in the beginning of a transaction
 pub enum Precondition {
-    KeyExists { cf: ColumnFamily, key: Key },
+    KeyExists {
+        cf: ColumnFamily,
+        key: Key,
+    },
     KeyEqual {
         cf: ColumnFamily,
         key: Key,
