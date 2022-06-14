@@ -25,7 +25,6 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use crate::cell_deserializer::CellDeserializer;
 use crate::cell_serializer::CellSerializer;
 use super::cell_based_table::CellBasedTable;
 use super::mem_table::{MemTable, RowOp};
@@ -39,11 +38,11 @@ pub struct StateTable<S: StateStore, SER: CellSerializer> {
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTable<S, SER>,
+    cell_based_table: CellBasedTable<S>,
 
     pk_indices: Vec<usize>,
 }
-impl<S: StateStore, SER: CellSerializer> StateTable<S, SER> {
+impl<S: StateStore> StateTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,

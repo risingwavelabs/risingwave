@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
@@ -20,7 +19,7 @@ use risingwave_common::error::Result;
 pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
 
-pub trait CellSerializer: 'static {
+pub trait CellSerializer {
     /// Serialize key and value.
     fn serialize(
         &mut self,

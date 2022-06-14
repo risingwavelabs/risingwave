@@ -35,7 +35,7 @@ use super::TableIter;
 use crate::cell_based_row_deserializer::{
     make_column_desc_index, CellBasedRowDeserializer, ColumnDescMapping,
 };
-use crate::cell_deserializer::CellDeserializer;
+// use crate::cell_deserializer::CellDeserializer;
 use crate::cell_serializer::CellSerializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
@@ -43,11 +43,55 @@ use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
+pub type CellBasedTable<S> = CellBasedTableExtended<S, CellBasedRowSerializer>;
+
+impl <S: StateStore> CellBasedTable<S> {
+    pub fn new(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        ordered_row_serializer: Option<OrderedRowSerializer>,
+        stats: Arc<StateStoreMetrics>,
+        dist_key_indices: Option<Vec<usize>>,
+    ) -> Self {
+        CellBasedTableExtended::new_extended(
+            keyspace,
+            column_descs,
+            ordered_row_serializer,
+            stats,
+            dist_key_indices,
+            CellBasedRowSerializer::new(),
+        )
+    }
+
+    pub fn new_for_test(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+    ) -> Self {
+        CellBasedTable::new(
+            keyspace,
+            column_descs,
+            Some(OrderedRowSerializer::new(order_types)),
+            Arc::new(StateStoreMetrics::unused()),
+            None,
+        )
+    }
+
+    /// Creates an "adhoc" [`CellBasedTable`] with specified columns.
+    pub fn new_adhoc(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        stats: Arc<StateStoreMetrics>,
+    ) -> Self {
+        CellBasedTable::new(keyspace, column_descs, None, stats, None)
+    }
+}
+
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
 /// format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation
 #[derive(Clone)]
-pub struct CellBasedTable<S: StateStore, SER: CellSerializer> {
+pub struct CellBasedTableExtended<S: StateStore, SER: CellSerializer> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
@@ -61,12 +105,11 @@ pub struct CellBasedTable<S: StateStore, SER: CellSerializer> {
     pk_serializer: OrderedRowSerializer,
 
     /// Used for serializing the row.
-    cell_based_row_serializer: CellBasedRowSerializer,
+    // cell_based_row_serializer: CellBasedRowSerializer,
+    cell_based_row_serializer: SER,
 
     /// Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
-
-    cell_serializer: SER,
 
     column_ids: Vec<ColumnId>,
 
@@ -76,7 +119,7 @@ pub struct CellBasedTable<S: StateStore, SER: CellSerializer> {
 }
 
 
-impl<S: StateStore, SER: CellSerializer> std::fmt::Debug for CellBasedTable<S, SER> {
+impl<S: StateStore, SER: CellSerializer> std::fmt::Debug for CellBasedTableExtended<S, SER> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CellBasedTable")
             .field("column_descs", &self.column_descs)
@@ -88,12 +131,13 @@ fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::CellBasedTable(rw.into())
 }
 
-impl<S: StateStore, SER: CellSerializer> CellBasedTable<S, SER> {
-    pub fn new(
+impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
+    pub fn new_extended(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         dist_key_indices: Option<Vec<usize>>,
+        cell_based_row_serializer: SER,
     ) -> Self {
         let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         let column_ids = column_descs.iter().map(|d| d.column_id).collect();
@@ -105,19 +149,25 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTable<S, SER> {
             mapping: Arc::new(make_column_desc_index(column_descs.clone())),
             column_descs,
             pk_serializer,
-            cell_based_row_serializer: CellBasedRowSerializer::new(),
+            cell_based_row_serializer,
             column_ids,
             dist_key_indices,
-            cell_serializer: todo!(),
         }
     }
 
-    pub fn new_for_test(
+    pub fn new_for_test_extended(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
+        cell_based_row_serializer: SER,
     ) -> Self {
-        Self::new(keyspace, column_descs, order_types, None)
+        Self::new_extended(
+            keyspace,
+            column_descs,
+            order_types,
+            None,
+            cell_based_row_serializer,
+        )
     }
 
     pub fn schema(&self) -> &Schema {
