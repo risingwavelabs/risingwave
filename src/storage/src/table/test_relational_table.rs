@@ -19,7 +19,6 @@ use futures::stream::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
-use risingwave_common::consistent_hash::VNODE_BITMAP_LEN;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
@@ -44,9 +43,7 @@ use crate::Keyspace;
 #[tokio::test]
 async fn test_state_table() -> StorageResult<()> {
     let state_store = MemoryStateStore::new();
-    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
-    let keyspace =
-        Keyspace::table_root_with_vnodes(state_store.clone(), &TableId::from(0x42), bitmap_inner);
+    let keyspace = Keyspace::table_root(state_store.clone(), &TableId::from(0x42));
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
@@ -207,9 +204,7 @@ async fn test_state_table() -> StorageResult<()> {
 #[tokio::test]
 async fn test_state_table_update_insert() -> StorageResult<()> {
     let state_store = MemoryStateStore::new();
-    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
-    let keyspace =
-        Keyspace::table_root_with_vnodes(state_store.clone(), &TableId::from(0x42), bitmap_inner);
+    let keyspace = Keyspace::table_root(state_store.clone(), &TableId::from(0x42));
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
@@ -834,9 +829,7 @@ async fn test_cell_based_get_row_by_scan() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
-    let keyspace =
-        Keyspace::table_root_with_vnodes(state_store, &TableId::from(0x42), bitmap_inner);
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
@@ -919,9 +912,7 @@ async fn test_cell_based_get_row_by_multi_get() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
-    let keyspace =
-        Keyspace::table_root_with_vnodes(state_store, &TableId::from(0x42), bitmap_inner);
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
@@ -1008,9 +999,7 @@ async fn test_cell_based_get_row_by_multi_get() {
 async fn test_cell_based_get_row_for_string() {
     let state_store = MemoryStateStore::new();
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
-    let keyspace =
-        Keyspace::table_root_with_vnodes(state_store, &TableId::from(0x42), bitmap_inner);
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![ColumnId::from(1), ColumnId::from(4), ColumnId::from(7)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Varchar),
@@ -1113,9 +1102,7 @@ async fn test_shuffled_column_id_for_get_row() {
     ];
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
-    let keyspace =
-        Keyspace::table_root_with_vnodes(state_store, &TableId::from(0x42), bitmap_inner);
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let pk_index = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
