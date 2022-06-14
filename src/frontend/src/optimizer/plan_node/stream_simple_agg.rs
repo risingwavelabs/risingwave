@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
@@ -70,7 +71,8 @@ impl_plan_tree_node_for_unary! { StreamSimpleAgg }
 impl ToStreamProst for StreamSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-
+        let (internal_tables, column_index2column_id) =
+            self.logical.infer_internal_table_catalog(self.input());
         // TODO: local or global simple agg?
         ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
@@ -85,7 +87,19 @@ impl ToStreamProst for StreamSimpleAgg {
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect_vec(),
-            table_ids: vec![],
+            internal_tables: internal_tables
+                .into_iter()
+                .map(|table_catalog| {
+                    table_catalog.to_prost(
+                        SchemaId::placeholder() as u32,
+                        DatabaseId::placeholder() as u32,
+                    )
+                })
+                .collect_vec(),
+            column_index2column_id: column_index2column_id
+                .into_iter()
+                .map(|(k, v)| (k as u32, v))
+                .collect(),
             append_only: self.append_only(),
         })
     }

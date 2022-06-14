@@ -325,20 +325,24 @@ impl StreamFragmenter {
             NodeBody::HashJoin(hash_join_node) => {
                 // Allocate local table id. It will be rewrite to global table id after get table id
                 // offset from id generator.
-                hash_join_node.left_table_id = state.gen_table_id();
-                hash_join_node.right_table_id = state.gen_table_id();
+                if let Some(left_table) = &mut hash_join_node.left_table {
+                    left_table.id = state.gen_table_id();
+                }
+                if let Some(right_table) = &mut hash_join_node.right_table {
+                    right_table.id = state.gen_table_id();
+                }
             }
 
             NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
-                for _ in &node.agg_calls {
-                    node.table_ids.push(state.gen_table_id());
+                for table in &mut node.internal_tables {
+                    table.id = state.gen_table_id();
                 }
             }
 
             // Rewrite hash agg. One agg call -> one table id.
             NodeBody::HashAgg(hash_agg_node) => {
-                for _ in &hash_agg_node.agg_calls {
-                    hash_agg_node.table_ids.push(state.gen_table_id());
+                for table in &mut hash_agg_node.internal_tables {
+                    table.id = state.gen_table_id();
                 }
             }
 
@@ -402,9 +406,9 @@ mod tests {
 
             if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_ref().unwrap() {
                 expect_table_id += 1;
-                assert_eq!(expect_table_id, hash_join_node.left_table_id);
+                assert_eq!(expect_table_id, hash_join_node.left_table.clone().unwrap().id);
                 expect_table_id += 1;
-                assert_eq!(expect_table_id, hash_join_node.right_table_id);
+                assert_eq!(expect_table_id, hash_join_node.right_table.clone().unwrap().id);
             }
         }
 
@@ -428,12 +432,11 @@ mod tests {
             {
                 assert_eq!(
                     global_simple_agg_node.agg_calls.len(),
-                    global_simple_agg_node.table_ids.len()
+                    global_simple_agg_node.internal_tables.len()
                 );
-
-                for table_id in &global_simple_agg_node.table_ids {
+                for table in &global_simple_agg_node.internal_tables {
                     expect_table_id += 1;
-                    assert_eq!(expect_table_id, *table_id);
+                    assert_eq!(expect_table_id, table.id);
                 }
             }
         }
@@ -455,11 +458,10 @@ mod tests {
             StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
 
             if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_ref().unwrap() {
-                assert_eq!(hash_agg_node.agg_calls.len(), hash_agg_node.table_ids.len());
-
-                for table_id in &hash_agg_node.table_ids {
+                assert_eq!(hash_agg_node.agg_calls.len(), hash_agg_node.internal_tables.len());
+                for table in &hash_agg_node.internal_tables {
                     expect_table_id += 1;
-                    assert_eq!(expect_table_id, *table_id);
+                    assert_eq!(expect_table_id, table.id);
                 }
             }
         }

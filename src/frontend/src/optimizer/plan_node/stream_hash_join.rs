@@ -15,12 +15,16 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, DatabaseId, OrderedColumnDesc, SchemaId, TableId};
 use risingwave_common::session_config::DELTA_JOIN;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
+use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::Distribution;
@@ -179,7 +183,47 @@ impl ToStreamProst for StreamHashJoin {
                 .map(|idx| *idx as u32)
                 .collect_vec(),
             is_delta_join: self.is_delta,
+            left_table: Some(infer_internal_table_catalog(self.left()).to_prost(
+                SchemaId::placeholder() as u32,
+                DatabaseId::placeholder() as u32,
+            )),
+            right_table: Some(infer_internal_table_catalog(self.right()).to_prost(
+                SchemaId::placeholder() as u32,
+                DatabaseId::placeholder() as u32,
+            )),
             ..Default::default()
         })
+    }
+}
+
+fn infer_internal_table_catalog(plan_node: PlanRef) -> TableCatalog {
+    let base = plan_node.plan_base();
+    let schema = &base.schema;
+    let pk_indices = &base.pk_indices;
+    let columns = schema
+        .fields()
+        .iter()
+        .map(|field| ColumnCatalog {
+            column_desc: ColumnDesc::from_field_without_column_id(field),
+            is_hidden: false,
+        })
+        .collect_vec();
+    let mut order_desc = vec![];
+    for &idx in pk_indices {
+        order_desc.push(OrderedColumnDesc {
+            column_desc: columns[idx].column_desc.clone(),
+            order: OrderType::Ascending,
+        });
+    }
+    TableCatalog {
+        id: TableId::placeholder(),
+        associated_source_id: None,
+        name: String::new(),
+        columns,
+        order_desc,
+        pks: pk_indices.clone(),
+        distribution_keys: base.dist.dist_column_indices().to_vec(),
+        is_index_on: None,
+        appendonly: plan_node.append_only(),
     }
 }

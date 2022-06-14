@@ -38,10 +38,10 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
         let keyspace = node
-            .get_table_ids()
+            .internal_tables
             .iter()
-            .map(|table_id| {
-                Keyspace::table_root_with_default_vnodes(store.clone(), &TableId::new(*table_id))
+            .map(|table| {
+                Keyspace::table_root_with_default_vnodes(store.clone(), &TableId::new(table.id))
             })
             .collect();
         let key_indices = node
