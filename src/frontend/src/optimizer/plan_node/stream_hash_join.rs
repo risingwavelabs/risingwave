@@ -191,7 +191,6 @@ impl ToStreamProst for StreamHashJoin {
                 SchemaId::placeholder() as u32,
                 DatabaseId::placeholder() as u32,
             )),
-            ..Default::default()
         })
     }
 }

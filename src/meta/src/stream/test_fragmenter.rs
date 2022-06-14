@@ -18,6 +18,7 @@ use std::vec;
 
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::error::Result;
+use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -25,7 +26,8 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
 use risingwave_pb::plan_common::{
-    ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId, ColumnCatalog, ColumnDesc,
+    ColumnCatalog, ColumnDesc, ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId,
+    TableRefId,
 };
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -33,7 +35,6 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode, ProjectNode,
     SimpleAggNode, SourceNode, StreamNode,
 };
-use risingwave_pb::catalog::Table as ProstTable;
 
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::manager::MetaSrvEnv;
@@ -103,7 +104,7 @@ fn make_column_order(idx: i32) -> ColumnOrder {
 
 fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
     ColumnCatalog {
-        column_desc: Some(ColumnDesc{
+        column_desc: Some(ColumnDesc {
             column_type: Some(DataType {
                 type_name: column_type as i32,
                 ..Default::default()

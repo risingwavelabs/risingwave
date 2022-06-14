@@ -406,9 +406,15 @@ mod tests {
 
             if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_ref().unwrap() {
                 expect_table_id += 1;
-                assert_eq!(expect_table_id, hash_join_node.left_table.clone().unwrap().id);
+                assert_eq!(
+                    expect_table_id,
+                    hash_join_node.left_table.clone().unwrap().id
+                );
                 expect_table_id += 1;
-                assert_eq!(expect_table_id, hash_join_node.right_table.clone().unwrap().id);
+                assert_eq!(
+                    expect_table_id,
+                    hash_join_node.right_table.clone().unwrap().id
+                );
             }
         }
 
@@ -458,7 +464,10 @@ mod tests {
             StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
 
             if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_ref().unwrap() {
-                assert_eq!(hash_agg_node.agg_calls.len(), hash_agg_node.internal_tables.len());
+                assert_eq!(
+                    hash_agg_node.agg_calls.len(),
+                    hash_agg_node.internal_tables.len()
+                );
                 for table in &hash_agg_node.internal_tables {
                     expect_table_id += 1;
                     assert_eq!(expect_table_id, table.id);
