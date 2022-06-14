@@ -117,7 +117,7 @@ impl Binder {
             ).collect::<Result<Vec<_>>>()?;
 
         let (_, table_name) = Self::resolve_table_name(table_name)?;
-        self.bind_context(columns, table_name.clone(), alias)?;
+        self.bind_context(columns, table_name, alias)?;
 
         let exprs: Vec<_> = args
             .map(|arg| self.bind_function_arg(arg))
