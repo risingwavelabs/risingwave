@@ -332,6 +332,9 @@ impl<S: StateStore> CellBasedTable<S> {
         CellBasedTableRowIter::new(&self.keyspace, self.mapping.clone(), epoch).await
     }
 
+    /// `dedup_pk_iter` should be used when pk is not persisted as value in storage.
+    /// It will attempt to decode pk from key instead of cell value.
+    /// Tracking issue: https://github.com/singularity-data/risingwave/issues/588
     pub async fn dedup_pk_iter(
         &self,
         epoch: u64,
