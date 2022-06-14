@@ -43,6 +43,8 @@ pub struct IntervalUnit {
     ms: i64,
 }
 
+const DAY_MS: i64 = 86400000;
+
 impl IntervalUnit {
     pub fn new(months: i32, days: i32, ms: i64) -> Self {
         IntervalUnit { months, days, ms }
@@ -241,7 +243,7 @@ impl PartialOrd for IntervalUnit {
         } else {
             let diff = *self - *other;
             let days = (diff.months * 30 + diff.days) as i64;
-            Some((days * 86400000 + diff.ms).cmp(&0))
+            Some((days * DAY_MS + diff.ms).cmp(&0))
         }
     }
 }
@@ -258,7 +260,7 @@ impl PartialEq for IntervalUnit {
     fn eq(&self, other: &Self) -> bool {
         let diff = *self - *other;
         let days = (diff.months * 30 + diff.days) as i64;
-        days * 86400000 + diff.ms == 0
+        days * DAY_MS + diff.ms == 0
     }
 }
 
