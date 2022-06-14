@@ -1,0 +1,25 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T
+select 'a' || 'b' || 'c';
+----
+abc
+
+query T
+select '2' || NULL;
+----
+NULL
+
+query T
+select '1' || true;
+----
+1true
+
+query T
+select '1' || 1.01 || 'A' || true;
+----
+11.01Atrue
+
+statement error
+select 2 || 3;

@@ -21,6 +21,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+tokio-retry = "0.3"
 tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

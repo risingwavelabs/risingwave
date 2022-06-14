@@ -7,9 +7,9 @@ select Row('foo', 'bar', null);
 (foo,bar,NULL)
 
 query T
-select Row(1,2+3,4*5+1);
+select Row();
 ----
-(1,5,21)
+()
 
 query T
 select Row(null);
