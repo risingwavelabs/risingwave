@@ -46,10 +46,11 @@ pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStor
     for idx in 0..row_count {
         let idx = idx as i32;
         state
-            .insert::<false>(
-                &Row(vec![Some(idx.into()), Some(idx.into())]),
-                Row(vec![Some(idx.into()), Some(idx.into()), Some(idx.into())]),
-            )
+            .insert::<false>(Row(vec![
+                Some(idx.into()),
+                Some(idx.into()),
+                Some(idx.into()),
+            ]))
             .unwrap();
     }
     state.commit(epoch).await.unwrap();

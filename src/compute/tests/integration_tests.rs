@@ -219,7 +219,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        ScanType::TableScan(table.iter_with_pk(u64::MAX, &ordered_column_descs).await?),
+        ScanType::TableScan(table.dedup_pk_iter(u64::MAX, &ordered_column_descs).await?),
         1024,
         true,
         "RowSeqExecutor2".to_string(),
@@ -278,7 +278,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        ScanType::TableScan(table.iter_with_pk(u64::MAX, &ordered_column_descs).await?),
+        ScanType::TableScan(table.dedup_pk_iter(u64::MAX, &ordered_column_descs).await?),
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
@@ -346,7 +346,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        ScanType::TableScan(table.iter_with_pk(u64::MAX, &ordered_column_descs).await?),
+        ScanType::TableScan(table.dedup_pk_iter(u64::MAX, &ordered_column_descs).await?),
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
@@ -397,24 +397,18 @@ async fn test_row_seq_scan() -> Result<()> {
     let epoch: u64 = 0;
 
     state
-        .insert::<false>(
-            &Row(vec![Some(1_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(4_i32.into()),
-                Some(7_i64.into()),
-            ]),
-        )
+        .insert::<false>(Row(vec![
+            Some(1_i32.into()),
+            Some(4_i32.into()),
+            Some(7_i64.into()),
+        ]))
         .unwrap();
     state
-        .insert::<false>(
-            &Row(vec![Some(2_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(5_i32.into()),
-                Some(8_i64.into()),
-            ]),
-        )
+        .insert::<false>(Row(vec![
+            Some(2_i32.into()),
+            Some(5_i32.into()),
+            Some(8_i64.into()),
+        ]))
         .unwrap();
     state.commit(epoch).await.unwrap();
 
@@ -429,7 +423,7 @@ async fn test_row_seq_scan() -> Result<()> {
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        ScanType::TableScan(table.iter_with_pk(u64::MAX, &pk_descs).await.unwrap()),
+        ScanType::TableScan(table.dedup_pk_iter(u64::MAX, &pk_descs).await.unwrap()),
         1,
         true,
         "RowSeqScanExecutor2".to_string(),

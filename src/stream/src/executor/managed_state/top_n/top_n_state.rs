@@ -177,12 +177,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // This is because other keys may be more qualified to stay in cache.
         // TODO: This needs to be changed when transaction on Hummock is implemented.
         match TOP_N_TYPE {
-            TOP_N_MIN => self
-                .state_table
-                .insert::<false>(&key.clone().into_row(), value.clone())?,
-            TOP_N_MAX => self
-                .state_table
-                .insert::<true>(&key.clone().into_row(), value.clone())?,
+            TOP_N_MIN => self.state_table.insert::<false>(value.clone())?,
+            TOP_N_MAX => self.state_table.insert::<true>(value.clone())?,
             _ => unreachable!(),
         }
         if !need_to_flush {
@@ -230,12 +226,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ) -> StreamExecutorResult<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
         match TOP_N_TYPE {
-            TOP_N_MIN => self
-                .state_table
-                .delete::<false>(&key.clone().into_row(), value)?,
-            TOP_N_MAX => self
-                .state_table
-                .delete::<true>(&key.clone().into_row(), value)?,
+            TOP_N_MIN => self.state_table.delete::<false>(value)?,
+            TOP_N_MAX => self.state_table.delete::<true>(value)?,
             _ => unreachable!(),
         }
 
