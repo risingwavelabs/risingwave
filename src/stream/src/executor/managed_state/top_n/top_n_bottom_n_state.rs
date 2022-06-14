@@ -66,7 +66,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         ordered_row_deserializer: OrderedRowDeserializer,
         pk_indices: PkIndices,
     ) -> Self {
-        let order_type = ordered_row_deserializer.clone().order_types;
+        let order_type = ordered_row_deserializer.get_order_types().to_vec();
         let column_descs = data_types
             .iter()
             .enumerate()
@@ -94,7 +94,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     }
 
     pub fn is_dirty(&self) -> bool {
-        !self.state_table.mem_table.buffer.is_empty()
+        !self.state_table.get_mem_table().buffer.is_empty()
     }
 
     // May have weird cache policy in the future, reserve an `n`.
@@ -234,11 +234,11 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         while let Some(next_res) = state_table_iter.next().await {
             let row = next_res.unwrap().into_owned();
             let mut datums = vec![];
-            for pk_indice in &self.state_table.pk_indices {
+            for pk_indice in self.state_table.get_pk_indices() {
                 datums.push(row.index(*pk_indice).clone());
             }
             let pk = Row::new(datums);
-            let pk_ordered = OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+            let pk_ordered = OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());
             kv_pairs.push((pk_ordered, row));
         }
 
@@ -270,11 +270,11 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
             let mut datums = vec![];
-            for pk_indice in &self.state_table.pk_indices {
+            for pk_indice in self.state_table.get_pk_indices() {
                 datums.push(row.index(*pk_indice).clone());
             }
             let pk = Row::new(datums);
-            let pk_ordered = OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+            let pk_ordered = OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());
             self.bottom_n.insert(pk_ordered, row);
         }
         // We don't retain `n` elements as we have a all-or-nothing policy for now.

@@ -62,7 +62,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         ordered_row_deserializer: OrderedRowDeserializer,
         pk_indices: PkIndices,
     ) -> Self {
-        let order_type = ordered_row_deserializer.clone().order_types;
+        let order_type = ordered_row_deserializer.get_order_types().to_vec();
         let column_descs = data_types
             .iter()
             .enumerate()
@@ -85,7 +85,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     }
 
     pub fn is_dirty(&self) -> bool {
-        !self.state_table.mem_table.buffer.is_empty()
+        !self.state_table.get_mem_table().buffer.is_empty()
     }
 
     pub fn retain_top_n(&mut self) {
@@ -206,12 +206,12 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 Some(next_res) => {
                     let row = next_res.unwrap().into_owned();
                     let mut datums = vec![];
-                    for pk_indice in &self.state_table.pk_indices {
+                    for pk_indice in self.state_table.get_pk_indices() {
                         datums.push(row.index(*pk_indice).clone());
                     }
                     let pk = Row::new(datums);
                     let pk_ordered =
-                        OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+                        OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());
                     self.top_n.insert(pk_ordered, row);
                 }
                 None => {
@@ -261,11 +261,11 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
             let mut datums = vec![];
-            for pk_indice in &self.state_table.pk_indices {
+            for pk_indice in self.state_table.get_pk_indices() {
                 datums.push(row.index(*pk_indice).clone());
             }
             let pk = Row::new(datums);
-            let pk_ordered = OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+            let pk_ordered = OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());
             let prev_row = self.top_n.insert(pk_ordered, row.clone());
             if let Some(prev_row) = prev_row {
                 debug_assert_eq!(prev_row, row);

@@ -1466,7 +1466,7 @@ async fn test_dedup_cell_based_table_iter_with(
             .iter()
             .map(|row_idx| row[*row_idx].clone())
             .collect_vec());
-        let pk_bytes = serialize_pk(&pk, &ordered_row_serializer);
+        let pk_bytes = serialize_pk::<false>(&pk, &ordered_row_serializer);
 
         let partial_row = Row(row
             .iter()
