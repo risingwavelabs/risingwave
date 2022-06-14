@@ -36,27 +36,6 @@ const PARSE_ERROR_STR_TO_TIME: &str =
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
 
 #[inline(always)]
-pub fn num_up<T, R>(n: T) -> Result<R>
-where
-    T: Into<R>,
-{
-    Ok(n.into())
-}
-
-#[inline(always)]
-pub fn float_up(n: OrderedF32) -> Result<OrderedF64> {
-    Ok((n.0 as f64).into())
-}
-
-/// Cast between different precision/length.
-/// Eg. Char(5) -> Char(10)
-/// Currently no-op. TODO: implement padding and overflow check (#2137)
-#[inline(always)]
-pub fn str_to_str(n: &str) -> Result<String> {
-    Ok(n.into())
-}
-
-#[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
     Ok(NaiveDateWrapper::new(
         NaiveDate::parse_from_str(elem, "%Y-%m-%d")
