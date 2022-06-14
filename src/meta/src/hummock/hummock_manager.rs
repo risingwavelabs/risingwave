@@ -1408,8 +1408,27 @@ where
             .unwrap_or(false)
         };
 
-        self.assign_compaction_task(&compact_task, compactor.context_id(), send_task)
-            .await?;
+        match self
+            .assign_compaction_task(&compact_task, compactor.context_id(), send_task)
+            .await
+        {
+            Ok(_) => {}
+
+            Err(error) => {
+                // cancel task in memory
+                let mut compaction_guard = self.compaction.write().await;
+                let compaction = compaction_guard.deref_mut();
+                let compact_status = compaction
+                    .compaction_statuses
+                    .get_mut(&compact_task.task_id)
+                    .unwrap();
+                compact_status.cancel_compaction_tasks_if(|pending_task_id| {
+                    pending_task_id == compact_task.task_id
+                });
+
+                return Err(error);
+            }
+        }
 
         tracing::trace!(
             "Trigger manual compaction task. {}. cost time: {:?}",

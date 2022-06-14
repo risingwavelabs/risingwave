@@ -977,13 +977,27 @@ async fn test_trigger_manual_compaction() {
     assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
 
     {
+        // to check compactor send task fail
+        drop(_receiver);
+        {
+            let result = hummock_manager
+                .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+                .await;
+            assert!(result.is_err());
+        }
+    }
+
+    compactor_manager_ref.remove_compactor(context_id);
+    let _receiver = compactor_manager_ref.add_compactor(context_id);
+
+    {
         let result = hummock_manager
             .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
             .await;
         assert!(result.is_ok());
     }
 
-    let task_id: u64 = 2;
+    let task_id: u64 = 3;
     let compact_task = hummock_manager
         .compaction_task_from_assignment_for_test(task_id)
         .await
@@ -991,4 +1005,12 @@ async fn test_trigger_manual_compaction() {
         .compact_task
         .unwrap();
     assert_eq!(task_id, compact_task.task_id);
+
+    {
+        // all sst pending , test no compaction avail
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .await;
+        assert!(result.is_err());
+    }
 }
