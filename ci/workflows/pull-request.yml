@@ -45,6 +45,7 @@ steps:
   - label: "unit test"
     command: "ci/scripts/unit-test.sh"
     plugins:
+      - ./ci/plugins/swapfile
       - seek-oss/aws-sm#v2.3.1:
           env:
             CODECOV_TOKEN: my-codecov-token

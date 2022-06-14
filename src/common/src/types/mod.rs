@@ -33,8 +33,8 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
 pub use scalar_impl::*;
-mod chrono_wrapper;
-mod decimal;
+pub mod chrono_wrapper;
+pub mod decimal;
 pub mod interval;
 
 mod ordered_float;
@@ -563,7 +563,7 @@ for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 
 // FIXME: should implement Hash and Eq all by deriving
 // TODO: may take type information into consideration later
-#[allow(clippy::derive_hash_xor_eq)]
+#[expect(clippy::derive_hash_xor_eq)]
 impl std::hash::Hash for ScalarImpl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         macro_rules! impl_all_hash {

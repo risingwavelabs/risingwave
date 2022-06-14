@@ -195,36 +195,36 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
-    #[allow(dead_code)]
-    pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType> {
-        let state = self.inner.get(key);
-        // TODO: we should probably implement a entry function for `LruCache`
-        match state {
-            Some(_) => self.inner.get(key),
-            None => {
-                let remote_state = self.fetch_cached_state(key).await.unwrap();
-                self.inner.put(key.clone(), remote_state);
-                self.inner.get(key)
-            }
-        }
-    }
+    // #[allow(dead_code)]
+    // pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType> {
+    //     let state = self.inner.get(key);
+    //     // TODO: we should probably implement a entry function for `LruCache`
+    //     match state {
+    //         Some(_) => self.inner.get(key),
+    //         None => {
+    //             let remote_state = self.fetch_cached_state(key).await.unwrap();
+    //             self.inner.put(key.clone(), remote_state);
+    //             self.inner.get(key)
+    //         }
+    //     }
+    // }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
-    #[allow(dead_code)]
-    pub async fn get_mut<'a>(&'a mut self, key: &'a K) -> Option<&'a mut HashValueType> {
-        let state = self.inner.get(key);
-        // TODO: we should probably implement a entry function for `LruCache`
-        match state {
-            Some(_) => self.inner.get_mut(key),
-            None => {
-                let remote_state = self.fetch_cached_state(key).await.unwrap();
-                self.inner.put(key.clone(), remote_state);
-                self.inner.get_mut(key)
-            }
-        }
-    }
+    // #[allow(dead_code)]
+    // pub async fn get_mut<'a>(&'a mut self, key: &'a K) -> Option<&'a mut HashValueType> {
+    //     let state = self.inner.get(key);
+    //     // TODO: we should probably implement a entry function for `LruCache`
+    //     match state {
+    //         Some(_) => self.inner.get_mut(key),
+    //         None => {
+    //             let remote_state = self.fetch_cached_state(key).await.unwrap();
+    //             self.inner.put(key.clone(), remote_state);
+    //             self.inner.get_mut(key)
+    //         }
+    //     }
+    // }
 
     /// Remove the key in the memory, returning the value at the key if the
     /// key was previously in the map. If does not exist, look

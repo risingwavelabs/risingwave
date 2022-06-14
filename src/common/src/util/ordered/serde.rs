@@ -229,23 +229,18 @@ pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
     result
 }
 
-pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
-    use serde::Serialize;
-    let mut serializer = memcomparable::Serializer::new(Vec::with_capacity(4));
-    column_id.get_id().serialize(&mut serializer)?;
-    let buf = serializer.into_inner();
-    debug_assert_eq!(buf.len(), 4);
-    Ok(buf)
+pub fn serialize_column_id(column_id: &ColumnId) -> [u8; 4] {
+    let id = column_id.get_id();
+    (id as u32 ^ (1 << 31)).to_be_bytes()
 }
 
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
-    assert_eq!(bytes.len(), 4);
-    let column_id = from_slice::<i32>(bytes)?;
-    Ok(column_id.into())
+    let column_id = from_slice::<u32>(bytes)? ^ (1 << 31);
+    Ok((column_id as i32).into())
 }
 
 pub fn serialize_pk_and_column_id(pk_buf: &[u8], col_id: &ColumnId) -> Result<Vec<u8>> {
-    Ok([pk_buf, serialize_column_id(col_id)?.as_slice()].concat())
+    Ok([pk_buf, serialize_column_id(col_id).as_slice()].concat())
 }
 
 #[cfg(test)]
@@ -254,6 +249,28 @@ mod tests {
     use crate::array::{I16Array, Utf8Array};
     use crate::array_nonnull;
     use crate::types::ScalarImpl::{Int16, Utf8};
+
+    #[test]
+    fn test_serialize_column_id() {
+        assert_eq!(
+            deserialize_column_id(&serialize_column_id(&ColumnId::new(1)))
+                .unwrap()
+                .get_id(),
+            1
+        );
+        assert_eq!(
+            deserialize_column_id(&serialize_column_id(&ColumnId::new(-1)))
+                .unwrap()
+                .get_id(),
+            -1
+        );
+        assert_eq!(
+            deserialize_column_id(&serialize_column_id(&ColumnId::new(65536)))
+                .unwrap()
+                .get_id(),
+            65536
+        );
+    }
 
     #[test]
     fn test_ordered_row_serializer() {

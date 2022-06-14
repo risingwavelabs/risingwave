@@ -17,7 +17,7 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::expr_binary_bytes::{new_substr_start, new_to_char};
+use crate::expr::expr_binary_bytes::{new_repeat, new_substr_start, new_to_char};
 use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
@@ -71,6 +71,14 @@ pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpress
         left_expr,
         right_expr,
     ))
+}
+
+pub fn build_repeat_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_children_and_return_type(prost)?;
+    ensure!(children.len() == 2);
+    let left_expr = expr_build_from_prost(&children[0])?;
+    let right_expr = expr_build_from_prost(&children[1])?;
+    Ok(new_repeat(left_expr, right_expr, ret_type))
 }
 
 pub fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {

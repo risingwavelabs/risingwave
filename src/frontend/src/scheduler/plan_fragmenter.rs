@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeInfo;
 use risingwave_pb::plan_common::Field as FieldProst;
@@ -26,10 +25,17 @@ use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::SchedulerResult;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct QueryId {
     pub id: String,
+}
+
+impl std::fmt::Display for QueryId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "QueryId:{}", self.id)
+    }
 }
 
 pub type StageId = u32;
@@ -138,7 +144,7 @@ impl Query {
         &self.query_id
     }
 
-    pub fn stage_has_table_scan(&self) -> Vec<StageId> {
+    pub fn stages_with_table_scan(&self) -> Vec<StageId> {
         self.stage_graph
             .stages
             .iter()
@@ -232,6 +238,10 @@ impl StageGraph {
         self.child_edges.get(stage_id).unwrap()
     }
 
+    pub fn get_child_stages(&self, stage_id: &StageId) -> Option<&HashSet<StageId>> {
+        self.child_edges.get(stage_id)
+    }
+
     /// Returns stage ids in topology order, e.g. child stage always appears before parent.
     pub fn stage_ids_by_topo_order(&self) -> impl Iterator<Item = StageId> {
         let mut stack = Vec::with_capacity(self.stages.len());
@@ -298,8 +308,8 @@ impl StageGraphBuilder {
 
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
-    pub fn split(mut self, batch_node: PlanRef) -> Result<Query> {
-        let root_stage = self.new_stage(batch_node.clone(), None, None);
+    pub fn split(mut self, batch_node: PlanRef) -> SchedulerResult<Query> {
+        let root_stage = self.new_stage(batch_node.clone(), Distribution::Single.to_prost(1));
         let stage_graph = self.stage_graph_builder.build(root_stage.id);
         Ok(Query {
             stage_graph,
@@ -307,25 +317,12 @@ impl BatchPlanFragmenter {
         })
     }
 
-    fn new_stage(
-        &mut self,
-        root: PlanRef,
-        parent_parallelism: Option<u32>,
-        exchange_info: Option<ExchangeInfo>,
-    ) -> QueryStageRef {
+    fn new_stage(&mut self, root: PlanRef, exchange_info: ExchangeInfo) -> QueryStageRef {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
-        let parallelism = match parent_parallelism {
-            // Non-root node
-            Some(_) => self.worker_node_manager.worker_node_count(),
-            // Root node.
-            None => 1,
-        };
-
-        let exchange_info = match exchange_info {
-            Some(info) => info,
-            // Root stage, the exchange info should always be Single
-            None => Distribution::Single.to_prost(1),
+        let parallelism = match root.distribution() {
+            Distribution::Single => 1,
+            _ => self.worker_node_manager.worker_node_count(),
         };
 
         let mut builder = QueryStageBuilder::new(
@@ -363,7 +360,7 @@ impl BatchPlanFragmenter {
                     builder.root = Some(Arc::new(execution_plan_node));
                 }
                 // Check out the comments for `has_table_scan` in `QueryStage`.
-                builder.has_table_scan = node.node_type() == PlanNodeType::BatchSeqScan;
+                builder.has_table_scan |= node.node_type() == PlanNodeType::BatchSeqScan;
             }
         }
     }
@@ -375,12 +372,8 @@ impl BatchPlanFragmenter {
         parent_exec_node: Option<&mut ExecutionPlanNode>,
     ) {
         let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
-        let child_exchange_info = Some(node.distribution().to_prost(builder.parallelism));
-        let child_stage = self.new_stage(
-            node.inputs()[0].clone(),
-            Some(builder.parallelism),
-            child_exchange_info,
-        );
+        let child_exchange_info = node.distribution().to_prost(builder.parallelism);
+        let child_stage = self.new_stage(node.inputs()[0].clone(), child_exchange_info);
         execution_plan_node.stage_id = Some(child_stage.id);
 
         if let Some(parent) = parent_exec_node {
@@ -409,8 +402,8 @@ mod tests {
 
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, PlanNodeType,
-        ToBatch,
+        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
+        LogicalScan, PlanNodeType, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
@@ -426,8 +419,9 @@ mod tests {
         //
         //    HashJoin
         //     /    \
-        //   Scan  Scan
-        //
+        //   Scan  Filter
+        //          |
+        //         Scan
         let ctx = OptimizerContext::mock().await;
 
         let batch_plan_node: PlanRef = LogicalScan::create(
@@ -460,6 +454,13 @@ mod tests {
         )
         .to_batch()
         .unwrap();
+        let batch_filter = BatchFilter::new(LogicalFilter::new(
+            batch_plan_node.clone(),
+            Condition {
+                conjunctions: vec![],
+            },
+        ))
+        .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
@@ -467,7 +468,7 @@ mod tests {
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
-            batch_plan_node.clone(),
+            batch_filter,
             Order::default(),
             Distribution::HashShard(vec![0, 1]),
         )
@@ -589,6 +590,7 @@ mod tests {
         assert_eq!(root_exchange.root.stage_id, Some(1));
         assert!(matches!(root_exchange.root.node, NodeBody::Exchange(_)));
         assert_eq!(root_exchange.parallelism, 1);
+        assert!(!root_exchange.has_table_scan);
 
         let join_node = query.stage_graph.stages.get(&1).unwrap();
         assert_eq!(join_node.root.node_type(), PlanNodeType::BatchHashJoin);
@@ -611,15 +613,18 @@ mod tests {
         ));
         assert_eq!(join_node.root.children[1].stage_id, Some(3));
         assert_eq!(0, join_node.root.children[1].children.len());
+        assert!(!join_node.has_table_scan);
 
         let scan_node1 = query.stage_graph.stages.get(&2).unwrap();
         assert_eq!(scan_node1.root.node_type(), PlanNodeType::BatchSeqScan);
         assert_eq!(scan_node1.root.stage_id, None);
         assert_eq!(0, scan_node1.root.children.len());
+        assert!(scan_node1.has_table_scan);
         let scan_node2 = query.stage_graph.stages.get(&3).unwrap();
-        assert_eq!(scan_node2.root.node_type(), PlanNodeType::BatchSeqScan);
+        assert_eq!(scan_node2.root.node_type(), PlanNodeType::BatchFilter);
         assert_eq!(scan_node2.root.stage_id, None);
-        assert_eq!(0, scan_node2.root.children.len());
+        assert_eq!(1, scan_node2.root.children.len());
+        assert!(scan_node2.has_table_scan);
     }
 
     fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {

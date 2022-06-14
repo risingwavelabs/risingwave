@@ -30,6 +30,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
 use risingwave_storage::table::state_table::StateTable;
@@ -37,6 +38,7 @@ use risingwave_storage::{Keyspace, StateStore};
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
+use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
@@ -44,6 +46,7 @@ use crate::executor::{Executor, PkDataTypes};
 
 mod agg_call;
 mod agg_state;
+mod approx_count_distinct;
 mod foldable;
 mod row_count;
 mod single_value;
@@ -137,6 +140,12 @@ pub fn create_streaming_agg_state(
                         Box::new(<$state_impl>::new())
                     }
                 )*
+                (AggKind::ApproxCountDistinct, _, DataType::Int64, Some(datum)) => {
+                    Box::new(StreamingApproxCountDistinct::new_with_datum(datum))
+                }
+                (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
+                    Box::new(StreamingApproxCountDistinct::new())
+                }
                 (other_agg, other_input, other_return, _) => panic!(
                     "streaming agg state not implemented: {:?} {:?} {:?}",
                     other_agg, other_input, other_return
@@ -344,8 +353,8 @@ pub fn generate_agg_schema(
 
 /// Infer column desc for state table.
 /// The column desc layout is
-/// [ `group_key` (only for hash agg) / `sort_key` (only for simple agg) / `value`(the agg call
-/// return type)].
+/// [ `group_key` (only for hash agg) / `sort_key` (only for extreme) /
+/// `value`(the agg call return type)].
 /// This is the Row layout insert into state table.
 /// For different agg call, different executor (hash agg or simple agg), the layout will be
 /// different.
@@ -387,6 +396,37 @@ pub fn generate_column_descs(
     add_column_desc(agg_call.return_type.clone());
 
     column_descs
+}
+
+/// Generate state table for agg executor.
+/// Relational pk = `table_desc.len` - 1.
+pub fn generate_state_table<S: StateStore>(
+    ks: Keyspace<S>,
+    agg_call: &AggCall,
+    group_keys: &[usize],
+    pk_indices: &[usize],
+    agg_schema: &Schema,
+    input_ref: &dyn Executor,
+) -> StateTable<S> {
+    let table_desc = generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
+    // Always leave 1 space for agg call value.
+    let relational_pk_len = table_desc.len() - 1;
+    StateTable::new(
+        ks,
+        table_desc,
+        // Primary key do not includes group key.
+        vec![
+            // Now we only infer order type for min/max in a naive way.
+            if agg_call.kind == AggKind::Max {
+                OrderType::Descending
+            } else {
+                OrderType::Ascending
+            };
+            relational_pk_len
+        ],
+        None,
+        (0..relational_pk_len).collect(),
+    )
 }
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
@@ -457,7 +497,11 @@ pub fn get_key_len(agg_call: &AggCall) -> usize {
             }
         }
         // These agg call do not have keys besides group key.
-        AggKind::Sum | AggKind::Count | AggKind::SingleValue | AggKind::RowCount => 0,
+        AggKind::Sum
+        | AggKind::Count
+        | AggKind::SingleValue
+        | AggKind::RowCount
+        | AggKind::ApproxCountDistinct => 0,
         _ => unimplemented!("{:?} do not implemented!", agg_call.kind),
     }
 }

@@ -24,7 +24,7 @@ drop schema ddl_database.ddl_schema;
 
 # Drop the schema.
 statement ok
-drop schema ddl_database.dev;
+drop schema ddl_database.public;
 
 # Drop the database.
 statement ok

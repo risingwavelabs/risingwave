@@ -204,7 +204,7 @@ impl IntervalUnit {
     }
 }
 
-#[allow(clippy::from_over_into)]
+#[expect(clippy::from_over_into)]
 impl Into<IntervalUnitProto> for IntervalUnit {
     fn into(self) -> IntervalUnitProto {
         IntervalUnitProto {
