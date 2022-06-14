@@ -22,8 +22,6 @@ use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
-use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
-use crate::hummock::shared_buffer::{OrderIndex, UploadTaskType};
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
@@ -91,16 +89,6 @@ impl LocalVersion {
             },
             pinned_version: self.pinned_version.clone(),
         }
-    }
-
-    pub fn new_upload_task(
-        &self,
-        epoch: HummockEpoch,
-        task_type: UploadTaskType,
-    ) -> Option<(OrderIndex, UploadTaskPayload)> {
-        self.shared_buffer
-            .get(&epoch)
-            .and_then(|shared_buffer| shared_buffer.write().new_upload_task(task_type))
     }
 }
 
