@@ -128,9 +128,10 @@ impl<S: StateStore> StateTable<S> {
 
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
-        let cell_based_start_key = Included(self.keyspace.key().to_vec());
-        let cell_based_end_key = Excluded(next_key(self.keyspace.key()));
-        let cell_based_bounds = (cell_based_start_key, cell_based_end_key);
+        let cell_based_bounds = (
+            Included(self.keyspace.key().to_vec()),
+            Excluded(next_key(self.keyspace.key())),
+        );
         let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
         let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
         Ok(StateTableRowIter::into_stream(
@@ -230,7 +231,10 @@ impl<S: StateStore> StateTable<S> {
                 epoch,
             ))
         } else {
-            let cell_based_bounds = (Unbounded, Unbounded);
+            let cell_based_bounds = (
+                Included(self.keyspace.key().to_vec()),
+                Excluded(next_key(self.keyspace.key())),
+            );
             let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
             let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
             Ok(StateTableRowIter::into_stream(
