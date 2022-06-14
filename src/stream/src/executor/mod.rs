@@ -66,6 +66,7 @@ mod project;
 mod rearranged_chain;
 pub mod receiver;
 mod simple;
+mod sink;
 mod source;
 mod top_n;
 mod top_n_appendonly;

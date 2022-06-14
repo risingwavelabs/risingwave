@@ -227,8 +227,7 @@ pub struct BytesWriter {
 }
 
 impl BytesWriter {
-    /// `write_ref` will consume `BytesWriter` and pass the ownership
-    /// of `builder` to `BytesGuard`.
+    /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
     pub fn write_ref(mut self, value: &str) -> ArrayResult<BytesGuard> {
         self.builder.append(Some(value))?;
         Ok(BytesGuard {
@@ -236,6 +235,9 @@ impl BytesWriter {
         })
     }
 
+    /// `write_from_char_iter` will consume `BytesWriter` and write the characters from the `iter`.
+    ///
+    /// Prefer [`BytesWriter::begin`] for writing multiple string pieces.
     pub fn write_from_char_iter(self, iter: impl Iterator<Item = char>) -> ArrayResult<BytesGuard> {
         let mut writer = self.begin();
         for c in iter {
@@ -246,8 +248,8 @@ impl BytesWriter {
         writer.finish()
     }
 
-    /// `begin` will create a `PartialBytesWriter`, which allow multiple
-    /// appendings to create a new record.
+    /// `begin` will create a `PartialBytesWriter`, which allow multiple appendings to create a new
+    /// record.
     pub fn begin(self) -> PartialBytesWriter {
         PartialBytesWriter {
             builder: self.builder,

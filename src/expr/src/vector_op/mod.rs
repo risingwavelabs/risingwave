@@ -19,6 +19,7 @@ pub mod ascii;
 pub mod bitwise_op;
 pub mod cast;
 pub mod cmp;
+pub mod concat_op;
 pub mod conjunction;
 pub mod extract;
 pub mod length;

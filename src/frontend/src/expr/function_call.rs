@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -144,7 +145,14 @@ impl FunctionCall {
                         // subsequent can be any type
                         _ => input.cast_explicit(DataType::Varchar),
                     })
-                    .collect::<Result<Vec<_>>>()?;
+                    .try_collect()?;
+                Ok(DataType::Varchar)
+            }
+            ExprType::ConcatOp => {
+                inputs = inputs
+                    .into_iter()
+                    .map(|input| input.cast_explicit(DataType::Varchar))
+                    .try_collect()?;
                 Ok(DataType::Varchar)
             }
 
