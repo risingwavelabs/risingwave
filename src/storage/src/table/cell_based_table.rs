@@ -36,7 +36,6 @@ use crate::cell_based_row_deserializer::{
     make_column_desc_index, CellBasedRowDeserializer, ColumnDescMapping,
 };
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
-// use crate::cell_deserializer::CellDeserializer;
 use crate::cell_serializer::CellSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;

@@ -42,6 +42,7 @@ pub struct StateTable<S: StateStore, SER: CellSerializer> {
 
     pk_indices: Vec<usize>,
 }
+
 impl<S: StateStore> StateTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
