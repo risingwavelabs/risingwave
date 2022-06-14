@@ -232,9 +232,9 @@ impl QueryRunner {
                 self.query.query_id, stage_id
             );
         }
-        let mut stages_has_table_scan = self
+        let mut stages_with_table_scan = self
             .query
-            .stage_has_table_scan()
+            .stages_with_table_scan()
             .into_iter()
             .collect::<HashSet<_>>();
 
@@ -247,8 +247,8 @@ impl QueryRunner {
                         self.query.query_id, stage_id
                     );
                     self.scheduled_stages_count += 1;
-                    stages_has_table_scan.remove(&stage_id);
-                    if stages_has_table_scan.is_empty() {
+                    stages_with_table_scan.remove(&stage_id);
+                    if stages_with_table_scan.is_empty() {
                         // Since all the iterators are created during building the leaf tasks in the
                         // backend, we can be sure here that all the
                         // iterator have been created, thus they all successfully pinned a

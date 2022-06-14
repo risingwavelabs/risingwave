@@ -14,9 +14,8 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::btree_map::Range;
-use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Included, Unbounded};
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Index, RangeBounds};
 use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
@@ -30,6 +29,7 @@ use risingwave_hummock_sdk::key::next_key;
 
 use super::cell_based_table::{CellBasedTable, CellBasedTableStreamingIter};
 use super::mem_table::{MemTable, RowOp};
+use crate::cell_based_row_deserializer::{make_column_desc_index, ColumnDescMapping};
 use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
 use crate::{Keyspace, StateStore};
@@ -38,10 +38,7 @@ use crate::{Keyspace, StateStore};
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
     keyspace: Keyspace<S>,
-
-    column_descs: Vec<ColumnDesc>,
-    /// Ordering of primary key (for assertion)
-    order_types: Vec<OrderType>,
+    column_mapping: Arc<ColumnDescMapping>,
 
     /// buffer key/values
     mem_table: MemTable,
@@ -49,22 +46,22 @@ pub struct StateTable<S: StateStore> {
     /// Relation layer
     cell_based_table: CellBasedTable<S>,
 
-    _pk_indices: Vec<usize>,
+    pk_indices: Vec<usize>,
 }
+
 impl<S: StateStore> StateTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         dist_key_indices: Option<Vec<usize>>,
-        _pk_indices: Vec<usize>,
+        pk_indices: Vec<usize>,
     ) -> Self {
         let cell_based_keyspace = keyspace.clone();
         let cell_based_column_descs = column_descs.clone();
         Self {
             keyspace,
-            column_descs,
-            order_types: order_types.clone(),
+            column_mapping: Arc::new(make_column_desc_index(column_descs)),
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
                 cell_based_keyspace,
@@ -73,12 +70,13 @@ impl<S: StateStore> StateTable<S> {
                 Arc::new(StateStoreMetrics::unused()),
                 dist_key_indices,
             ),
-            _pk_indices,
+            pk_indices,
         }
     }
 
     /// read methods
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+        // TODO: change to Cow to avoid unnecessary clone.
         let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         let mem_table_res = self.mem_table.get_row(&pk_bytes).map_err(err)?;
         match mem_table_res {
@@ -92,16 +90,24 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
-        assert_eq!(self.order_types.len(), pk.size());
-        let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+    pub fn insert(&mut self, value: Row) -> StorageResult<()> {
+        let mut datums = vec![];
+        for pk_indice in &self.pk_indices {
+            datums.push(value.index(*pk_indice).clone());
+        }
+        let pk = Row::new(datums);
+        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         self.mem_table.insert(pk_bytes, value)?;
         Ok(())
     }
 
-    pub fn delete(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
-        assert_eq!(self.order_types.len(), pk.size());
-        let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+    pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
+        let mut datums = vec![];
+        for pk_indice in &self.pk_indices {
+            datums.push(old_value.index(*pk_indice).clone());
+        }
+        let pk = Row::new(datums);
+        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }
@@ -128,16 +134,20 @@ impl<S: StateStore> StateTable<S> {
 
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
-        let cell_based_bounds = (Unbounded, Unbounded);
+        let cell_based_bounds = (
+            Included(self.keyspace.key().to_vec()),
+            Excluded(next_key(self.keyspace.key())),
+        );
         let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
         let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
-        Ok(StateTableRowIter::into_stream(
+        Ok(StateTableRowIter::new(
             &self.keyspace,
-            self.column_descs.clone(),
+            self.column_mapping.clone(),
             mem_table_iter,
             cell_based_bounds,
             epoch,
-        ))
+        )
+        .into_stream())
     }
 
     /// This function scans rows from the relational table with specific `pk_bounds`.
@@ -191,13 +201,14 @@ impl<S: StateStore> StateTable<S> {
         };
         let mem_table_bounds = (mem_table_start_key, mem_table_end_key);
         let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
-        Ok(StateTableRowIter::into_stream(
+        Ok(StateTableRowIter::new(
             &self.keyspace,
-            self.column_descs.clone(),
+            self.column_mapping.clone(),
             mem_table_iter,
             cell_based_bounds,
             epoch,
-        ))
+        )
+        .into_stream())
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
@@ -220,63 +231,83 @@ impl<S: StateStore> StateTable<S> {
                 Excluded(next_key(key_bytes.as_slice())),
             );
             let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
-            Ok(StateTableRowIter::into_stream(
+            Ok(StateTableRowIter::new(
                 &self.keyspace,
-                self.column_descs.clone(),
+                self.column_mapping.clone(),
                 mem_table_iter,
                 cell_based_bounds,
                 epoch,
-            ))
+            )
+            .into_stream())
         } else {
-            let cell_based_bounds = (Unbounded, Unbounded);
+            let cell_based_bounds = (
+                Included(self.keyspace.key().to_vec()),
+                Excluded(next_key(self.keyspace.key())),
+            );
             let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
             let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
-            Ok(StateTableRowIter::into_stream(
+            Ok(StateTableRowIter::new(
                 &self.keyspace,
-                self.column_descs.clone(),
+                self.column_mapping.clone(),
                 mem_table_iter,
                 cell_based_bounds,
                 epoch,
-            ))
+            )
+            .into_stream())
         }
     }
 }
 
 pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>>;
 
-struct StateTableRowIter<S: StateStore> {
-    _phantom: PhantomData<S>,
+struct StateTableRowIter<'a, S: StateStore> {
+    keyspace: &'a Keyspace<S>,
+    table_descs: Arc<ColumnDescMapping>,
+    mem_table_iter: Range<'a, Vec<u8>, RowOp>,
+    cell_based_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    epoch: u64,
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommited data).
 /// It will merge the result of `mem_table_iter` and `cell_based_streaming_iter`.
-impl<S: StateStore> StateTableRowIter<S> {
-    /// This function scans kv pairs from the `shared_storage`(`cell_based_table`) and
-    /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is (Unbounded, Unbounded), all kv
-    /// pairs will be scanned. If a record exist in both `cell_based_table` and `mem_table`,
-    /// result `mem_table` is returned according to the operation(RowOp) on it.
-
-    #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
-    async fn into_stream<'a>(
+impl<'a, S: StateStore> StateTableRowIter<'a, S> {
+    pub fn new(
         keyspace: &'a Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
+        table_descs: Arc<ColumnDescMapping>,
         mem_table_iter: Range<'a, Vec<u8>, RowOp>,
         cell_based_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
-    ) {
+    ) -> Self {
+        Self {
+            keyspace,
+            table_descs,
+            mem_table_iter,
+            cell_based_bounds,
+            epoch,
+        }
+    }
+
+    /// This function scans kv pairs from the `shared_storage`(`cell_based_table`) and
+    /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is
+    /// (Included(prefix),Excluded(next_key(prefix))), all kv pairs within corresponding prefix will
+    /// be scanned. If a record exist in both `cell_based_table` and `mem_table`, result
+    /// `mem_table` is returned according to the operation(RowOp) on it.
+
+    #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
+    async fn into_stream(self) {
         let cell_based_table_iter: futures::stream::Peekable<_> =
             CellBasedTableStreamingIter::new_with_bounds(
-                keyspace,
-                table_descs,
-                cell_based_bounds,
-                epoch,
+                self.keyspace,
+                self.table_descs,
+                self.cell_based_bounds,
+                self.epoch,
             )
             .await?
             .into_stream()
             .peekable();
         pin_mut!(cell_based_table_iter);
 
-        let mut mem_table_iter = mem_table_iter.peekable();
+        let mut mem_table_iter = self.mem_table_iter.peekable();
 
         loop {
             match (

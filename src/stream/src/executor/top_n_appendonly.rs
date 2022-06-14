@@ -17,7 +17,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::StreamExecutorResult;
@@ -139,7 +139,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
+        let cell_based_row_deserializer = make_cell_based_row_deserializer(table_column_descs);
         Ok(Self {
             info: ExecutorInfo {
                 schema: input_info.schema,

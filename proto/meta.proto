@@ -161,3 +161,13 @@ message SubscribeResponse {
 service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }
+
+message SourceActorSplit {
+  string type = 1;
+  bytes split = 2;
+}
+
+message SourceActorInfo {
+  uint32 actor_id = 1;
+  repeated SourceActorSplit splits = 2;
+}

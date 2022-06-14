@@ -18,7 +18,7 @@ mod top_n_state;
 use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::GeneralCellBasedRowDeserializer;
 use risingwave_storage::StateStoreIter;
 pub use top_n_bottom_n_state::ManagedTopNBottomNState;
 pub use top_n_state::ManagedTopNState;
@@ -47,7 +47,7 @@ fn deserialize_pk<const TOP_N_TYPE: usize>(
 pub struct PkAndRowIterator<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, const TOP_N_TYPE: usize> {
     iter: I,
     ordered_row_deserializer: &'a mut OrderedRowDeserializer,
-    cell_based_row_deserializer: &'a mut CellBasedRowDeserializer,
+    cell_based_row_deserializer: &'a mut GeneralCellBasedRowDeserializer,
 }
 
 impl<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, const TOP_N_TYPE: usize>
@@ -56,7 +56,7 @@ impl<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, const TOP_N_TYPE: usize>
     pub fn new(
         iter: I,
         ordered_row_deserializer: &'a mut OrderedRowDeserializer,
-        cell_based_row_deserializer: &'a mut CellBasedRowDeserializer,
+        cell_based_row_deserializer: &'a mut GeneralCellBasedRowDeserializer,
     ) -> Self {
         Self {
             iter,

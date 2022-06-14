@@ -434,9 +434,6 @@
             exchange:
               strategy:
                 type: SIMPLE
-        pkIndices:
-          - 0
-          - 1
         fields:
           - dataType:
               typeName: INT64
@@ -461,9 +458,6 @@
               returnType:
                 typeName: INT64
                 isNullable: true
-    pkIndices:
-      - 0
-      - 1
     fields:
       - dataType:
           typeName: INT64
@@ -474,18 +468,6 @@
           isNullable: true
         name: "agg#1"
     materialize:
-      columnOrders:
-        - orderType: ASCENDING
-          inputRef: {}
-          returnType:
-            typeName: INT64
-            isNullable: true
-        - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
       columnIds:
         - 0
         - 1
@@ -505,15 +487,6 @@
             isNullable: true
           columnId: 1
           name: sum
-    orderColumnIds:
-      - 0
-      - 1
-    orders:
-      - ASCENDING
-      - ASCENDING
-    pk:
-      - 0
-      - 1
 - sql: |
     /* test simple agg */
     create table t (v1 int, v2 int);

@@ -172,30 +172,38 @@ impl Binder {
         }
     }
 
+    pub(super) fn bind_relation_by_name(
+        &mut self,
+        name: ObjectName,
+        alias: Option<TableAlias>,
+    ) -> Result<Relation> {
+        let has_schema_name = name.0.len() > 1;
+        let (schema_name, table_name) = Self::resolve_table_name(name)?;
+        if !has_schema_name
+            && let Some(bound_query) = self.cte_to_relation.get(&table_name)
+        {
+            let (query, alias) = bound_query.clone();
+            self.bind_context(
+                query
+                    .body
+                    .schema()
+                    .fields
+                    .iter()
+                    .map(|f| (false, f.clone())),
+                table_name,
+                Some(alias),
+            )?;
+            Ok(Relation::Subquery(Box::new(BoundSubquery { query })))
+        } else {
+            self.bind_table_or_source(&schema_name, &table_name, alias)
+        }
+    }
+
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
             TableFactor::Table { name, alias, args } => {
                 if args.is_empty() {
-                    let has_schema_name = name.0.len() > 1;
-                    let (schema_name, table_name) = Self::resolve_table_name(name)?;
-                    if !has_schema_name
-                        && let Some(bound_query) = self.cte_to_relation.get(&table_name)
-                    {
-                        let (query, alias) = bound_query.clone();
-                        self.bind_context(
-                            query
-                                .body
-                                .schema()
-                                .fields
-                                .iter()
-                                .map(|f| (false, f.clone())),
-                            table_name,
-                            Some(alias),
-                        )?;
-                        Ok(Relation::Subquery(Box::new(BoundSubquery { query })))
-                    } else {
-                        self.bind_table_or_source(&schema_name, &table_name, alias)
-                    }
+                    self.bind_relation_by_name(name, alias)
                 } else {
                     let func_name = &name.0[0].value;
                     if func_name.eq_ignore_ascii_case("generate_series") {
