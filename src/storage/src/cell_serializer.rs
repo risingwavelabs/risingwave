@@ -13,43 +13,21 @@
 // limitations under the License.
 
 use itertools::Itertools;
-
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_common::util::ordered::{
-    serialize_pk_and_column_id, serialize_pk_and_row, SENTINEL_CELL_ID,
-};
 
-use crate::cell_serializer::{CellSerializer, KeyBytes, ValueBytes};
+pub type KeyBytes = Vec<u8>;
+pub type ValueBytes = Vec<u8>;
 
-#[derive(Clone)]
-pub struct CellBasedRowSerializer {}
-impl Default for CellBasedRowSerializer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-impl CellBasedRowSerializer {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl CellSerializer for CellBasedRowSerializer {
+pub trait CellSerializer: 'static {
     /// Serialize key and value.
     fn serialize(
         &mut self,
         pk: &[u8],
         row: Row,
         column_ids: &[ColumnId],
-    ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
-        let res = serialize_pk_and_row(pk, &row, column_ids)?
-            .into_iter()
-            .flatten()
-            .collect_vec();
-        Ok(res)
-    }
+    ) -> Result<Vec<(KeyBytes, ValueBytes)>>;
 
     /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
     /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
@@ -59,10 +37,7 @@ impl CellSerializer for CellBasedRowSerializer {
         pk: &[u8],
         row: Row,
         column_ids: &[ColumnId],
-    ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
-        let res = serialize_pk_and_row(pk, &row, column_ids)?;
-        Ok(res)
-    }
+    ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>>;
 
     /// Different from [`CellBasedRowSerializer::serialize`], only serialize key into cell key (With
     /// column id appended).
@@ -71,15 +46,5 @@ impl CellSerializer for CellBasedRowSerializer {
         pk: &[u8],
         row: &Row,
         column_ids: &[ColumnId],
-    ) -> Result<Vec<KeyBytes>> {
-        let mut results = Vec::with_capacity(column_ids.len());
-        for (index, col_id) in column_ids.iter().enumerate() {
-            if row[index].is_none() {
-                continue;
-            }
-            results.push(serialize_pk_and_column_id(pk, col_id)?);
-        }
-        results.push(serialize_pk_and_column_id(pk, &SENTINEL_CELL_ID)?);
-        Ok(results)
-    }
+    ) -> Result<Vec<KeyBytes>>;
 }
