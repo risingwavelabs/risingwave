@@ -47,25 +47,23 @@ pub struct PlanAggCall {
     pub distinct: bool,
 }
 
-struct InputRefWithDistinct<'a>(&'a InputRef, bool);
-
-impl<'a> fmt::Debug for InputRefWithDistinct<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.1 {
-            write!(f, "distinct ")?;
-        }
-        write!(f, "{}", self.0)
-    }
-}
-
 impl fmt::Debug for PlanAggCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
-        self.inputs.iter().for_each(|child| {
-            let input_ref = InputRefWithDistinct(child, self.distinct);
-            builder.field(&input_ref);
-        });
-        builder.finish()
+        write!(f, "{}", self.agg_kind)?;
+        if !self.inputs.is_empty() {
+            write!(f, "(")?;
+            for (idx, input) in self.inputs.iter().enumerate() {
+                if idx == 0 && self.distinct {
+                    write!(f, "distinct ")?;
+                }
+                write!(f, "{:?}", input)?;
+                if idx != (self.inputs.len() - 1) {
+                    write!(f, ",")?;
+                }
+            }
+            write!(f, ")")?;
+        }
+        Ok(())
     }
 }
 
