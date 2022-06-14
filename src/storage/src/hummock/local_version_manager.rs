@@ -159,9 +159,11 @@ impl LocalVersionManager {
     /// being referenced by some readers.
     pub fn try_update_pinned_version(&self, newly_pinned_version: HummockVersion) -> bool {
         let new_version_id = newly_pinned_version.id;
-        if validate_table_key_range(&newly_pinned_version.levels).is_err() {
-            error!("invalid table key range: {:?}", newly_pinned_version.levels);
-            return false;
+        for levels in newly_pinned_version.levels.values() {
+            if validate_table_key_range(&levels.levels).is_err() {
+                error!("invalid table key range: {:?}", levels.levels);
+                return false;
+            }
         }
         let mut guard = self.local_version.write();
 
