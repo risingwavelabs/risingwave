@@ -27,21 +27,13 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 
 use crate::cell_serializer::CellSerializer;
 use super::cell_based_table::CellBasedTable;
+use super::cell_based_table::{CellBasedTableExtended, CellBasedTableStreamingIter};
+use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
-#[derive(Clone)]
-pub struct StateTable<S: StateStore, SER: CellSerializer> {
-    /// buffer key/values
-    mem_table: MemTable,
-
-    /// Relation layer
-    cell_based_table: CellBasedTable<S>,
-
-    pk_indices: Vec<usize>,
-}
+pub type StateTable<S> = StateTableExtended<S, CellBasedRowSerializer>;
 
 impl<S: StateStore> StateTable<S> {
     pub fn new(
@@ -51,13 +43,46 @@ impl<S: StateStore> StateTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        StateTableExtended::new_extended(
+            keyspace,
+            column_descs,
+            order_types,
+            dist_key_indices,
+            pk_indices,
+            CellBasedRowSerializer::new(),
+        )
+    }
+}
+
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
+#[derive(Clone)]
+pub struct StateTableExtended<S: StateStore, SER: CellSerializer> {
+    /// buffer key/values
+    mem_table: MemTable,
+
+    /// Relation layer
+    cell_based_table: CellBasedTableExtended<S, SER>,
+
+    pk_indices: Vec<usize>,
+}
+
+impl<S: StateStore, SER: CellSerializer> StateTableExtended<S, SER> {
+    pub fn new_extended(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        dist_key_indices: Option<Vec<usize>>,
+        pk_indices: Vec<usize>,
+        cell_based_row_serializer: SER,
+    ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTable::new(
+            cell_based_table: CellBasedTableExtended::new_extended(
                 keyspace,
                 column_descs,
                 order_types,
                 dist_key_indices,
+                cell_based_row_serializer,
             ),
             pk_indices,
         }

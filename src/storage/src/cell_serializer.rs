@@ -38,7 +38,7 @@ pub trait CellSerializer {
         column_ids: &[ColumnId],
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>>;
 
-    /// Different from [`CellBasedRowSerializer::serialize`], only serialize key into cell key (With
+    /// Different from [`CellSerializer::serialize`], only serialize key into cell key (With
     /// column id appended).
     fn serialize_cell_key(
         &mut self,
