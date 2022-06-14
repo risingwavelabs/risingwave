@@ -127,6 +127,22 @@
 - sql: |
     create table t1 (id int, v1 int, created_at date);
     with t2 as (select * from t1 where v1 >= 10)
+    select * from tumble(t1, created_at, interval '3' day);
+  logical_plan: |
+    LogicalProject { exprs: [$1, $2, $3, $4, $5] }
+      LogicalProject { exprs: [$0, $1, $2, $3, TumbleStart($3, '3 days 00:00:00':Interval), (TumbleStart($3, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
+        LogicalScan { table: t1, columns: [_row_id, id, v1, created_at] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $1, $2, TumbleStart($2, '3 days 00:00:00':Interval), (TumbleStart($2, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
+        BatchScan { table: t1, columns: [id, v1, created_at] }
+  stream_plan: |
+    StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, _row_id(hidden)], pk_columns: [_row_id] }
+      StreamProject { exprs: [$0, $1, $2, TumbleStart($2, '3 days 00:00:00':Interval), (TumbleStart($2, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval), $3] }
+        StreamTableScan { table: t1, columns: [id, v1, created_at, _row_id], pk_indices: [3] }
+- sql: |
+    create table t1 (id int, v1 int, created_at date);
+    with t2 as (select * from t1 where v1 >= 10)
     select * from hop(t2, created_at, interval '1' day, interval '3' day);
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $2, $3, $4] }
