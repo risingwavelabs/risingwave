@@ -332,8 +332,7 @@ impl<S: StateStore> CellBasedTable<S> {
         CellBasedTableRowIter::new(&self.keyspace, self.mapping.clone(), epoch).await
     }
 
-    // TODO: give a more meaningful name to this function
-    pub async fn iter_with_pk(
+    pub async fn dedup_pk_iter(
         &self,
         epoch: u64,
         // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
