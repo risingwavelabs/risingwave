@@ -288,12 +288,15 @@ impl MockCatalogWriter {
 }
 
 pub struct MockUserInfoWriter {
+    id: AtomicU32,
     user_info: Arc<RwLock<UserInfoManager>>,
 }
 
 #[async_trait::async_trait]
 impl UserInfoWriter for MockUserInfoWriter {
     async fn create_user(&self, user: UserInfo) -> Result<()> {
+        let mut user = user.clone();
+        user.id = self.gen_id();
         self.user_info.write().create_user(user);
         Ok(())
     }
@@ -373,13 +376,21 @@ impl UserInfoWriter for MockUserInfoWriter {
 impl MockUserInfoWriter {
     pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
         user_info.write().create_user(UserInfo {
+            id: 0,
             name: DEFAULT_SUPPER_USER.to_string(),
             is_supper: true,
             can_create_db: true,
             can_login: true,
             ..Default::default()
         });
-        Self { user_info }
+        Self {
+            user_info,
+            id: AtomicU32::new(1),
+        }
+    }
+
+    fn gen_id(&self) -> u32 {
+        self.id.fetch_add(1, Ordering::SeqCst)
     }
 }
 

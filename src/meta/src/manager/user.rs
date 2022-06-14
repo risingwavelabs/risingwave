@@ -55,9 +55,10 @@ impl<S: MetaStore> UserManager<S> {
 
     async fn init(&self) -> Result<()> {
         let mut core = self.core.lock().await;
-        for user in [DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_FOR_PG] {
+        for (user, id) in [(DEFAULT_SUPPER_USER, 1), (DEFAULT_SUPPER_USER_FOR_PG, 2)] {
             if !core.contains_key(user) {
                 let default_user = UserInfo {
+                    id,
                     name: user.to_string(),
                     is_supper: true,
                     can_create_db: true,
@@ -352,8 +353,9 @@ mod tests {
 
     use super::*;
 
-    fn make_test_user(name: &str) -> UserInfo {
+    fn make_test_user(id: u32, name: &str) -> UserInfo {
         UserInfo {
+            id,
             name: name.to_string(),
             ..Default::default()
         }
@@ -380,9 +382,11 @@ mod tests {
     async fn test_user_manager() -> Result<()> {
         let user_manager = UserManager::new(MetaSrvEnv::for_test().await).await?;
         let test_user = "test_user";
-        user_manager.create_user(&make_test_user(test_user)).await?;
+        user_manager
+            .create_user(&make_test_user(10, test_user))
+            .await?;
         assert!(user_manager
-            .create_user(&make_test_user(DEFAULT_SUPPER_USER))
+            .create_user(&make_test_user(1, DEFAULT_SUPPER_USER))
             .await
             .is_err());
 

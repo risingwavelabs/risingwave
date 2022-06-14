@@ -20,14 +20,15 @@ message AuthInfo {
 
 /// User defines a user in the system.
 message UserInfo {
-  string name = 1;
-  bool is_supper = 2;
-  bool can_create_db = 3;
-  bool can_login = 4;
-  AuthInfo auth_info = 5;
+  uint32 id = 1;
+  string name = 2;
+  bool is_supper = 3;
+  bool can_create_db = 4;
+  bool can_login = 5;
+  AuthInfo auth_info = 6;
 
   /// Granted privileges will be only updated through the command of GRANT/REVOKE.
-  repeated GrantPrivilege grant_privileges = 6;
+  repeated GrantPrivilege grant_privileges = 7;
 }
 
 /// GrantPrivilege defines a privilege granted to a user.

@@ -30,13 +30,17 @@ pub async fn handle_drop_user(
         return Err(ErrorCode::BindError("Drop user not support drop mode".to_string()).into());
     }
 
-    {
-        let user_info_reader = session.env().user_info_reader();
-        let user = user_info_reader
-            .read_guard()
-            .get_user_by_name(&user_name.to_string())
-            .cloned();
-        if user.is_none() {
+    let user_info_reader = session.env().user_info_reader();
+    let user = user_info_reader
+        .read_guard()
+        .get_user_by_name(&user_name.to_string())
+        .cloned();
+    match user {
+        Some(user) => {
+            let user_info_writer = session.env().user_info_writer();
+            user_info_writer.drop_user(&user.name).await?;
+        }
+        None => {
             return if if_exists {
                 Ok(PgResponse::empty_result_with_notice(
                     StatementType::DROP_USER,
@@ -47,8 +51,7 @@ pub async fn handle_drop_user(
             };
         }
     }
-    let user_info_writer = session.env().user_info_writer();
-    user_info_writer.drop_user(&user_name.to_string()).await?;
+
     Ok(PgResponse::empty_result(StatementType::DROP_USER))
 }
 
