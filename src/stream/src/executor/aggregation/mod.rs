@@ -30,6 +30,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
 use risingwave_storage::table::state_table::StateTable;
@@ -395,6 +396,37 @@ pub fn generate_column_descs(
     add_column_desc(agg_call.return_type.clone());
 
     column_descs
+}
+
+/// Generate state table for agg executor.
+/// Relational pk = `table_desc.len` - 1.
+pub fn generate_state_table<S: StateStore>(
+    ks: Keyspace<S>,
+    agg_call: &AggCall,
+    group_keys: &[usize],
+    pk_indices: &[usize],
+    agg_schema: &Schema,
+    input_ref: &dyn Executor,
+) -> StateTable<S> {
+    let table_desc = generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
+    // Always leave 1 space for agg call value.
+    let relational_pk_len = table_desc.len() - 1;
+    StateTable::new(
+        ks,
+        table_desc,
+        // Primary key do not includes group key.
+        vec![
+            // Now we only infer order type for min/max in a naive way.
+            if agg_call.kind == AggKind::Max {
+                OrderType::Descending
+            } else {
+                OrderType::Ascending
+            };
+            relational_pk_len
+        ],
+        None,
+        (0..relational_pk_len).collect(),
+    )
 }
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.

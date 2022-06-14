@@ -28,8 +28,6 @@ use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -38,7 +36,7 @@ use super::{
     StreamExecutorResult,
 };
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_column_descs, generate_managed_agg_state,
+    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, generate_state_table,
     AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
@@ -123,26 +121,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut state_tables = Vec::with_capacity(agg_calls.len());
         for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
-            let table_desc =
-                generate_column_descs(agg_call, &key_indices, &pk_indices, &schema, input.as_ref());
-            // Relational pk always leave 1 space for the agg call value.
-            let relational_pk_len = table_desc.len() - 1;
-            let state_table = StateTable::new(
+            state_tables.push(generate_state_table(
                 ks.clone(),
-                generate_column_descs(agg_call, &key_indices, &pk_indices, &schema, input.as_ref()),
-                vec![
-                    // Now we only infer order type for min/max in a naive way.
-                    if agg_call.kind == AggKind::Max {
-                        OrderType::Descending
-                    } else {
-                        OrderType::Ascending
-                    };
-                    relational_pk_len
-                ],
-                Some(key_indices.clone()),
-                (0..relational_pk_len).collect(),
-            );
-            state_tables.push(state_table);
+                agg_call,
+                &key_indices,
+                &pk_indices,
+                &schema,
+                input.as_ref(),
+            ));
         }
 
         Ok(Self {
