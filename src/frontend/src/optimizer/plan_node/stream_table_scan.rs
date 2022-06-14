@@ -129,9 +129,6 @@ impl StreamTableScan {
                 .iter()
                 .map(|k| *k as u32)
                 .collect_vec(),
-            // Will fill when resolving chain node.
-            hash_mapping: None,
-            parallel_unit_id: 0,
         };
 
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
