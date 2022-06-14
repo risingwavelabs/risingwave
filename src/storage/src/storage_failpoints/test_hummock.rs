@@ -66,11 +66,7 @@ async fn test_failpoint_state_store_read_upload() {
     hummock_storage.ingest_batch(batch1, 1).await.unwrap();
 
     // Get the value after flushing to remote.
-    let value = hummock_storage
-        .get(&anchor, 1)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, 1).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111"));
     // // Write second batch.
     hummock_storage.ingest_batch(batch2, 3).await.unwrap();
@@ -95,9 +91,7 @@ async fn test_failpoint_state_store_read_upload() {
 
     let result = hummock_storage.get(&anchor, 2).await;
     assert!(result.is_err());
-    let result = hummock_storage
-        .iter(..=b"ee".to_vec(), 2)
-        .await;
+    let result = hummock_storage.iter(..=b"ee".to_vec(), 2).await;
     assert!(result.is_err());
 
     let value = hummock_storage.get(b"ee".as_ref(), 2).await.unwrap();
@@ -128,10 +122,7 @@ async fn test_failpoint_state_store_read_upload() {
         .unwrap()
         .unwrap();
     assert_eq!(value, Bytes::from("111"));
-    let mut iters = hummock_storage
-        .iter(..=b"ee".to_vec(), 5)
-        .await
-        .unwrap();
+    let mut iters = hummock_storage.iter(..=b"ee".to_vec(), 5).await.unwrap();
     let len = count_iter(&mut iters).await;
     assert_eq!(len, 2);
 }
