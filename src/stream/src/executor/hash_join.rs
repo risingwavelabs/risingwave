@@ -517,14 +517,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
     /// the data the hash table and match the coming
     /// data chunk with the executor state
-    async fn hash_eq_match<'a>(
-        key: &'a K,
-        ht: &'a mut JoinHashMap<K, S>,
-    ) -> Option<&'a mut HashValueType> {
+    async fn hash_eq_match<'a>(key: &K, ht: &mut JoinHashMap<K, S>) -> Option<HashValueType> {
         if key.has_null() {
             None
         } else {
-            ht.get_mut(key).await
+            ht.remove_state(key).await
         }
     }
 
@@ -610,13 +607,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             let key = &keys[idx];
             let value = row.to_owned_row();
             let pk = row.row_by_indices(&side_update.pk_indices);
-            let mut matched_rows = Self::hash_eq_match(key, &mut side_match.ht).await;
+            let matched_rows = Self::hash_eq_match(key, &mut side_match.ht).await;
             match *op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
-                    let mut matched_pks: Vec<Row> = Vec::with_capacity(1);
-                    if let Some(matched_rows) = matched_rows.as_mut() {
-                        for matched_row in (*matched_rows).values_mut() {
+                    let mut append_only_matched_rows = Vec::with_capacity(1);
+                    if let Some(mut matched_rows) = matched_rows {
+                        for matched_row in matched_rows.values_mut() {
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
                                 if !forward_exactly_once(T, SIDE) {
@@ -626,14 +623,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                         yield Message::Chunk(chunk);
                                     }
                                 }
-                                side_match.ht.inc_degree(matched_row);
+                                side_match.ht.inc_degree(matched_row)?;
                             }
                             // If the stream is append-only and the join key covers pk in both side,
                             // then we can remove matched rows since pk is unique and will not be
                             // inserted again
                             if append_only_optimize {
-                                let pk_matched = matched_row.row_by_indices(&side_match.pk_indices);
-                                matched_pks.push(pk_matched);
+                                append_only_matched_rows.push(matched_row.clone());
                             }
                         }
                         if degree == 0 {
@@ -647,6 +643,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         {
                             yield Message::Chunk(chunk);
                         }
+                        // Insert back the state taken from ht.
+                        side_match.ht.insert_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
                     {
@@ -654,11 +652,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
 
                     if append_only_optimize {
-                        if true{
+                        if !append_only_matched_rows.is_empty() {
                             // Since join key contains pk and pk is unique, there should be only
                             // one row if matched
-                            debug_assert!(1 == matched_pks.len());
-                            // v.remove(matched_pks.remove(0));
+                            debug_assert_eq!(1, append_only_matched_rows.len());
+                            let row = append_only_matched_rows.remove(0);
+                            let pk = row.row_by_indices(&side_match.pk_indices);
+                            side_match.ht.delete(key, pk, row)?;
                         } else {
                             side_update
                                 .ht
@@ -672,11 +672,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
                 Op::Delete | Op::UpdateDelete => {
                     let mut degree = 0;
-                    if let Some(matched_rows) = matched_rows {
+                    if let Some(mut matched_rows) = matched_rows {
                         for matched_row in matched_rows.values_mut() {
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
-                                matched_row.dec_degree()?;
+                                side_match.ht.dec_degree(matched_row)?;
                                 if !forward_exactly_once(T, SIDE) {
                                     if let Some(chunk) = hashjoin_chunk_builder
                                         .with_match_on_delete(&row, matched_row)?
@@ -697,6 +697,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         {
                             yield Message::Chunk(chunk);
                         }
+                        // Insert back the state taken from ht.
+                        side_match.ht.insert_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
                     {

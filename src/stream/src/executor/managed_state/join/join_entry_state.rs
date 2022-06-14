@@ -36,11 +36,6 @@ impl JoinEntryState {
         Self { cached }
     }
 
-    /// If the cache is empty
-    pub fn is_empty(&self) -> bool {
-        self.cached.is_empty()
-    }
-
     // Insert into the cache and flush buffer.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
         self.cached.insert(key, value);

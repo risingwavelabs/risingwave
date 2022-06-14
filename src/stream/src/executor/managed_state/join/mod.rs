@@ -193,7 +193,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
-    /// up in remote storage and return, if still not exist, return None.
+    /// up in remote storage and return. If not exist in remote storage, a
+    /// `JoinEntryState` with empty cache will be returned.
     #[allow(dead_code)]
     pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType> {
         let state = self.inner.get(key);
@@ -209,8 +210,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
-    /// up in remote storage and return, if still not exist, return None.
-    pub async fn get_mut<'a>(&'a mut self, key: &K) -> Option<&'a mut HashValueType> {
+    /// up in remote storage and return. If not exist in remote storage, a
+    /// `JoinEntryState` with empty cache will be returned.
+    #[allow(dead_code)]
+    pub async fn get_mut<'a>(&'a mut self, key: &'a K) -> Option<&'a mut HashValueType> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -220,6 +223,19 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 self.inner.put(key.clone(), remote_state);
                 self.inner.get_mut(key)
             }
+        }
+    }
+
+    /// Remove the key in the memory, returning the value at the key if the
+    /// key was previously in the map. If does not exist, look
+    /// up in remote storage and return. If not exist in remote storage, a
+    /// `JoinEntryState` with empty cache will be returned.
+    /// WARNING: This will NOT remove anything from remote storage.
+    pub async fn remove_state<'a>(&mut self, key: &K) -> Option<HashValueType> {
+        let state = self.inner.pop(key);
+        match state {
+            Some(_) => state,
+            None => Some(self.fetch_cached_state(key).await.unwrap()),
         }
     }
 
@@ -282,12 +298,26 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(())
     }
 
-    pub fn inc_degree(&mut self, join_row: &mut JoinRow) {
-        join_row.inc_degree();
+    /// Insert a [`JoinEntryState`]
+    pub fn insert_state(&mut self, key: &K, state: JoinEntryState) {
+        self.inner.put(key.clone(), state);
     }
 
-    pub fn dec_degree(&self, join_row: &mut JoinRow) -> RwResult<()> {
+    pub fn inc_degree(&mut self, join_row: &mut JoinRow) -> RwResult<()> {
+        let old_row = join_row.clone().into_row();
+        join_row.inc_degree();
+        let new_row = join_row.clone().into_row();
+
+        self.state_table.update(old_row, new_row)?;
+        Ok(())
+    }
+
+    pub fn dec_degree(&mut self, join_row: &mut JoinRow) -> RwResult<()> {
+        let old_row = join_row.clone().into_row();
         join_row.dec_degree()?;
+        let new_row = join_row.clone().into_row();
+
+        self.state_table.update(old_row, new_row)?;
         Ok(())
     }
 }
