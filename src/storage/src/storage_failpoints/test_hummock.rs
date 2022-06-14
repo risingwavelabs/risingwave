@@ -116,11 +116,7 @@ async fn test_failpoint_state_store_read_upload() {
         .await;
     fail::remove(mem_upload_err);
 
-    let value = hummock_storage
-        .get(&anchor, 5, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, 5).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111"));
     let mut iters = hummock_storage.iter(..=b"ee".to_vec(), 5).await.unwrap();
     let len = count_iter(&mut iters).await;
