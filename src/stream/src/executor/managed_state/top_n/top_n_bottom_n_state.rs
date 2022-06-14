@@ -28,9 +28,7 @@ use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::variants::TOP_N_MIN;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::deserialize_pk;
 use crate::executor::PkIndices;
 
 /// This state is used for `[offset, offset+limit)` part in the `TopNExecutor`.
@@ -159,7 +157,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 &self.bottom_n
             };
             let key = cache_to_pop.first_key_value().unwrap().0.clone();
-            let old_value = cache_to_pop.last_key_value().unwrap().1.clone();
+            let old_value = cache_to_pop.first_key_value().unwrap().1.clone();
             let value = self.delete(&key, old_value, epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
@@ -240,18 +238,16 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         pin_mut!(state_table_iter);
         while let Some(next_res) = state_table_iter.next().await {
             let row = next_res.unwrap().into_owned();
-            let mut pk_bytes = vec![];
+            let mut datums = vec![];
             for pk_indice in &self.state_table.pk_indices {
-                pk_bytes.append(&mut row.serialize_datum(*pk_indice).unwrap());
+                datums.push(row.index(*pk_indice).clone());
             }
-            let pk = deserialize_pk::<TOP_N_MIN>(
-                &mut pk_bytes.clone(),
-                &mut self.ordered_row_deserializer,
-            )?;
-            kv_pairs.push((pk, row));
+            let pk = Row::new(datums);
+            let pk_ordered = OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
+            kv_pairs.push((pk_ordered, row));
         }
 
-        // The reason we can split the `kv_pairs` without caring whether the key to be inserted is
+        // The reason we can split the `kv_pairs` withocut caring whether the key to be inserted is
         // already in the top_n or bottom_n is that we would only trigger `scan_and_merge` when both
         // caches are empty.
 
@@ -280,8 +276,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             let row = res.unwrap().into_owned();
             let mut datums = vec![];
             for pk_indice in &self.state_table.pk_indices {
-                let a = row.index(*pk_indice).clone();
-                datums.push(a);
+                datums.push(row.index(*pk_indice).clone());
             }
             let pk = Row::new(datums);
             let pk_ordered = OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);

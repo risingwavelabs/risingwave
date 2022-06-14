@@ -94,21 +94,29 @@ impl<S: StateStore> StateTable<S> {
     /// write methods
     pub fn insert<const RVERSE: bool>(&mut self, pk: &Row, value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
+        println!("state table insert pk = {:?}", pk);
         let pk_bytes = match RVERSE {
             true => reverse_serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
             false => serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
         };
 
+        println!("state table insert pk_bytes = {:?}\n", pk_bytes);
         self.mem_table.insert(pk_bytes, value)?;
         Ok(())
     }
 
     pub fn delete<const RVERSE: bool>(&mut self, pk: &Row, old_value: Row) -> StorageResult<()> {
         assert_eq!(self.order_types.len(), pk.size());
+        println!(
+            "\nstate table delete pk = {:?}, old_value = {:?}",
+            pk, old_value
+        );
         let pk_bytes = match RVERSE {
             true => reverse_serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
             false => serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap()),
         };
+
+        println!("state table delete pk_bytes = {:?}", pk_bytes);
         self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }
@@ -135,7 +143,10 @@ impl<S: StateStore> StateTable<S> {
 
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
-        let cell_based_bounds = (Unbounded, Unbounded);
+        let cell_based_start_key = Included(self.keyspace.prefix.clone());
+        let cell_based_end_key = Included(next_key(&self.keyspace.prefix));
+        let cell_based_bounds = (cell_based_start_key, cell_based_end_key);
+        // let cell_based_bounds = (Unbounded, Unbounded);
         let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
         let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
         Ok(StateTableRowIter::into_stream(
@@ -274,6 +285,7 @@ impl<S: StateStore> StateTableRowIter<S> {
         cell_based_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
     ) {
+        println!("||| call state_table_iter next一次\n");
         let cell_based_table_iter: futures::stream::Peekable<_> =
             CellBasedTableStreamingIter::new_with_bounds(
                 keyspace,
@@ -296,6 +308,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                 (None, None) => break,
                 (Some(_), None) => {
                     let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+                    println!("yield cell_based_item = {:?}", row);
                     yield Cow::Owned(row);
                 }
                 (None, Some(_)) => {
@@ -312,11 +325,14 @@ impl<S: StateStore> StateTableRowIter<S> {
                     Some(Ok((cell_based_pk, cell_based_row))),
                     Some((mem_table_pk, _mem_table_row_op)),
                 ) => {
+                    println!("cell_based_pk = {:?}", cell_based_pk);
+                    println!("mem_table_pk = {:?}", mem_table_pk);
                     match cell_based_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
                             // cell_based_table_item will be return
 
                             let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+                            println!("Less yield cell = {:?}\n", row);
                             yield Cow::Owned(row);
                         }
                         Ordering::Equal => {
@@ -326,13 +342,15 @@ impl<S: StateStore> StateTableRowIter<S> {
                             let row_op = mem_table_iter.next().unwrap().1;
                             match row_op {
                                 RowOp::Insert(row) => {
+                                    println!("Equal yield mem = {:?}\n", row);
                                     yield Cow::Borrowed(row);
                                 }
                                 RowOp::Delete(_) => {
-                                    println!("Equal Delete");
+                                    println!("Equal Delete\n");
                                 }
                                 RowOp::Update((old_row, new_row)) => {
                                     debug_assert!(old_row == cell_based_row);
+                                    println!("Equal yield mem = {:?}\n", new_row);
                                     yield Cow::Borrowed(new_row);
                                 }
                             }
@@ -343,6 +361,7 @@ impl<S: StateStore> StateTableRowIter<S> {
                             let row_op = mem_table_iter.next().unwrap().1;
                             match row_op {
                                 RowOp::Insert(row) => {
+                                    println!("Greater yield mem = {:?}\n", row);
                                     yield Cow::Borrowed(row);
                                 }
                                 RowOp::Delete(_) => {}

@@ -398,6 +398,200 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     Ok(())
 }
 
+// #[tokio::test]
+// async fn test_state_table_update_insert_reverse() -> StorageResult<()> {
+//     let state_store = MemoryStateStore::new();
+//     let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
+//     let keyspace =
+//         Keyspace::table_root_with_vnodes(state_store.clone(), &TableId::from(0x42),
+// bitmap_inner);     let column_descs = vec![
+//         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+//         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+//         ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
+//         ColumnDesc::unnamed(ColumnId::from(4), DataType::Int32),
+//     ];
+//     let order_types = vec![OrderType::Ascending];
+//     let pk_index = vec![0_usize];
+//     let mut state_table =
+//         StateTable::new(keyspace.clone(), column_descs, order_types, None, pk_index);
+//     let mut epoch: u64 = 0;
+//     state_table
+//         .insert::<true>(
+//             &Row(vec![Some(6_i32.into())]),
+//             Row(vec![
+//                 Some(6_i32.into()),
+//                 Some(66_i32.into()),
+//                 Some(666_i32.into()),
+//                 Some(6666_i32.into()),
+//             ]),
+//         )
+//         .unwrap();
+
+//     state_table
+//         .insert::<true>(
+//             &Row(vec![Some(7_i32.into())]),
+//             Row(vec![Some(7_i32.into()), None, Some(777_i32.into()), None]),
+//         )
+//         .unwrap();
+//     state_table.commit(epoch).await.unwrap();
+
+//     epoch += 1;
+//     state_table
+//         .delete::<true>(
+//             &Row(vec![Some(6_i32.into())]),
+//             Row(vec![
+//                 Some(6_i32.into()),
+//                 Some(66_i32.into()),
+//                 Some(666_i32.into()),
+//                 Some(6666_i32.into()),
+//             ]),
+//         )
+//         .unwrap();
+//     state_table
+//         .insert::<true>(
+//             &Row(vec![Some(6_i32.into())]),
+//             Row(vec![
+//                 Some(6666_i32.into()),
+//                 None,
+//                 None,
+//                 Some(6666_i32.into()),
+//             ]),
+//         )
+//         .unwrap();
+
+//     state_table
+//         .delete::<true>(
+//             &Row(vec![Some(7_i32.into())]),
+//             Row(vec![Some(7_i32.into()), None, Some(777_i32.into()), None]),
+//         )
+//         .unwrap();
+//     state_table
+//         .insert::<true>(
+//             &Row(vec![Some(7_i32.into())]),
+//             Row(vec![None, Some(77_i32.into()), Some(7777_i32.into()), None]),
+//         )
+//         .unwrap();
+//     let row6 = state_table
+//         .get_row(&Row(vec![Some(6_i32.into())]), epoch)
+//         .await
+//         .unwrap();
+//     assert_eq!(
+//         row6,
+//         Some(Row(vec![
+//             Some(6666_i32.into()),
+//             None,
+//             None,
+//             Some(6666_i32.into())
+//         ]))
+//     );
+
+//     let row7 = state_table
+//         .get_row(&Row(vec![Some(7_i32.into())]), epoch)
+//         .await
+//         .unwrap();
+//     assert_eq!(
+//         row7,
+//         Some(Row(vec![
+//             None,
+//             Some(77_i32.into()),
+//             Some(7777_i32.into()),
+//             None
+//         ]))
+//     );
+
+//     state_table.commit(epoch).await.unwrap();
+
+//     let row6_commit = state_table
+//         .get_row(&Row(vec![Some(6_i32.into())]), epoch)
+//         .await
+//         .unwrap();
+//     assert_eq!(
+//         row6_commit,
+//         Some(Row(vec![
+//             Some(6666_i32.into()),
+//             None,
+//             None,
+//             Some(6666_i32.into())
+//         ]))
+//     );
+//     let row7_commit = state_table
+//         .get_row(&Row(vec![Some(7_i32.into())]), epoch)
+//         .await
+//         .unwrap();
+//     assert_eq!(
+//         row7_commit,
+//         Some(Row(vec![
+//             None,
+//             Some(77_i32.into()),
+//             Some(7777_i32.into()),
+//             None
+//         ]))
+//     );
+
+//     epoch += 1;
+
+//     state_table
+//         .insert::<true>(
+//             &Row(vec![Some(1_i32.into())]),
+//             Row(vec![
+//                 Some(1_i32.into()),
+//                 Some(2_i32.into()),
+//                 Some(3_i32.into()),
+//                 Some(4_i32.into()),
+//             ]),
+//         )
+//         .unwrap();
+//     state_table.commit(epoch).await.unwrap();
+//     // one epoch: delete (1, 2, 3, 4), insert (5, 6, 7, None), delete(5, 6, 7, None)
+//     state_table
+//         .delete::<true>(
+//             &Row(vec![Some(1_i32.into())]),
+//             Row(vec![
+//                 Some(1_i32.into()),
+//                 Some(2_i32.into()),
+//                 Some(3_i32.into()),
+//                 Some(4_i32.into()),
+//             ]),
+//         )
+//         .unwrap();
+//     state_table
+//         .insert::<true>(
+//             &Row(vec![Some(1_i32.into())]),
+//             Row(vec![
+//                 Some(5_i32.into()),
+//                 Some(6_i32.into()),
+//                 Some(7_i32.into()),
+//                 None,
+//             ]),
+//         )
+//         .unwrap();
+//     state_table
+//         .delete::<true>(
+//             &Row(vec![Some(1_i32.into())]),
+//             Row(vec![
+//                 Some(5_i32.into()),
+//                 Some(6_i32.into()),
+//                 Some(7_i32.into()),
+//                 None,
+//             ]),
+//         )
+//         .unwrap();
+
+//     let row1 = state_table
+//         .get_row(&Row(vec![Some(1_i32.into())]), epoch)
+//         .await
+//         .unwrap();
+//     assert_eq!(row1, None);
+//     state_table.commit(epoch).await.unwrap();
+
+//     let row1_commit = state_table
+//         .get_row(&Row(vec![Some(1_i32.into())]), epoch)
+//         .await
+//         .unwrap();
+//     assert_eq!(row1_commit, None);
+//     Ok(())
+// }
+
 #[tokio::test]
 async fn test_state_table_iter() {
     let state_store = MemoryStateStore::new();

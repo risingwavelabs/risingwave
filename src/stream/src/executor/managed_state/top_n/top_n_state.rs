@@ -178,7 +178,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // we cannot insert `key` into cache. Instead, we have to flush it onto the storage.
         // This is because other keys may be more qualified to stay in cache.
         // TODO: This needs to be changed when transaction on Hummock is implemented.
-
         match TOP_N_TYPE {
             TOP_N_MIN => self
                 .state_table
@@ -231,7 +230,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                             let pk = Row::new(datums);
                             let pk_ordered =
                                 OrderedRow::new(pk, &self.ordered_row_deserializer.order_types);
-
                             self.top_n.insert(pk_ordered, row);
                         }
                         None => {
