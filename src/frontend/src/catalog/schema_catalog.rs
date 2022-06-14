@@ -128,7 +128,6 @@ impl SchemaCatalog {
     pub fn owner(&self) -> String {
         self.owner.clone()
     }
-
 }
 
 impl From<&ProstSchema> for SchemaCatalog {
