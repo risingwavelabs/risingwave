@@ -15,6 +15,8 @@
 use std::any::type_name;
 use std::convert::TryInto;
 use std::fmt::Debug;
+use std::ops::Sub;
+use chrono::Duration;
 
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
 use risingwave_common::types::{
@@ -26,10 +28,10 @@ use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
-where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
-    T3: CheckedAdd<Output = T3>,
+    where
+        T1: TryInto<T3> + Debug,
+        T2: TryInto<T3> + Debug,
+        T3: CheckedAdd<Output=T3>,
 {
     general_atm(l, r, |a, b| {
         a.checked_add(b).ok_or(ExprError::NumericOutOfRange)
@@ -38,10 +40,10 @@ where
 
 #[inline(always)]
 pub fn general_sub<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
-where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
-    T3: CheckedSub,
+    where
+        T1: TryInto<T3> + Debug,
+        T2: TryInto<T3> + Debug,
+        T3: CheckedSub,
 {
     general_atm(l, r, |a, b| {
         a.checked_sub(&b).ok_or(ExprError::NumericOutOfRange)
@@ -50,10 +52,10 @@ where
 
 #[inline(always)]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
-where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
-    T3: CheckedMul,
+    where
+        T1: TryInto<T3> + Debug,
+        T2: TryInto<T3> + Debug,
+        T3: CheckedMul,
 {
     general_atm(l, r, |a, b| {
         a.checked_mul(&b).ok_or(ExprError::NumericOutOfRange)
@@ -62,10 +64,10 @@ where
 
 #[inline(always)]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
-where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
-    T3: CheckedDiv,
+    where
+        T1: TryInto<T3> + Debug,
+        T2: TryInto<T3> + Debug,
+        T3: CheckedDiv,
 {
     general_atm(l, r, |a, b| {
         a.checked_div(&b).ok_or(ExprError::NumericOutOfRange)
@@ -74,10 +76,10 @@ where
 
 #[inline(always)]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
-where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
-    T3: CheckedRem,
+    where
+        T1: TryInto<T3> + Debug,
+        T2: TryInto<T3> + Debug,
+        T3: CheckedRem,
 {
     general_atm(l, r, |a, b| {
         a.checked_rem(&b).ok_or(ExprError::NumericOutOfRange)
@@ -104,10 +106,10 @@ pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
 
 #[inline(always)]
 pub fn general_atm<T1, T2, T3, F>(l: T1, r: T2, atm: F) -> Result<T3>
-where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
-    F: FnOnce(T3, T3) -> Result<T3>,
+    where
+        T1: TryInto<T3> + Debug,
+        T2: TryInto<T3> + Debug,
+        F: FnOnce(T3, T3) -> Result<T3>,
 {
     // TODO: We need to improve the error message
     let l: T3 = l
@@ -125,7 +127,9 @@ pub fn timestamp_timestamp_sub<T1, T2, T3>(
     r: NaiveDateTimeWrapper,
 ) -> Result<IntervalUnit> {
     let tmp = l.0 - r.0;
-    Ok(IntervalUnit::new(0, tmp.num_days() as i32, 0))
+    let days = tmp.num_days();
+    let ms = tmp.sub(Duration::days(tmp.num_days())).num_milliseconds();
+    Ok(IntervalUnit::new(0, days as i32, ms))
 }
 
 #[inline(always)]
@@ -183,16 +187,16 @@ pub fn timestamp_interval_sub<T1, T2, T3>(
 
 #[inline(always)]
 pub fn interval_int_mul<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
-where
-    T2: TryInto<i32> + Debug,
+    where
+        T2: TryInto<i32> + Debug,
 {
     l.checked_mul_int(r).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
 pub fn int_interval_mul<T1, T2, T3>(l: T1, r: IntervalUnit) -> Result<IntervalUnit>
-where
-    T1: TryInto<i32> + Debug,
+    where
+        T1: TryInto<i32> + Debug,
 {
     interval_int_mul::<T2, T1, T3>(r, l)
 }
