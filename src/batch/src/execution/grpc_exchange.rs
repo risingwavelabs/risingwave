@@ -74,7 +74,7 @@ impl ExchangeSource for GrpcExchangeSource {
             None => return Ok(None),
             Some(r) => r,
         };
-        let task_data = res.to_rw_result()?;
+        let task_data = res?;
         let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact()?;
         trace!(
             "Receiver taskOutput = {:?}, data = {:?}",

@@ -30,6 +30,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_rpc_client::error::Result as RpcResult;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tempfile::{Builder, NamedTempFile};
@@ -387,19 +388,19 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self, _epoch: u64) -> Result<u64> {
+    async fn pin_snapshot(&self, _epoch: u64) -> RpcResult<u64> {
         Ok(0)
     }
 
-    async fn flush(&self) -> Result<()> {
+    async fn flush(&self) -> RpcResult<()> {
         Ok(())
     }
 
-    async fn unpin_snapshot(&self, _epoch: u64) -> Result<()> {
+    async fn unpin_snapshot(&self, _epoch: u64) -> RpcResult<()> {
         Ok(())
     }
 
-    async fn unpin_snapshot_before(&self, _epoch: u64) -> Result<()> {
+    async fn unpin_snapshot_before(&self, _epoch: u64) -> RpcResult<()> {
         Ok(())
     }
 }

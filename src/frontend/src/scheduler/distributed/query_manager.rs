@@ -14,12 +14,11 @@
 
 use std::fmt::{Debug, Formatter};
 
-use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use log::debug;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{RwError, ToErrorStr};
+use risingwave_common::error::{RwError, ToRwResult};
 use risingwave_pb::batch_plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -28,7 +27,6 @@ use uuid::Uuid;
 use super::QueryExecution;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::SchedulerError::RpcError;
 use crate::scheduler::{
     DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult,
 };
@@ -76,8 +74,7 @@ impl QueryManager {
         let compute_client = self
             .compute_client_pool
             .get_client_for_addr((&worker_node_addr).into())
-            .await
-            .map_err(|e| anyhow!(e.to_string()))?;
+            .await?;
 
         let query_id = QueryId {
             id: Uuid::new_v4().to_string(),
@@ -105,7 +102,7 @@ impl QueryManager {
         self.hummock_snapshot_manager
             .unpin_snapshot(epoch, &query_id)
             .await?;
-        creat_task_resp.map_err(|e| RpcError(e.to_string()))?;
+        creat_task_resp?;
 
         let query_result_fetcher = QueryResultFetcher::new(
             epoch,
@@ -181,11 +178,7 @@ impl QueryResultFetcher {
             .await?;
         let mut stream = compute_client.get_data(self.task_output_id.clone()).await?;
         while let Some(response) = stream.next().await {
-            yield DataChunk::from_protobuf(
-                response
-                    .map_err(|e| RpcError(e.to_error_str()))?
-                    .get_record_batch()?,
-            )?;
+            yield DataChunk::from_protobuf(response?.get_record_batch()?)?;
         }
     }
 }

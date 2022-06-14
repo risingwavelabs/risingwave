@@ -21,7 +21,7 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{internal_error, Result, ToRwResult};
+use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
@@ -580,7 +580,7 @@ where
                 let request = ComputeNodeCreateSourceRequest {
                     source: Some(source.clone()),
                 };
-                async move { client.create_source(request).await.to_rw_result() }
+                async move { client.create_source(request).await.map_err(RwError::from) }
             });
 
         // ignore response body, always none
@@ -629,7 +629,7 @@ where
             .into_iter()
             .map(|mut client| {
                 let request = ComputeNodeDropSourceRequest { source_id };
-                async move { client.drop_source(request).await.to_rw_result() }
+                async move { client.drop_source(request).await.map_err(RwError::from) }
             });
         let _responses: Vec<_> = try_join_all(futures).await?;
 

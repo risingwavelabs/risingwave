@@ -17,9 +17,6 @@ use std::time::Duration;
 use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::ErrorCode::{self, InternalError};
-use risingwave_common::error::{Result, ToRwResult};
-use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::catalog::{
@@ -70,6 +67,7 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
 
+use crate::error::Result;
 use crate::hummock_meta_client::HummockMetaClient;
 
 type DatabaseId = u32;
@@ -119,8 +117,7 @@ impl MetaClient {
             host: Some(addr.to_protobuf()),
         };
         let resp = self.inner.add_worker_node(request).await?;
-        let worker_node =
-            try_match_expand!(resp.node, Some, "AddWorkerNodeResponse::node is empty")?;
+        let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
         self.set_worker_id(worker_node.id);
         Ok(worker_node.id)
     }
@@ -339,10 +336,7 @@ impl MetaClient {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {}", err);
-                        if err
-                            .to_string()
-                            .contains(&ErrorCode::UnknownWorker.to_string())
-                        {
+                        if err.to_string().contains("unknown worker") {
                             panic!("Already removed by the meta node. Need to restart the worker");
                         }
                     }
@@ -431,7 +425,7 @@ impl HummockMetaClient for MetaClient {
     }
 
     async fn commit_epoch(&self, _epoch: HummockEpoch, _sstables: Vec<SstableInfo>) -> Result<()> {
-        unimplemented!("Only meta service can commit_epoch in production.")
+        panic!("Only meta service can commit_epoch in production.")
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
@@ -476,8 +470,7 @@ impl GrpcMetaClient {
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
-        let endpoint =
-            Endpoint::from_shared(addr.to_string()).map_err(|e| InternalError(format!("{}", e)))?;
+        let endpoint = Endpoint::from_shared(addr.to_string())?;
         let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
             .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
             .map(jitter);
@@ -487,15 +480,15 @@ impl GrpcMetaClient {
                 .connect_timeout(Duration::from_secs(5))
                 .connect()
                 .await
-                .map_err(|_e| {
+                .inspect_err(|e| {
                     tracing::warn!(
-                        "Failed to connect to meta server: {}, wait for online.",
-                        addr
+                        "Failed to connect to meta server {}, wait for online: {}",
+                        addr,
+                        e
                     );
                 })
         })
-        .await
-        .expect("Retry connecting to meta server");
+        .await?;
 
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
@@ -525,9 +518,9 @@ macro_rules! grpc_meta_client_impl {
                         .$client
                         .to_owned()
                         .$fn_name(request)
-                        .await
-                        .to_rw_result()?
-                        .into_inner())
+                        .await?
+                        .into_inner()
+                        .into())
                 }
             }
         })*
@@ -575,8 +568,6 @@ macro_rules! for_all_meta_rpc {
 for_all_meta_rpc! { grpc_meta_client_impl }
 
 impl GrpcMetaClient {
-    // TODO(TaoWu): Use macro to refactor the following methods.
-
     pub async fn subscribe(
         &self,
         request: SubscribeRequest,
@@ -585,8 +576,7 @@ impl GrpcMetaClient {
             self.notification_client
                 .to_owned()
                 .subscribe(request)
-                .await
-                .to_rw_result()?
+                .await?
                 .into_inner(),
         ))
     }
@@ -603,17 +593,13 @@ pub trait NotificationStream: Send {
 #[async_trait::async_trait]
 impl NotificationStream for Streaming<SubscribeResponse> {
     async fn next(&mut self) -> Result<Option<SubscribeResponse>> {
-        self.message().await.to_rw_result()
+        self.message().await.map_err(Into::into)
     }
 }
 
 #[async_trait::async_trait]
 impl NotificationStream for Receiver<std::result::Result<SubscribeResponse, Status>> {
     async fn next(&mut self) -> Result<Option<SubscribeResponse>> {
-        match self.recv().await {
-            Some(Ok(x)) => Ok(Some(x)),
-            Some(Err(e)) => Err(e).to_rw_result(),
-            None => Ok(None),
-        }
+        self.recv().await.transpose().map_err(Into::into)
     }
 }

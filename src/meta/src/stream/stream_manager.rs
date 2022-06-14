@@ -492,8 +492,7 @@ where
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
                     info: actor_infos_to_broadcast.clone(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
 
             let stream_actors = actors
                 .iter()
@@ -509,8 +508,7 @@ where
                     actors: stream_actors.clone(),
                     hanging_channels: node_hanging_channels.remove(node_id).unwrap_or_default(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         for (node_id, hanging_channels) in node_hanging_channels {
@@ -526,8 +524,7 @@ where
                     actors: vec![],
                     hanging_channels,
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
@@ -545,8 +542,7 @@ where
                     request_id,
                     actor_id: actors,
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         let mut source_fragments = HashMap::new();

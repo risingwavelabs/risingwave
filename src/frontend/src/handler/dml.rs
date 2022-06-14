@@ -84,10 +84,11 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
-            client.flush().await
+            client.flush().await?;
         }
-        _ => Ok(()),
+        _ => {}
     }
+    Ok(())
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {

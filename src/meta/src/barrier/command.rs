@@ -203,7 +203,7 @@ where
                             request_id,
                             actor_ids: actors.to_owned(),
                         };
-                        client.drop_actors(request).await.to_rw_result()?;
+                        client.drop_actors(request).await?;
 
                         Ok::<_, RwError>(())
                     }

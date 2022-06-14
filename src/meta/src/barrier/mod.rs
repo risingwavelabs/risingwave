@@ -395,7 +395,7 @@ where
                         .inject_barrier(request)
                         .await
                         .map(tonic::Response::<_>::into_inner)
-                        .to_rw_result()
+                        .map_err(Into::into)
                 }
                 .into()
             }

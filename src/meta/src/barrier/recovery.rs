@@ -138,11 +138,7 @@ where
             };
             async move {
                 let client = &self.env.stream_client_pool().get(node).await?;
-                client
-                    .to_owned()
-                    .sync_sources(request)
-                    .await
-                    .to_rw_result()?;
+                client.to_owned().sync_sources(request).await?;
 
                 Ok::<_, RwError>(())
             }
@@ -183,8 +179,7 @@ where
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
                     info: actor_infos.clone(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
@@ -195,8 +190,7 @@ where
                     actors: node_actors.get(node_id).cloned().unwrap_or_default(),
                     ..Default::default()
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         Ok(())
@@ -216,8 +210,7 @@ where
                     request_id,
                     actor_id: actors.to_owned(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         Ok(())
@@ -247,7 +240,7 @@ where
                             }),
                         })
                         .await
-                        .to_rw_result()
+                        .map_err(RwError::from)
                 })
                 .await
                 .expect("Force stop actors until success");
