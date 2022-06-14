@@ -138,6 +138,7 @@
       - 1
     pk:
       - 1
+    owner: root
 - sql: |
     /* test projection */
     create table t (v1 int);
@@ -246,6 +247,7 @@
       - 1
     pk:
       - 1
+    owner: root
 - sql: |
     /* test projection for single column */
     create table t (v1 int, v2 int);
@@ -358,6 +360,7 @@
       - 1
     pk:
       - 1
+    owner: root
 - sql: |
     /* test simple agg */
     create table t (v1 int);
@@ -514,6 +517,7 @@
     pk:
       - 0
       - 1
+    owner: root
 - sql: |
     /* test simple agg */
     create table t (v1 int, v2 int);
@@ -751,3 +755,4 @@
       - 1
     pk:
       - 1
+    owner: root
