@@ -590,6 +590,7 @@ mod tests {
         assert_eq!(root_exchange.root.stage_id, Some(1));
         assert!(matches!(root_exchange.root.node, NodeBody::Exchange(_)));
         assert_eq!(root_exchange.parallelism, 1);
+        assert!(!root_exchange.has_table_scan);
 
         let join_node = query.stage_graph.stages.get(&1).unwrap();
         assert_eq!(join_node.root.node_type(), PlanNodeType::BatchHashJoin);
@@ -612,6 +613,7 @@ mod tests {
         ));
         assert_eq!(join_node.root.children[1].stage_id, Some(3));
         assert_eq!(0, join_node.root.children[1].children.len());
+        assert!(!join_node.has_table_scan);
 
         let scan_node1 = query.stage_graph.stages.get(&2).unwrap();
         assert_eq!(scan_node1.root.node_type(), PlanNodeType::BatchSeqScan);
