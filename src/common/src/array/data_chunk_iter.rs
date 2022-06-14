@@ -264,7 +264,6 @@ impl Row {
         Ok(serializer.into_inner())
     }
 
-
     /// Serialize the row into a value encode bytes.
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.

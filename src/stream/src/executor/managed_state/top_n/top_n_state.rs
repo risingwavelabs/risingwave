@@ -21,7 +21,6 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -61,7 +60,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         keyspace: Keyspace<S>,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
-        _cell_based_row_deserializer: CellBasedRowDeserializer,
         pk_indices: PkIndices,
     ) -> Self {
         let order_type = ordered_row_deserializer.clone().order_types;
@@ -306,7 +304,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{ColumnDesc, TableId};
+    use risingwave_common::catalog::TableId;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
@@ -323,14 +321,6 @@ mod tests {
         order_types: Vec<OrderType>,
     ) -> ManagedTopNState<S, TOP_N_TYPE> {
         let ordered_row_deserializer = OrderedRowDeserializer::new(data_types.clone(), order_types);
-        let table_column_descs = data_types
-            .iter()
-            .enumerate()
-            .map(|(id, data_type)| {
-                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
-            })
-            .collect::<Vec<_>>();
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
 
         ManagedTopNState::<S, TOP_N_TYPE>::new(
             Some(2),
@@ -338,7 +328,6 @@ mod tests {
             Keyspace::table_root(store.clone(), &TableId::from(0x2333)),
             data_types,
             ordered_row_deserializer,
-            cell_based_row_deserializer,
             vec![0_usize, 1_usize],
         )
     }

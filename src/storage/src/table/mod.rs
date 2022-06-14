@@ -23,6 +23,7 @@ use risingwave_common::array::Row;
 
 use crate::error::StorageResult;
 
+// TODO: GAT-ify this trait or remove this trait
 #[async_trait::async_trait]
 pub trait TableIter: Send {
     async fn next(&mut self) -> StorageResult<Option<Row>>;

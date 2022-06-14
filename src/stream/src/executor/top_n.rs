@@ -15,11 +15,10 @@
 use async_trait::async_trait;
 use madsim::collections::HashSet;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::StreamExecutorResult;
@@ -156,14 +155,6 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             .iter()
             .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
-        let table_column_descs = row_data_types
-            .iter()
-            .enumerate()
-            .map(|(id, data_type)| {
-                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
-            })
-            .collect::<Vec<_>>();
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
         let lower_sub_keyspace = keyspace.append_u8(b'l');
         let middle_sub_keyspace = keyspace.append_u8(b'm');
         let higher_sub_keyspace = keyspace.append_u8(b'h');
@@ -173,7 +164,6 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             lower_sub_keyspace,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
-            cell_based_row_deserializer.clone(),
             pk_indices.clone(),
         );
         let managed_middle_state = ManagedTopNBottomNState::new(
@@ -182,7 +172,6 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             middle_sub_keyspace,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
-            cell_based_row_deserializer.clone(),
             pk_indices.clone(),
         );
         let managed_highest_state = ManagedTopNState::<S, TOP_N_MIN>::new(
@@ -191,7 +180,6 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             higher_sub_keyspace,
             row_data_types,
             ordered_row_deserializer,
-            cell_based_row_deserializer,
             pk_indices.clone(),
         );
         Ok(Self {
