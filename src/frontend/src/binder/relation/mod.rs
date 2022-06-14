@@ -176,8 +176,11 @@ impl Binder {
         match table_factor {
             TableFactor::Table { name, alias, args } => {
                 if args.is_empty() {
+                    let has_schema_name = name.0.len() > 1;
                     let (schema_name, table_name) = Self::resolve_table_name(name)?;
-                    if let Some(bound_query) = self.cte_to_relation.get(&table_name) {
+                    if !has_schema_name
+                        && let Some(bound_query) = self.cte_to_relation.get(&table_name)
+                    {
                         let (query, alias) = bound_query.clone();
                         self.bind_context(
                             query

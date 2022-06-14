@@ -43,7 +43,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
+use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
     INVALID_TIMESTAMP,
@@ -812,9 +812,6 @@ where
                 ))?,
             self.versioning.read().await.current_version_ref(),
         );
-        if let Some(ref compact_task_metrics) = compact_task.metrics {
-            trigger_rw_stat(&self.metrics, compact_task_metrics);
-        }
 
         self.try_send_compaction_request(compact_task.compaction_group_id);
 

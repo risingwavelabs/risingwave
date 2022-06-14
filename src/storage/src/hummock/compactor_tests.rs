@@ -168,9 +168,7 @@ mod tests {
         assert!(compact_task.is_none());
     }
 
-    // TODO: enable after fix incorrect existing_table_id
     #[tokio::test]
-    #[ignore]
     async fn test_compaction_drop_all_key() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -248,9 +246,7 @@ mod tests {
         assert!(compact_task.is_none());
     }
 
-    // TODO: enable after fix incorrect existing_table_id
     #[tokio::test]
-    #[ignore]
     async fn test_compaction_drop_key_by_existing_table_id() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
