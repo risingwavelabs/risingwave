@@ -125,10 +125,12 @@ impl LogicalAgg {
         let fields = schema.fields();
         let pk_indices = &base.pk_indices;
         for agg_call in &self.agg_calls {
+            let mut internal_pk_indices = vec![];
             let mut columns = vec![];
             let mut order_desc = vec![];
             for &idx in pk_indices {
                 let column_id = columns.len() as i32;
+                internal_pk_indices.push(column_id as usize); // Currently our column index is same as column id
                 column_index2columb_id.insert(idx, column_id);
                 let column_desc = ColumnDesc::from_field_with_column_id(&fields[idx], column_id);
                 columns.push(ColumnCatalog {
@@ -175,7 +177,7 @@ impl LogicalAgg {
                 name: String::new(),
                 columns,
                 order_desc,
-                pks: pk_indices.clone(),
+                pks: internal_pk_indices,
                 is_index_on: None,
                 distribution_keys: base.dist.dist_column_indices().to_vec(),
                 appendonly: false,
