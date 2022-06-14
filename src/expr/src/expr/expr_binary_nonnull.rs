@@ -19,13 +19,13 @@ use risingwave_common::array::{
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
+use crate::expr::expr_binary_bytes::new_concat_op;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::for_all_cmp_variants;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
-use crate::vector_op::concat_op::*;
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
@@ -474,9 +474,7 @@ pub fn new_binary_expr(
             l, r, ret, position,
         )),
         Type::TumbleStart => new_tumble_start(l, r, ret),
-        Type::ConcatOp => Box::new(BinaryExpression::<Utf8Array, Utf8Array, Utf8Array, _>::new(
-            l, r, ret, concat_op,
-        )),
+        Type::ConcatOp => new_concat_op(l, r, ret),
 
         tp => {
             unimplemented!(
