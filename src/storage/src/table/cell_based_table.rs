@@ -20,11 +20,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use log::debug;
+use log::trace;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
-use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_common::error::RwError;
 use risingwave_common::types::Datum;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -74,8 +73,8 @@ pub struct CellBasedTable<S: StateStore> {
     #[expect(dead_code)]
     stats: Arc<StateStoreMetrics>,
 
-    /// Indices of distribution keys in pk for computing value meta. None if value meta is not
-    /// required.
+    /// Indices of distribution keys in full row for computing value meta. None if value meta is
+    /// not required.
     dist_key_indices: Option<Vec<usize>>,
 }
 
@@ -143,30 +142,17 @@ impl<S: StateStore> CellBasedTable<S> {
         Self::new(keyspace, column_descs, None, stats, None)
     }
 
-    // cell-based interface
+    /// Get a single row by point get
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        // get row by state_store get
         // TODO: use multi-get for cell_based get_row
-        let vnode = self
-            .dist_key_indices
-            .as_ref()
-            .map(|indices| {
-                let hash_builder = CRC32FastBuilder {};
-                pk.hash_by_indices(indices, &hash_builder)
-                    .unwrap()
-                    .to_vnode()
-            })
-            .unwrap_or_default();
+        // let vnode = self.compute_vnode_by_row(pk);
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let serialized_pk = serialize_pk(pk, pk_serializer);
         let sentinel_key =
             serialize_pk_and_column_id(&serialized_pk, &SENTINEL_CELL_ID).map_err(err)?;
         let mut get_res = Vec::new();
 
-        let sentinel_cell = self
-            .keyspace
-            .get_with_vnode(&sentinel_key, epoch, vnode)
-            .await?;
+        let sentinel_cell = self.keyspace.get(&sentinel_key, epoch).await?;
 
         if sentinel_cell.is_none() {
             // if sentinel cell is none, this row doesn't exist
@@ -176,7 +162,7 @@ impl<S: StateStore> CellBasedTable<S> {
         }
         for column_id in &self.column_ids {
             let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
-            let state_store_get_res = self.keyspace.get_with_vnode(&key, epoch, vnode).await?;
+            let state_store_get_res = self.keyspace.get(&key, epoch).await?;
             if let Some(state_store_get_res) = state_store_get_res {
                 get_res.push((key, state_store_get_res));
             }
@@ -192,29 +178,32 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(pk_and_row.map(|(_pk, row)| row))
     }
 
+    /// Get vnode value. Should provide a full row (instead of pk).
+    fn compute_vnode_by_value(&self, value: &Row) -> u16 {
+        let dist_key_indices = self.dist_key_indices.as_ref().unwrap();
+
+        let hash_builder = CRC32FastBuilder {};
+        value
+            .hash_by_indices(dist_key_indices, &hash_builder)
+            .unwrap()
+            .to_vnode()
+    }
+
+    /// Get a single row by range scan
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // get row by state_store scan
-        let vnode = self
-            .dist_key_indices
-            .as_ref()
-            .map(|indices| {
-                let hash_builder = CRC32FastBuilder {};
-                pk.hash_by_indices(indices, &hash_builder)
-                    .unwrap()
-                    .to_vnode()
-            })
-            .unwrap_or_default();
+        // let vnode = self.compute_vnode_by_row(value);
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let start_key = self.keyspace.prefixed_key(&serialize_pk(pk, pk_serializer));
         let end_key = next_key(&start_key);
 
         // Construct a vnode bitmap according to the given vnode.
-        let vnode_bitmap = VNodeBitmap::new_with_single_vnode(self.keyspace.table_id(), vnode);
+        // let vnode_bitmap = VNodeBitmap::new_with_single_vnode(self.keyspace.table_id(), vnode);
 
         let state_store_range_scan_res = self
             .keyspace
             .state_store()
-            .scan(start_key..end_key, None, epoch, Some(vnode_bitmap))
+            .scan(start_key..end_key, None, epoch, None)
             .await?;
         let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
         for (key, value) in state_store_range_scan_res {
@@ -246,10 +235,7 @@ impl<S: StateStore> CellBasedTable<S> {
             match row_op {
                 RowOp::Insert(row) => {
                     let value_meta = if WITH_VALUE_META {
-                        let vnode = row
-                            .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
-                            .unwrap()
-                            .to_vnode();
+                        let vnode = self.compute_vnode_by_value(&row);
                         ValueMeta::with_vnode(vnode)
                     } else {
                         ValueMeta::default()
@@ -323,6 +309,7 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(())
     }
 
+    /// Write to state store, and use distribution key indices to compute value meta
     pub async fn batch_write_rows_with_value_meta(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
@@ -331,6 +318,7 @@ impl<S: StateStore> CellBasedTable<S> {
         self.batch_write_rows_inner::<true>(buffer, epoch).await
     }
 
+    /// Write to state store without value meta
     pub async fn batch_write_rows(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
@@ -344,9 +332,11 @@ impl<S: StateStore> CellBasedTable<S> {
         CellBasedTableRowIter::new(&self.keyspace, self.mapping.clone(), epoch).await
     }
 
+    // TODO: give a more meaningful name to this function
     pub async fn iter_with_pk(
         &self,
         epoch: u64,
+        // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<DedupPkCellBasedTableRowIter<S>> {
         DedupPkCellBasedTableRowIter::new(
@@ -419,9 +409,10 @@ impl<S: StateStore> CellBasedTable<S> {
         let start_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.start_bound(), true);
         let end_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.end_bound(), false);
 
-        debug!(
+        trace!(
             "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
-            start_key, end_key
+            start_key,
+            end_key
         );
 
         CellBasedTableRowIter::new_with_bounds(
@@ -444,9 +435,10 @@ impl<S: StateStore> CellBasedTable<S> {
         let start_key = Included(self.keyspace.prefixed_key(&serialized_pk_prefix));
         let next_key = Excluded(self.keyspace.prefixed_key(next_key(serialized_pk_prefix)));
 
-        debug!(
+        trace!(
             "iter_with_pk_prefix: start_key: {:?}, next_key: {:?}",
-            start_key, next_key
+            start_key,
+            next_key
         );
 
         CellBasedTableRowIter::new_with_bounds(
@@ -456,15 +448,6 @@ impl<S: StateStore> CellBasedTable<S> {
             epoch,
         )
         .await
-    }
-
-    // streaming_iter is uesed for streaming executors, which is regarded as a short-term iterator
-    // and will not wait for epoch.
-    pub async fn streaming_iter(
-        &self,
-        epoch: u64,
-    ) -> StorageResult<CellBasedTableStreamingIter<S>> {
-        CellBasedTableStreamingIter::new(&self.keyspace, self.mapping.clone(), epoch).await
     }
 
     pub fn schema(&self) -> &Schema {
