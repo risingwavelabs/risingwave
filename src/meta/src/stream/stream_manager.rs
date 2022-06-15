@@ -19,9 +19,8 @@ use std::time::Instant;
 use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::catalog::TableId;
-use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
-use risingwave_common::error::{internal_error, Result, ToRwResult};
-use risingwave_common::util::compress::compress_data;
+use risingwave_common::error::{internal_error, Result};
+use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
@@ -77,7 +76,7 @@ pub struct GlobalStreamManager<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
 
     /// Maintains vnode mapping of all fragments and state tables.
-    hash_mapping_manager: HashMappingManagerRef,
+    _hash_mapping_manager: HashMappingManagerRef,
 
     /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
@@ -103,7 +102,7 @@ where
             barrier_manager,
             cluster_manager,
             source_manager,
-            hash_mapping_manager: env.hash_mapping_manager_ref(),
+            _hash_mapping_manager: env.hash_mapping_manager_ref(),
             client_pool: env.stream_client_pool_ref(),
         })
     }
@@ -118,7 +117,6 @@ where
     ) -> Result<()> {
         // The closure environment. Used to simulate recursive closure.
         struct Env<'a> {
-            hash_mapping_manager: &'a HashMappingManagerRef,
             /// Records what's the correspoding actor of each parallel unit of one table.
             upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
             /// Records what's the actors on each worker of one table.
@@ -148,28 +146,16 @@ where
 
                 // get upstream table id
                 let table_id = TableId::from(&chain.table_ref_id);
-                let hash_mapping = self
-                    .hash_mapping_manager
-                    .get_table_hash_mapping(&table_id.table_id)
-                    .unwrap_or_else(|| {
-                        panic!("table {} should have a vnode mapping", table_id.table_id)
-                    });
 
-                let (upstream_actor_id, parallel_unit_id) = {
+                let upstream_actor_id = {
                     // 1. use table id to get upstream parallel_unit -> actor_id mapping
                     let upstream_parallel_actor_mapping =
-                        self.upstream_parallel_unit_info.get(&table_id).unwrap();
+                        &self.upstream_parallel_unit_info[&table_id];
                     // 2. use our actor id to get parallel unit id of the chain actor
-                    let parallel_unit_id =
-                        self.locations.actor_locations.get(&actor_id).unwrap().id;
+                    let parallel_unit_id = self.locations.actor_locations[&actor_id].id;
                     // 3. and use chain actor's parallel unit id to get the corresponding upstream
                     // actor id
-                    (
-                        *upstream_parallel_actor_mapping
-                            .get(&parallel_unit_id)
-                            .unwrap(),
-                        parallel_unit_id,
-                    )
+                    upstream_parallel_actor_mapping[&parallel_unit_id]
                 };
 
                 // The current implementation already ensures chain and upstream are on the same
@@ -219,18 +205,10 @@ where
                     unreachable!("chain's input[0] should always be merge");
                 }
                 let batch_stream_node = &mut stream_node.input[1];
-                if let Some(NodeBody::BatchPlan(ref mut batch_query)) = batch_stream_node.node_body
-                {
-                    let (original_indices, data) = compress_data(&hash_mapping);
-                    batch_query.hash_mapping = Some(ParallelUnitMapping {
-                        table_id: Default::default(),
-                        original_indices,
-                        data,
-                    });
-                    batch_query.parallel_unit_id = parallel_unit_id;
-                } else {
-                    unreachable!("chain's input[1] should always be batch query");
-                }
+                assert!(
+                    matches!(batch_stream_node.node_body, Some(NodeBody::BatchPlan(_))),
+                    "chain's input[1] should always be batch query"
+                );
 
                 // finally, we should also build dispatcher infos here.
                 self.dispatches
@@ -253,7 +231,6 @@ where
             .await?;
 
         let mut env = Env {
-            hash_mapping_manager: &self.hash_mapping_manager,
             upstream_parallel_unit_info,
             tables_node_actors,
             locations,
@@ -515,8 +492,7 @@ where
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
                     info: actor_infos_to_broadcast.clone(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
 
             let stream_actors = actors
                 .iter()
@@ -532,8 +508,7 @@ where
                     actors: stream_actors.clone(),
                     hanging_channels: node_hanging_channels.remove(node_id).unwrap_or_default(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         for (node_id, hanging_channels) in node_hanging_channels {
@@ -549,8 +524,7 @@ where
                     actors: vec![],
                     hanging_channels,
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
@@ -568,8 +542,7 @@ where
                     request_id,
                     actor_id: actors,
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         let mut source_fragments = HashMap::new();
@@ -687,7 +660,7 @@ mod tests {
     use crate::barrier::GlobalBarrierManager;
     use crate::cluster::ClusterManager;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
-    use crate::hummock::HummockManager;
+    use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::{CatalogManager, MetaSrvEnv};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
@@ -847,15 +820,19 @@ mod tests {
             let meta_metrics = Arc::new(MetaMetrics::new());
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
+            let compactor_manager = Arc::new(CompactorManager::new());
+
             let hummock_manager = Arc::new(
                 HummockManager::new(
                     env.clone(),
                     cluster_manager.clone(),
                     meta_metrics.clone(),
                     compaction_group_manager.clone(),
+                    compactor_manager.clone(),
                 )
                 .await?,
             );
+
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),

@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_common::error::Result;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
     CompactTask, CompactionGroup, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
     VacuumTask,
 };
 use tonic::Streaming;
+
+use crate::error::Result;
 
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
@@ -35,4 +36,5 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>>;
+    async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()>;
 }
