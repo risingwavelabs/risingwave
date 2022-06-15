@@ -102,14 +102,14 @@ impl<S: StateStore> AggState<S> {
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
         epoch: u64,
-        state_table: &[StateTable<S>],
+        state_tables: &[StateTable<S>],
     ) -> StreamExecutorResult<usize> {
         if !self.is_dirty() {
             return Ok(0);
         }
 
         let row_count = self
-            .row_count(epoch, &state_table[ROW_COUNT_COLUMN])
+            .row_count(epoch, &state_tables[ROW_COUNT_COLUMN])
             .await?;
         let prev_row_count = self.prev_row_count();
 
@@ -135,7 +135,7 @@ impl<S: StateStore> AggState<S> {
                 for ((builder, state), state_table) in builders
                     .iter_mut()
                     .zip_eq(self.managed_states.iter_mut())
-                    .zip_eq(state_table.iter())
+                    .zip_eq(state_tables.iter())
                 {
                     let data = state.get_output(epoch, state_table).await?;
                     trace!("append_datum (0 -> N): {:?}", &data);
@@ -169,7 +169,7 @@ impl<S: StateStore> AggState<S> {
                     builders.iter_mut(),
                     self.prev_states.as_ref().unwrap().iter(),
                     self.managed_states.iter_mut(),
-                    state_table.iter(),
+                    state_tables.iter(),
                 )) {
                     let cur_state = cur_state.get_output(epoch, state_table).await?;
                     trace!(

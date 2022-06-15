@@ -201,11 +201,11 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_with_pk_prefix<'a>(
-        &'a self,
-        pk_prefix: &'a Row,
+    pub async fn iter_with_pk_prefix(
+        &self,
+        pk_prefix: &Row,
         epoch: u64,
-    ) -> StorageResult<RowStream<'a, S>> {
+    ) -> StorageResult<RowStream<'_, S>> {
         let order_types = &self.pk_serializer.clone().into_order_types()[0..pk_prefix.size()];
         let prefix_serializer = OrderedRowSerializer::new(order_types.into());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
@@ -213,10 +213,6 @@ impl<S: StateStore> StateTable<S> {
 
         self.iter_with_encoded_key_range(encoded_key_range, epoch)
             .await
-    }
-
-    pub fn is_dirty(&self) -> bool {
-        !self.mem_table.buffer.is_empty()
     }
 }
 
