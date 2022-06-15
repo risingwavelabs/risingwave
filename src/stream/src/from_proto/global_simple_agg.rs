@@ -40,9 +40,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         let keyspace = node
             .internal_tables
             .iter()
-            .map(|table| {
-                Keyspace::table_root_with_default_vnodes(store.clone(), &TableId::new(table.id))
-            })
+            .map(|table| Keyspace::table_root(store.clone(), &TableId::new(table.id)))
             .collect();
         let key_indices = node
             .get_distribution_keys()
