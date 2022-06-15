@@ -110,7 +110,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 ks.clone(),
                 agg_call,
                 &key_indices,
-                &pk_indices,
+                &input_info.pk_indices,
                 &schema,
                 input.as_ref(),
             ));

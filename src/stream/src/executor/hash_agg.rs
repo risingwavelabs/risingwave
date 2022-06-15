@@ -77,7 +77,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// Schema from input
     input_schema: Schema,
 
-    // /// The executor operates on this keyspace.
+    /// The executor operates on this keyspace.
     keyspace: Vec<Keyspace<S>>,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
@@ -126,7 +126,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 ks.clone(),
                 agg_call,
                 &key_indices,
-                &pk_indices,
+                &input_info.pk_indices,
                 &schema,
                 input.as_ref(),
             ));
@@ -332,11 +332,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         epoch: u64,
     ) {
         // The state store of each keyspace is the same so just need the first.
+        let store = keyspace[0].state_store();
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been
         // fully flushed.
-        let (_write_batch, dirty_cnt) = {
-            let mut write_batch = keyspace[0].state_store().start_write_batch();
+        let dirty_cnt = {
+            let mut write_batch = store.start_write_batch();
             let mut dirty_cnt = 0;
             let mut state_tables = state_tables.write().await;
             for states in state_map.values_mut() {
@@ -354,27 +355,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
             }
 
-            // Batch commit state table.
-            for state_table in state_tables.iter_mut() {
-                state_table.commit(epoch).await?;
-            }
-
-            ((), dirty_cnt)
+            dirty_cnt
         };
 
         if dirty_cnt == 0 {
             // Nothing to flush.
-            // assert!(write_batch.is_empty());
             return Ok(());
         } else {
-            // write_batch
-            //     .ingest(epoch)
-            //     .await
-            //     .map_err(StreamExecutorError::agg_state_error)?;
-
+            // Batch commit data.
             for state_table in state_tables.write().await.iter_mut() {
                 state_table.commit(epoch).await?;
             }
+
             let state_tables = state_tables.read().await;
             // --- Produce the stream chunk ---
             let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);

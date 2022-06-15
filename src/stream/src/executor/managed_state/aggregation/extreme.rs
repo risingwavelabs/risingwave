@@ -227,7 +227,7 @@ where
 
             // Get relational pk and value.
             let sort_key = key.map(|key| key.into());
-            let (relational_pk, relational_value) =
+            let relational_value =
                 self.get_relational_pk_and_value(sort_key.clone(), composed_key.1.clone());
 
             match op {
@@ -260,12 +260,12 @@ where
                     if do_insert {
                         self.top_n.insert(composed_key.clone(), value.clone());
                     }
-                    state_table.insert(&relational_pk, relational_value)?;
+                    state_table.insert(relational_value)?;
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
                     self.top_n.remove(&composed_key);
-                    state_table.delete(&relational_pk, relational_value)?;
+                    state_table.delete(relational_value)?;
                     self.total_count -= 1;
                 }
             }
@@ -367,8 +367,9 @@ where
 
     // TODO: After state table refactored to derive pk from value, should be fixed to only return
     // value.
-    fn get_relational_pk_and_value(&self, sort_key: Datum, extreme_pk: ExtremePk) -> (Row, Row) {
-        // Assemble pk for relational table.
+    fn get_relational_pk_and_value(&self, sort_key: Datum, extreme_pk: ExtremePk) -> Row {
+        // Assemble value for relational table. Should be group_key + sort_key + input pk + agg call
+        // value.
         let mut sort_key_vec = if let Some(group_key) = self.group_key.as_ref() {
             group_key.0.to_vec()
         } else {
@@ -376,13 +377,8 @@ where
         };
         sort_key_vec.push(sort_key.clone());
         sort_key_vec.extend(extreme_pk.into_iter());
-        let relational_pk = Row::new(sort_key_vec.to_vec());
-
-        // Assemble value for relational table. Should be relational pk + value.
         sort_key_vec.push(sort_key);
-        let relational_value = Row::new(sort_key_vec);
-
-        (relational_pk, relational_value)
+        Row::new(sort_key_vec)
     }
 }
 
