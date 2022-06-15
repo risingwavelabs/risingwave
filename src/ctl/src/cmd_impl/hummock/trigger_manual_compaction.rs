@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod intercept;
-pub mod metrics;
-pub mod server;
-mod service;
+use risingwave_rpc_client::HummockMetaClient;
 
-pub use service::cluster_service::ClusterServiceImpl;
-pub use service::ddl_service::DdlServiceImpl;
-pub use service::heartbeat_service::HeartbeatServiceImpl;
-pub use service::hummock_service::HummockServiceImpl;
-pub use service::notification_service::NotificationServiceImpl;
-pub use service::stream_service::StreamServiceImpl;
+use crate::common::MetaServiceOpts;
 
-pub const META_CF_NAME: &str = "cf/meta";
-pub const META_LEADER_KEY: &str = "leader";
-pub const META_LEASE_KEY: &str = "lease";
+pub async fn trigger_manual_compaction(compaction_group_id: u64) -> anyhow::Result<()> {
+    let meta_opts = MetaServiceOpts::from_env()?;
+    let meta_client = meta_opts.create_meta_client().await?;
+    let result = meta_client
+        .trigger_manual_compaction(compaction_group_id)
+        .await;
+    println!("{:#?}", result);
+    Ok(())
+}

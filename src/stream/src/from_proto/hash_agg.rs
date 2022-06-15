@@ -69,7 +69,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| build_agg_call_from_prost(node.append_only, agg_call))
+            .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.

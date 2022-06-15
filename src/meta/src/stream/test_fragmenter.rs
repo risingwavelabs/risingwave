@@ -202,7 +202,7 @@ fn make_stream_node() -> StreamNode {
             distribution_keys: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
             column_index2column_id: HashMap::new(),
-            append_only: false,
+            is_append_only: false,
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
@@ -235,7 +235,7 @@ fn make_stream_node() -> StreamNode {
             distribution_keys: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
             column_index2column_id: HashMap::new(),
-            append_only: false,
+            is_append_only: false,
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],

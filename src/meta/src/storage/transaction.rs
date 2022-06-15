@@ -35,6 +35,14 @@ impl Transaction {
         self.add_precondition(Precondition::KeyExists { cf, key })
     }
 
+    /// Check whether the key exists.
+    ///
+    /// The check call will never failed, instead, it will only fail on commit.
+    #[inline(always)]
+    pub fn check_equal(&mut self, cf: ColumnFamily, key: Key, value: Value) {
+        self.add_precondition(Precondition::KeyEqual { cf, key, value })
+    }
+
     /// Put the key/value pair if the preconditions satisfied.
     #[inline(always)]
     pub fn put(&mut self, cf: ColumnFamily, key: Key, value: Value) {
@@ -92,5 +100,13 @@ pub enum Operation {
 
 /// Preconditions are checked in the beginning of a transaction
 pub enum Precondition {
-    KeyExists { cf: ColumnFamily, key: Key },
+    KeyExists {
+        cf: ColumnFamily,
+        key: Key,
+    },
+    KeyEqual {
+        cf: ColumnFamily,
+        key: Key,
+        value: Value,
+    },
 }

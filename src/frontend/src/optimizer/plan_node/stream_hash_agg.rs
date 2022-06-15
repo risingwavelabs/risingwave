@@ -58,7 +58,11 @@ impl StreamHashAgg {
 
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamHashAgg");
+        let mut builder = if self.input().append_only() {
+            f.debug_struct("StreamAppendOnlyHashAgg")
+        } else {
+            f.debug_struct("StreamHashAgg")
+        };
         builder
             .field(
                 "group_keys",
@@ -69,12 +73,8 @@ impl fmt::Display for StreamHashAgg {
                     .map(InputRefDisplay)
                     .collect_vec(),
             )
-            .field("aggs", &self.agg_calls());
-
-        if self.base.append_only {
-            builder.field("append_only", &format_args!("{}", true));
-        }
-        builder.finish()
+            .field("aggs", &self.agg_calls())
+            .finish()
     }
 }
 
@@ -117,7 +117,7 @@ impl ToStreamProst for StreamHashAgg {
                 .into_iter()
                 .map(|(k, v)| (k as u32, v))
                 .collect(),
-            append_only: self.append_only(),
+            is_append_only: self.input().append_only(),
         })
     }
 }

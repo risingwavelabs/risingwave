@@ -58,7 +58,9 @@ message SimpleAggNode {
   repeated uint32 distribution_keys = 2;
   repeated catalog.Table internal_tables = 3;
   map<uint32, int32> column_index2column_id = 4;
-  bool append_only = 5;
+  // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 5;
 }
 
 message HashAggNode {
@@ -66,7 +68,9 @@ message HashAggNode {
   repeated expr.AggCall agg_calls = 2;
   repeated catalog.Table internal_tables = 3;
   map<uint32, int32> column_index2column_id = 4;
-  bool append_only = 5;
+  // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 5;
 }
 
 message TopNNode {
@@ -91,6 +95,9 @@ message HashJoinNode {
   bool is_delta_join = 6;
   catalog.Table left_table = 7;
   catalog.Table right_table = 8;
+  // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 9;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta

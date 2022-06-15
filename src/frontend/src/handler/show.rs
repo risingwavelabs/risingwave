@@ -87,6 +87,7 @@ pub async fn handle_show_object(
             .iter_materialized_source()
             .map(|t| t.name.clone())
             .collect(),
+        ShowObject::Sink { _schema } => todo!(),
         ShowObject::Columns { table } => {
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);

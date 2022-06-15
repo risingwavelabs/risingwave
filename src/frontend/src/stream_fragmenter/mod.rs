@@ -101,10 +101,7 @@ impl StreamFragmenter {
                 | NodeBody::HashJoin(_)
                 | NodeBody::DeltaIndexJoin(_)
                 | NodeBody::Chain(_) => {
-                    // We didn't make `fields` available on Java frontend yet, so we check if schema
-                    // is available (by `child_node.fields.is_empty()`) before deciding to do the
-                    // rewrite.
-                    if insert_exchange_flag && !child_node.fields.is_empty() {
+                    if insert_exchange_flag {
                         let child_node =
                             self.rewrite_stream_node_inner(state, child_node, false)?;
 

@@ -211,6 +211,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     for e in [E::And, E::Or] {
         map.insert(FuncSign::new(e, vec![T::Boolean, T::Boolean]), T::Boolean);
     }
+    map.insert(FuncSign::new(E::BoolOut, vec![T::Boolean]), T::Varchar);
 
     // comparison expressions
     for e in [E::IsNull, E::IsNotNull] {

@@ -915,3 +915,102 @@ async fn test_mark_orphan_ssts() {
         .unwrap_err();
     assert!(matches!(error, Error::InternalError(_)));
 }
+
+#[tokio::test]
+async fn test_trigger_manual_compaction() {
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let sst_num = 2usize;
+
+    // Construct vnode mappings for generating compaction tasks.
+    let parallel_units = cluster_manager
+        .list_parallel_units(Some(ParallelUnitType::Hash))
+        .await;
+    env.hash_mapping_manager()
+        .build_fragment_hash_mapping(1, &parallel_units);
+    for table_id in 1..sst_num + 2 {
+        env.hash_mapping_manager()
+            .set_fragment_state_table(1, table_id as u32);
+    }
+
+    {
+        // to check no compactor
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .await;
+
+        assert_eq!(
+            "internal error: trigger_manual_compaction No compactor is available. compaction_group 2",
+            result.err().unwrap().to_string()
+        );
+    }
+
+    // No compaction task available.
+    let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
+    let receiver = compactor_manager_ref.add_compactor(context_id);
+    {
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .await;
+        assert_eq!("internal error: trigger_manual_compaction No compaction_task is available. compaction_group 2", result.err().unwrap().to_string());
+    }
+
+    // Add some sstables and commit.
+    let epoch: u64 = 1;
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    hummock_manager
+        .commit_epoch(epoch, original_tables.clone())
+        .await
+        .unwrap();
+
+    // check safe epoch in hummock version
+    let version_id1 = CurrentHummockVersionId::get(env.meta_store())
+        .await
+        .unwrap()
+        .unwrap();
+    let hummock_version1 = HummockVersion::select(env.meta_store(), &version_id1.id())
+        .await
+        .unwrap()
+        .unwrap();
+
+    // safe epoch should be INVALID before success compaction
+    assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
+
+    {
+        // to check compactor send task fail
+        drop(receiver);
+        {
+            let result = hummock_manager
+                .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+                .await;
+            assert!(result.is_err());
+        }
+    }
+
+    compactor_manager_ref.remove_compactor(context_id);
+    let _receiver = compactor_manager_ref.add_compactor(context_id);
+
+    {
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .await;
+        assert!(result.is_ok());
+    }
+
+    let task_id: u64 = 3;
+    let compact_task = hummock_manager
+        .compaction_task_from_assignment_for_test(task_id)
+        .await
+        .unwrap()
+        .compact_task
+        .unwrap();
+    assert_eq!(task_id, compact_task.task_id);
+
+    {
+        // all sst pending , test no compaction avail
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .await;
+        assert!(result.is_err());
+    }
+}
