@@ -119,7 +119,7 @@ impl ManagedValueState {
         v.extend_from_slice(&self.pk.as_ref().unwrap_or(&Row(vec![])).0);
         v.push(self.state.get_output()?);
 
-        state_table.insert::<false>(Row::new(v))?;
+        state_table.insert(Row::new(v))?;
 
         self.is_dirty = false;
         Ok(())
