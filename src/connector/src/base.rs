@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::panicking::panic;
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
@@ -19,7 +20,11 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
+use mysql_async::Conn;
 use serde::{Deserialize, Serialize};
+use tonic::codec::ProstCodec;
+use risingwave_pb::meta::ConnectorSplit;
+use prost::Message;
 
 use crate::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
@@ -130,6 +135,38 @@ impl_split! {
     { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit }
+}
+
+impl SplitMetaData for SplitImpl {
+    fn id(&self) -> String {
+        "".to_string()
+    }
+
+    fn encode_to_bytes(&self) -> Bytes {
+
+        let x = match self {
+            SplitImpl::Kafka(inner) => {
+                inner.encode_to_bytes()
+            }
+            SplitImpl::Pulsar(_) => {}
+            SplitImpl::Kinesis(_) => {}
+            SplitImpl::Nexmark(_) => {}
+            SplitImpl::Datagen(_) => {}
+        }.to_vec();
+        let split = ConnectorSplit{ r#type: KAFKA_CONNECTOR.to_string(), split: x };
+        let x = split.encode_to_vec();
+
+        todo!()
+    }
+
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+        let split = ConnectorSplit::decode(bytes)?;
+        match split.r#type {
+
+            KAFKA_CONNECTOR => <KafkaSplit>::restore_from_bytes(split.split.as_bytes()).map(Self::Kafka),
+            _ => panic("123")
+        }
+    }
 }
 
 impl_split_reader! {

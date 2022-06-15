@@ -19,16 +19,12 @@ use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use paste::paste;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::state::SourceStateHandler;
-use risingwave_connector::{
-    ConnectorState, SplitImpl, DATAGEN_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR,
-    NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
-};
+use risingwave_connector::{ConnectorState, SplitImpl};
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{channel, Receiver, UnboundedReceiver};
@@ -229,22 +225,6 @@ impl SourceReader {
     }
 }
 
-macro_rules! impl_take_snapshot {
-    ([], $state_store: expr, $epoch: ident, $vec_split_impl: ident, $({$connector: ident, $connector_split_type: ident}), *) => {
-        paste! {
-            match $vec_split_impl[0].get_type().as_str() {
-                $(
-                    $connector_split_type => {
-                        let type_cache = $vec_split_impl.iter().map(|split_impl| split_impl.[<as_ $connector>]().unwrap().clone()).collect::<Vec<_>>();
-                        $state_store.take_snapshot(type_cache, $epoch).await.to_rw_result()?;
-                    },
-                )*
-                _ => todo!(),
-            }
-        }
-    };
-}
-
 impl<S: StateStore> SourceExecutor<S> {
     fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
         // rhs can not be None because we do not support split number reduction
@@ -275,18 +255,16 @@ impl<S: StateStore> SourceExecutor<S> {
         let cache = self
             .state_cache
             .iter()
-            .map(|(_, split_impl)| split_impl)
-            .collect::<Vec<_>>();
-        if !cache.is_empty() {
-            impl_take_snapshot!([], self.split_state_store, epoch, cache,
-                { kafka, KAFKA_CONNECTOR },
-                { kinesis, KINESIS_CONNECTOR },
-                { nexmark, NEXMARK_CONNECTOR },
-                { pulsar, PULSAR_CONNECTOR },
-                { datagen, DATAGEN_CONNECTOR}
+            .map(|(_, split_impl)| split_impl.to_owned())
+            .collect_vec();
 
-            );
+        if !cache.is_empty() {
+            self.split_state_store
+                .take_snapshot(cache, epoch)
+                .await
+                .to_rw_result()?;
         }
+
         Ok(())
     }
 

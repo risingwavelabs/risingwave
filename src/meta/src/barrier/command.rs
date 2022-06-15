@@ -157,7 +157,7 @@ where
                             split_type,
                             source_splits: splits
                                 .iter()
-                                .map(|split| split.to_json_bytes().to_vec())
+                                .map(|split| split.encode_to_bytes().to_vec())
                                 .collect(),
                         }
                     })

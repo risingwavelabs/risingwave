@@ -43,7 +43,7 @@ macro_rules! impl_split {
                 }
             }
 
-            pub fn to_json_bytes(&self) -> Bytes {
+            pub fn encode_to_bytes(&self) -> Bytes {
                 match self {
                     $( Self::$variant_name(inner) => inner.encode_to_bytes(), )*
                 }

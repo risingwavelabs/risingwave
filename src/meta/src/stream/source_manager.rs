@@ -102,7 +102,7 @@ impl MetadataModel for SourceActorInfo {
                 .iter()
                 .map(|split| ProstSourceActorSplit {
                     r#type: split.get_type(),
-                    split: split.to_json_bytes().to_vec(),
+                    split: split.encode_to_bytes().to_vec(),
                 })
                 .collect(),
         }
@@ -668,7 +668,7 @@ where
                         split_type: splits.first().unwrap().get_type(),
                         source_splits: splits
                             .iter()
-                            .map(|split| split.to_json_bytes().to_vec())
+                            .map(|split| split.encode_to_bytes().to_vec())
                             .collect(),
                     })
                     .collect(),
