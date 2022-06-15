@@ -95,6 +95,9 @@ impl IntervalUnit {
         }
     }
 
+    /// Justify interval, convert 1 month to 30 days and 86400 ms to 1 day.
+    /// If day is positive, complement the ms negative value.
+    /// These rules only use in interval comparison.
     pub fn justify_interval(&mut self) {
         let month = (self.months * 30) as i64 * DAY_MS;
         self.ms = self.ms + month + (self.days) as i64 * DAY_MS;
