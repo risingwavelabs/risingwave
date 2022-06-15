@@ -121,10 +121,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                         match op {
                             Insert | UpdateInsert => {
-                                self.state_table.insert::<false>(row)?;
+                                self.state_table.insert(row)?;
                             }
                             Delete | UpdateDelete => {
-                                self.state_table.delete::<false>(row)?;
+                                self.state_table.delete(row)?;
                             }
                         }
                     }

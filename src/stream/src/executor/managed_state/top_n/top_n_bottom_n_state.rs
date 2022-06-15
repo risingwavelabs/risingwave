@@ -197,7 +197,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             &mut self.bottom_n
         };
         insert_to_cache.insert(key, value.clone());
-        self.state_table.insert::<false>(value).unwrap();
+        self.state_table.insert(value).unwrap();
         self.total_count += 1;
     }
 
@@ -209,7 +209,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     ) -> StreamExecutorResult<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
-        self.state_table.delete::<false>(value)?;
+        self.state_table.delete(value)?;
         self.total_count -= 1;
         // If we have nothing in both caches, we have to scan from the storage.
         if self.top_n.is_empty() && self.bottom_n.is_empty() && self.total_count > 0 {
