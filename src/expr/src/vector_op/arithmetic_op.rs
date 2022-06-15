@@ -15,9 +15,7 @@
 use std::any::type_name;
 use std::convert::TryInto;
 use std::fmt::Debug;
-use std::ops::Sub;
 
-use chrono::Duration;
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
 use risingwave_common::types::{
     CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -127,9 +125,7 @@ pub fn timestamp_timestamp_sub<T1, T2, T3>(
     r: NaiveDateTimeWrapper,
 ) -> Result<IntervalUnit> {
     let tmp = l.0 - r.0;
-    let days = tmp.num_days();
-    let ms = tmp.sub(Duration::days(tmp.num_days())).num_milliseconds();
-    Ok(IntervalUnit::new(0, days as i32, ms))
+    Ok(IntervalUnit::new(0, tmp.num_days() as i32, 0))
 }
 
 #[inline(always)]

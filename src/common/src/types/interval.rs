@@ -37,7 +37,10 @@ use super::*;
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
 ///
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+/// FIXME: if this derives `PartialEq` and `PartialOrd`, caller must guarantee the fields are valid.
+#[derive(
+Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub struct IntervalUnit {
     months: i32,
     days: i32,
@@ -232,58 +235,6 @@ impl Add for IntervalUnit {
         let days = self.days + rhs.days;
         let ms = self.ms + rhs.ms;
         IntervalUnit { months, days, ms }
-    }
-}
-
-impl PartialOrd for IntervalUnit {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self.eq(other) {
-            Some(Ordering::Equal)
-        } else {
-            let day1 = self.months * 30 + self.days;
-            let day2 = other.months * 30 + other.days;
-            match day1.cmp(&day2){
-                Ordering::Less => {
-                    Some(Ordering::Less)
-                }
-                Ordering::Equal => {
-                    if self.ms > other.ms {
-                        Some(Ordering::Greater)
-                    } else {
-                        Some(Ordering::Less)
-                    }
-                }
-                Ordering::Greater => {
-                    Some(Ordering::Greater)
-                }
-            }
-        }
-    }
-}
-
-impl Hash for IntervalUnit {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.months.hash(state);
-        self.ms.hash(state);
-        self.days.hash(state);
-    }
-}
-
-impl PartialEq for IntervalUnit {
-    fn eq(&self, other: &Self) -> bool {
-        if self.months * 30 + self.days != other.months * 30 + other.days {
-            false
-        } else{
-            self.ms == other.ms
-        }
-    }
-}
-
-impl Eq for IntervalUnit {}
-
-impl Ord for IntervalUnit {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
     }
 }
 
