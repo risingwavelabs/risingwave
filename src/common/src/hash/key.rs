@@ -21,7 +21,6 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use super::{VirtualNode, VIRTUAL_NODE_COUNT};
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, Row, StructRef,
 };
@@ -40,6 +39,11 @@ use crate::util::hash_util::CRC32FastBuilder;
 /// For example, `SELECT sum(t.a) FROM t GROUP BY t.b, t.c`, the hash keys
 /// are encoded from both `t.b, t.c`. If t.b="abc", t.c=1, the hashkey may be
 /// encoded in certain format of ("abc", 1).
+
+pub type VirtualNode = u16;
+pub const VNODE_BITS: usize = 11;
+pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
+pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -126,9 +130,9 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 
     #[inline(always)]
     fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> Result<Row> {
-        let mut builders = data_types
+        let mut builders: Vec<_> = data_types
             .map(|dt| dt.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
 
         self.deserialize_to_builders(&mut builders)?;
         builders
@@ -647,7 +651,9 @@ impl HashKey for SerializedKey {
         array_builders
             .iter_mut()
             .zip_eq(self.key)
-            .try_for_each(|(array_builder, key)| array_builder.append_datum(&key))
+            .try_for_each(|(array_builder, key)| {
+                array_builder.append_datum(&key).map_err(Into::into)
+            })
     }
 
     fn has_null(&self) -> bool {
@@ -658,7 +664,6 @@ impl HashKey for SerializedKey {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::convert::TryFrom;
     use std::str::FromStr;
     use std::sync::Arc;
 
@@ -699,7 +704,7 @@ mod tests {
             )),
         ];
 
-        DataChunk::try_from(columns).expect("Failed to create data chunk")
+        DataChunk::new(columns, capacity)
     }
 
     fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
@@ -847,7 +852,7 @@ mod tests {
             .into(),
         ) as ArrayRef)];
 
-        DataChunk::try_from(columns).expect("Failed to create data chunk")
+        DataChunk::new(columns, 5)
     }
 
     #[test]

@@ -16,7 +16,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::HashSet;
-use risingwave_common::array::{Array, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{Array, ArrayRef, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_common::hash::HashKey;
@@ -363,7 +363,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         key_indices: Vec<usize>,
         ks_l: Keyspace<S>,
         ks_r: Keyspace<S>,
-        append_only: bool,
+        is_append_only: bool,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -398,7 +398,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let pk_indices_r = input_r.pk_indices().to_vec();
 
         // check whether join key contains pk in both side
-        let append_only_optimize = if append_only {
+        let append_only_optimize = if is_append_only {
             let join_key_l = HashSet::<usize>::from_iter(params_l.key_indices.clone());
             let join_key_r = HashSet::<usize>::from_iter(params_r.key_indices.clone());
             let pk_contained_l = pk_indices_l.len()
@@ -580,16 +580,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         append_only_optimize: bool,
     ) {
         let chunk = chunk.compact()?;
-        let (ops, columns, visibility) = chunk.into_inner();
-
-        let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().columns(columns);
-            if let Some(visibility) = visibility {
-                data_chunk_builder.visibility(visibility).build()
-            } else {
-                data_chunk_builder.build()
-            }
-        };
+        let (data_chunk, ops) = chunk.into_parts();
 
         let (side_update, side_match) = if SIDE == SideType::Left {
             (&mut side_l, &mut side_r)

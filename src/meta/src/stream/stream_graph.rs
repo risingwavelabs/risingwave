@@ -529,42 +529,52 @@ impl StreamGraphBuilder {
                 let mut new_stream_node = stream_node.clone();
 
                 // Table id rewrite done below.
-
-                if let NodeBody::HashJoin(node) = new_stream_node.node_body.as_mut().unwrap() {
-                    // The operator id must be assigned with table ids. Otherwise it is a logic
-                    // error.
-                    let left_table_id = node.left_table_id + table_id_offset;
-                    let right_table_id = left_table_id + 1;
-                    node.left_table_id = left_table_id;
-                    node.right_table_id = right_table_id;
-                }
-
-                if let NodeBody::Lookup(node) = new_stream_node.node_body.as_mut().unwrap() {
-                    if let Some(ArrangementTableId::TableId(table_id)) =
-                        &mut node.arrangement_table_id
-                    {
-                        *table_id += table_id_offset;
-                    }
-                }
-
-                if let NodeBody::Arrange(node) = new_stream_node.node_body.as_mut().unwrap() {
-                    node.table_id += table_id_offset;
-                }
-
-                if let NodeBody::HashAgg(node) = new_stream_node.node_body.as_mut().unwrap() {
-                    assert_eq!(node.table_ids.len(), node.agg_calls.len());
-                    // In-place update the table id. Convert from local to global.
-                    for table_id in &mut node.table_ids {
-                        *table_id += table_id_offset;
-                    }
-                }
-
                 match new_stream_node.node_body.as_mut().unwrap() {
+                    NodeBody::HashJoin(node) => {
+                        // The operator id must be assigned with table ids. Otherwise it is a logic
+                        // error.
+                        let left_table_id = node.left_table_id + table_id_offset;
+                        let right_table_id = left_table_id + 1;
+                        node.left_table_id = left_table_id;
+                        node.right_table_id = right_table_id;
+                        ctx.internal_table_id_set.insert(left_table_id);
+                        ctx.internal_table_id_set.insert(right_table_id);
+                    }
+
+                    NodeBody::Lookup(node) => {
+                        if let Some(ArrangementTableId::TableId(table_id)) =
+                            &mut node.arrangement_table_id
+                        {
+                            *table_id += table_id_offset;
+                            ctx.internal_table_id_set.insert(*table_id);
+                        }
+                    }
+
+                    NodeBody::Arrange(node) => {
+                        node.table_id += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id);
+                    }
+
+                    NodeBody::HashAgg(node) => {
+                        assert_eq!(node.table_ids.len(), node.agg_calls.len());
+                        // In-place update the table id. Convert from local to global.
+                        for table_id in &mut node.table_ids {
+                            *table_id += table_id_offset;
+                            ctx.internal_table_id_set.insert(*table_id);
+                        }
+                    }
+
+                    NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
+                        node.table_id += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id);
+                    }
+
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
                         assert_eq!(node.table_ids.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
                         for table_id in &mut node.table_ids {
                             *table_id += table_id_offset;
+                            ctx.internal_table_id_set.insert(*table_id);
                         }
                     }
                     _ => {}

@@ -1,0 +1,39 @@
+# Create a database.
+statement ok
+create database ddl_database;
+
+# Create another database with duplicated name.
+statement error
+create database ddl_database;
+
+# Create another database with duplicated name and if not exists.
+statement ok
+create database if not exists ddl_database;
+
+# Create a schema.
+statement ok
+create schema ddl_database.ddl_schema;
+
+# Cannot drop the database when it is not empty.
+statement error
+drop database ddl_database;
+
+# Drop the schema.
+statement ok
+drop schema ddl_database.ddl_schema;
+
+# Drop the schema.
+statement ok
+drop schema ddl_database.public;
+
+# Drop the database.
+statement ok
+drop database ddl_database;
+
+# Drop it again.
+statement error
+drop database ddl_database;
+
+# Drop it again with if exists.
+statement ok
+drop database if exists ddl_database;

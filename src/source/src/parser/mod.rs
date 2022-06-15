@@ -27,7 +27,6 @@ use risingwave_common::types::Datum;
 use crate::parser::avro_parser::AvroParser;
 use crate::{SourceColumnDesc, SourceFormat};
 
-#[allow(dead_code)]
 mod avro_parser;
 mod common;
 mod debezium;

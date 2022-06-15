@@ -1,0 +1,32 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query I
+values(3&5);
+----
+1
+
+query I
+values(3|5);
+----
+7
+
+query I
+values(3#5);
+----
+6
+
+query I
+values(1<<2);
+----
+4
+
+query I
+values(4>>2);
+----
+1
+
+query I
+values(~1);
+----
+-2

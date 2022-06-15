@@ -55,6 +55,13 @@ impl Binder {
             self.bind_table_source(name)?
         };
 
+        if table_source.append_only {
+            return Err(ErrorCode::BindError(
+                "Append-only table source doesn't support update".to_string(),
+            )
+            .into());
+        }
+
         let table = self.bind_vec_table_with_joins(vec![table])?.unwrap();
         assert_matches!(table, Relation::BaseTable(_));
 

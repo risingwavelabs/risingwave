@@ -14,13 +14,15 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
-    VacuumTask,
+    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableInfo,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
+use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::HummockMetaClient;
 use tonic::Streaming;
 
@@ -45,10 +47,14 @@ impl MockHummockMetaClient {
 
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
-            .get_compact_task()
+            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
             .await
             .unwrap_or(None)
     }
+}
+
+fn mock_err(error: super::error::Error) -> RpcError {
+    anyhow!("mock error: {}", error).into()
 }
 
 #[async_trait]
@@ -57,14 +63,14 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .pin_version(self.context_id, last_pinned)
             .await
-            .map_err(|e| e.into())
+            .map_err(mock_err)
     }
 
     async fn unpin_version(&self, pinned_version_id: &[HummockVersionId]) -> Result<()> {
         self.hummock_manager
             .unpin_version(self.context_id, pinned_version_id)
             .await
-            .map_err(|e| e.into())
+            .map_err(mock_err)
     }
 
     async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
@@ -72,7 +78,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .pin_snapshot(self.context_id, last_pinned)
             .await
             .map(|e| e.epoch)
-            .map_err(|e| e.into())
+            .map_err(mock_err)
     }
 
     async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()> {
@@ -85,14 +91,26 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .unpin_snapshot(self.context_id, snapshots)
             .await
-            .map_err(|e| e.into())
+            .map_err(mock_err)
+    }
+
+    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()> {
+        self.hummock_manager
+            .unpin_snapshot_before(
+                self.context_id,
+                HummockSnapshot {
+                    epoch: pinned_epochs,
+                },
+            )
+            .await
+            .map_err(mock_err)
     }
 
     async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         self.hummock_manager
             .get_new_table_id()
             .await
-            .map_err(|e| e.into())
+            .map_err(mock_err)
     }
 
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
@@ -100,26 +118,30 @@ impl HummockMetaClient for MockHummockMetaClient {
             .report_compact_task(&compact_task)
             .await
             .map(|_| ())
-            .map_err(|e| e.into())
+            .map_err(mock_err)
     }
 
     async fn commit_epoch(&self, epoch: HummockEpoch, sstables: Vec<SstableInfo>) -> Result<()> {
         self.hummock_manager
             .commit_epoch(epoch, sstables)
             .await
-            .map_err(|e| e.into())
+            .map_err(mock_err)
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
-        Err(ErrorCode::NotImplemented(
-            "MockHummockMetaClient::subscribe_compact_tasks".to_owned(),
-            None.into(),
-        )
-        .into())
+        unimplemented!()
     }
 
     async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> Result<()> {
         Ok(())
+    }
+
+    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+        todo!()
+    }
+
+    async fn trigger_manual_compaction(&self, _compaction_group_id: u64) -> Result<()> {
+        todo!()
     }
 }
 

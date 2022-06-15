@@ -15,11 +15,12 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{ErrorCode, Result, RwError};
+use crate::array::{ArrayError, ArrayResult};
 mod native_type;
 mod ops;
 mod scalar_impl;
@@ -32,8 +33,8 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
 pub use scalar_impl::*;
-mod chrono_wrapper;
-mod decimal;
+pub mod chrono_wrapper;
+pub mod decimal;
 pub mod interval;
 
 mod ordered_float;
@@ -49,13 +50,12 @@ pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 use prost::Message;
-use risingwave_pb::expr::StructValue as ProstStructValue;
+use risingwave_pb::expr::{ListValue as ProstListValue, StructValue as ProstStructValue};
 
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
 };
-use crate::error::ErrorCode::InternalError;
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -121,7 +121,7 @@ impl From<&ProstDataType> for DataType {
 }
 
 impl DataType {
-    pub fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+    pub fn create_array_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
         use crate::array::*;
         Ok(match self {
             DataType::Boolean => BoolArrayBuilder::new(capacity)?.into(),
@@ -197,7 +197,7 @@ impl DataType {
             DataType::Int64 => DataSize::Fixed(size_of::<i64>()),
             DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
             DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
-            DataType::Decimal => DataSize::Fixed(16),
+            DataType::Decimal => DataSize::Fixed(size_of::<Decimal>()),
             DataType::Varchar => DataSize::Variable,
             DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
             DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
@@ -220,6 +220,18 @@ impl DataType {
                 | DataType::Decimal
         )
     }
+
+    /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
+    pub fn mem_cmp_eq_value_enc(&self) -> bool {
+        use DataType::*;
+        match self {
+            Boolean | Int16 | Int32 | Int64 => true,
+            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz
+            | Interval => false,
+            Struct { fields } => fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
+            List { datatype } => datatype.mem_cmp_eq_value_enc(),
+        }
+    }
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation
@@ -234,7 +246,7 @@ pub trait Scalar:
     + 'static
     + Clone
     + std::fmt::Debug
-    + TryFrom<ScalarImpl, Error = RwError>
+    + TryFrom<ScalarImpl, Error = ArrayError>
     + Into<ScalarImpl>
 {
     /// Type for reference of `Scalar`
@@ -264,7 +276,11 @@ pub fn option_to_owned_scalar<S: Scalar>(scalar: &Option<S::ScalarRefType<'_>>) 
 /// `ScalarRef` is reciprocal to `Scalar`. Use `to_owned_scalar` to get an
 /// owned scalar.
 pub trait ScalarRef<'a>:
-    Copy + std::fmt::Debug + 'a + TryFrom<ScalarRefImpl<'a>, Error = RwError> + Into<ScalarRefImpl<'a>>
+    Copy
+    + std::fmt::Debug
+    + 'a
+    + TryFrom<ScalarRefImpl<'a>, Error = ArrayError>
+    + Into<ScalarRefImpl<'a>>
 {
     /// `ScalarType` is the owned type of current `ScalarRef`.
     type ScalarType: Scalar<ScalarRefType<'a> = Self>;
@@ -444,14 +460,12 @@ macro_rules! impl_convert {
             }
 
             impl TryFrom<ScalarImpl> for $scalar {
-                type Error = RwError;
+                type Error = ArrayError;
 
-                fn try_from(val: ScalarImpl) -> Result<Self> {
+                fn try_from(val: ScalarImpl) -> ArrayResult<Self> {
                     match val {
                         ScalarImpl::$variant_name(scalar) => Ok(scalar),
-                        other_scalar => Err(ErrorCode::InternalError(
-                            format!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
-                        ).into())
+                        other_scalar => bail!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident()),
                     }
                 }
             }
@@ -463,14 +477,12 @@ macro_rules! impl_convert {
             }
 
             impl <'scalar> TryFrom<ScalarRefImpl<'scalar>> for $scalar_ref {
-                type Error = RwError;
+                type Error = ArrayError;
 
-                fn try_from(val: ScalarRefImpl<'scalar>) -> Result<Self> {
+                fn try_from(val: ScalarRefImpl<'scalar>) -> ArrayResult<Self> {
                     match val {
                         ScalarRefImpl::$variant_name(scalar_ref) => Ok(scalar_ref),
-                        other_scalar => Err(ErrorCode::InternalError(
-                            format!("cannot convert ScalarRefImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
-                        ).into())
+                        other_scalar => bail!("cannot convert ScalarRefImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name)),
                     }
                 }
             }
@@ -551,7 +563,7 @@ for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 
 // FIXME: should implement Hash and Eq all by deriving
 // TODO: may take type information into consideration later
-#[allow(clippy::derive_hash_xor_eq)]
+#[expect(clippy::derive_hash_xor_eq)]
 impl std::hash::Hash for ScalarImpl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         macro_rules! impl_all_hash {
@@ -640,6 +652,12 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
+            &Self::Struct(StructRef::ValueRef { val }) => {
+                ser.serialize_struct_or_list(val.to_protobuf_owned())?
+            }
+            &Self::List(ListRef::ValueRef { val }) => {
+                ser.serialize_struct_or_list(val.to_protobuf_owned())?
+            }
             _ => {
                 panic!("Type is unable to be serialized.")
             }
@@ -694,8 +712,13 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::with_days(days)?
             }),
-            _ => {
-                panic!("Type is unable to be deserialized.")
+            Ty::Struct { fields: _ } => {
+                let bytes = de.deserialize_struct_or_list()?;
+                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
+            }
+            Ty::List { datatype: _ } => {
+                let bytes = de.deserialize_struct_or_list()?;
+                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
             }
         })
     }
@@ -715,57 +738,60 @@ impl ScalarImpl {
             ScalarImpl::NaiveDateTime(_) => todo!(),
             ScalarImpl::NaiveTime(_) => todo!(),
             ScalarImpl::Struct(v) => v.to_protobuf_owned(),
-            ScalarImpl::List(_) => todo!(),
+            ScalarImpl::List(v) => v.to_protobuf_owned(),
         };
         body
     }
 
-    pub fn bytes_to_scalar(b: &Vec<u8>, data_type: &ProstDataType) -> Result<Self> {
+    pub fn bytes_to_scalar(b: &Vec<u8>, data_type: &ProstDataType) -> ArrayResult<Self> {
         let value = match data_type.get_type_name()? {
             TypeName::Boolean => ScalarImpl::Bool(
-                i8::from_be_bytes(b.as_slice().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize bool, reason: {:?}", e))
-                })?) == 1,
+                i8::from_be_bytes(
+                    b.as_slice()
+                        .try_into()
+                        .map_err(|e| anyhow!("Failed to deserialize bool, reason: {:?}", e))?,
+                ) == 1,
             ),
-            TypeName::Int16 => {
-                ScalarImpl::Int16(i16::from_be_bytes(b.as_slice().try_into().map_err(
-                    |e| InternalError(format!("Failed to deserialize i16, reason: {:?}", e)),
-                )?))
-            }
-            TypeName::Int32 => {
-                ScalarImpl::Int32(i32::from_be_bytes(b.as_slice().try_into().map_err(
-                    |e| InternalError(format!("Failed to deserialize i32, reason: {:?}", e)),
-                )?))
-            }
-            TypeName::Int64 => {
-                ScalarImpl::Int64(i64::from_be_bytes(b.as_slice().try_into().map_err(
-                    |e| InternalError(format!("Failed to deserialize i64, reason: {:?}", e)),
-                )?))
-            }
+            TypeName::Int16 => ScalarImpl::Int16(i16::from_be_bytes(
+                b.as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("Failed to deserialize i16, reason: {:?}", e))?,
+            )),
+            TypeName::Int32 => ScalarImpl::Int32(i32::from_be_bytes(
+                b.as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?,
+            )),
+            TypeName::Int64 => ScalarImpl::Int64(i64::from_be_bytes(
+                b.as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("Failed to deserialize i64, reason: {:?}", e))?,
+            )),
             TypeName::Float => ScalarImpl::Float32(
-                f32::from_be_bytes(b.as_slice().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize f32, reason: {:?}", e))
-                })?)
+                f32::from_be_bytes(
+                    b.as_slice()
+                        .try_into()
+                        .map_err(|e| anyhow!("Failed to deserialize f32, reason: {:?}", e))?,
+                )
                 .into(),
             ),
             TypeName::Double => ScalarImpl::Float64(
-                f64::from_be_bytes(b.as_slice().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
-                })?)
+                f64::from_be_bytes(
+                    b.as_slice()
+                        .try_into()
+                        .map_err(|e| anyhow!("Failed to deserialize f64, reason: {:?}", e))?,
+                )
                 .into(),
             ),
             TypeName::Varchar => ScalarImpl::Utf8(
                 std::str::from_utf8(b)
-                    .map_err(|e| {
-                        InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
-                    })?
+                    .map_err(|e| anyhow!("Failed to deserialize varchar, reason: {:?}", e))?
                     .to_string(),
             ),
-            TypeName::Decimal => {
-                ScalarImpl::Decimal(Decimal::from_str(std::str::from_utf8(b).unwrap()).map_err(
-                    |e| InternalError(format!("Failed to deserialize decimal, reason: {:?}", e)),
-                )?)
-            }
+            TypeName::Decimal => ScalarImpl::Decimal(
+                Decimal::from_str(std::str::from_utf8(b).unwrap())
+                    .map_err(|e| anyhow!("Failed to deserialize decimal, reason: {:?}", e))?,
+            ),
             TypeName::Interval => ScalarImpl::Interval(IntervalUnit::from_protobuf_bytes(
                 b,
                 data_type.get_interval_type()?,
@@ -783,16 +809,26 @@ impl ScalarImpl {
                             Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
                         }
                     })
-                    .collect::<Result<Vec<Datum>>>()?;
+                    .collect::<ArrayResult<Vec<Datum>>>()?;
                 ScalarImpl::Struct(StructValue::new(fields))
             }
-            _ => {
-                return Err(InternalError(format!(
-                    "Unrecognized type name: {:?}",
-                    data_type.get_type_name()
-                ))
-                .into());
+            TypeName::List => {
+                let list_value: ProstListValue = Message::decode(b.as_slice())?;
+                let d = &data_type.field_type[0];
+                let fields: Vec<Datum> = list_value
+                    .fields
+                    .iter()
+                    .map(|b| {
+                        if b.is_empty() {
+                            Ok(None)
+                        } else {
+                            Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
+                        }
+                    })
+                    .collect::<ArrayResult<Vec<Datum>>>()?;
+                ScalarImpl::List(ListValue::new(fields))
             }
+            _ => bail!("Unrecognized type name: {:?}", data_type.get_type_name()),
         };
         Ok(value)
     }
@@ -877,5 +913,15 @@ mod tests {
         let decoded_floats = memcomparables.into_iter().map(deserialize).collect_vec();
         assert!(decoded_floats.is_sorted());
         assert_eq!(floats, decoded_floats);
+    }
+
+    #[test]
+    fn test_size() {
+        assert_eq!(std::mem::size_of::<StructValue>(), 16);
+        assert_eq!(std::mem::size_of::<ListValue>(), 16);
+        // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
+        assert_eq!(std::mem::size_of::<Decimal>(), 20);
+        assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
+        assert_eq!(std::mem::size_of::<Datum>(), 32);
     }
 }

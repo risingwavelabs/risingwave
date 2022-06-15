@@ -37,7 +37,7 @@ use super::SstableStoreRef;
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTask;
-use crate::hummock::shared_buffer::SharedBuffer;
+use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, INVALID_VERSION_ID,
@@ -57,7 +57,7 @@ struct BufferTracker {
 }
 
 impl BufferTracker {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.upload_size.load(Relaxed) == 0
     }
@@ -141,7 +141,7 @@ impl LocalVersionManager {
         ));
 
         // Uploader shared buffer to S3.
-        let mut uploader = SharedBufferUploader::new(
+        let uploader = SharedBufferUploader::new(
             options.clone(),
             sstable_store,
             hummock_meta_client,
@@ -231,7 +231,11 @@ impl LocalVersionManager {
 
         let batch_size = SharedBufferBatch::measure_batch_size(&sorted_items);
         while !self.buffer_tracker.can_write() {
-            self.sync_shared_buffer(None).await?;
+            // TODO: may apply high-low memory threshold here to avoid always await here.
+            if !self.flush_shared_buffer().await? {
+                // The flush has no effect. yield to avoid occupying the execution endlessly.
+                tokio::task::yield_now().await;
+            }
         }
 
         let batch = SharedBufferBatch::new_with_size(
@@ -265,90 +269,112 @@ impl LocalVersionManager {
         Ok(batch_size)
     }
 
-    pub async fn sync_shared_buffer(&self, epoch: Option<HummockEpoch>) -> HummockResult<()> {
-        if self.buffer_tracker.is_empty() {
-            return Ok(());
-        }
-
-        let mut tasks = vec![];
-
-        let mut handle_epoch = |epoch: &HummockEpoch, shared_buffer: &Arc<RwLock<SharedBuffer>>| {
-            let mut guard = shared_buffer.write();
-            if let Some((task_id, task_data)) = guard.new_upload_task() {
-                tasks.push(UploadTask::new(task_id, *epoch, task_data));
+    pub async fn flush_shared_buffer(&self) -> HummockResult<bool> {
+        // The current implementation is a trivial one, which issue only one flush task and wait for
+        // the task to finish.
+        //
+        // TODO: apply high-low threshold here and avoid always await here.
+        let mut task = None;
+        for (epoch, shared_buffer) in self.local_version.read().iter_shared_buffer() {
+            if let Some((order_index, task_data)) =
+                shared_buffer.write().new_upload_task(FlushWriteBatch)
+            {
+                // TODO: may apply different `is_local` according to whether local spill is enabled.
+                task = Some(UploadTask::new(order_index, *epoch, task_data, true));
+                break;
             }
+        }
+        let task = match task {
+            Some(task) => task,
+            None => return Ok(false),
         };
 
-        {
-            let guard = self.local_version.read();
-            match epoch {
-                Some(epoch) => match guard.get_shared_buffer(epoch) {
-                    None => return Ok(()),
-                    Some(shared_buffer) => {
-                        handle_epoch(&epoch, shared_buffer);
-                    }
-                },
-                None => {
-                    for (epoch, shared_buffer) in guard.iter_shared_buffer() {
-                        handle_epoch(epoch, shared_buffer);
-                    }
-                }
-            }
-        }
-
-        if tasks.is_empty() {
-            return Ok(());
-        }
+        let epoch = task.epoch;
 
         let (tx, rx) = oneshot::channel();
         self.worker_context
             .shared_buffer_uploader_tx
-            .send(UploadItem::new(tasks, tx))
+            .send(UploadItem::new(vec![task], tx))
             .map_err(HummockError::shared_buffer_error)?;
-        let upload_result = rx.await.map_err(HummockError::shared_buffer_error)?;
+        let ((_, order_index), task_result) = rx
+            .await
+            .map_err(HummockError::shared_buffer_error)?
+            .pop_first()
+            .expect("the result should not be empty");
 
-        let failed_epoch = upload_result
-            .iter()
-            .filter_map(
-                |((epoch, _), result)| {
-                    if result.is_err() {
-                        Some(*epoch)
-                    } else {
-                        None
-                    }
-                },
-            )
-            .collect_vec();
+        let local_version_guard = self.local_version.read();
+        let mut shared_buffer_guard = local_version_guard
+            .get_shared_buffer(epoch)
+            .expect("shared buffer should exist since some uncommitted data is not committed yet")
+            .write();
 
-        if failed_epoch.len() < upload_result.len() {
-            // only acquire the lock when any of the upload task succeed.
-            let guard = self.local_version.read();
-            for ((epoch, task_id), result) in upload_result {
-                match result {
-                    Ok(ssts) => {
-                        if let Some(shared_buffer) = guard.get_shared_buffer(epoch) {
-                            shared_buffer.write().succeed_upload_task(task_id, ssts);
-                        }
-                        if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-                            conflict_detector.archive_epoch(epoch);
-                        }
-                    }
-                    Err(_) => {
-                        if let Some(shared_buffer) = guard.get_shared_buffer(epoch) {
-                            shared_buffer.write().fail_upload_task(task_id);
-                        }
-                    }
+        match task_result {
+            Ok(ssts) => {
+                shared_buffer_guard.succeed_upload_task(order_index, ssts);
+                Ok(true)
+            }
+            Err(e) => {
+                shared_buffer_guard.fail_upload_task(order_index);
+                Err(e)
+            }
+        }
+    }
+
+    pub async fn sync_shared_buffer(&self, epoch: Option<HummockEpoch>) -> HummockResult<()> {
+        let epochs = match epoch {
+            Some(epoch) => vec![epoch],
+            None => self
+                .local_version
+                .read()
+                .iter_shared_buffer()
+                .map(|(epoch, _)| *epoch)
+                .collect(),
+        };
+        for epoch in epochs {
+            self.sync_shared_buffer_epoch(epoch).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn sync_shared_buffer_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
+        let task = {
+            match self.local_version.read().new_upload_task(epoch, SyncEpoch) {
+                Some((order_index, task_data)) => {
+                    UploadTask::new(order_index, epoch, task_data, false)
                 }
+                None => return Ok(()),
             }
         };
 
-        if failed_epoch.is_empty() {
-            Ok(())
-        } else {
-            Err(HummockError::shared_buffer_error(format!(
-                "Failed to sync epochs: {:?}",
-                failed_epoch
-            )))
+        let (tx, rx) = oneshot::channel();
+        self.worker_context
+            .shared_buffer_uploader_tx
+            .send(UploadItem::new(vec![task], tx))
+            .map_err(HummockError::shared_buffer_error)?;
+        let ((_, order_index), task_result) = rx
+            .await
+            .map_err(HummockError::shared_buffer_error)?
+            .pop_first()
+            .expect("the result should not be empty");
+
+        let local_version_guard = self.local_version.read();
+        let mut shared_buffer_guard = local_version_guard
+            .get_shared_buffer(epoch)
+            .expect("shared buffer should exist since some uncommitted data is not committed yet")
+            .write();
+
+        match task_result {
+            Ok(ssts) => {
+                shared_buffer_guard.succeed_upload_task(order_index, ssts);
+                if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
+                    conflict_detector.archive_epoch(epoch);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                shared_buffer_guard.fail_upload_task(order_index);
+                Err(e)
+            }
         }
     }
 
@@ -546,48 +572,21 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use risingwave_hummock_sdk::HummockSSTableId;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
-    use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+    use risingwave_pb::hummock::HummockVersion;
 
     use super::LocalVersionManager;
     use crate::hummock::conflict_detector::ConflictDetector;
-    use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_sstable_store};
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-    use crate::hummock::test_utils::default_config_for_test;
+    use crate::hummock::shared_buffer::UncommittedData;
+    use crate::hummock::shared_buffer::UploadTaskType::SyncEpoch;
+    use crate::hummock::test_utils::{
+        default_config_for_test, gen_dummy_batch, gen_dummy_sst_info,
+    };
     use crate::monitor::StateStoreMetrics;
-    use crate::storage_value::{StorageValue, ValueMeta};
-
-    fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
-        vec![(
-            iterator_test_key_of_epoch(0, epoch).into(),
-            StorageValue::new_put(ValueMeta::default(), b"value1".to_vec()),
-        )]
-    }
-
-    fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
-        let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
-        let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
-        for batch in batches.iter().skip(1) {
-            if min_key.as_slice() > batch.start_key() {
-                min_key = batch.start_key().to_vec();
-            }
-            if max_key.as_slice() < batch.end_key() {
-                max_key = batch.end_key().to_vec();
-            }
-        }
-        SstableInfo {
-            id,
-            key_range: Some(KeyRange {
-                left: min_key,
-                right: max_key,
-                inf: false,
-            }),
-            file_size: batches.len() as u64,
-            vnode_bitmaps: vec![],
-        }
-    }
+    use crate::storage_value::StorageValue;
 
     #[tokio::test]
     async fn test_update_pinned_version() {
@@ -733,11 +732,11 @@ mod tests {
                 .get_shared_buffer(epochs[0])
                 .unwrap()
                 .write();
-            let (task_id, mut payload) = shared_buffer_guard.new_upload_task().unwrap();
+            let (task_id, payload) = shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
             {
                 assert_eq!(1, payload.len());
-                let batch = payload.pop().unwrap();
-                assert_eq!(batch, batches[0]);
+                assert_eq!(1, payload[0].len());
+                assert_eq!(payload[0][0], UncommittedData::Batch(batches[0].clone()));
             }
             shared_buffer_guard.succeed_upload_task(task_id, vec![sst1.clone()]);
         }
@@ -781,11 +780,11 @@ mod tests {
                 .get_shared_buffer(epochs[1])
                 .unwrap()
                 .write();
-            let (task_id, mut payload) = shared_buffer_guard.new_upload_task().unwrap();
+            let (task_id, payload) = shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
             {
                 assert_eq!(1, payload.len());
-                let batch = payload.pop().unwrap();
-                assert_eq!(batch, batches[1]);
+                assert_eq!(1, payload[0].len());
+                assert_eq!(payload[0][0], UncommittedData::Batch(batches[1].clone()));
             }
             shared_buffer_guard.succeed_upload_task(task_id, vec![sst2.clone()]);
         }

@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::session_config::DELTA_JOIN;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
@@ -41,9 +42,11 @@ pub struct StreamHashJoin {
     /// be create automatically when building the executors on meta service. For testing purpose
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
-}
 
-pub static DELTA_JOIN: &str = "RW_FORCE_DELTA_JOIN";
+    /// Whether can optimize for append-only stream.
+    /// It is true if input of both side is append-only
+    is_append_only: bool,
+}
 
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
@@ -81,6 +84,7 @@ impl StreamHashJoin {
             logical,
             eq_join_predicate,
             is_delta: force_delta,
+            is_append_only: append_only,
         }
     }
 
@@ -116,17 +120,17 @@ impl StreamHashJoin {
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ type: {:?}, predicate: {} }}",
-            if self.is_delta {
-                "StreamDeltaHashJoin"
-            } else {
-                "StreamHashJoin"
-            },
-            self.logical.join_type(),
-            self.eq_join_predicate()
-        )
+        let mut builder = if self.is_delta {
+            f.debug_struct("StreamDeltaHashJoin")
+        } else if self.is_append_only {
+            f.debug_struct("StreamAppendOnlyHashJoin")
+        } else {
+            f.debug_struct("StreamHashJoin")
+        };
+        builder
+            .field("type", &format_args!("{:?}", self.logical.join_type()))
+            .field("predicate", &format_args!("{}", self.eq_join_predicate()))
+            .finish()
     }
 }
 
@@ -178,6 +182,7 @@ impl ToStreamProst for StreamHashJoin {
                 .map(|idx| *idx as u32)
                 .collect_vec(),
             is_delta_join: self.is_delta,
+            is_append_only: self.is_append_only,
             ..Default::default()
         })
     }

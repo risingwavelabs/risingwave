@@ -620,6 +620,7 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
+    Sink { _schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
@@ -647,6 +648,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
+            ShowObject::Sink { _schema } => write!(f, "SINKS{}", fmt_schema(_schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
@@ -751,6 +753,8 @@ pub enum Statement {
         is_materialized: bool,
         stmt: CreateSourceStatement,
     },
+    /// CREATE SINK
+    CreateSink { stmt: CreateSinkStatement },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -828,6 +832,7 @@ pub enum Statement {
         objects: GrantObjects,
         grantees: Vec<Ident>,
         granted_by: Option<Ident>,
+        revoke_grant_option: bool,
         cascade: bool,
     },
     /// `DEALLOCATE [ PREPARE ] { name | ALL }`
@@ -857,6 +862,8 @@ pub enum Statement {
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
+    /// CREATE USER
+    CreateUser(CreateUserStatement),
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1087,6 +1094,7 @@ impl fmt::Display for Statement {
                     ""
                 }
             ),
+            Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1181,9 +1189,19 @@ impl fmt::Display for Statement {
                 objects,
                 grantees,
                 granted_by,
+                revoke_grant_option,
                 cascade,
             } => {
-                write!(f, "REVOKE {} ", privileges)?;
+                write!(
+                    f,
+                    "REVOKE {}{} ",
+                    if *revoke_grant_option {
+                        "GRANT OPTION FOR "
+                    } else {
+                        ""
+                    },
+                    privileges
+                )?;
                 write!(f, "ON {} ", objects)?;
                 write!(f, "FROM {}", display_comma_separated(grantees))?;
                 if let Some(grantor) = granted_by {
@@ -1227,6 +1245,9 @@ impl fmt::Display for Statement {
                 } else {
                     write!(f, "NULL")
                 }
+            }
+            Statement::CreateUser(statement) => {
+                write!(f, "CREATE USER {}", statement)
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -1348,8 +1369,18 @@ pub enum GrantObjects {
     AllSequencesInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL TABLES IN SCHEMA <schema_name> [, ...]`
     AllTablesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SOURCES IN SCHEMA <schema_name> [, ...]`
+    AllSourcesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL MATERIALIZED VIEWS IN SCHEMA <schema_name> [, ...]`
+    AllMviewsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on specific databases
+    Databases(Vec<ObjectName>),
     /// Grant privileges on specific schemas
     Schemas(Vec<ObjectName>),
+    /// Grant privileges on specific sources
+    Sources(Vec<ObjectName>),
+    /// Grant privileges on specific materialized views
+    Mviews(Vec<ObjectName>),
     /// Grant privileges on specific sequences
     Sequences(Vec<ObjectName>),
     /// Grant privileges on specific tables
@@ -1381,6 +1412,29 @@ impl fmt::Display for GrantObjects {
                     "ALL TABLES IN SCHEMA {}",
                     display_comma_separated(schemas)
                 )
+            }
+            GrantObjects::AllSourcesInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SOURCES IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllMviewsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL MATERIALIZED VIEWS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::Databases(databases) => {
+                write!(f, "DATABASE {}", display_comma_separated(databases))
+            }
+            GrantObjects::Sources(sources) => {
+                write!(f, "SOURCE {}", display_comma_separated(sources))
+            }
+            GrantObjects::Mviews(mviews) => {
+                write!(f, "MATERIALIZED VIEW {}", display_comma_separated(mviews))
             }
         }
     }
@@ -1433,6 +1487,15 @@ pub enum FunctionArg {
     Unnamed(FunctionArgExpr),
 }
 
+impl FunctionArg {
+    pub fn get_expr(&self) -> FunctionArgExpr {
+        match self {
+            FunctionArg::Named { name: _, arg } => arg.clone(),
+            FunctionArg::Unnamed(arg) => arg.clone(),
+        }
+    }
+}
+
 impl fmt::Display for FunctionArg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -1479,7 +1542,9 @@ pub enum ObjectType {
     Schema,
     Source,
     MaterializedSource,
+    Sink,
     Database,
+    User,
 }
 
 impl fmt::Display for ObjectType {
@@ -1492,7 +1557,9 @@ impl fmt::Display for ObjectType {
             ObjectType::Schema => "SCHEMA",
             ObjectType::Source => "SOURCE",
             ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
+            ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
+            ObjectType::User => "USER",
         })
     }
 }
@@ -1509,15 +1576,19 @@ impl ParseTo for ObjectType {
             ObjectType::MaterializedSource
         } else if parser.parse_keyword(Keyword::SOURCE) {
             ObjectType::Source
+        } else if parser.parse_keyword(Keyword::SINK) {
+            ObjectType::Sink
         } else if parser.parse_keyword(Keyword::INDEX) {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {
             ObjectType::Schema
         } else if parser.parse_keyword(Keyword::DATABASE) {
             ObjectType::Database
+        } else if parser.parse_keyword(Keyword::USER) {
+            ObjectType::User
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, or SCHEMA after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
                 parser.peek_token(),
             );
         };

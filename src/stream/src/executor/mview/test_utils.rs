@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
@@ -25,18 +25,20 @@ pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStor
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let orderings = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::executor_root(state_store, 0x42);
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![0.into(), 1.into(), 2.into()];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
+    let pk_index = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
         vec![OrderType::Ascending, OrderType::Descending],
         None,
+        pk_index,
     );
     let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, orderings);
     let epoch: u64 = 0;
@@ -44,10 +46,11 @@ pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStor
     for idx in 0..row_count {
         let idx = idx as i32;
         state
-            .insert(
-                Row(vec![Some(idx.into()), Some(idx.into())]),
-                Row(vec![Some(idx.into()), Some(idx.into()), Some(idx.into())]),
-            )
+            .insert(Row(vec![
+                Some(idx.into()),
+                Some(idx.into()),
+                Some(idx.into()),
+            ]))
             .unwrap();
     }
     state.commit(epoch).await.unwrap();

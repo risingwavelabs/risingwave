@@ -160,6 +160,7 @@ pub(super) struct ProbeTable<K> {
     params: EquiJoinParams,
 
     array_builders: Vec<ArrayBuilderImpl>,
+    array_len: usize,
 }
 
 /// Iterator for joined row ids for one key.
@@ -197,7 +198,7 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
             .full_data_types()
             .iter()
             .map(|data_type| data_type.create_array_builder(build_table.params.batch_size()))
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
 
         Ok(Self {
             build_table: hash_map,
@@ -216,6 +217,7 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
             cur_remaining_build_row_id: remaining_build_row_id,
             params: build_table.params,
             array_builders,
+            array_len: 0,
         })
     }
 }
@@ -279,7 +281,7 @@ impl<K: HashKey> ProbeTable<K> {
             match self.params.join_type() {
                 JoinType::Inner => self.do_inner_join(),
                 JoinType::LeftOuter => self.do_left_outer_join_with_non_equi_condition(),
-                JoinType::LeftAnti => self.do_left_anti_join_with_non_equi_conditon(),
+                JoinType::LeftAnti => self.do_left_anti_join_with_non_equi_condition(),
                 JoinType::LeftSemi => self.do_left_semi_join_with_non_equi_condition(),
                 JoinType::RightOuter => self.do_right_outer_join_with_non_equi_condition(),
                 JoinType::RightAnti => self.do_right_anti_join_with_non_equi_condition(),
@@ -346,9 +348,9 @@ impl<K: HashKey> ProbeTable<K> {
             }
         }
         assert_eq!(result_row_id, chunk_len);
-        // push the last probe_match vec back bacause the probe may not be finished
+        // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
-        new_filter.try_into()
+        new_filter.try_into().map_err(Into::into)
     }
 
     fn remove_duplicate_rows_for_left_semi(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -386,9 +388,9 @@ impl<K: HashKey> ProbeTable<K> {
             }
         }
         assert_eq!(result_row_id, chunk_len);
-        // push the last probe_match vec back bacause the probe may not be finished
+        // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
-        new_filter.try_into()
+        new_filter.try_into().map_err(Into::into)
     }
 
     fn remove_duplicate_rows_for_left_anti(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -429,9 +431,9 @@ impl<K: HashKey> ProbeTable<K> {
             }
         }
         assert_eq!(result_row_id, chunk_len);
-        // push the last probe_match vec back bacause the probe may not be finished
+        // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
-        new_filter.try_into()
+        new_filter.try_into().map_err(Into::into)
     }
 
     fn remove_duplicate_rows_for_right_outer(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -467,7 +469,7 @@ impl<K: HashKey> ProbeTable<K> {
                 new_filter.push(filter_bit);
             }
         }
-        new_filter.try_into()
+        new_filter.try_into().map_err(Into::into)
     }
 
     fn remove_duplicate_rows_for_right_anti(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -533,10 +535,10 @@ impl<K: HashKey> ProbeTable<K> {
             }
         }
         assert_eq!(result_row_id, chunk_len);
-        // push the last probe_match vec back bacause the probe may not be finished
+        // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
         self.probe_matched_list = Some(probe_matched_list);
-        new_filter.try_into()
+        new_filter.try_into().map_err(Into::into)
     }
 
     fn remove_duplicate_rows(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -615,7 +617,7 @@ impl<K: HashKey> ProbeTable<K> {
 
     fn get_non_equi_cond_filter(&mut self, data_chunk: &DataChunk) -> Result<Bitmap> {
         let array = self.params.cond.as_mut().unwrap().eval(data_chunk)?;
-        array.as_bool().try_into()
+        array.as_bool().try_into().map_err(Into::into)
     }
 
     pub(super) fn join_remaining(&mut self) -> Result<Option<DataChunk>> {
@@ -745,7 +747,7 @@ impl<K: HashKey> ProbeTable<K> {
         Ok(None)
     }
 
-    fn do_left_anti_join_with_non_equi_conditon(&mut self) -> Result<Option<DataChunk>> {
+    fn do_left_anti_join_with_non_equi_condition(&mut self) -> Result<Option<DataChunk>> {
         self.do_full_outer_join_with_non_equi_condition()
     }
 
@@ -972,6 +974,7 @@ impl<K: HashKey> ProbeTable<K> {
         // The indices before the offset are already appended and dirty.
         let offset = self.result_offset;
         self.result_offset = self.result_build_index.len();
+        self.array_len += self.result_offset - offset;
         for col_idx in 0..self.params.left_len() {
             let builder_idx = col_idx;
             for probe_row_id in &self.result_probe_index[offset..] {
@@ -1015,19 +1018,20 @@ impl<K: HashKey> ProbeTable<K> {
             .full_data_types()
             .iter()
             .map(|data_type| data_type.create_array_builder(self.params.batch_size()))
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
 
-        let new_arrays = mem::replace(&mut self.array_builders, new_array_builders)
+        let new_arrays: Vec<_> = mem::replace(&mut self.array_builders, new_array_builders)
             .into_iter()
             .map(|builder| builder.finish())
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
+        let new_len = mem::replace(&mut self.array_len, 0);
 
         let new_columns = new_arrays
             .into_iter()
             .map(|array| Column::new(Arc::new(array)))
             .collect_vec();
 
-        let data_chunk = DataChunk::try_from(new_columns)?;
+        let data_chunk = DataChunk::new(new_columns, new_len);
 
         Ok(data_chunk)
     }

@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::binder::Binder;
-use crate::expr::{ExprImpl, ExprType, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {
     pub(super) fn bind_binary_op(
@@ -43,6 +44,13 @@ impl Binder {
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::Like => ExprType::Like,
             BinaryOperator::NotLike => return self.bind_not_like(bound_left, bound_right),
+            BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
+            BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
+            BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
+            BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
+            BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
+            BinaryOperator::Concat => return self.bind_concat_op(bound_left, bound_right),
+
             _ => return Err(ErrorCode::NotImplemented(format!("{:?}", op), 112.into()).into()),
         };
         Ok(FunctionCall::new(func_type, vec![bound_left, bound_right])?.into())
@@ -55,5 +63,30 @@ impl Binder {
             vec![FunctionCall::new(ExprType::Like, vec![left, right])?.into()],
         )?
         .into())
+    }
+
+    /// Bind `||`. Based on the types of the inputs, this can be string concat or array concat.
+    fn bind_concat_op(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
+        let types = [left.return_type(), right.return_type()];
+
+        let has_string = types.iter().any(|t| matches!(t, DataType::Varchar));
+        let has_array = types.iter().any(|t| matches!(t, DataType::List { .. }));
+
+        // StringConcat
+        if has_string && !has_array {
+            Ok(FunctionCall::new(ExprType::ConcatOp, vec![left, right])?.into())
+        }
+        // ArrayConcat
+        else if has_array {
+            Err(ErrorCode::NotImplemented("array concat operator".into(), None.into()).into())
+        }
+        // Invalid types
+        else {
+            Err(ErrorCode::BindError(format!(
+                "operator does not exist: {:?} || {:?}",
+                &types[0], &types[1]
+            ))
+            .into())
+        }
     }
 }

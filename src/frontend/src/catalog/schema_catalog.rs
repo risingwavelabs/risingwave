@@ -27,12 +27,13 @@ pub type SourceId = u32;
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     id: SchemaId,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     name: String,
     table_by_name: HashMap<String, TableCatalog>,
     table_name_by_id: HashMap<TableId, String>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
+    owner: String,
 }
 
 impl SchemaCatalog {
@@ -123,6 +124,10 @@ impl SchemaCatalog {
     pub fn id(&self) -> SchemaId {
         self.id
     }
+
+    pub fn owner(&self) -> String {
+        self.owner.clone()
+    }
 }
 
 impl From<&ProstSchema> for SchemaCatalog {
@@ -134,6 +139,7 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
+            owner: schema.owner.clone(),
         }
     }
 }

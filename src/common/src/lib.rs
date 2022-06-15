@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::dbg_macro)]
@@ -35,6 +35,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
 #![feature(trusted_len)]
+#![feature(allocator_api)]
+#![feature(lint_reasons)]
 
 #[macro_use]
 pub mod error;
@@ -43,11 +45,14 @@ pub mod array;
 #[macro_use]
 pub mod util;
 pub mod buffer;
+pub mod cache;
 pub mod catalog;
 pub mod collection;
 pub mod config;
 pub mod hash;
+pub mod monitor;
 pub mod service;
+pub mod session_config;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;

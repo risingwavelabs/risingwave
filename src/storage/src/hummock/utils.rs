@@ -16,9 +16,7 @@ use std::cmp::Ordering;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
-use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::{HummockError, HummockResult};
@@ -74,42 +72,15 @@ pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
     Ok(())
 }
 
-pub fn bitmap_overlap(pattern: &VNodeBitmap, sst_bitmaps: &Vec<VNodeBitmap>) -> bool {
-    if sst_bitmaps.is_empty() {
-        return true;
-    }
-    if let Ok(pos) =
-        sst_bitmaps.binary_search_by_key(&pattern.get_table_id(), |bitmap| bitmap.get_table_id())
-    {
-        let text = &sst_bitmaps[pos];
-        assert_eq!(pattern.bitmap.len(), VNODE_BITMAP_LEN);
-        assert_eq!(text.bitmap.len(), VNODE_BITMAP_LEN);
-        for i in 0..VNODE_BITMAP_LEN as usize {
-            if (pattern.get_bitmap()[i] & text.get_bitmap()[i]) != 0 {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-pub fn filter_single_sst<R, B>(
-    info: &SstableInfo,
-    key_range: &R,
-    vnode_set: Option<&VNodeBitmap>,
-) -> bool
+pub fn filter_single_sst<R, B>(info: &SstableInfo, key_range: &R) -> bool
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    ({
-        let table_range = info.key_range.as_ref().unwrap();
-        let table_start = user_key(table_range.left.as_slice());
-        let table_end = user_key(table_range.right.as_slice());
-        range_overlap(key_range, table_start, table_end)
-    }) && vnode_set.map_or(true, |vnode_set| {
-        bitmap_overlap(vnode_set, &info.vnode_bitmaps)
-    })
+    let table_range = info.key_range.as_ref().unwrap();
+    let table_start = user_key(table_range.left.as_slice());
+    let table_end = user_key(table_range.right.as_slice());
+    range_overlap(key_range, table_start, table_end)
 }
 
 /// Prune SSTs that does not overlap with a specific key range or does not overlap with a specific
@@ -117,13 +88,12 @@ where
 pub fn prune_ssts<'a, R, B>(
     ssts: impl Iterator<Item = &'a SstableInfo>,
     key_range: &R,
-    vnode_set: Option<&VNodeBitmap>,
 ) -> Vec<&'a SstableInfo>
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    ssts.filter(|info| filter_single_sst(info, key_range, vnode_set))
+    ssts.filter(|info| filter_single_sst(info, key_range))
         .collect()
 }
 

@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::array::StructValue;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::{Binder, BoundTableSource};
-use crate::expr::{Expr, ExprImpl, InputRef, Literal};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
 #[derive(Debug)]
 pub struct BoundInsert {
@@ -132,19 +131,7 @@ impl Binder {
                     .into_iter()
                     .zip_eq(expected_types)
                     .map(|(mut e, t)| {
-                        // If Literal is struct, check whether can use the expect type to change
-                        // origin to get the type of None value.
-                        if let ExprImpl::Literal(literal) = &e {
-                            if let Some(ScalarImpl::Struct(value)) = literal.get_data() {
-                                if Self::check_struct_type(value, e.return_type(), t.clone()) {
-                                    e = Literal::new(
-                                        Some(ScalarImpl::Struct(value.clone())),
-                                        t.clone(),
-                                    )
-                                    .into();
-                                }
-                            }
-                        }
+                        e = Self::change_null_struct_type(e, t.clone())?;
                         e.cast_assign(t)
                     })
                     .try_collect();
@@ -155,23 +142,44 @@ impl Binder {
         Err(ErrorCode::BindError(msg.into()).into())
     }
 
-    /// Check whether can use target type to switch source type to determine the `data_type` of
-    /// `None` value.
-    pub fn check_struct_type(value: &StructValue, source: DataType, target: DataType) -> bool {
-        match (source, target) {
-            (DataType::Struct { fields: source }, DataType::Struct { fields: target }) => {
-                for i in 0..value.fields().len() {
-                    if let Some(ScalarImpl::Struct(v)) = &value.fields()[i] {
-                        if !Self::check_struct_type(v, source[i].clone(), target[i].clone()) {
-                            return false;
-                        }
-                    } else if source[i] != target[i] && value.fields()[i].is_some() {
-                        return false;
-                    }
+    /// If expr is struct type function and some inputs are null,
+    /// we need to change the data type of these fields to target type.
+    pub fn change_null_struct_type(expr: ExprImpl, target: DataType) -> Result<ExprImpl> {
+        if let ExprImpl::FunctionCall(func) = &expr {
+            if func.get_expr_type() == ExprType::Row {
+                if let DataType::Struct { fields } = target {
+                    let inputs = func
+                        .inputs()
+                        .iter()
+                        .zip_eq(fields.iter())
+                        .map(|(e, d)| {
+                            if e.is_null() {
+                                Ok(ExprImpl::Literal(Literal::new(None, d.clone()).into()))
+                            } else if let DataType::Struct { fields: _ } = d {
+                                Self::change_null_struct_type(e.clone(), d.clone())
+                            } else {
+                                Ok(e.clone())
+                            }
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let data_type = inputs.iter().map(|i| i.return_type()).collect_vec();
+                    return Ok(ExprImpl::FunctionCall(
+                        FunctionCall::new_unchecked(
+                            func.get_expr_type(),
+                            inputs,
+                            DataType::Struct {
+                                fields: data_type.into(),
+                            },
+                        )
+                        .into(),
+                    ));
                 }
-                true
+                return Err(ErrorCode::BindError(
+                    "target type of struct function is not struct type".to_string(),
+                )
+                .into());
             }
-            (_, _) => false,
         }
+        Ok(expr)
     }
 }

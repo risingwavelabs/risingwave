@@ -18,6 +18,7 @@ use risingwave_common::types::*;
 use risingwave_pb::expr::AggCall;
 
 use crate::expr::AggKind;
+use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::count_star::CountStar;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
@@ -105,7 +106,12 @@ impl AggStateFactory {
     }
 
     pub fn create_agg_state(&self) -> Result<Box<dyn Aggregator>> {
-        if let Some(input_type) = self.input_type.clone() {
+        if let AggKind::ApproxCountDistinct = self.agg_kind {
+            Ok(Box::new(ApproxCountDistinct::new(
+                self.return_type.clone(),
+                self.input_col_idx,
+            )))
+        } else if let Some(input_type) = self.input_type.clone() {
             create_agg_state_unary(
                 input_type,
                 self.input_col_idx,
@@ -179,6 +185,12 @@ pub fn create_agg_state_unary(
         (Count, count, decimal, int64, Some(0)),
         (Count, count_str, varchar, int64, Some(0)),
         (Count, count, boolean, int64, Some(0)),
+        (Count, count, interval, int64, Some(0)),
+        (Count, count, date, int64, Some(0)),
+        (Count, count, timestamp, int64, Some(0)),
+        (Count, count, time, int64, Some(0)),
+        (Count, count_struct, struct_type, int64, Some(0)),
+        (Count, count_list, list, int64, Some(0)),
         (Sum, sum, int16, int64, None),
         (Sum, sum, int32, int64, None),
         (Sum, sum, int64, decimal, None),
@@ -192,6 +204,10 @@ pub fn create_agg_state_unary(
         (Min, min, float64, float64, None),
         (Min, min, decimal, decimal, None),
         (Min, min, boolean, boolean, None), // TODO(#359): remove once unnecessary
+        (Min, min, interval, interval, None),
+        (Min, min, date, date, None),
+        (Min, min, timestamp, timestamp, None),
+        (Min, min, time, time, None),
         (Min, min_struct, struct_type, struct_type, None),
         (Min, min_str, varchar, varchar, None),
         (Min, min_list, list, list, None),
@@ -202,6 +218,10 @@ pub fn create_agg_state_unary(
         (Max, max, float64, float64, None),
         (Max, max, decimal, decimal, None),
         (Max, max, boolean, boolean, None), // TODO(#359): remove once unnecessary
+        (Max, max, interval, interval, None),
+        (Max, max, date, date, None),
+        (Max, max, timestamp, timestamp, None),
+        (Max, max, time, time, None),
         (Max, max_struct, struct_type, struct_type, None),
         (Max, max_str, varchar, varchar, None),
         (Max, max_list, list, list, None),

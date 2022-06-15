@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::next_key;
+use risingwave_hummock_sdk::key::prefixed_range;
 
 use crate::error::StorageResult;
 use crate::{StateStore, StateStoreIter};
@@ -34,31 +35,8 @@ impl<S: StateStore> Keyspace<S> {
     /// Creates a shared root [`Keyspace`] for all executors of the same operator.
     ///
     /// By design, all executors of the same operator should share the same keyspace in order to
-    /// support scaling out, and ensure not to overlap with each other. So we use `operator_id`
+    /// support scaling out, and ensure not to overlap with each other. So we use `table_id`
     /// here.
-    ///
-    /// Note: when using shared keyspace, be caution to scan the keyspace since states of other
-    /// executors might be scanned as well.
-    pub fn shared_executor_root(store: S, operator_id: u64) -> Self {
-        let prefix = {
-            let mut buf = BytesMut::with_capacity(9);
-            buf.put_u8(b's');
-            buf.put_u64(operator_id);
-            buf.to_vec()
-        };
-        Self { store, prefix }
-    }
-
-    /// Creates a root [`Keyspace`] for an executor.
-    pub fn executor_root(store: S, executor_id: u64) -> Self {
-        let prefix = {
-            let mut buf = BytesMut::with_capacity(9);
-            buf.put_u8(b'e');
-            buf.put_u64(executor_id);
-            buf.to_vec()
-        };
-        Self { store, prefix }
-    }
 
     /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
@@ -109,39 +87,38 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Gets from the keyspace with the `prefixed_key` of given key.
-    /// The returned value is based on a snapshot corresponding to the given `epoch`
+    /// The returned value is based on a snapshot corresponding to the given `epoch`.
     pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> StorageResult<Option<Bytes>> {
         self.store.get(&self.prefixed_key(key), epoch).await
     }
 
-    /// Scans `limit` keys from the keyspace using an inclusive `start_key` and get their values. If
-    /// `limit` is None, all keys of the given prefix will be scanned. Note that the prefix of this
-    /// keyspace will be stripped. The returned values are based on a snapshot corresponding to
-    /// the given `epoch`
-    pub async fn scan_with_start_key(
-        &self,
-        start_key: Vec<u8>,
-        limit: Option<usize>,
-        epoch: u64,
-    ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let start_key_with_prefix = [self.prefix.as_slice(), start_key.as_slice()].concat();
-        let range = start_key_with_prefix..next_key(self.prefix.as_slice());
-        let mut pairs = self.store.scan(range, limit, epoch).await?;
-        pairs
-            .iter_mut()
-            .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
-        Ok(pairs)
-    }
-
-    /// Scans `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
-    /// the given prefix will be scanned. Note that the prefix of this keyspace will be stripped.
-    /// The returned values are based on a snapshot corresponding to the given `epoch`
+    /// Scans `limit` keys from the keyspace and get their values.
+    /// If `limit` is None, all keys of the given prefix will be scanned.
+    /// The returned values are based on a snapshot corresponding to the given `epoch`.
     pub async fn scan(
         &self,
         limit: Option<usize>,
         epoch: u64,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
+        self.scan_with_range::<_, &[u8]>(.., limit, epoch).await
+    }
+
+    /// Scans `limit` keys from the given `range` in this keyspace and get their values.
+    /// If `limit` is None, all keys of the given prefix will be scanned.
+    /// The returned values are based on a snapshot corresponding to the given `epoch`.
+    ///
+    /// **Note**: the `range` should not be prepended with the prefix of this keyspace.
+    pub async fn scan_with_range<R, B>(
+        &self,
+        range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> StorageResult<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        let range = prefixed_range(range, &self.prefix);
         let mut pairs = self.store.scan(range, limit, epoch).await?;
         pairs
             .iter_mut()
@@ -149,15 +126,27 @@ impl<S: StateStore> Keyspace<S> {
         Ok(pairs)
     }
 
-    /// Gets an iterator with the prefix of this keyspace.
-    /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    async fn iter_inner(&'_ self, epoch: u64) -> StorageResult<S::Iter> {
-        let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
-        self.store.iter(range, epoch).await
+    /// Gets an iterator of this keyspace.
+    /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
+    pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
+        self.iter_with_range::<_, &[u8]>(.., epoch).await
     }
 
-    pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
-        let iter = self.iter_inner(epoch).await?;
+    /// Gets an iterator of the given `range` in this keyspace.
+    /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
+    ///
+    /// **Note**: the `range` should not be prepended with the prefix of this keyspace.
+    pub async fn iter_with_range<R, B>(
+        &self,
+        range: R,
+        epoch: u64,
+    ) -> StorageResult<StripPrefixIterator<S::Iter>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        let range = prefixed_range(range, &self.prefix);
+        let iter = self.store.iter(range, epoch).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),

@@ -1,3 +1,6 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 query I
 select nullif(2,2);
 ----
@@ -93,10 +96,10 @@ NULL
 query T
 select concat_ws(',', 1, 1.01, 'A', true, NULL);
 ----
-1,1.01,A,true
+1,1.01,A,t
 
 statement ok
-create table t (v1 varchar, v2 smallint, v3 int, v4 decimal, v5 real, v6 double, v7 bool, v8 varchar);
+create table t (v1 varchar, v2 smallint, v3 int, v4 decimal, v5 real, v6 double, v7 bool, v8 string);
 
 statement ok
 insert into t values (',', 1, 2, 3.01, 4, 5.01, true, NULL);
@@ -104,7 +107,7 @@ insert into t values (',', 1, 2, 3.01, 4, 5.01, true, NULL);
 query T
 select concat_ws(v1, v2, v3, v4, v5, v6, v7, v8) from t;
 ----
-1,2,3.01,4,5.01,true
+1,2,3.01,4,5.01,t
 
 
 statement ok
@@ -135,3 +138,23 @@ select split_part('abc,def,ghi,jkl', ',', -2);
 ----
 ghi
 
+
+query I
+select char_length('hello world');
+----
+11
+
+query I
+select char_length('abcdefghijklmnopqrstuvwxyz');
+----
+26
+
+query I
+select repeat('hello', 3);
+----
+hellohellohello
+
+query I
+select repeat('hello', -1);
+----
+(empty)

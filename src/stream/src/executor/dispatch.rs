@@ -251,6 +251,7 @@ impl DispatchExecutorInner {
 
             Mutation::AddOutput(adds) => {
                 let mut adds: HashMap<DispatcherId, Vec<ActorInfo>> = adds
+                    .map
                     .iter()
                     .filter_map(|(&(actor_id, dispatcher_id), outputs)| {
                         if actor_id == self.actor_id {
@@ -844,7 +845,7 @@ mod tests {
 
     use super::*;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::ActorContext;
+    use crate::executor::{ActorContext, AddOutput};
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -1046,13 +1047,16 @@ mod tests {
         add_local_channels(ctx.clone(), vec![(233, 245)]);
         add_remote_channels(ctx.clone(), 233, vec![246]);
         tx.send(Message::Barrier(
-            Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput({
-                let mut actors = HashMap::default();
-                actors.insert(
-                    (233, 666),
-                    vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
-                );
-                actors
+            Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput(AddOutput {
+                map: {
+                    let mut actors = HashMap::default();
+                    actors.insert(
+                        (233, 666),
+                        vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
+                    );
+                    actors
+                },
+                ..Default::default()
             })),
         ))
         .await

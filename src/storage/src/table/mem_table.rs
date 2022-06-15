@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![allow(dead_code)]
 use std::collections::btree_map::{self, Entry};
 use std::collections::BTreeMap;
 
@@ -28,7 +27,7 @@ pub enum RowOp {
 /// `MemTable` is a buffer for modify operations without encoding
 #[derive(Clone)]
 pub struct MemTable {
-    pub buffer: BTreeMap<Row, RowOp>,
+    pub buffer: BTreeMap<Vec<u8>, RowOp>,
 }
 type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
 
@@ -46,12 +45,12 @@ impl MemTable {
     }
 
     /// read methods
-    pub fn get_row(&self, pk: &Row) -> StorageResult<Option<&RowOp>> {
+    pub fn get_row(&self, pk: &[u8]) -> StorageResult<Option<&RowOp>> {
         Ok(self.buffer.get(pk))
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: Row, value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, pk: Vec<u8>, value: Row) -> StorageResult<()> {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -79,7 +78,7 @@ impl MemTable {
         Ok(())
     }
 
-    pub fn delete(&mut self, pk: Row, old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, pk: Vec<u8>, old_value: Row) -> StorageResult<()> {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -109,7 +108,7 @@ impl MemTable {
         Ok(())
     }
 
-    pub fn into_parts(self) -> BTreeMap<Row, RowOp> {
+    pub fn into_parts(self) -> BTreeMap<Vec<u8>, RowOp> {
         self.buffer
     }
 

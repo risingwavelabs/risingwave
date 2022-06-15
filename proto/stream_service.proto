@@ -69,6 +69,15 @@ message InjectBarrierRequest {
 }
 
 message InjectBarrierResponse {
+  string request_id = 1;
+  common.Status status = 2;
+}
+
+message BarrierCompleteRequest {
+  string request_id = 1;
+  uint64 prev_epoch = 2;
+}
+message BarrierCompleteResponse {
   message CreateMviewProgress {
     uint32 chain_actor_id = 1;
     bool done = 2;
@@ -119,6 +128,7 @@ service StreamService {
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc SyncSources(SyncSourcesRequest) returns (SyncSourcesResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
+  rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
 }
 
 // TODO: Lifecycle management for actors.

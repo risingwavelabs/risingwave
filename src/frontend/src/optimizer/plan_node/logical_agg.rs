@@ -49,11 +49,21 @@ pub struct PlanAggCall {
 
 impl fmt::Debug for PlanAggCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
-        self.inputs.iter().for_each(|child| {
-            builder.field(child);
-        });
-        builder.finish()
+        write!(f, "{}", self.agg_kind)?;
+        if !self.inputs.is_empty() {
+            write!(f, "(")?;
+            for (idx, input) in self.inputs.iter().enumerate() {
+                if idx == 0 && self.distinct {
+                    write!(f, "distinct ")?;
+                }
+                write!(f, "{:?}", input)?;
+                if idx != (self.inputs.len() - 1) {
+                    write!(f, ",")?;
+                }
+            }
+            write!(f, ")")?;
+        }
+        Ok(())
     }
 }
 
@@ -75,7 +85,9 @@ impl PlanAggCall {
             | AggKind::StringAgg
             | AggKind::SingleValue => self.agg_kind.clone(),
 
-            AggKind::Count | AggKind::RowCount | AggKind::Sum => AggKind::Sum,
+            AggKind::Count | AggKind::RowCount | AggKind::Sum | AggKind::ApproxCountDistinct => {
+                AggKind::Sum
+            }
         };
         PlanAggCall {
             agg_kind: total_agg_kind,
@@ -302,7 +314,7 @@ impl LogicalAgg {
         );
         let pk_indices = match group_keys.is_empty() {
             // simple agg
-            true => (0..schema.len()).collect(),
+            true => vec![],
             // group agg
             false => group_keys.clone(),
         };

@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk, Vis};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_expr::expr::BoxedExpression;
@@ -24,7 +24,6 @@ use super::{
     Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
     StreamExecutorResult,
 };
-use crate::executor::error::StreamExecutorError;
 
 pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
 
@@ -77,17 +76,13 @@ impl SimpleExecutor for SimpleFilterExecutor {
         &mut self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
+        let chunk = chunk.compact()?;
 
-        let (ops, columns, _visibility) = chunk.into_inner();
-        let data_chunk = DataChunk::builder().columns(columns).build();
+        let (data_chunk, ops) = chunk.into_parts();
 
-        let pred_output = self
-            .expr
-            .eval(&data_chunk)
-            .map_err(StreamExecutorError::eval_error)?;
+        let pred_output = self.expr.eval(&data_chunk)?;
 
-        let (columns, visibility) = data_chunk.into_parts();
+        let (columns, vis) = data_chunk.into_parts();
 
         let n = ops.len();
 
@@ -96,9 +91,9 @@ impl SimpleExecutor for SimpleFilterExecutor {
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         let mut last_res = false;
 
-        assert!(match visibility {
-            None => true,
-            Some(ref m) => m.len() == n,
+        assert!(match vis {
+            Vis::Compact(c) => c == n,
+            Vis::Bitmap(ref m) => m.len() == n,
         });
         assert!(matches!(&*pred_output, ArrayImpl::Bool(_)));
 

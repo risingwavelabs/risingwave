@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use futures_async_stream::for_await;
+use log::debug;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::error::Result;
+use risingwave_common::session_config::QUERY_MODE;
 use risingwave_sqlparser::ast::Statement;
 use tracing::info;
 
@@ -24,11 +26,10 @@ use crate::binder::{Binder, BoundStatement};
 use crate::config::QueryMode;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
-use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
-use crate::scheduler::{ExecutionContext, ExecutionContextRef, LocalQueryExecution};
+use crate::scheduler::{
+    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
+};
 use crate::session::OptimizerContext;
-
-pub static QUERY_MODE: &str = "query_mode";
 
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
@@ -46,6 +47,8 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         .get_config(QUERY_MODE)
         .map(|entry| entry.get_val(QueryMode::default()))
         .unwrap_or_default();
+
+    debug!("query_mode:{:?}", query_mode);
 
     let (data_stream, pg_descs) = match query_mode {
         QueryMode::Local => local_execute(context, bound).await?,
@@ -142,9 +145,9 @@ async fn local_execute(
         (query, pg_descs)
     };
 
-    let hummock_snapshot_manager = session.env().hummock_snapshot_manager().clone();
+    let front_env = session.env();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(query, hummock_snapshot_manager, "");
+    let execution = LocalQueryExecution::new(query, front_env.clone(), "");
     Ok((Box::pin(execution.run()), pg_descs))
 }

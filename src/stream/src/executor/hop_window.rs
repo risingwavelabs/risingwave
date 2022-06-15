@@ -18,7 +18,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::{DataChunk, StreamChunk, Vis};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
@@ -34,6 +34,7 @@ pub struct HopWindowExecutor {
     pub time_col_idx: usize,
     pub window_slide: IntervalUnit,
     pub window_size: IntervalUnit,
+    pub output_indices: Vec<usize>,
 }
 
 impl HopWindowExecutor {
@@ -43,6 +44,7 @@ impl HopWindowExecutor {
         time_col_idx: usize,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
+        output_indices: Vec<usize>,
     ) -> Self {
         HopWindowExecutor {
             input,
@@ -50,6 +52,7 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
+            output_indices,
         }
     }
 }
@@ -80,6 +83,7 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
+            output_indices,
             ..
         } = *self;
         let units = window_size
@@ -93,8 +97,7 @@ impl HopWindowExecutor {
             })?
             .get();
 
-        let schema = self.info.schema;
-        let time_col_data_type = schema.fields()[time_col_idx].data_type();
+        let time_col_data_type = input.schema().fields()[time_col_idx].data_type();
         let time_col_ref = InputRefExpression::new(time_col_data_type, self.time_col_idx).boxed();
 
         let window_slide_expr =
@@ -167,7 +170,8 @@ impl HopWindowExecutor {
             );
             window_end_exprs.push(window_end_expr);
         }
-
+        let window_start_col_index = input.schema().len();
+        let window_end_col_index = input.schema().len() + 1;
         #[for_await]
         for msg in input.execute() {
             let msg = msg?;
@@ -177,27 +181,39 @@ impl HopWindowExecutor {
                 continue;
             };
             // TODO: compact may be not necessary here.
-            let chunk = chunk.compact().map_err(StreamExecutorError::executor_v1)?;
+            let chunk = chunk.compact()?;
             let (data_chunk, ops) = chunk.into_parts();
-            let hop_start = hop_start
-                .eval(&data_chunk)
-                .map_err(StreamExecutorError::eval_error)?;
-            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], None);
-            let (origin_cols, visibility) = data_chunk.into_parts();
+            let hop_start = hop_start.eval(&data_chunk)?;
+            let len = hop_start.len();
+            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
+            let (origin_cols, vis) = data_chunk.into_parts();
             // SAFETY: Already compacted.
-            assert!(visibility.is_none());
+            assert!(matches!(vis, Vis::Compact(_)));
             for i in 0..units {
-                let window_start_col = window_start_exprs[i]
-                    .eval(&hop_start_chunk)
-                    .map_err(StreamExecutorError::eval_error)?;
-                let window_end_col = window_end_exprs[i]
-                    .eval(&hop_start_chunk)
-                    .map_err(StreamExecutorError::eval_error)?;
-                let mut new_cols = origin_cols.clone();
-                new_cols.extend_from_slice(&[
-                    Column::new(window_start_col),
-                    Column::new(window_end_col),
-                ]);
+                let window_start_col = if output_indices.contains(&window_start_col_index) {
+                    Some(window_start_exprs[i].eval(&hop_start_chunk)?)
+                } else {
+                    None
+                };
+                let window_end_col = if output_indices.contains(&window_end_col_index) {
+                    Some(window_end_exprs[i].eval(&hop_start_chunk)?)
+                } else {
+                    None
+                };
+                let new_cols = output_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        if idx < window_start_col_index {
+                            Some(origin_cols[idx].clone())
+                        } else if idx == window_start_col_index {
+                            Some(Column::new(window_start_col.clone().unwrap()))
+                        } else if idx == window_end_col_index {
+                            Some(Column::new(window_end_col.clone().unwrap()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
                 let new_chunk = StreamChunk::new(ops.clone(), new_cols, None);
                 yield Message::Chunk(new_chunk);
             }
@@ -241,7 +257,7 @@ mod tests {
 
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
-
+        let default_indices: Vec<_> = (0..5).collect();
         let executor = super::HopWindowExecutor::new(
             input,
             ExecutorInfo {
@@ -253,6 +269,7 @@ mod tests {
             2,
             window_slide,
             window_size,
+            default_indices,
         )
         .boxed();
 
@@ -289,6 +306,85 @@ mod tests {
                 + 6 2 ^10:42:00 ^10:30:00 ^11:00:00
                 - 7 1 ^10:51:00 ^10:45:00 ^11:15:00
                 + 8 3 ^11:02:00 ^11:00:00 ^11:30:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_output_indices() {
+        let field1 = Field::unnamed(DataType::Int64);
+        let field2 = Field::unnamed(DataType::Int64);
+        let field3 = Field::with_name(DataType::Timestamp, "created_at");
+        let schema = Schema::new(vec![field1, field2, field3]);
+        let pk_indices = vec![0];
+
+        let chunk = StreamChunk::from_pretty(
+            &"I I TS
+            + 1 1 ^10:00:00
+            + 2 3 ^10:05:00
+            - 3 2 ^10:14:00
+            + 4 1 ^10:22:00
+            - 5 3 ^10:33:00
+            + 6 2 ^10:42:00
+            - 7 1 ^10:51:00
+            + 8 3 ^11:02:00"
+                .replace('^', "2022-2-2T"),
+        );
+
+        let input =
+            MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
+
+        let window_slide = IntervalUnit::from_minutes(15);
+        let window_size = IntervalUnit::from_minutes(30);
+        let executor = super::HopWindowExecutor::new(
+            input,
+            ExecutorInfo {
+                // TODO: the schema is incorrect, but it seems useless here.
+                schema: schema.clone(),
+                pk_indices,
+                identity: "test".to_string(),
+            },
+            2,
+            window_slide,
+            window_size,
+            vec![4, 1, 0, 2],
+        )
+        .boxed();
+
+        let mut stream = executor.execute();
+        // TODO: add more test infra to reduce the duplicated codes below.
+
+        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                &"TS        I I TS       
+                + ^10:15:00 1 1 ^10:00:00
+                + ^10:15:00 3 2 ^10:05:00
+                - ^10:15:00 2 3 ^10:14:00
+                + ^10:30:00 1 4 ^10:22:00
+                - ^10:45:00 3 5 ^10:33:00
+                + ^10:45:00 2 6 ^10:42:00
+                - ^11:00:00 1 7 ^10:51:00
+                + ^11:15:00 3 8 ^11:02:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+
+        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                &"TS        I I TS 
+                + ^10:30:00 1 1 ^10:00:00 
+                + ^10:30:00 3 2 ^10:05:00 
+                - ^10:30:00 2 3 ^10:14:00 
+                + ^10:45:00 1 4 ^10:22:00 
+                - ^11:00:00 3 5 ^10:33:00 
+                + ^11:00:00 2 6 ^10:42:00 
+                - ^11:15:00 1 7 ^10:51:00 
+                + ^11:30:00 3 8 ^11:02:00"
                     .replace('^', "2022-2-2T"),
             )
         );

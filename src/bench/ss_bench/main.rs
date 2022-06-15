@@ -20,11 +20,12 @@ mod utils;
 use clap::Parser;
 use operations::*;
 use risingwave_common::config::StorageConfig;
+use risingwave_common::monitor::Print;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::compactor::{get_remote_sstable_id_generator, CompactorContext};
-use risingwave_storage::monitor::{ObjectStoreMetrics, Print, StateStoreMetrics};
+use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
 #[derive(Parser, Debug)]
@@ -155,6 +156,7 @@ async fn main() {
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
         share_buffer_compaction_worker_threads_number: 1,
+        share_buffer_upload_concurrency: 4,
     });
 
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =

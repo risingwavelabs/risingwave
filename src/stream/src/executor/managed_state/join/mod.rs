@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod join_entry_state;
+use std::alloc::Global;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
@@ -25,6 +26,7 @@ use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_storage::{Keyspace, StateStore};
+use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
@@ -116,9 +118,16 @@ type PkType = Row;
 pub type StateValueType = JoinRow;
 pub type HashValueType<S> = JoinEntryState<S>;
 
+type JoinHashMapInner<K, S> =
+    EvictableHashMap<K, HashValueType<S>, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
+    /// Allocator
+    alloc: SharedStatsAlloc<Global>,
     /// Store the join states.
-    inner: EvictableHashMap<K, HashValueType<S>, PrecomputedBuildHasher>,
+    // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
+    // itself. Use the field is safe iff the struct is constructed with [`moveit`](https://crates.io/crates/moveit)'s way.
+    inner: JoinHashMapInner<K, S>,
     /// Data types of the columns
     data_types: Arc<[DataType]>,
     /// Data types of the columns
@@ -148,15 +157,27 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .iter()
             .map(|idx| data_types[*idx].clone())
             .collect_vec();
-
+        let alloc = StatsAlloc::new(Global).shared();
         Self {
-            inner: EvictableHashMap::with_hasher(target_cap, PrecomputedBuildHasher),
+            inner: EvictableHashMap::with_hasher_in(
+                target_cap,
+                PrecomputedBuildHasher,
+                alloc.clone(),
+            ),
             data_types: data_types.into(),
             join_key_data_types: join_key_data_types.into(),
             pk_data_types: pk_data_types.into(),
             keyspace,
             current_epoch: 0,
+            alloc,
         }
+    }
+
+    #[allow(dead_code)]
+    /// Report the bytes used by the join map.
+    // FIXME: Currently, only memory used in the hash map itself is counted.
+    pub fn bytes_in_use(&self) -> usize {
+        self.alloc.bytes_in_use()
     }
 
     pub fn update_epoch(&mut self, epoch: u64) {
@@ -172,25 +193,25 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
-    #[allow(dead_code)]
-    pub async fn get<'a, 'b>(&'a mut self, key: &'b K) -> Option<&'a HashValueType<S>> {
-        let state = self.inner.get(key);
-        // TODO: we should probably implement a entry function for `LruCache`
-        match state {
-            Some(_) => self.inner.get(key),
-            None => {
-                let remote_state = self.fetch_cached_state(key).await.unwrap();
-                remote_state.map(|rv| {
-                    self.inner.put(key.clone(), rv);
-                    self.inner.get(key).unwrap()
-                })
-            }
-        }
-    }
+    // #[allow(dead_code)]
+    // pub async fn get<'a, 'b>(&'a mut self, key: &'b K) -> Option<&'a HashValueType<S>> {
+    //     let state = self.inner.get(key);
+    //     // TODO: we should probably implement a entry function for `LruCache`
+    //     match state {
+    //         Some(_) => self.inner.get(key),
+    //         None => {
+    //             let remote_state = self.fetch_cached_state(key).await.unwrap();
+    //             remote_state.map(|rv| {
+    //                 self.inner.put(key.clone(), rv);
+    //                 self.inner.get(key).unwrap()
+    //             })
+    //         }
+    //     }
+    // }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
-    pub async fn get_mut<'a>(&'a mut self, key: &K) -> Option<&'a mut HashValueType<S>> {
+    pub async fn get_mut(&mut self, key: &K) -> Option<&mut HashValueType<S>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -296,7 +317,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> Deref for JoinHashMap<K, S> {
-    type Target = EvictableHashMap<K, HashValueType<S>, PrecomputedBuildHasher>;
+    type Target = JoinHashMapInner<K, S>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner

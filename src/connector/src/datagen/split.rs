@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::base::SplitMetaData;
 
-#[derive(Clone, Serialize, Deserialize, Debug, Default, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default, PartialEq, Hash)]
 pub struct DatagenSplit {
     pub(crate) split_index: i32,
     pub(crate) split_num: i32,
@@ -49,12 +49,6 @@ impl DatagenSplit {
     }
 
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        // TODO make sure fail over for generators
-        log::warn!(
-            "DatagenSplit is updated to {:?} but not applied",
-            start_offset
-        );
-
         Self::new(
             self.split_index,
             self.split_num,

@@ -15,12 +15,13 @@
 use std::time::SystemTime;
 
 use prost::Message;
-use risingwave_pb::hummock::{SstableIdInfo, SstableRefId};
+use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_pb::hummock::SstableIdInfo;
 
 use crate::model::MetadataModel;
 
 /// Column family name for hummock sstable id.
-/// `cf(hummock_sstable_id)`: `SstableRefId` -> `SstableIdInfo`
+/// `cf(hummock_sstable_id)`: `SstableId` -> `SstableIdInfo`
 const HUMMOCK_SSTABLE_ID_CF_NAME: &str = "cf/hummock_sstable_id";
 
 pub const INVALID_TIMESTAMP: u64 = 0;
@@ -28,7 +29,7 @@ pub const INVALID_TIMESTAMP: u64 = 0;
 /// `SstableIdInfo` tracks when the sstable id is acquired from meta node and when the corresponding
 /// sstable is tracked in meta node.
 impl MetadataModel for SstableIdInfo {
-    type KeyType = SstableRefId;
+    type KeyType = HummockSSTableId;
     type ProstType = SstableIdInfo;
 
     fn cf_name() -> String {
@@ -48,7 +49,7 @@ impl MetadataModel for SstableIdInfo {
     }
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(SstableRefId { id: self.id })
+        Ok(self.id)
     }
 }
 

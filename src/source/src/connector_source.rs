@@ -25,7 +25,7 @@ use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitReaderImpl,
 };
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
@@ -43,6 +43,8 @@ struct InnerConnectorSourceReaderHandle {
     join_handle: JoinHandle<()>,
 }
 
+const CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 512;
+
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or
 /// batch processing. [`ConnectorSource`] introduces schema at this level while
 /// [`SplitReaderImpl`] simply loads raw content from message queue or file system.
@@ -54,11 +56,10 @@ pub struct ConnectorSourceReader {
     pub columns: Vec<SourceColumnDesc>,
 
     handles: Option<HashMap<String, InnerConnectorSourceReaderHandle>>,
-    message_rx: UnboundedReceiver<Either<Vec<SourceMessage>, RwError>>,
+    message_rx: Receiver<Either<Vec<SourceMessage>, RwError>>,
     // We need to keep this tx, otherwise the channel will return none with 0 inner readers, and we
     // need to clone this tx when adding new inner readers in the future.
-    #[allow(dead_code)]
-    message_tx: UnboundedSender<Either<Vec<SourceMessage>, RwError>>,
+    message_tx: Sender<Either<Vec<SourceMessage>, RwError>>,
 }
 
 impl InnerConnectorSourceReader {
@@ -97,7 +98,7 @@ impl InnerConnectorSourceReader {
     async fn run(
         &mut self,
         mut stop: oneshot::Receiver<()>,
-        output: mpsc::UnboundedSender<Either<Vec<SourceMessage>, RwError>>,
+        output: mpsc::Sender<Either<Vec<SourceMessage>, RwError>>,
     ) {
         loop {
             let id = match &self.split {
@@ -116,8 +117,7 @@ impl InnerConnectorSourceReader {
                     match chunk.map_err(|e| internal_error(e.to_string())) {
                         Err(e) => {
                             log::error!("connector reader {} error happened {}", id, e.to_string());
-                            // just ignore
-                            let _ = output.send(Either::Right(e));
+                            output.send(Either::Right(e)).await.ok();
                             break;
                         },
                         Ok(None) => {
@@ -125,8 +125,7 @@ impl InnerConnectorSourceReader {
                             break;
                         },
                         Ok(Some(msg)) => {
-                            // just ignore
-                            let _ = output.send(Either::Left(msg));
+                            output.send(Either::Left(msg)).await.ok();
                         },
                     }
                 }
@@ -263,7 +262,7 @@ impl ConnectorSource {
         splits: ConnectorState,
         column_ids: Vec<ColumnId>,
     ) -> Result<ConnectorSourceReader> {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(CONNECTOR_MESSAGE_BUFFER_SIZE);
         let mut handles = HashMap::with_capacity(if let Some(split) = &splits {
             split.len()
         } else {

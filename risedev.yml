@@ -39,6 +39,17 @@ risedev:
     # - use: kafka
     #   persist-data: true
 
+  default-v6:
+    - use: meta-node
+      address: "[::1]"
+      listen-address: "[::]"
+    - use: compute-node
+      address: "[::1]"
+      listen-address: "[::]"
+    - use: frontend
+      address: "[::1]"
+      listen-address: "[::]"
+
   # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
   dev-compute-node:
     - use: meta-node
@@ -145,6 +156,11 @@ risedev:
       address: ${id}
       id: grafana-0
 
+    - use: etcd
+      listen-address: "0.0.0.0"
+      address: ${id}
+      id: etcd-0
+
   # special config for deployment, see related PR for more information
   compose-3node-deploy:
     - use: minio
@@ -156,6 +172,13 @@ risedev:
     # - use: aws-s3
     #   bucket: ${terraform:s3-bucket}
 
+    # Not enabled by default as all previous benchmarks are not done with etcd.
+    # Also we currently only support node-level docker volume tear down.
+    # - use: etcd
+    #   listen-address: "0.0.0.0"
+    #   address: ${dns-host:rw-meta-0}
+    #   id: etcd-0
+
     - use: meta-node
       # Id must starts with `meta-node`, therefore to be picked up by other
       # components.
@@ -164,7 +187,6 @@ risedev:
       # Advertise address can be `id`, so as to use docker's DNS. If running
       # in host network mode, we should use IP directly in this field.
       address: ${dns-host:rw-meta-0}
-
       listen-address: "0.0.0.0"
 
     - use: compute-node
@@ -257,6 +279,7 @@ compose:
   minio: "quay.io/minio/minio:latest"
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
   grafana: "grafana/grafana-oss:latest"
+  etcd: "quay.io/coreos/etcd:latest"
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
@@ -307,6 +330,9 @@ template:
     # Peer listen port of the single-node etcd.
     peer-port: 2389
 
+    # Prometheus exporter listen port
+    exporter-port: 2379
+
     # Whether to enable fsync (NEVER SET TO TRUE IN PRODUCTION ENVIRONMENT!)
     unsafe-no-fsync: false
 
@@ -346,9 +372,6 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
-
-    # Whether to enable in-memory pure KV state backend
-    enable-in-memory-kv-state-backend: false
 
   meta-node:
     # Meta-node advertise address
@@ -405,6 +428,12 @@ template:
 
     # Compactors used by this Prometheus instance
     provide-compactor: "compactor*"
+
+    # Etcd used by this Prometheus instance
+    provide-etcd: "etcd*"
+
+    # Redpanda used by this Prometheus instance
+    provide-redpanda: "redpanda*"
 
   frontend:
     # Advertise address of frontend

@@ -19,14 +19,18 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager};
-use risingwave_common::catalog::{TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
+use risingwave_common::catalog::{
+    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER,
+};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_rpc_client::error::Result as RpcResult;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tempfile::{Builder, NamedTempFile};
@@ -39,6 +43,9 @@ use crate::meta_client::FrontendMetaClient;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{FrontendEnv, OptimizerContext, SessionImpl};
+use crate::user::user_manager::UserInfoManager;
+use crate::user::user_service::UserInfoWriter;
+use crate::user::UserName;
 use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
@@ -50,7 +57,11 @@ pub struct LocalFrontend {
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
-    fn connect(&self, _database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    fn connect(
+        &self,
+        _database: &str,
+        _user_name: &str,
+    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
     }
 }
@@ -105,6 +116,8 @@ impl LocalFrontend {
         Arc::new(SessionImpl::new(
             self.env.clone(),
             DEFAULT_DATABASE_NAME.to_string(),
+            DEFAULT_SUPPER_USER.to_string(),
+            UserAuthenticator::None,
         ))
     }
 }
@@ -118,20 +131,27 @@ pub struct MockCatalogWriter {
 
 #[async_trait::async_trait]
 impl CatalogWriter for MockCatalogWriter {
-    async fn create_database(&self, db_name: &str) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
         self.catalog.write().create_database(ProstDatabase {
             name: db_name.to_string(),
             id: self.gen_id(),
+            owner,
         });
         Ok(())
     }
 
-    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+    async fn create_schema(
+        &self,
+        db_id: DatabaseId,
+        schema_name: &str,
+        owner: String,
+    ) -> Result<()> {
         let id = self.gen_id();
         self.catalog.write().create_schema(ProstSchema {
             id,
             name: schema_name.to_string(),
             database_id: db_id,
+            owner,
         });
         self.add_schema_id(id, db_id);
         Ok(())
@@ -177,6 +197,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        self.catalog
+            .write()
+            .drop_table(database_id, schema_id, table_id);
+        Ok(())
+    }
+
     async fn drop_source(&self, source_id: u32) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.catalog
@@ -195,14 +223,6 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog.write().drop_schema(database_id, schema_id);
         Ok(())
     }
-
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
-        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
-        self.catalog
-            .write()
-            .drop_table(database_id, schema_id, table_id);
-        Ok(())
-    }
 }
 
 impl MockCatalogWriter {
@@ -210,11 +230,13 @@ impl MockCatalogWriter {
         catalog.write().create_database(ProstDatabase {
             name: DEFAULT_DATABASE_NAME.to_string(),
             id: 0,
+            owner: DEFAULT_SUPPER_USER.to_string(),
         });
         catalog.write().create_schema(ProstSchema {
             id: 0,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
+            owner: DEFAULT_SUPPER_USER.to_string(),
         });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(0_u32, 0_u32);
@@ -275,19 +297,119 @@ impl MockCatalogWriter {
     }
 }
 
+pub struct MockUserInfoWriter {
+    user_info: Arc<RwLock<UserInfoManager>>,
+}
+
+#[async_trait::async_trait]
+impl UserInfoWriter for MockUserInfoWriter {
+    async fn create_user(&self, user: UserInfo) -> Result<()> {
+        self.user_info.write().create_user(user);
+        Ok(())
+    }
+
+    async fn drop_user(&self, user_name: &str) -> Result<()> {
+        self.user_info.write().drop_user(user_name);
+        Ok(())
+    }
+
+    /// In `MockUserInfoWriter`, we don't support expand privilege with `GrantAllTables` and
+    /// `GrantAllSources` when grant privilege to user.
+    async fn grant_privilege(
+        &self,
+        users: Vec<UserName>,
+        privileges: Vec<GrantPrivilege>,
+        with_grant_option: bool,
+    ) -> Result<()> {
+        let privileges = privileges
+            .into_iter()
+            .map(|mut p| {
+                p.action_with_opts
+                    .iter_mut()
+                    .for_each(|ao| ao.with_grant_option = with_grant_option);
+                p
+            })
+            .collect::<Vec<_>>();
+        for user_name in users {
+            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+                u.grant_privileges.extend(privileges.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// In `MockUserInfoWriter`, we don't support expand privilege with `RevokeAllTables` and
+    /// `RevokeAllSources` when revoke privilege from user.
+    async fn revoke_privilege(
+        &self,
+        users: Vec<UserName>,
+        privileges: Vec<GrantPrivilege>,
+        revoke_grant_option: bool,
+    ) -> Result<()> {
+        for user_name in users {
+            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+                u.grant_privileges.iter_mut().for_each(|p| {
+                    for rp in &privileges {
+                        if rp.object != p.object {
+                            continue;
+                        }
+                        if revoke_grant_option {
+                            for ao in &mut p.action_with_opts {
+                                if rp
+                                    .action_with_opts
+                                    .iter()
+                                    .any(|rao| rao.action == ao.action)
+                                {
+                                    ao.with_grant_option = false;
+                                }
+                            }
+                        } else {
+                            p.action_with_opts.retain(|po| {
+                                rp.action_with_opts
+                                    .iter()
+                                    .all(|rao| rao.action != po.action)
+                            });
+                        }
+                    }
+                });
+                u.grant_privileges
+                    .retain(|p| !p.action_with_opts.is_empty());
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MockUserInfoWriter {
+    pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
+        user_info.write().create_user(UserInfo {
+            name: DEFAULT_SUPPER_USER.to_string(),
+            is_supper: true,
+            can_create_db: true,
+            can_login: true,
+            ..Default::default()
+        });
+        Self { user_info }
+    }
+}
+
 pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self, _epoch: u64) -> Result<u64> {
+    async fn pin_snapshot(&self, _epoch: u64) -> RpcResult<u64> {
         Ok(0)
     }
 
-    async fn flush(&self) -> Result<()> {
+    async fn flush(&self) -> RpcResult<()> {
         Ok(())
     }
 
-    async fn unpin_snapshot(&self, _epoch: u64) -> Result<()> {
+    async fn unpin_snapshot(&self, _epoch: u64) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn unpin_snapshot_before(&self, _epoch: u64) -> RpcResult<()> {
         Ok(())
     }
 }

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Port from PgFieldDescriptor.java
 #[derive(Debug, Clone)]
 pub struct PgFieldDescriptor {
     name: String,
@@ -105,6 +104,14 @@ pub enum TypeOid {
 }
 
 impl TypeOid {
+    // Error handle need modify later!
+    pub fn as_type(oid: i32) -> Result<TypeOid, String> {
+        match oid {
+            1043 => Ok(TypeOid::Varchar),
+            _ => todo!(),
+        }
+    }
+
     pub fn as_number(&self) -> i32 {
         match self {
             TypeOid::Boolean => 16,

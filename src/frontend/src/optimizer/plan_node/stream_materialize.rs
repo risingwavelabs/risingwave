@@ -105,13 +105,13 @@ impl StreamMaterialize {
             }
         }
         let mut out_name_iter = out_names.into_iter();
-        let mut columns = schema
+        let columns = schema
             .fields()
             .iter()
             .enumerate()
             .map(|(i, field)| {
                 let mut c = ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_without_column_id(field),
+                    column_desc: ColumnDesc::from_field_with_column_id(field, i as i32),
                     is_hidden: !user_cols.contains(i),
                 };
                 c.column_desc.name = if !c.is_hidden {
@@ -129,10 +129,6 @@ impl StreamMaterialize {
                 c
             })
             .collect_vec();
-
-        // Since the `field.into()` only generate same ColumnId,
-        // so rewrite ColumnId for each `column_desc` and `column_desc.field_desc`.
-        ColumnCatalog::generate_increment_id(&mut columns);
 
         let mut in_order = FixedBitSet::with_capacity(schema.len());
         let mut order_desc = vec![];
@@ -166,6 +162,8 @@ impl StreamMaterialize {
             pks: pk_indices.clone(),
             is_index_on,
             distribution_keys: base.dist.dist_column_indices().to_vec(),
+            appendonly: input.append_only(),
+            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
         };
 
         Ok(Self { base, input, table })
@@ -210,19 +208,15 @@ impl fmt::Display for StreamMaterialize {
             .map(|order| &order.column_desc.name)
             .join(", ");
 
+        let mut builder = f.debug_struct("StreamMaterialize");
+        builder
+            .field("columns", &format_args!("[{}]", column_names))
+            .field("pk_columns", &format_args!("[{}]", pk_column_names));
+
         if pk_column_names != order_descs {
-            write!(
-                f,
-                "StreamMaterialize {{ columns: [{}], pk_columns: [{}], order_descs: [{}] }}",
-                column_names, pk_column_names, order_descs
-            )
-        } else {
-            write!(
-                f,
-                "StreamMaterialize {{ columns: [{}], pk_columns: [{}] }}",
-                column_names, pk_column_names
-            )
+            builder.field("order_descs", &format_args!("[{}]", order_descs));
         }
+        builder.finish()
     }
 }
 

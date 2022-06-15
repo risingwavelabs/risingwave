@@ -15,14 +15,24 @@
 use std::sync::Arc;
 
 use risingwave_batch::executor::BatchMetrics;
-use risingwave_batch::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::addr::HostAddr;
+use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
+use risingwave_common::error::Result;
+use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_source::SourceManagerRef;
 
+use crate::session::FrontendEnv;
+
 /// Batch task execution context in frontend.
-#[derive(Clone, Default)]
-pub struct FrontendBatchTaskContext {}
+#[derive(Clone)]
+pub struct FrontendBatchTaskContext {
+    env: FrontendEnv,
+}
+
+impl FrontendBatchTaskContext {
+    pub fn new(env: FrontendEnv) -> Self {
+        Self { env }
+    }
+}
 
 impl BatchTaskContext for FrontendBatchTaskContext {
     fn get_task_output(&self, _task_output_id: TaskOutputId) -> Result<TaskOutput> {
@@ -30,7 +40,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
-        todo!()
+        is_local_address(self.env.server_address(), peer_addr)
     }
 
     fn source_manager_ref(&self) -> Option<SourceManagerRef> {

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::once;
+
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -42,6 +44,7 @@ impl Binder {
                 "avg" => Some(AggKind::Avg),
                 "string_agg" => Some(AggKind::StringAgg),
                 "single_value" => Some(AggKind::SingleValue),
+                "approx_count_distinct" => Some(AggKind::ApproxCountDistinct),
                 _ => None,
             };
             if let Some(kind) = agg_kind {
@@ -65,6 +68,10 @@ impl Binder {
                 "nullif" => {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case
+                }
+                "concat" => {
+                    inputs = Self::rewrite_concat_to_concat_ws(inputs)?;
+                    ExprType::ConcatWs
                 }
                 "concat_ws" => ExprType::ConcatWs,
                 "split_part" => ExprType::SplitPart,
@@ -94,6 +101,9 @@ impl Binder {
                     inputs = Self::rewrite_two_bool_inputs(inputs)?;
                     ExprType::NotEqual
                 }
+                "char_length" => ExprType::CharLength,
+                "character_length" => ExprType::CharLength,
+                "repeat" => ExprType::Repeat,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
@@ -109,6 +119,20 @@ impl Binder {
                 112.into(),
             )
             .into())
+        }
+    }
+
+    fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.is_empty() {
+            Err(ErrorCode::BindError(
+                "Function `Concat` takes at least 1 arguments (0 given)".to_string(),
+            )
+            .into())
+        } else {
+            let inputs = once(ExprImpl::literal_varchar("".to_string()))
+                .chain(inputs)
+                .collect();
+            Ok(inputs)
         }
     }
 

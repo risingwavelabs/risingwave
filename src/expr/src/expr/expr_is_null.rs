@@ -17,10 +17,10 @@ use std::sync::Arc;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayRef, BoolArrayBuilder, DataChunk, Row,
 };
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct IsNullExpression {
@@ -124,9 +124,10 @@ mod tests {
             builder.finish()?
         };
 
-        let input_chunk = DataChunk::builder()
-            .columns(vec![Column::new(Arc::new(ArrayImpl::Decimal(input_array)))])
-            .build();
+        let input_chunk = DataChunk::new(
+            vec![Column::new(Arc::new(ArrayImpl::Decimal(input_array)))],
+            3,
+        );
         let result_array = expr.eval(&input_chunk).unwrap();
         assert_eq!(3, result_array.len());
         for (i, v) in expected_eval_result.iter().enumerate() {

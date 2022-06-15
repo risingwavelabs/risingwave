@@ -19,10 +19,12 @@ use risingwave_common::array::{
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
+use crate::expr::expr_binary_bytes::new_concat_op;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::for_all_cmp_variants;
 use crate::vector_op::arithmetic_op::*;
+use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
@@ -97,6 +99,38 @@ macro_rules! gen_cmp_impl {
             ),*
             _ => {
                 unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type())
+            }
+        }
+    };
+}
+
+/// This macro helps create bitwise shift expression. The Output type is same as LHS of the
+/// expression and the RHS of the expression is being match into u32. Similar to `gen_atm_impl`.
+macro_rules! gen_shift_impl {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $func:ident },)*) => {
+        match ($l.return_type(), $r.return_type()) {
+            $(
+                ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+                    Box::new(
+                        BinaryExpression::<
+                            $i1! { type_array },
+                            $i2! { type_array },
+                            $i1! { type_array },
+                            _
+                        >::new(
+                            $l,
+                            $r,
+                            $ret,
+                            $func::<
+                                <$i1! { type_array } as Array>::OwnedItem,
+                                <$i2! { type_array } as Array>::OwnedItem>,
+
+                        )
+                    )
+                },
+            )*
+            _ => {
+                unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type(), $ret)
             }
         }
     };
@@ -201,6 +235,70 @@ macro_rules! gen_binary_expr_atm {
             { float64, decimal, float64, $general_f },
             $(
                 { $i1, $i2, $rt, $func },
+            )*
+        }
+    };
+}
+
+/// `gen_binary_expr_bitwise` is similar to `gen_binary_expr_atm`.
+/// They are differentiate because bitwise operation only supports integral datatype.
+/// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
+/// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
+macro_rules! gen_binary_expr_bitwise {
+    (
+        $macro:ident,
+        $l:expr,
+        $r:expr,
+        $ret:expr,
+        $general_f:ident,
+        {
+            $( { $i1:ident, $i2:ident, $rt:ident, $func:ident }, )*
+        } $(,)?
+    ) => {
+        $macro! {
+            [$l, $r, $ret],
+            { int16, int16, int16, $general_f },
+            { int16, int32, int32, $general_f },
+            { int16, int64, int64, $general_f },
+            { int32, int16, int32, $general_f },
+            { int32, int32, int32, $general_f },
+            { int32, int64, int64, $general_f },
+            { int64, int16,int64, $general_f },
+            { int64, int32,int64, $general_f },
+            { int64, int64, int64, $general_f },
+            $(
+                { $i1, $i2, $rt, $func },
+            )*
+        }
+    };
+}
+
+/// `gen_binary_expr_shift` is similar to `gen_binary_expr_bitwise`.
+/// They are differentiate because shift operation have different typing rules.
+/// * `$general_f`: generic atm function
+/// `$rt` is not required because Type of the output is same as the Type of LHS of expression.
+/// * `$i1`, `$i2`, `$func`: extra list passed to `$macro` directly
+macro_rules! gen_binary_expr_shift {
+    (
+        $macro:ident,
+        $l:expr,
+        $r:expr,
+        $ret:expr,
+        $general_f:ident,
+        {
+            $( { $i1:ident, $i2:ident, $func:ident }, )*
+        } $(,)?
+    ) => {
+        $macro! {
+            [$l, $r, $ret],
+            { int16, int16, $general_f },
+            { int32, int16, $general_f },
+            { int16, int32, $general_f },
+            { int32, int32, $general_f },
+            { int64, int16, $general_f },
+            { int64, int32, $general_f },
+            $(
+                { $i1, $i2, $func },
             )*
         }
     };
@@ -315,6 +413,54 @@ pub fn new_binary_expr(
                 },
             }
         }
+        // BitWise Operation
+        Type::BitwiseShiftLeft => {
+            gen_binary_expr_shift! {
+                gen_shift_impl,
+                l, r, ret,
+                general_shl,
+                {
+
+                },
+            }
+        }
+        Type::BitwiseShiftRight => {
+            gen_binary_expr_shift! {
+                gen_shift_impl,
+                l, r, ret,
+                general_shr,
+                {
+
+                },
+            }
+        }
+        Type::BitwiseAnd => {
+            gen_binary_expr_bitwise! {
+                gen_atm_impl,
+                l, r, ret,
+                general_bitand,
+                {
+                },
+            }
+        }
+        Type::BitwiseOr => {
+            gen_binary_expr_bitwise! {
+                gen_atm_impl,
+                l, r, ret,
+                general_bitor,
+                {
+                },
+            }
+        }
+        Type::BitwiseXor => {
+            gen_binary_expr_bitwise! {
+                gen_atm_impl,
+                l, r, ret,
+                general_bitxor,
+                {
+                },
+            }
+        }
         Type::Extract => build_extract_expr(ret, l, r),
         Type::RoundDigit => Box::new(
             BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
@@ -328,6 +474,8 @@ pub fn new_binary_expr(
             l, r, ret, position,
         )),
         Type::TumbleStart => new_tumble_start(l, r, ret),
+        Type::ConcatOp => new_concat_op(l, r, ret),
+
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",
@@ -473,7 +621,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
@@ -531,7 +679,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
@@ -592,7 +740,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();

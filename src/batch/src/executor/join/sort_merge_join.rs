@@ -17,7 +17,6 @@ use std::cmp::Ordering;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Row, RowRef};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::to_datum_ref;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -237,8 +236,12 @@ impl SortMergeJoinExecutor {
 impl BoxedExecutorBuilder for SortMergeJoinExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
     ) -> risingwave_common::error::Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_children().len() == 2);
+        ensure!(
+            inputs.len() == 2,
+            "SortMergeJoinExecutor should have 2 children!"
+        );
 
         let sort_merge_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -249,58 +252,50 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
         // Only allow it in ascending order.
         ensure!(sort_order == OrderTypeProst::Ascending);
         let join_type = JoinType::from_prost(sort_merge_join_node.get_join_type()?);
-        // Note: Assume that optimizer has set up probe side and build side. Left is the probe side,
-        // right is the build side. This is the same for all join executors.
-        let left_plan_opt = source.plan_node().get_children().get(0);
-        let right_plan_opt = source.plan_node().get_children().get(1);
-        match (left_plan_opt, right_plan_opt) {
-            (Some(left_plan), Some(right_plan)) => {
-                let left_child = source.clone_for_plan(left_plan).build().await?;
-                let right_child = source.clone_for_plan(right_plan).build().await?;
 
-                let fields = left_child
-                    .schema()
-                    .fields
-                    .iter()
-                    .chain(right_child.schema().fields.iter())
-                    .cloned()
-                    .collect();
-                let schema = Schema { fields };
+        let left_child = inputs.remove(0);
+        let right_child = inputs.remove(0);
 
-                let left_keys = sort_merge_join_node.get_left_keys();
-                let mut probe_key_idxs = vec![];
-                for key in left_keys {
-                    probe_key_idxs.push(*key as usize);
-                }
+        let fields = left_child
+            .schema()
+            .fields
+            .iter()
+            .chain(right_child.schema().fields.iter())
+            .cloned()
+            .collect();
+        let schema = Schema { fields };
 
-                let right_keys = sort_merge_join_node.get_right_keys();
-                let mut build_key_idxs = vec![];
-                for key in right_keys {
-                    build_key_idxs.push(*key as usize);
-                }
-                match join_type {
-                    JoinType::Inner => {
-                        // TODO: Support more join type.
-                        let probe_table_source = RowLevelIter::new(left_child);
-                        let build_table_source = RowLevelIter::new(right_child);
-                        Ok(Box::new(Self::new(
-                            join_type,
-                            schema,
-                            probe_table_source,
-                            build_table_source,
-                            probe_key_idxs,
-                            build_key_idxs,
-                            "SortMergeJoinExecutor2".to_string(),
-                        )))
-                    }
-                    _ => Err(ErrorCode::NotImplemented(
-                        format!("Do not support {:?} join type now.", join_type),
-                        None.into(),
-                    )
-                    .into()),
-                }
+        let left_keys = sort_merge_join_node.get_left_keys();
+        let mut probe_key_idxs = vec![];
+        for key in left_keys {
+            probe_key_idxs.push(*key as usize);
+        }
+
+        let right_keys = sort_merge_join_node.get_right_keys();
+        let mut build_key_idxs = vec![];
+        for key in right_keys {
+            build_key_idxs.push(*key as usize);
+        }
+        match join_type {
+            JoinType::Inner => {
+                // TODO: Support more join type.
+                let probe_table_source = RowLevelIter::new(left_child);
+                let build_table_source = RowLevelIter::new(right_child);
+                Ok(Box::new(Self::new(
+                    join_type,
+                    schema,
+                    probe_table_source,
+                    build_table_source,
+                    probe_key_idxs,
+                    build_key_idxs,
+                    "SortMergeJoinExecutor2".to_string(),
+                )))
             }
-            (_, _) => Err(InternalError("Filter must have one children".to_string()).into()),
+            _ => Err(ErrorCode::NotImplemented(
+                format!("Do not support {:?} join type now.", join_type),
+                None.into(),
+            )
+            .into()),
         }
     }
 }
