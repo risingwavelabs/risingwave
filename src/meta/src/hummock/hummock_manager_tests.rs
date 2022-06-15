@@ -947,7 +947,7 @@ async fn test_trigger_manual_compaction() {
 
     // No compaction task available.
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
-    let _receiver = compactor_manager_ref.add_compactor(context_id);
+    let receiver = compactor_manager_ref.add_compactor(context_id);
     {
         let result = hummock_manager
             .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
@@ -978,7 +978,7 @@ async fn test_trigger_manual_compaction() {
 
     {
         // to check compactor send task fail
-        drop(_receiver);
+        drop(receiver);
         {
             let result = hummock_manager
                 .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())

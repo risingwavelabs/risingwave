@@ -1430,7 +1430,7 @@ where
             }
         }
 
-        tracing::trace!(
+        tracing::info!(
             "Trigger manual compaction task. {}. cost time: {:?}",
             compact_task_to_string(&compact_task),
             start_time.elapsed(),
