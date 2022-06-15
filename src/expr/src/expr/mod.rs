@@ -81,14 +81,12 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 
     match prost.get_expr_type().unwrap() {
         Cast | Upper | Lower | Md5 | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot | CharLength => {
-            build_unary_expr_prost(prost)
-        }
+        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot | CharLength
+        | BoolOut => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
-        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor => {
-            build_binary_expr_prost(prost)
-        }
+        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
+        | ConcatOp => build_binary_expr_prost(prost),
         And | Or | IsDistinctFrom | ArrayAccess => build_nullable_binary_expr_prost(prost),
         ToChar => build_to_char_expr(prost),
         Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),

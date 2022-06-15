@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-use std::mem::swap;
+use std::collections::HashMap;
+use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -160,8 +160,7 @@ impl QueryExecution {
     /// Start execution of this query.
     pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
-        let mut cur_state = Failed;
-        swap(&mut *state, &mut cur_state);
+        let cur_state = mem::replace(&mut *state, Failed);
 
         match cur_state {
             QueryState::Pending {
@@ -217,28 +216,18 @@ impl QueryRunner {
                 "Starting query stage: {:?}-{:?}",
                 self.query.query_id, stage_id
             );
-            self.stage_executions
-                .get(stage_id)
-                .as_ref()
-                .unwrap()
-                .start()
-                .await
-                .map_err(|e| {
-                    error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
-                    e
-                })?;
+            self.stage_executions[stage_id].start().await.map_err(|e| {
+                error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
+                e
+            })?;
             info!(
                 "Query stage {:?}-{:?} started.",
                 self.query.query_id, stage_id
             );
         }
-        let mut stages_has_table_scan = self
-            .query
-            .stage_has_table_scan()
-            .into_iter()
-            .collect::<HashSet<_>>();
+        let mut stages_with_table_scan = self.query.stages_with_table_scan();
 
-        // Schedule stages when leaf stages all scheduled
+        // Schedule other stages after leaf stages are all scheduled.
         while let Some(msg) = self.msg_receiver.recv().await {
             match msg {
                 Stage(Scheduled(stage_id)) => {
@@ -247,15 +236,13 @@ impl QueryRunner {
                         self.query.query_id, stage_id
                     );
                     self.scheduled_stages_count += 1;
-                    stages_has_table_scan.remove(&stage_id);
-                    if stages_has_table_scan.is_empty() {
-                        // Since all the iterators are created during building the leaf tasks in the
-                        // backend, we can be sure here that all the
-                        // iterator have been created, thus they all successfully pinned a
-                        // HummockVersion. So we can now unpin their epoch.
+                    stages_with_table_scan.remove(&stage_id);
+                    if stages_with_table_scan.is_empty() {
+                        // We can be sure here that all the Hummock iterators have been created,
+                        // thus they all successfully pinned a HummockVersion.
+                        // So we can now unpin their epoch.
                         info!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
-                            .clone()
                             .unpin_snapshot(self.epoch, self.query.query_id())
                             .await?;
                     }
@@ -266,16 +253,10 @@ impl QueryRunner {
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
                             if self.all_children_scheduled(parent).await {
-                                self.get_stage_execution_unchecked(parent)
-                                    .start()
-                                    .await
-                                    .map_err(|e| {
-                                        error!(
-                                            "Failed to start stage: {}, reason: {:?}",
-                                            stage_id, e
-                                        );
-                                        e
-                                    })?;
+                                self.stage_executions[parent].start().await.map_err(|e| {
+                                    error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
+                                    e
+                                })?;
                             }
                         }
                     }
@@ -287,11 +268,10 @@ impl QueryRunner {
                     );
 
                     // Consume sender here.
-                    let mut tmp_sender = None;
-                    swap(&mut self.root_stage_sender, &mut tmp_sender);
+                    let root_stage_sender = mem::take(&mut self.root_stage_sender);
                     // It's possible we receive stage failed event message multi times and the
                     // sender has been consumed in first failed event.
-                    if let Some(sender) = tmp_sender {
+                    if let Some(sender) = root_stage_sender {
                         if let Err(e) = sender.send(Err(reason)) {
                             warn!("Query execution dropped: {:?}", e);
                         } else {
@@ -342,10 +322,9 @@ impl QueryRunner {
         );
 
         // Consume sender here.
-        let mut tmp_sender = None;
-        swap(&mut self.root_stage_sender, &mut tmp_sender);
+        let root_stage_sender = mem::take(&mut self.root_stage_sender);
 
-        if let Err(e) = tmp_sender.unwrap().send(Ok(root_stage_result)) {
+        if let Err(e) = root_stage_sender.unwrap().send(Ok(root_stage_result)) {
             warn!("Query execution dropped: {:?}", e);
         } else {
             debug!("Root stage for {:?} sent.", self.query.query_id);
@@ -354,19 +333,11 @@ impl QueryRunner {
 
     async fn all_children_scheduled(&self, stage_id: &StageId) -> bool {
         for child in self.query.stage_graph.get_child_stages_unchecked(stage_id) {
-            if !self
-                .get_stage_execution_unchecked(child)
-                .is_scheduled()
-                .await
-            {
+            if !self.stage_executions[child].is_scheduled().await {
                 return false;
             }
         }
         true
-    }
-
-    fn get_stage_execution_unchecked(&self, stage_id: &StageId) -> Arc<StageExecution> {
-        self.stage_executions.get(stage_id).unwrap().clone()
     }
 }
 

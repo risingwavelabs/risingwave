@@ -46,7 +46,10 @@ pub async fn handle_create_database(
     }
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_database(&database_name).await?;
+    let owner: String = session.user_name().to_string();
+    catalog_writer
+        .create_database(&database_name, owner.clone())
+        .await?;
 
     // Default create dev schema.
     let db_id = {
@@ -55,7 +58,7 @@ pub async fn handle_create_database(
         reader.get_database_by_name(&database_name)?.id()
     };
     catalog_writer
-        .create_schema(db_id, DEFAULT_SCHEMA_NAME)
+        .create_schema(db_id, DEFAULT_SCHEMA_NAME, owner.clone())
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))

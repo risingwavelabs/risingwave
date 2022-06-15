@@ -15,9 +15,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use risingwave_common::consistent_hash::VNODE_BITMAP_LEN;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{internal_error, Result};
+use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -288,7 +288,7 @@ mod test {
     use std::time::Duration;
 
     use itertools::Itertools;
-    use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::hash::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::plan_common::TableRefId;

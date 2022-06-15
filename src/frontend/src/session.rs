@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
@@ -549,6 +550,28 @@ impl Session for SessionImpl {
             e
         })?;
         Ok(rsp)
+    }
+
+    async fn infer_return_type(
+        self: Arc<Self>,
+        sql: &str,
+    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
+        // Parse sql.
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
+            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        // With pgwire, there would be at most 1 statement in the vec.
+        assert!(stmts.len() <= 1);
+        if stmts.is_empty() {
+            return Ok(vec![]);
+        }
+        let stmt = stmts.swap_remove(0);
+        let rsp = handle(self, stmt).await.map_err(|e| {
+            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        Ok(rsp.get_row_desc())
     }
 
     fn user_authenticator(&self) -> &UserAuthenticator {
