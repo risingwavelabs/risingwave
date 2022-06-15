@@ -49,14 +49,12 @@ impl<S: StateStore> CellBasedTable<S> {
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         ordered_row_serializer: Option<OrderedRowSerializer>,
-        stats: Arc<StateStoreMetrics>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         CellBasedTableExtended::new_extended(
             keyspace,
             column_descs,
             ordered_row_serializer,
-            stats,
             dist_key_indices,
             CellBasedRowSerializer::new(),
         )
@@ -71,18 +69,8 @@ impl<S: StateStore> CellBasedTable<S> {
             keyspace,
             column_descs,
             Some(OrderedRowSerializer::new(order_types)),
-            Arc::new(StateStoreMetrics::unused()),
             None,
         )
-    }
-
-    /// Creates an "adhoc" [`CellBasedTable`] with specified columns.
-    pub fn new_adhoc(
-        keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
-        stats: Arc<StateStoreMetrics>,
-    ) -> Self {
-        CellBasedTable::new(keyspace, column_descs, None, stats, None)
     }
 }
 
