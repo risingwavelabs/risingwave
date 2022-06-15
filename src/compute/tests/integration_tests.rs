@@ -397,24 +397,18 @@ async fn test_row_seq_scan() -> Result<()> {
     let epoch: u64 = 0;
 
     state
-        .insert(
-            &Row(vec![Some(1_i32.into())]),
-            Row(vec![
-                Some(1_i32.into()),
-                Some(4_i32.into()),
-                Some(7_i64.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(4_i32.into()),
+            Some(7_i64.into()),
+        ]))
         .unwrap();
     state
-        .insert(
-            &Row(vec![Some(2_i32.into())]),
-            Row(vec![
-                Some(2_i32.into()),
-                Some(5_i32.into()),
-                Some(8_i64.into()),
-            ]),
-        )
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(5_i32.into()),
+            Some(8_i64.into()),
+        ]))
         .unwrap();
     state.commit(epoch).await.unwrap();
 

@@ -31,8 +31,8 @@ use risingwave_connector::{
 };
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
-use tokio::sync::mpsc::{channel, unbounded_channel, Receiver, UnboundedReceiver};
-use tokio::sync::Notify;
+use tokio::sync::mpsc::{channel, Receiver, UnboundedReceiver};
+use tokio::sync::{oneshot, Notify};
 use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
@@ -152,9 +152,9 @@ impl SourceReader {
         mut stream_reader: Box<dyn StreamSourceReader>,
         notifier: Arc<Notify>,
         expected_barrier_latency_ms: u64,
-        mut inject_source_rx: Receiver<Box<SourceStreamReaderImpl>>,
+        mut inject_source_rx: Receiver<(Box<SourceStreamReaderImpl>, oneshot::Sender<()>)>,
     ) {
-        let (msg_tx, mut msg_rx) = tokio::sync::mpsc::channel::<Result<StreamChunkWithState>>(std::mem::size_of::<Result<StreamChunkWithState>>());
+        let (msg_tx, mut msg_rx) = channel::<Result<StreamChunkWithState>>(1);
         let handler = tokio::task::spawn(async move {
             loop {
                 let now = Instant::now();
@@ -162,7 +162,13 @@ impl SourceReader {
                 // We allow data to flow for `expected_barrier_latency_ms` milliseconds.
                 while now.elapsed().as_millis() < expected_barrier_latency_ms as u128 {
                     tokio::select! {
-                        reader = inject_source_rx.recv() => { stream_reader = reader.unwrap(); }
+                        biased;
+                        reader = inject_source_rx.recv() => {
+                            if let Some((new_reader, tx)) = reader {
+                                stream_reader = new_reader;
+                                tx.send(()).unwrap();
+                            }
+                        }
                         chunk = stream_reader.next() => { msg_tx.send(chunk).await.unwrap(); }
                     }
                 }
@@ -220,7 +226,7 @@ impl SourceReader {
 
     fn into_stream(
         self,
-        inject_source: Receiver<Box<SourceStreamReaderImpl>>,
+        inject_source: Receiver<(Box<SourceStreamReaderImpl>, oneshot::Sender<()>)>,
     ) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunkWithState>>> {
         let notifier = Arc::new(Notify::new());
 
@@ -370,7 +376,8 @@ impl<S: StateStore> SourceExecutor<S> {
         };
         yield Message::Barrier(barrier);
 
-        let (inject_source_tx, inject_source_rx) = channel::<Box<SourceStreamReaderImpl>>(std::mem::size_of::<Box<SourceStreamReaderImpl>>());
+        let (inject_source_tx, inject_source_rx) =
+            channel::<(Box<SourceStreamReaderImpl>, oneshot::Sender<()>)>(1);
         #[for_await]
         for msg in reader.into_stream(inject_source_rx) {
             match msg {
@@ -391,11 +398,15 @@ impl<S: StateStore> SourceExecutor<S> {
                                         None => {}
                                         Some(target_state) => {
                                             let reader = self
-                                                .build_stream_source_reader(Some(target_state))
+                                                .build_stream_source_reader(Some(
+                                                    target_state.clone(),
+                                                ))
                                                 .await
                                                 .map_err(StreamExecutorError::source_error)?;
+
+                                            let (tx, rx) = oneshot::channel();
                                             inject_source_tx
-                                                .send(reader)
+                                                .send((reader, tx))
                                                 .await
                                                 .to_rw_result()
                                                 .map_err(|e| {
@@ -403,6 +414,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                                         e.to_string(),
                                                     )
                                                 })?;
+
+                                            // force sync
+                                            rx.await.unwrap();
+                                            self.stream_source_splits = target_state;
                                         }
                                     }
                                 }
