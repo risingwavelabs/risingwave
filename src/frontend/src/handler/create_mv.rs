@@ -60,8 +60,10 @@ pub fn gen_create_mv_plan(
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     plan_root.set_required_dist(RequiredDist::Any);
     let materialize = plan_root.gen_create_mv_plan(table_name)?;
-    let table = materialize.table().to_prost(schema_id, database_id);
+    let mut table = materialize.table().to_prost(schema_id, database_id);
     let plan: PlanRef = materialize.into();
+    table.owner = session.user_name().to_string();
+
     Ok((plan, table))
 }
 
