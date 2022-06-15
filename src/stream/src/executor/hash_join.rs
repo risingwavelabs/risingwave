@@ -366,7 +366,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         key_indices: Vec<usize>,
         ks_l: Keyspace<S>,
         ks_r: Keyspace<S>,
-        append_only: bool,
+        is_append_only: bool,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -401,7 +401,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let pk_indices_r = input_r.pk_indices().to_vec();
 
         // check whether join key contains pk in both side
-        let append_only_optimize = if append_only {
+        let append_only_optimize = if is_append_only {
             let join_key_l = HashSet::<usize>::from_iter(params_l.key_indices.clone());
             let join_key_r = HashSet::<usize>::from_iter(params_r.key_indices.clone());
             let pk_contained_l = pk_indices_l.len()

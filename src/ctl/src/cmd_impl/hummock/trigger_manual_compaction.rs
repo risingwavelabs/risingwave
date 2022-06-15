@@ -12,5 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod vnode;
-pub use vnode::*;
+use risingwave_rpc_client::HummockMetaClient;
+
+use crate::common::MetaServiceOpts;
+
+pub async fn trigger_manual_compaction(compaction_group_id: u64) -> anyhow::Result<()> {
+    let meta_opts = MetaServiceOpts::from_env()?;
+    let meta_client = meta_opts.create_meta_client().await?;
+    let result = meta_client
+        .trigger_manual_compaction(compaction_group_id)
+        .await;
+    println!("{:#?}", result);
+    Ok(())
+}

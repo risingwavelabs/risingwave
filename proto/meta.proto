@@ -162,6 +162,17 @@ service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }
 
+message MetaLeaderInfo {
+  string node_address = 1;
+  uint64 lease_id = 2;
+}
+
+message MetaLeaseInfo {
+  MetaLeaderInfo leader = 1;
+  uint64 lease_register_time = 2;
+  uint64 lease_expire_time = 3;
+}
+
 message SourceActorSplit {
   string type = 1;
   bytes split = 2;

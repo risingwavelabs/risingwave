@@ -20,13 +20,15 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
-use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
+use risingwave_pb::stream_service::{
+    BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
+};
 use smallvec::SmallVec;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::{oneshot, watch, RwLock};
@@ -310,7 +312,7 @@ where
     async fn run_inner<'a>(
         &self,
         command_context: &CommandContext<'a, S>,
-    ) -> Result<Vec<InjectBarrierResponse>> {
+    ) -> Result<Vec<BarrierCompleteResponse>> {
         let timer = self.metrics.barrier_latency.start_timer();
 
         // Wait for all barriers collected
@@ -351,14 +353,12 @@ where
     async fn inject_barrier<'a>(
         &self,
         command_context: &CommandContext<'a, S>,
-    ) -> Result<Vec<InjectBarrierResponse>> {
+    ) -> Result<Vec<BarrierCompleteResponse>> {
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info;
-
-        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
+        let inject_futures = info.node_map.iter().filter_map(|(node_id, node)| {
             let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
             let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
-
             if actor_ids_to_collect.is_empty() {
                 // No need to send or collect barrier for this node.
                 assert!(actor_ids_to_send.is_empty());
@@ -375,7 +375,6 @@ where
                     // TODO(chi): add distributed tracing
                     span: vec![],
                 };
-
                 async move {
                     let mut client = self.env.stream_client_pool().get(node).await?;
 
@@ -390,12 +389,45 @@ where
                         "inject barrier request: {:?}", request
                     );
 
-                    // This RPC returns only if this worker node has collected this barrier.
+                    // This RPC returns only if this worker node has injected this barrier.
                     client
                         .inject_barrier(request)
                         .await
                         .map(tonic::Response::<_>::into_inner)
-                        .to_rw_result()
+                        .map_err(RwError::from)
+                }
+                .into()
+            }
+        });
+        try_join_all(inject_futures).await?;
+        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
+            let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+            let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
+            if actor_ids_to_collect.is_empty() {
+                // No need to send or collect barrier for this node.
+                assert!(actor_ids_to_send.is_empty());
+                None
+            } else {
+                let request_id = Uuid::new_v4().to_string();
+                let prev_epoch = command_context.prev_epoch.0;
+                async move {
+                    let mut client = self.env.stream_client_pool().get(node).await?;
+
+                    let request = BarrierCompleteRequest {
+                        request_id,
+                        prev_epoch,
+                    };
+                    tracing::trace!(
+                        target: "events::meta::barrier::barrier_complete",
+                        "barrier complete request: {:?}", request
+                    );
+
+                    // This RPC returns only if this worker node has collected this barrier.
+                    client
+                        .barrier_complete(request)
+                        .await
+                        .map(tonic::Response::<_>::into_inner)
+                        .map_err(RwError::from)
                 }
                 .into()
             }

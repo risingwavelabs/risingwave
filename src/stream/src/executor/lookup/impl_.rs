@@ -20,7 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -220,7 +220,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 col_types: arrangement_datatypes,
                 // special thing about this pair of serializer and deserializer: the serializer only
                 // serializes join key, while the deserializer will take join key + pk into account.
-                deserializer: CellBasedRowDeserializer::new(arrangement_col_descs.clone()),
+                deserializer: make_cell_based_row_deserializer(arrangement_col_descs.clone()),
                 serializer: OrderedRowSerializer::new(arrangement_order_types),
                 col_descs: arrangement_col_descs,
                 order_rules: arrangement_order_rules,

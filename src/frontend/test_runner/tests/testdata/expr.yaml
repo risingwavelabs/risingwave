@@ -277,3 +277,13 @@
     create table t (v1 int);
     select concat() from t;
   binder_error: 'Bind error: Function `Concat` takes at least 1 arguments (0 given)'
+- sql: |
+    select concat(':', true);
+  batch_plan: |
+    BatchProject { exprs: [ConcatWs('':Varchar, ':':Varchar, BoolOut(true:Boolean))] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select ':' || true;
+  batch_plan: |
+    BatchProject { exprs: [ConcatOp(':':Varchar, true:Boolean::Varchar)] }
+      BatchValues { rows: [[]] }
