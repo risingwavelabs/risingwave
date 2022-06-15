@@ -24,7 +24,6 @@ use itertools::Itertools;
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, Row, StructRef,
 };
-use crate::consistent_hash::{VirtualNode, VIRTUAL_NODE_COUNT};
 use crate::error::Result;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -40,6 +39,11 @@ use crate::util::hash_util::CRC32FastBuilder;
 /// For example, `SELECT sum(t.a) FROM t GROUP BY t.b, t.c`, the hash keys
 /// are encoded from both `t.b, t.c`. If t.b="abc", t.c=1, the hashkey may be
 /// encoded in certain format of ("abc", 1).
+
+pub type VirtualNode = u16;
+pub const VNODE_BITS: usize = 11;
+pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
+pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone, Debug, PartialEq)]
