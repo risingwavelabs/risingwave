@@ -55,15 +55,11 @@ impl fmt::Display for StreamTopN {
             f.debug_struct("StreamTopN")
         };
 
-        builder.field("order", &format_args!("{}", self.logical.topn_order()));
-        builder.field("limit", &format_args!("{}", self.logical.limit()));
-        builder.field("offset", &format_args!("{}", self.logical.offset()));
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
-
-        builder.finish()
+        builder
+            .field("order", &format_args!("{}", self.logical.topn_order()))
+            .field("limit", &format_args!("{}", self.logical.limit()))
+            .field("offset", &format_args!("{}", self.logical.offset()))
+            .finish()
     }
 }
 

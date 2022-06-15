@@ -129,12 +129,8 @@ impl fmt::Display for StreamHashJoin {
         };
         builder
             .field("type", &format_args!("{:?}", self.logical.join_type()))
-            .field("predicate", &format_args!("{}", self.eq_join_predicate()));
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
-        builder.finish()
+            .field("predicate", &format_args!("{}", self.eq_join_predicate()))
+            .finish()
     }
 }
 

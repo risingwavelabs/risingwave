@@ -72,12 +72,8 @@ impl fmt::Display for StreamHashAgg {
                     .map(InputRefDisplay)
                     .collect_vec(),
             )
-            .field("aggs", &self.agg_calls());
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
-        builder.finish()
+            .field("aggs", &self.agg_calls())
+            .finish()
     }
 }
 
