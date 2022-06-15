@@ -154,11 +154,13 @@ fn next_key_no_alloc(key: &[u8]) -> Option<(&[u8], u8)> {
 
 /// Get the end bound of the given `prefix` when transforming it to a key range.
 fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
-    let next_key = next_key(prefix);
-    if next_key.is_empty() {
-        Unbounded
+    if let Some((s, e)) = next_key_no_alloc(prefix) {
+        let mut res = Vec::with_capacity(s.len() + 1);
+        res.extend_from_slice(s);
+        res.push(e);
+        Excluded(res)
     } else {
-        Excluded(next_key)
+        Unbounded
     }
 }
 
