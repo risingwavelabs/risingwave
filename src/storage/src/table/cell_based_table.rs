@@ -196,16 +196,12 @@ impl<S: StateStore> CellBasedTable<S> {
         // TODO: encode vnode into key
         // let vnode = self.compute_vnode_by_row(value);
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let start_key = self
-            .keyspace
-            .prefixed_key(&serialize_pk::<false>(pk, pk_serializer));
+        let start_key = serialize_pk::<false>(pk, pk_serializer);
         let key_range = range_of_prefix(&start_key);
 
-        // TODO: support scan_range in keyspace.
         let state_store_range_scan_res = self
             .keyspace
-            .state_store()
-            .scan(key_range, None, epoch)
+            .scan_with_range(key_range, None, epoch)
             .await?;
         let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
         for (key, value) in state_store_range_scan_res {

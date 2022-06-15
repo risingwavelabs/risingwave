@@ -17,7 +17,7 @@ use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
+use risingwave_hummock_sdk::key::prefixed_range;
 
 use crate::error::StorageResult;
 use crate::{StateStore, StateStoreIter};
@@ -87,20 +87,37 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Gets from the keyspace with the `prefixed_key` of given key.
-    /// The returned value is based on a snapshot corresponding to the given `epoch`
+    /// The returned value is based on a snapshot corresponding to the given `epoch`.
     pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> StorageResult<Option<Bytes>> {
         self.store.get(&self.prefixed_key(key), epoch).await
     }
 
-    /// Scans `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
-    /// the given prefix will be scanned. Note that the prefix of this keyspace will be stripped.
-    /// The returned values are based on a snapshot corresponding to the given `epoch`
+    /// Scans `limit` keys from the keyspace and get their values.
+    /// If `limit` is None, all keys of the given prefix will be scanned.
+    /// The returned values are based on a snapshot corresponding to the given `epoch`.
     pub async fn scan(
         &self,
         limit: Option<usize>,
         epoch: u64,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let range = range_of_prefix(&self.prefix);
+        self.scan_with_range::<_, &[u8]>(.., limit, epoch).await
+    }
+
+    /// Scans `limit` keys from the given `range` in this keyspace and get their values.
+    /// Note that the `range` should not be prepended with the prefix of this keyspace.
+    /// If `limit` is None, all keys of the given prefix will be scanned.
+    /// The returned values are based on a snapshot corresponding to the given `epoch`.
+    pub async fn scan_with_range<R, B>(
+        &self,
+        range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> StorageResult<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        let range = prefixed_range(range, &self.prefix);
         let mut pairs = self.store.scan(range, limit, epoch).await?;
         pairs
             .iter_mut()
