@@ -161,9 +161,26 @@ impl Binder {
 
     pub(crate) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
         let (schema_name, source_name) = Self::resolve_table_name(name)?;
-        let source = self
-            .catalog
-            .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
+        let source =
+            match self
+                .catalog
+                .get_source_by_name(&self.db_name, &schema_name, &source_name)
+            {
+                Ok(it) => it,
+                Err(err) => {
+                    if let Ok(table) =
+                        self.catalog
+                            .get_table_by_name(&self.db_name, &schema_name, &source_name)
+                            &&table.associated_source_id().is_none()
+                    {
+                            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                                "Materized view doesn't support this syntax.".to_owned(),
+                            )));
+
+                    }
+                    return Err(err);
+                }
+            };
 
         let source_id = TableId::new(source.id);
 

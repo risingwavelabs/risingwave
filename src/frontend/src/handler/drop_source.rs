@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> Result<PgResponse> {
@@ -25,10 +26,30 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
     let (schema_name, source_name) = Binder::resolve_table_name(name)?;
 
     let catalog_reader = session.env().catalog_reader();
-    let source = catalog_reader
-        .read_guard()
-        .get_source_by_name(session.database(), &schema_name, &source_name)?
-        .clone();
+
+    let source: SourceCatalog;
+    {
+        source = match catalog_reader.read_guard().get_source_by_name(
+            session.database(),
+            &schema_name,
+            &source_name,
+        ) {
+            Ok(it) => it.clone(),
+            Err(err) => {
+                let reader = catalog_reader.read_guard();
+                if let Ok(table) =
+                    reader.get_table_by_name(session.database(), &schema_name, &source_name)
+                {
+                    if table.associated_source_id().is_none() {
+                        return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                            "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+                        )));
+                    }
+                }
+                return Err(err);
+            }
+        };
+    }
 
     match source.source_type {
         SourceType::Table => {
@@ -109,6 +130,25 @@ mod tests {
             "Invalid input syntax: Use `DROP TABLE` to drop a table.".to_string(),
             frontend
                 .run_sql("DROP SOURCE s")
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_drop_materialized_view_using_drop_source() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql("CREATE TABLE s").await.unwrap();
+        frontend
+            .run_sql("CREATE MATERIALIZED VIEW mv AS SELECT * FROM s")
+            .await
+            .unwrap();
+        assert_eq!(
+            "Invalid input syntax: Use `DROP MATERIALIZED VIEW` to drop a materialized view."
+                .to_string(),
+            frontend
+                .run_sql("DROP SOURCE mv")
                 .await
                 .unwrap_err()
                 .to_string()
