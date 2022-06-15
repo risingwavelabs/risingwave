@@ -165,9 +165,6 @@ where
             FeMessage::Parse(m) => {
                 let query = cstr_to_str(&m.query_string).unwrap();
 
-                // TODO: make sure the query is a complete statement.
-                assert!(query.trim_end().ends_with(';'));
-
                 // 1. Create the types description.
                 let type_ids = m.type_ids;
                 let types: Vec<TypeOid> = type_ids

@@ -17,7 +17,7 @@ use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ScalarRefImpl, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct WhenClause {
@@ -59,7 +59,7 @@ impl Expression for CaseExpression {
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         // TODO: we can avoid the compact here.
-        let input = input.clone().compact().map_err(ExprError::Array)?;
+        let input = input.clone().compact()?;
         let mut els = self
             .else_clause
             .as_deref()
@@ -74,10 +74,7 @@ impl Expression for CaseExpression {
                 )
             })
             .collect_vec();
-        let mut output_array = self
-            .return_type()
-            .create_array_builder(input.capacity())
-            .map_err(ExprError::Array)?;
+        let mut output_array = self.return_type().create_array_builder(input.capacity())?;
         for idx in 0..input.capacity() {
             if let Some((_, t)) = when_thens
                 .iter()
@@ -88,17 +85,15 @@ impl Expression for CaseExpression {
                         .as_bool()
                 })
             {
-                output_array
-                    .append_datum(&t.to_owned_datum())
-                    .map_err(ExprError::Array)?;
+                output_array.append_datum(&t.to_owned_datum())?;
             } else if let Some(els) = els.as_mut() {
                 let t = els.datum_at(idx);
-                output_array.append_datum(&t).map_err(ExprError::Array)?;
+                output_array.append_datum(&t)?;
             } else {
-                output_array.append_null().map_err(ExprError::Array)?;
+                output_array.append_null()?;
             };
         }
-        let output_array = output_array.finish().map_err(ExprError::Array)?.into();
+        let output_array = output_array.finish()?.into();
         Ok(output_array)
     }
 

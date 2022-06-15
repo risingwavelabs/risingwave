@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 use tokio::sync::RwLock;
 
+use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
 use crate::manager::MetaSrvEnv;
@@ -37,7 +38,7 @@ pub struct CompactionGroupManager<S: MetaStore> {
 
 impl<S: MetaStore> CompactionGroupManager<S> {
     pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
-        let config = CompactionConfig::default();
+        let config = CompactionConfigBuilder::new().build();
         Self::new_with_config(env, config).await
     }
 
@@ -77,7 +78,10 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         // internal_table_id (stateful executor)
         pairs.push((
             Prefix::from(table_fragments.table_id().table_id),
-            CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
+            // TODO: before compaction group write path is finished, all SSTs belongs to
+            // `StateDefault`.
+            CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
+            // CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
         ));
         // internal states
         for table_id in table_fragments.internal_table_ids() {

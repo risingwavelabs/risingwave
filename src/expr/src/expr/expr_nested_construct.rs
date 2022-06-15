@@ -18,6 +18,7 @@ use std::sync::Arc;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue, Row,
+    StructArrayBuilder, StructValue,
 };
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -27,44 +28,61 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Ex
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
-pub struct ArrayExpression {
-    element_type: Box<DataType>,
+pub struct NestedConstructExpression {
+    data_type: DataType,
     elements: Vec<BoxedExpression>,
 }
 
-impl Expression for ArrayExpression {
+impl Expression for NestedConstructExpression {
     fn return_type(&self) -> DataType {
-        DataType::List {
-            datatype: self.element_type.clone(),
-        }
+        self.data_type.clone()
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let columns = self
             .elements
             .iter()
-            .map(|e| {
-                let array = e.eval(input)?;
-                Ok(Column::new(array))
-            })
-            .collect::<Result<Vec<Column>>>()?;
-        let chunk = DataChunk::new(columns, input.vis().clone());
+            .map(|e| e.eval(input))
+            .collect::<Result<Vec<_>>>()?;
 
-        let mut builder = ListArrayBuilder::with_meta(
-            input.capacity(),
-            ArrayMeta::List {
-                datatype: self.element_type.clone(),
-            },
-        )
-        .map_err(ExprError::Array)?;
-        chunk
-            .rows()
-            .try_for_each(|row| builder.append_row_ref(row))
+        if let DataType::Struct { fields } = &self.data_type {
+            let mut builder = StructArrayBuilder::with_meta(
+                input.capacity(),
+                ArrayMeta::Struct {
+                    children: fields.clone(),
+                },
+            )
             .map_err(ExprError::Array)?;
-        builder
-            .finish()
-            .map(|a| Arc::new(ArrayImpl::List(a)))
-            .map_err(ExprError::Array)
+            builder
+                .append_array_refs(columns, input.capacity())
+                .map_err(ExprError::Array)?;
+            builder
+                .finish()
+                .map(|a| Arc::new(ArrayImpl::Struct(a)))
+                .map_err(Into::into)
+        } else if let DataType::List { datatype } = &self.data_type {
+            let columns = columns.into_iter().map(Column::new).collect();
+            let chunk = DataChunk::new(columns, input.vis().clone());
+            let mut builder = ListArrayBuilder::with_meta(
+                input.capacity(),
+                ArrayMeta::List {
+                    datatype: datatype.clone(),
+                },
+            )
+            .map_err(ExprError::Array)?;
+            chunk
+                .rows()
+                .try_for_each(|row| builder.append_row_ref(row))
+                .map_err(ExprError::Array)?;
+            builder
+                .finish()
+                .map(|a| Arc::new(ArrayImpl::List(a)))
+                .map_err(Into::into)
+        } else {
+            Err(ExprError::UnsupportedFunction(
+                "expects struct or list type".to_string(),
+            ))
+        }
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
@@ -73,28 +91,35 @@ impl Expression for ArrayExpression {
             .iter()
             .map(|e| e.eval_row(input))
             .collect::<Result<Vec<Datum>>>()?;
-        Ok(Some(ListValue::new(datums).to_scalar_value()))
+        if let DataType::Struct { fields: _ } = &self.data_type {
+            Ok(Some(StructValue::new(datums).to_scalar_value()))
+        } else if let DataType::List { datatype: _ } = &self.data_type {
+            Ok(Some(ListValue::new(datums).to_scalar_value()))
+        } else {
+            Err(ExprError::UnsupportedFunction(
+                "expects struct or list type".to_string(),
+            ))
+        }
     }
 }
 
-impl ArrayExpression {
-    pub fn new(ret_type: DataType, elements: Vec<BoxedExpression>) -> Self {
-        let element_type = match ret_type {
-            DataType::List { datatype } => datatype,
-            _ => unreachable!(),
-        };
-        ArrayExpression {
-            element_type,
+impl NestedConstructExpression {
+    pub fn new(data_type: DataType, elements: Vec<BoxedExpression>) -> Self {
+        NestedConstructExpression {
+            data_type,
             elements,
         }
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for ArrayExpression {
+impl<'a> TryFrom<&'a ExprNode> for NestedConstructExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Array);
+        ensure!(
+            prost.get_expr_type().unwrap() == Type::Array
+                || prost.get_expr_type().unwrap() == Type::Row
+        );
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -105,7 +130,7 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayExpression {
             .iter()
             .map(expr_build_from_prost)
             .collect::<Result<Vec<BoxedExpression>>>()?;
-        Ok(ArrayExpression::new(ret_type, elements))
+        Ok(NestedConstructExpression::new(ret_type, elements))
     }
 }
 
@@ -114,13 +139,15 @@ mod tests {
     use risingwave_common::array::{DataChunk, ListValue, Row};
     use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 
-    use super::ArrayExpression;
+    use super::NestedConstructExpression;
     use crate::expr::{BoxedExpression, Expression, LiteralExpression};
 
     #[test]
     fn test_eval_array_expr() {
-        let expr = ArrayExpression {
-            element_type: Box::new(DataType::Int32),
+        let expr = NestedConstructExpression {
+            data_type: DataType::List {
+                datatype: DataType::Int32.into(),
+            },
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
@@ -130,8 +157,10 @@ mod tests {
 
     #[test]
     fn test_eval_row_array_expr() {
-        let expr = ArrayExpression {
-            element_type: Box::new(DataType::Int32),
+        let expr = NestedConstructExpression {
+            data_type: DataType::List {
+                datatype: DataType::Int32.into(),
+            },
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 

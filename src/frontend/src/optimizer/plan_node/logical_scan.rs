@@ -370,7 +370,7 @@ impl ToStream for LogicalScan {
             true => {
                 let mut col_ids = HashSet::new();
 
-                for idx in &self.required_col_idx {
+                for idx in &self.output_col_idx {
                     col_ids.insert(self.table_desc.columns[*idx].column_id);
                 }
                 let mut col_id_to_tb_idx = HashMap::new();

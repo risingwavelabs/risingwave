@@ -52,13 +52,13 @@ impl Expression for ConcatWsExpression {
             .collect::<Vec<_>>();
 
         let row_len = input.cardinality();
-        let mut builder = Utf8ArrayBuilder::new(row_len).map_err(ExprError::Array)?;
+        let mut builder = Utf8ArrayBuilder::new(row_len)?;
 
         for row_idx in 0..row_len {
             let sep = match sep_column.value_at(row_idx) {
                 Some(sep) => sep,
                 None => {
-                    builder.append(None).map_err(ExprError::Array)?;
+                    builder.append(None)?;
                     continue;
                 }
             };
@@ -68,23 +68,21 @@ impl Expression for ConcatWsExpression {
             let mut string_columns = string_columns_ref.iter();
             for string_column in string_columns.by_ref() {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(string).map_err(ExprError::Array)?;
+                    writer.write_ref(string)?;
                     break;
                 }
             }
 
             for string_column in string_columns {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(sep).map_err(ExprError::Array)?;
-                    writer.write_ref(string).map_err(ExprError::Array)?;
+                    writer.write_ref(sep)?;
+                    writer.write_ref(string)?;
                 }
             }
 
-            builder = writer.finish().map_err(ExprError::Array)?.into_inner();
+            builder = writer.finish()?.into_inner();
         }
-        Ok(Arc::new(ArrayImpl::from(
-            builder.finish().map_err(ExprError::Array)?,
-        )))
+        Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

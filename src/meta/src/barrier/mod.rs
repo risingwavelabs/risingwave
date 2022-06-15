@@ -20,7 +20,7 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
@@ -395,7 +395,7 @@ where
                         .inject_barrier(request)
                         .await
                         .map(tonic::Response::<_>::into_inner)
-                        .to_rw_result()
+                        .map_err(Into::into)
                 }
                 .into()
             }
@@ -425,13 +425,11 @@ where
     }
 
     /// Schedule a command and return immediately.
-    #[allow(dead_code)]
     pub async fn schedule_command(&self, command: Command) -> Result<()> {
         self.do_schedule(command, Default::default()).await
     }
 
     /// Schedule a command and return when its corresponding barrier is about to sent.
-    #[allow(dead_code)]
     pub async fn issue_command(&self, command: Command) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.do_schedule(

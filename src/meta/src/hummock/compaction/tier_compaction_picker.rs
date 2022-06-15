@@ -380,6 +380,7 @@ pub mod tests {
             }),
             file_size: (right - left + 1) as u64,
             vnode_bitmaps: vec![],
+            unit_id: u64::MAX,
         }
     }
 

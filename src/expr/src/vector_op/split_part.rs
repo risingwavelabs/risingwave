@@ -62,7 +62,7 @@ pub fn split_part(
         }
     };
 
-    writer.write_ref(nth_val).map_err(ExprError::Array)
+    writer.write_ref(nth_val).map_err(Into::into)
 }
 
 #[cfg(test)]
