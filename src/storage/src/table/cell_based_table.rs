@@ -145,6 +145,7 @@ impl<S: StateStore> CellBasedTable<S> {
     /// Get a single row by point get
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: use multi-get for cell_based get_row
+        // TODO: encode vnode into key
         // let vnode = self.compute_vnode_by_row(pk);
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let serialized_pk = serialize_pk(pk, pk_serializer);
@@ -192,18 +193,16 @@ impl<S: StateStore> CellBasedTable<S> {
     /// Get a single row by range scan
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // get row by state_store scan
+        // TODO: encode vnode into key
         // let vnode = self.compute_vnode_by_row(value);
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let start_key = self.keyspace.prefixed_key(&serialize_pk(pk, pk_serializer));
         let key_range = range_of_prefix(&start_key);
 
-        // Construct a vnode bitmap according to the given vnode.
-        // let vnode_bitmap = VNodeBitmap::new_with_single_vnode(self.keyspace.table_id(), vnode);
-
         let state_store_range_scan_res = self
             .keyspace
             .state_store()
-            .scan(key_range, None, epoch, None)
+            .scan(key_range, None, epoch)
             .await?;
         let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
         for (key, value) in state_store_range_scan_res {

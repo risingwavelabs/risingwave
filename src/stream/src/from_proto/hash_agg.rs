@@ -76,13 +76,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         let keyspace = node
             .get_table_ids()
             .iter()
-            .map(|&table_id| {
-                Keyspace::table_root_with_vnodes(
-                    store.clone(),
-                    &TableId::new(table_id),
-                    (*params.vnode_bitmap).clone(),
-                )
-            })
+            .map(|&table_id| Keyspace::table_root(store.clone(), &TableId::new(table_id)))
             .collect();
         let input = params.input.remove(0);
         let keys = key_indices
