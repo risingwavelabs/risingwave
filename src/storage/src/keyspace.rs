@@ -104,9 +104,10 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Scans `limit` keys from the given `range` in this keyspace and get their values.
-    /// Note that the `range` should not be prepended with the prefix of this keyspace.
     /// If `limit` is None, all keys of the given prefix will be scanned.
     /// The returned values are based on a snapshot corresponding to the given `epoch`.
+    ///
+    /// **Note**: the `range` should not be prepended with the prefix of this keyspace.
     pub async fn scan_with_range<R, B>(
         &self,
         range: R,
@@ -132,8 +133,9 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Gets an iterator of the given `range` in this keyspace.
-    /// Note that the `range` should not be prepended with the prefix of this keyspace.
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
+    ///
+    /// **Note**: the `range` should not be prepended with the prefix of this keyspace.
     pub async fn iter_with_range<R, B>(
         &self,
         range: R,
