@@ -122,12 +122,10 @@ impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut builder = if self.is_delta {
             f.debug_struct("StreamDeltaHashJoin")
+        } else if self.is_append_only {
+            f.debug_struct("StreamAppendOnlyHashJoin")
         } else {
-            if self.is_append_only {
-                f.debug_struct("StreamAppendOnlyHashJoin")
-            } else {
-                f.debug_struct("StreamHashJoin")
-            }
+            f.debug_struct("StreamHashJoin")
         };
         builder
             .field("type", &format_args!("{:?}", self.logical.join_type()))
