@@ -31,7 +31,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::jitter;
-use tracing::{debug, error};
+use tracing::error;
 
 use super::local_version::{LocalVersion, PinnedVersion, ReadVersion};
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -54,7 +54,8 @@ struct WorkerContext {
 }
 
 struct BufferTracker {
-    capacity: usize,
+    flush_threshold: usize,
+    block_write_threshold: usize,
     global_buffer_size: Arc<AtomicUsize>,
     global_upload_task_size: Arc<AtomicUsize>,
 
@@ -73,13 +74,11 @@ impl BufferTracker {
     /// Requesting to write data with `size`. The request will be blocked until we have enough
     /// memory space to write the data.
     pub async fn request_write(&self, size: usize) {
-        if self.can_write() {
+        if self.can_direct_write() {
             self.global_buffer_size.fetch_add(size, Relaxed);
         } else {
             let (tx, rx) = oneshot::channel();
-            self.buffer_event_sender
-                .send(SharedBufferEvent::WriteRequest(size, tx))
-                .unwrap();
+            self.send_event(SharedBufferEvent::WriteRequest(size, tx));
             // global buffer size will have been added when the request is granted. So we shouldn't
             // add to global buffer size
             rx.await
@@ -88,15 +87,21 @@ impl BufferTracker {
     }
 
     pub fn can_write(&self) -> bool {
-        self.get_buffer_size() <= self.capacity
+        self.get_buffer_size() <= self.block_write_threshold
     }
 
-    /// Return whether we need more flush task
-    ///
+    pub fn can_direct_write(&self) -> bool {
+        self.get_buffer_size() <= self.flush_threshold
+    }
+
     /// Return true when the buffer size minus current upload task size is still greater than the
     /// capacity
     pub fn need_more_flush(&self) -> bool {
-        self.get_buffer_size() - self.get_upload_task_size() > self.capacity
+        self.get_buffer_size() - self.get_upload_task_size() > self.flush_threshold
+    }
+
+    pub fn send_event(&self, event: SharedBufferEvent) {
+        self.buffer_event_sender.send(event).unwrap();
     }
 }
 
@@ -137,13 +142,18 @@ impl LocalVersionManager {
 
         let (buffer_event_sender, buffer_event_receiver) = mpsc::unbounded_channel();
 
+        let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
+
         let local_version_manager = Arc::new(LocalVersionManager {
             local_version: RwLock::new(LocalVersion::new(pinned_version, version_unpin_worker_tx)),
             worker_context: WorkerContext {
                 version_update_notifier_tx,
             },
             buffer_tracker: BufferTracker {
-                capacity: (options.shared_buffer_capacity_mb as usize) * (1 << 20),
+                block_write_threshold: capacity,
+                // 0.8 * capacity
+                // TODO: enable setting the ratio with config
+                flush_threshold: capacity * 4 / 5,
                 global_buffer_size: Arc::new(AtomicUsize::new(0)),
                 global_upload_task_size: Arc::new(AtomicUsize::new(0)),
                 buffer_event_sender: Arc::new(buffer_event_sender),
@@ -171,7 +181,7 @@ impl LocalVersionManager {
         ));
 
         // Buffer size manager.
-        tokio::spawn(LocalVersionManager::start_buffer_manager(
+        tokio::spawn(LocalVersionManager::start_buffer_tracker_worker(
             local_version_manager.clone(),
             buffer_event_receiver,
         ));
@@ -279,17 +289,15 @@ impl LocalVersionManager {
             shared_buffer.write().write_batch(batch);
         }
 
-        // Notify the buffer manager after the batch has been added to shared buffer.
+        // Notify the buffer tracker after the batch has been added to shared buffer.
         self.buffer_tracker
-            .buffer_event_sender
-            .send(SharedBufferEvent::BatchAdded)
-            .unwrap();
+            .send_event(SharedBufferEvent::BatchAdded);
         Ok(batch_size)
     }
 
     /// Issue a concurrent upload task to flush some local shared buffer batch to object store.
     ///
-    /// This method should only be called in the shared buffer manager thread.
+    /// This method should only be called in the buffer tracker worker.
     ///
     /// Return:
     ///   - Some(task buffer size, task join handle) when there is new upload task
@@ -315,11 +323,6 @@ impl LocalVersionManager {
             Some(task) => task,
             None => return None,
         };
-
-        debug!(
-            "flush shared buffer: epoch {}, order index {} size {}",
-            epoch, order_index, task_write_batch_size
-        );
 
         let join_handle = tokio::spawn(async move {
             // TODO: may apply different `is_local` according to whether local spill is enabled.
@@ -355,9 +358,7 @@ impl LocalVersionManager {
     pub async fn sync_shared_buffer_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
-            .buffer_event_sender
-            .send(SharedBufferEvent::SyncEpoch(epoch, tx))
-            .unwrap();
+            .send_event(SharedBufferEvent::SyncEpoch(epoch, tx));
         let join_handles = rx.await.unwrap();
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
@@ -391,9 +392,7 @@ impl LocalVersionManager {
             conflict_detector.archive_epoch(epoch);
         }
         self.buffer_tracker
-            .buffer_event_sender
-            .send(SharedBufferEvent::EpochSynced(epoch))
-            .unwrap();
+            .send_event(SharedBufferEvent::EpochSynced(epoch));
         ret
     }
 
@@ -427,9 +426,7 @@ impl LocalVersionManager {
             }
         };
         self.buffer_tracker
-            .buffer_event_sender
-            .send(SharedBufferEvent::UploadTaskFinish(task_write_batch_size))
-            .unwrap();
+            .send_event(SharedBufferEvent::UploadTaskFinish(task_write_batch_size));
         ret
     }
 
@@ -606,7 +603,7 @@ impl LocalVersionManager {
         }
     }
 
-    pub async fn start_buffer_manager(
+    pub async fn start_buffer_tracker_worker(
         local_version_manager: Arc<LocalVersionManager>,
         mut buffer_size_change_receiver: mpsc::UnboundedReceiver<SharedBufferEvent>,
     ) {
