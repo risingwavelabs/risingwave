@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(any(test, feature = "test"))]
 use prost::Message;
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
@@ -24,6 +25,7 @@ use super::{HashMappingManager, HashMappingManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, NotificationManager, NotificationManagerRef,
 };
+#[cfg(any(test, feature = "test"))]
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
