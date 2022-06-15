@@ -50,9 +50,14 @@ impl CatalogReader {
 /// the version.
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
-    async fn create_database(&self, db_name: &str) -> Result<()>;
+    async fn create_database(&self, db_name: &str, owner: String) -> Result<()>;
 
-    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()>;
+    async fn create_schema(
+        &self,
+        db_id: DatabaseId,
+        schema_name: &str,
+        owner: String,
+    ) -> Result<()>;
 
     async fn create_materialized_view(
         &self,
@@ -92,24 +97,31 @@ pub struct CatalogWriterImpl {
 
 #[async_trait::async_trait]
 impl CatalogWriter for CatalogWriterImpl {
-    async fn create_database(&self, db_name: &str) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_database(ProstDatabase {
                 name: db_name.to_string(),
                 id: 0,
+                owner,
             })
             .await?;
         self.wait_version(version).await
     }
 
-    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+    async fn create_schema(
+        &self,
+        db_id: DatabaseId,
+        schema_name: &str,
+        owner: String,
+    ) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_schema(ProstSchema {
                 id: 0,
                 name: schema_name.to_string(),
                 database_id: db_id,
+                owner,
             })
             .await?;
         self.wait_version(version).await

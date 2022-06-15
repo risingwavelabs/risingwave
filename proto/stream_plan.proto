@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package stream_plan;
 
-import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
@@ -68,14 +67,18 @@ message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   repeated uint32 distribution_keys = 2;
   repeated uint32 table_ids = 3;
-  bool append_only = 4;
+  // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 4;
 }
 
 message HashAggNode {
   repeated uint32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated uint32 table_ids = 3;
-  bool append_only = 4;
+  // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 4;
 }
 
 message TopNNode {
@@ -102,6 +105,9 @@ message HashJoinNode {
   uint32 left_table_id = 7;
   // Used for internal table states. Id of the right table.
   uint32 right_table_id = 8;
+  // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 9;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -165,8 +171,6 @@ message BatchPlanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
   repeated uint32 distribution_keys = 3;
-  common.ParallelUnitMapping hash_mapping = 4;
-  uint32 parallel_unit_id = 5;
 }
 
 message ArrangementInfo {

@@ -39,6 +39,7 @@ pub struct SchemaCatalog {
     source_name_by_id: HashMap<SourceId, String>,
     sink_by_name: HashMap<String, SinkCatalog>,
     sink_name_by_id: HashMap<SinkId, String>,
+    owner: String,
 }
 
 impl SchemaCatalog {
@@ -156,6 +157,10 @@ impl SchemaCatalog {
     pub fn id(&self) -> SchemaId {
         self.id
     }
+
+    pub fn owner(&self) -> String {
+        self.owner.clone()
+    }
 }
 
 impl From<&ProstSchema> for SchemaCatalog {
@@ -167,8 +172,12 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
+<<<<<<< HEAD
             sink_by_name: HashMap::new(),
             sink_name_by_id: HashMap::new(),
+=======
+            owner: schema.owner.clone(),
+>>>>>>> main
         }
     }
 }

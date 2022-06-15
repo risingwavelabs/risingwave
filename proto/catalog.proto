@@ -29,6 +29,7 @@ message Source {
     StreamSourceInfo stream_source = 5;
     TableSourceInfo table_source = 6;
   }
+  string owner = 7;
 }
 
 message StreamSinkInfo {
@@ -81,15 +82,18 @@ message Table {
   repeated int32 distribution_keys = 12;
   repeated int32 pk = 13;
   bool appendonly = 14;
+  string owner = 15;
 }
 
 message Schema {
   uint32 id = 1;
   uint32 database_id = 2;
   string name = 3;
+  string owner = 4;
 }
 
 message Database {
   uint32 id = 1;
   string name = 2;
+  string owner = 3;
 }

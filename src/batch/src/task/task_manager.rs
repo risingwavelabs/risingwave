@@ -81,7 +81,7 @@ impl BatchManager {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
             match task_output.take_data(&mut writer).await {
                 Ok(_) => {
-                    tracing::debug!(
+                    tracing::trace!(
                         from = ?task_id,
                         "exchanged {} chunks",
                         writer.written_chunks(),

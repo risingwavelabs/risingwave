@@ -4388,6 +4388,7 @@ dependencies = [
 name = "risingwave_rpc_client"
 version = "0.1.9"
 dependencies = [
+ "anyhow",
  "async-trait",
  "futures",
  "log",
@@ -4399,6 +4400,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
+ "thiserror",
  "tokio-retry",
  "tracing",
  "workspace-hack",

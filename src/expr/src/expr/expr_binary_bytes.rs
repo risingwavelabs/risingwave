@@ -20,6 +20,7 @@ use risingwave_common::types::DataType;
 use super::Expression;
 use crate::expr::template::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
+use crate::vector_op::concat_op::concat_op;
 use crate::vector_op::repeat::repeat;
 use crate::vector_op::substr::*;
 use crate::vector_op::to_char::to_char_timestamp;
@@ -75,6 +76,20 @@ pub fn new_repeat(
 ) -> BoxedExpression {
     BinaryBytesExpression::<Utf8Array, I32Array, _>::new(expr_ia1, expr_ia2, return_type, repeat)
         .boxed()
+}
+
+pub fn new_concat_op(
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    BinaryBytesExpression::<Utf8Array, Utf8Array, _>::new(
+        expr_ia1,
+        expr_ia2,
+        return_type,
+        concat_op,
+    )
+    .boxed()
 }
 
 #[cfg(test)]

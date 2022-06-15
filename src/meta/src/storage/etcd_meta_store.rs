@@ -207,6 +207,9 @@ impl MetaStore for EtcdMetaStore {
                 super::Precondition::KeyExists { cf, key } => {
                     Compare::value(encode_etcd_key(&cf, &key), CompareOp::NotEqual, vec![])
                 }
+                super::Precondition::KeyEqual { cf, key, value } => {
+                    Compare::value(encode_etcd_key(&cf, &key), CompareOp::Equal, value)
+                }
             })
             .collect::<Vec<_>>();
 

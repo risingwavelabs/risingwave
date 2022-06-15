@@ -1,0 +1,8 @@
+statement ok
+create table t(v int);
+
+statement ok
+explain create index i on t(v);
+
+statement ok
+drop table t;
