@@ -102,13 +102,18 @@ const fn is_semi_or_anti(join_type: JoinTypePrimitive) -> bool {
 }
 
 pub struct JoinParams {
-    /// Indices of the join columns
+    /// Indices of the join keys
     pub key_indices: Vec<usize>,
+    /// Indices of the distribution keys
+    pub dist_keys: Vec<usize>,
 }
 
 impl JoinParams {
-    pub fn new(key_indices: Vec<usize>) -> Self {
-        Self { key_indices }
+    pub fn new(key_indices: Vec<usize>, dist_keys: Vec<usize>) -> Self {
+        Self {
+            key_indices,
+            dist_keys,
+        }
     }
 }
 
@@ -355,7 +360,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<RowExpression>,
         op_info: String,
-        distribution_keys: Vec<usize>,
         ks_l: Keyspace<S>,
         ks_r: Keyspace<S>,
         append_only: bool,
@@ -425,7 +429,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
                     ks_l,
-                    Some(distribution_keys.clone()),
+                    Some(params_l.dist_keys.clone()),
                 ), // TODO: decide the target cap
                 key_indices: params_l.key_indices,
                 col_types: col_l_datatypes,
@@ -439,7 +443,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
                     ks_r,
-                    Some(distribution_keys),
+                    Some(params_r.dist_keys.clone()),
                 ), // TODO: decide the target cap
                 key_indices: params_r.key_indices,
                 col_types: col_r_datatypes,
@@ -762,8 +766,8 @@ mod tests {
         };
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0, 1]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![0, 1]);
-        let params_l = JoinParams::new(vec![0]);
-        let params_r = JoinParams::new(vec![0]);
+        let params_l = JoinParams::new(vec![0], vec![]);
+        let params_r = JoinParams::new(vec![0], vec![]);
         let cond = with_condition.then(create_cond);
 
         let (ks_l, ks_r) = create_in_memory_keyspace();
@@ -777,7 +781,6 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            vec![],
             ks_l,
             ks_r,
             false,
@@ -797,8 +800,8 @@ mod tests {
         };
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![0]);
-        let params_l = JoinParams::new(vec![0, 1]);
-        let params_r = JoinParams::new(vec![0, 1]);
+        let params_l = JoinParams::new(vec![0, 1], vec![]);
+        let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(create_cond);
 
         let (ks_l, ks_r) = create_in_memory_keyspace();
@@ -812,7 +815,6 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            vec![],
             ks_l,
             ks_r,
             true,

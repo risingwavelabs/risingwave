@@ -42,6 +42,9 @@ pub struct StreamHashJoin {
     /// be create automatically when building the executors on meta service. For testing purpose
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
+
+    dist_key_l: Distribution,
+    dist_key_r: Distribution,
 }
 
 impl StreamHashJoin {
@@ -52,11 +55,19 @@ impl StreamHashJoin {
             JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
             _ => false,
         };
-        let dist = Self::derive_dist(
+        let dist_l = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
             &logical
                 .l2i_col_mapping()
+                .composite(&logical.i2o_col_mapping()),
+        );
+
+        let dist_r = Self::derive_dist(
+            logical.left().distribution(),
+            logical.right().distribution(),
+            &logical
+                .r2i_col_mapping()
                 .composite(&logical.i2o_col_mapping()),
         );
 
@@ -71,7 +82,7 @@ impl StreamHashJoin {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.to_vec(),
-            dist,
+            dist_l.clone(),
             append_only,
         );
 
@@ -80,6 +91,8 @@ impl StreamHashJoin {
             logical,
             eq_join_predicate,
             is_delta: force_delta,
+            dist_key_l: dist_l,
+            dist_key_r: dist_r,
         }
     }
 
@@ -96,12 +109,12 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        l2o_mapping: &ColIndexMapping,
+        side2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
+                side2o_mapping.rewrite_provided_distribution(left)
             }
             (_, _) => panic!(),
         }
@@ -171,14 +184,19 @@ impl ToStreamProst for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            distribution_keys: self
-                .base
-                .dist
+            is_delta_join: self.is_delta,
+            dist_key_l: self
+                .dist_key_l
                 .dist_column_indices()
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect_vec(),
-            is_delta_join: self.is_delta,
+            dist_key_r: self
+                .dist_key_r
+                .dist_column_indices()
+                .iter()
+                .map(|idx| *idx as u32)
+                .collect_vec(),
             ..Default::default()
         })
     }
