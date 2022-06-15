@@ -39,7 +39,6 @@ use crate::cell_based_row_deserializer::{
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::monitor::StateStoreMetrics;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
@@ -69,9 +68,6 @@ pub struct CellBasedTable<S: StateStore> {
 
     column_ids: Vec<ColumnId>,
 
-    /// Statistics.
-    stats: Arc<StateStoreMetrics>,
-
     /// Indices of distribution keys in full row for computing value meta. None if value meta is
     /// not required.
     dist_key_indices: Option<Vec<usize>>,
@@ -94,7 +90,6 @@ impl<S: StateStore> CellBasedTable<S> {
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         ordered_row_serializer: Option<OrderedRowSerializer>,
-        stats: Arc<StateStoreMetrics>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         let schema = Schema::new(
@@ -113,7 +108,6 @@ impl<S: StateStore> CellBasedTable<S> {
             pk_serializer: ordered_row_serializer,
             cell_based_row_serializer: CellBasedRowSerializer::new(),
             column_ids,
-            stats,
             dist_key_indices,
         }
     }
@@ -127,18 +121,13 @@ impl<S: StateStore> CellBasedTable<S> {
             keyspace,
             column_descs,
             Some(OrderedRowSerializer::new(order_types)),
-            Arc::new(StateStoreMetrics::unused()),
             None,
         )
     }
 
     /// Creates an "adhoc" [`CellBasedTable`] with specified columns.
-    pub fn new_adhoc(
-        keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
-        stats: Arc<StateStoreMetrics>,
-    ) -> Self {
-        Self::new(keyspace, column_descs, None, stats, None)
+    pub fn new_adhoc(keyspace: Keyspace<S>, column_descs: Vec<ColumnDesc>) -> Self {
+        Self::new(keyspace, column_descs, None, None)
     }
 
     /// Get a single row by point get
@@ -343,7 +332,6 @@ impl<S: StateStore> CellBasedTable<S> {
             self.keyspace.clone(),
             self.mapping.clone(),
             epoch,
-            self.stats.clone(),
             pk_descs,
         )
         .await
@@ -572,7 +560,6 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         keyspace: Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
         epoch: u64,
-        _stats: Arc<StateStoreMetrics>,
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<Self> {
         let inner = CellBasedTableRowIter::new(&keyspace, table_descs.clone(), epoch).await?;

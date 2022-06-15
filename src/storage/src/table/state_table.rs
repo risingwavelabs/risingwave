@@ -31,7 +31,6 @@ use super::cell_based_table::{CellBasedTable, CellBasedTableStreamingIter};
 use super::mem_table::{MemTable, RowOp};
 use crate::cell_based_row_deserializer::{make_column_desc_index, ColumnDescMapping};
 use crate::error::{StorageError, StorageResult};
-use crate::monitor::StateStoreMetrics;
 use crate::{Keyspace, StateStore};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
@@ -67,7 +66,6 @@ impl<S: StateStore> StateTable<S> {
                 cell_based_keyspace,
                 cell_based_column_descs,
                 Some(OrderedRowSerializer::new(order_types)),
-                Arc::new(StateStoreMetrics::unused()),
                 dist_key_indices,
             ),
             pk_indices,
