@@ -57,7 +57,11 @@ impl StreamHashAgg {
 
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamHashAgg");
+        let mut builder = if self.input().append_only() {
+            f.debug_struct("StreamAppendOnlyHashAgg")
+        } else {
+            f.debug_struct("StreamHashAgg")
+        };
         builder
             .field(
                 "group_keys",
@@ -70,7 +74,7 @@ impl fmt::Display for StreamHashAgg {
             )
             .field("aggs", &self.agg_calls());
 
-        if self.base.append_only {
+        if self.append_only() {
             builder.field("append_only", &format_args!("{}", true));
         }
         builder.finish()
@@ -104,7 +108,7 @@ impl ToStreamProst for StreamHashAgg {
                 .map(PlanAggCall::to_protobuf)
                 .collect_vec(),
             table_ids: vec![],
-            append_only: self.append_only(),
+            is_append_only: self.input().append_only(),
         })
     }
 }

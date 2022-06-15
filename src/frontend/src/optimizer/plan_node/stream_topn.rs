@@ -49,13 +49,21 @@ impl StreamTopN {
 
 impl fmt::Display for StreamTopN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "StreamTopN {{ order: {}, limit: {}, offset: {} }}",
-            self.logical.topn_order(),
-            self.logical.limit(),
-            self.logical.offset(),
-        )
+        let mut builder = if self.input().append_only() {
+            f.debug_struct("StreamAppendOnlyTopN")
+        } else {
+            f.debug_struct("StreamTopN")
+        };
+
+        builder.field("order", self.logical.topn_order());
+        builder.field("limit", &format_args!("{}", self.logical.limit()));
+        builder.field("offset", &format_args!("{}", self.logical.offset()));
+
+        if self.append_only() {
+            builder.field("append_only", &format_args!("{}", true));
+        }
+
+        builder.finish()
     }
 }
 
@@ -87,12 +95,19 @@ impl ToStreamProst for StreamTopN {
                 return_type: Some(self.input().schema()[f.index].data_type().to_protobuf()),
             })
             .collect();
-        ProstStreamNode::TopN(TopNNode {
+
+        let topn_node = TopNNode {
             column_orders,
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,
             distribution_keys: vec![], // TODO: seems unnecessary
             ..Default::default()
-        })
+        };
+
+        if self.input().append_only() {
+            ProstStreamNode::AppendOnlyTopN(topn_node)
+        } else {
+            ProstStreamNode::TopN(topn_node)
+        }
     }
 }

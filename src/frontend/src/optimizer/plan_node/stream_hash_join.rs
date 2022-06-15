@@ -42,6 +42,10 @@ pub struct StreamHashJoin {
     /// be create automatically when building the executors on meta service. For testing purpose
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
+
+    /// Whether can optimize for append-only stream.
+    /// It is true if input of both side is append-only
+    is_append_only: bool,
 }
 
 impl StreamHashJoin {
@@ -80,6 +84,7 @@ impl StreamHashJoin {
             logical,
             eq_join_predicate,
             is_delta: force_delta,
+            is_append_only: append_only,
         }
     }
 
@@ -118,7 +123,11 @@ impl fmt::Display for StreamHashJoin {
         let mut builder = if self.is_delta {
             f.debug_struct("StreamDeltaHashJoin")
         } else {
-            f.debug_struct("StreamHashJoin")
+            if self.is_append_only {
+                f.debug_struct("StreamAppendOnlyHashJoin")
+            } else {
+                f.debug_struct("StreamHashJoin")
+            }
         };
         builder
             .field("type", &format_args!("{:?}", self.logical.join_type()))
@@ -179,6 +188,7 @@ impl ToStreamProst for StreamHashJoin {
                 .map(|idx| *idx as u32)
                 .collect_vec(),
             is_delta_join: self.is_delta,
+            is_append_only: self.is_append_only,
             ..Default::default()
         })
     }
