@@ -192,22 +192,6 @@ impl SourceReader {
                     break 'outer;
                 }
             }
-            // if let Ok(reader) = inject_source_rx.try_recv() {
-            //     stream_reader = reader;
-            // }
-            // match stream_reader.next().await {
-            //     Ok(chunk) => yield chunk,
-            //     Err(e) => {
-            //         // TODO: report this error to meta service to mark the actors failed.
-            //         error!("hang up stream reader due to polling error: {}", e);
-
-            //         // Drop the reader, then the error might be caught by the writer side.
-            //         drop(stream_reader);
-            //         // Then hang up this stream by breaking the loop.
-            //         break 'outer;
-            //     }
-            // }
-            // }
         }
 
         futures::future::pending().await
@@ -397,6 +381,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     match self.get_diff(target_splits) {
                                         None => {}
                                         Some(target_state) => {
+                                            log::info!("actor {:?} apply source split change to {:?}", self.actor_id, target_state);
                                             let reader = self
                                                 .build_stream_source_reader(Some(
                                                     target_state.clone(),
