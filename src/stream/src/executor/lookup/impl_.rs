@@ -427,7 +427,6 @@ impl<S: StateStore> LookupExecutor<S> {
         if let Some((_, last_row)) = self.arrangement.deserializer.take() {
             all_rows.push(last_row);
         }
-        println!("all rows: {:#?}", all_rows);
 
         tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows);
 

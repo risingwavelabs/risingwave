@@ -58,7 +58,8 @@ pub fn make_cell_based_row_deserializer(
     data_types: Vec<DataType>,
     pk_indices: Vec<usize>,
 ) -> GeneralCellBasedRowDeserializer {
-    let pk_indices = vec![2];
+    // let pk_indices = vec![2];
+    // println!("pk_indices: {:#?}", pk_indices);
     let pk_descs = table_column_descs
         .iter()
         .enumerate()
@@ -73,6 +74,7 @@ pub fn make_cell_based_row_deserializer(
         .filter(|(i, d)| pk_indices.contains(i))
         .map(|(i, d)| d)
         .collect_vec();
+    println!("data_types: {:#?}", data_types);
     let order_types = data_types
         .iter()
         .map(|_| OrderType::Ascending) // FIXME: THIS IS A HACK
@@ -135,6 +137,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
             .pk_decoder
             .deserialize(pk)
             .map_err(StorageError::CellBasedTable)?;
+        println!("deserialized row from pk: {:#?}", ordered_row);
         Ok(ordered_row.into_row())
     }
 
