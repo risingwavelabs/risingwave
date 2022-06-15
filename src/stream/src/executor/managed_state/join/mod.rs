@@ -245,7 +245,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let table_iter = self
             .state_table
-            .iter_with_pk_prefix(Some(&key), self.current_epoch)?;
+            .iter_with_pk_prefix(&key, self.current_epoch).await?;
         pin_mut!(table_iter);
 
         let mut cached = BTreeMap::new();
@@ -280,7 +280,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             entry.insert(pk.clone(), value.clone());
         }
 
-        let table_pk = self.get_table_pk(join_key, pk)?;
         // If no cache maintained, only update the flush buffer.
         self.state_table.insert(value.into_row())?;
         Ok(())
@@ -292,7 +291,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             entry.remove(pk.clone());
         }
 
-        let table_pk = self.get_table_pk(join_key, pk)?;
         // If no cache maintained, only update the flush buffer.
         self.state_table.delete(value.into_row())?;
         Ok(())

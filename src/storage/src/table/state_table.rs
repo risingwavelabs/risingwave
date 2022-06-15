@@ -11,12 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::btree_map::Range;
 use std::marker::PhantomData;
-use std::ops::Bound::{Excluded, Included, Unbounded};
-use std::ops::{Bound, Index, RangeBounds};
+use std::ops::{Index, RangeBounds};
 use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
@@ -98,8 +97,8 @@ impl<S: StateStore> StateTable<S> {
     /// write methods
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
         let mut datums = vec![];
-        for pk_indice in &self.pk_indices {
-            datums.push(value.index(*pk_indice).clone());
+        for pk_index in &self.pk_indices {
+            datums.push(value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
         let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
@@ -109,8 +108,8 @@ impl<S: StateStore> StateTable<S> {
 
     pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
         let mut datums = vec![];
-        for pk_indice in &self.pk_indices {
-            datums.push(old_value.index(*pk_indice).clone());
+        for pk_index in &self.pk_indices {
+            datums.push(old_value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
         let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());

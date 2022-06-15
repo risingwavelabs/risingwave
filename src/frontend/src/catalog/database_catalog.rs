@@ -26,6 +26,7 @@ pub struct DatabaseCatalog {
     name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
+    owner: String,
 }
 
 impl DatabaseCatalog {
@@ -64,6 +65,10 @@ impl DatabaseCatalog {
     pub fn id(&self) -> DatabaseId {
         self.id
     }
+
+    pub fn owner(&self) -> String {
+        self.owner.clone()
+    }
 }
 impl From<&ProstDatabase> for DatabaseCatalog {
     fn from(db: &ProstDatabase) -> Self {
@@ -72,6 +77,7 @@ impl From<&ProstDatabase> for DatabaseCatalog {
             name: db.name.clone(),
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),
+            owner: db.owner.clone(),
         }
     }
 }
