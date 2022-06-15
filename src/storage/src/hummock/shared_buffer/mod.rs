@@ -24,10 +24,11 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::consistent_hash::VNodeBitmap;
-use risingwave_hummock_sdk::is_remote_sst_id;
 use risingwave_hummock_sdk::key::user_key;
+use risingwave_hummock_sdk::{is_remote_sst_id, HummockEpoch};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 use self::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::iterator::{
@@ -175,6 +176,14 @@ pub enum SharedBufferEvent {
 
     /// An upload task is finished
     UploadTaskFinish(usize),
+
+    /// An epoch is going to be synced. Once the event is processed, there will be no more flush
+    /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
+    /// handle sender.
+    SyncEpoch(HummockEpoch, oneshot::Sender<Vec<JoinHandle<()>>>),
+
+    /// An epoch has been synced.
+    EpochSynced(HummockEpoch),
 }
 
 impl SharedBuffer {
