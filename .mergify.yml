@@ -1,0 +1,26 @@
+queue_rules:
+  - name: default
+    conditions: []
+
+pull_request_rules:
+  - name: Automatic merge on approval
+    conditions:
+      - "base=main"
+      - "#approved-reviews-by>=1"
+      - "check-success=buildkite/pull-request"
+      - "check-success=buildkite/pull-request/end-to-end-test"
+      - "check-success=buildkite/pull-request/end-to-end-test-parallel"
+      - "check-success=buildkite/docker"
+      - "check-success=buildkite/pull-request/build"
+      - "check-success=buildkite/pull-request/end-to-end-source-test"
+      - "check-success=buildkite/pull-request/misc-check"
+      - "check-success=buildkite/pull-request/pipeline-pipeline-upload"
+      - "check-success=buildkite/pull-request/pre-unit-test"
+      - "check-success=buildkite/pull-request/unit-test"
+      - "check-success=buildkite/pull-request/unit-test-deterministic-simulation"
+      - "check-success=license/cla"
+      - "check-success=task-list-completed"
+    actions:
+      queue:
+        name: default
+        method: squash
