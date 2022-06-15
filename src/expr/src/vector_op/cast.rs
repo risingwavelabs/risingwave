@@ -182,6 +182,12 @@ pub fn general_to_string<T: std::fmt::Display>(elem: T) -> Result<String> {
     Ok(elem.to_string())
 }
 
+/// `bool_out` is different from `general_to_string<bool>` to produce a single char. `PostgreSQL`
+/// uses different variants of bool-to-string in different situations.
+pub fn bool_out(input: bool) -> Result<String> {
+    Ok(if input { "t".into() } else { "f".into() })
+}
+
 #[cfg(test)]
 mod tests {
     use num_traits::FromPrimitive;
