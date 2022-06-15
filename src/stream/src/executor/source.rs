@@ -31,7 +31,7 @@ use risingwave_connector::{
 };
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{channel, unbounded_channel, Receiver, UnboundedReceiver};
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
@@ -152,37 +152,56 @@ impl SourceReader {
         mut stream_reader: Box<dyn StreamSourceReader>,
         notifier: Arc<Notify>,
         expected_barrier_latency_ms: u64,
-        mut inject_source_rx: UnboundedReceiver<Box<SourceStreamReaderImpl>>,
+        mut inject_source_rx: Receiver<Box<SourceStreamReaderImpl>>,
     ) {
-        'outer: loop {
-            let now = Instant::now();
+        let (msg_tx, mut msg_rx) = tokio::sync::mpsc::channel::<Result<StreamChunkWithState>>(std::mem::size_of::<Result<StreamChunkWithState>>());
+        let handler = tokio::task::spawn(async move {
+            loop {
+                let now = Instant::now();
 
-            // We allow data to flow for `expected_barrier_latency_ms` milliseconds.
-            while now.elapsed().as_millis() < expected_barrier_latency_ms as u128 {
-                if let Ok(reader) = inject_source_rx.try_recv() {
-                    stream_reader = reader;
-                }
-                match stream_reader.next().await {
-                    Ok(chunk) => yield chunk,
-                    Err(e) => {
-                        // TODO: report this error to meta service to mark the actors failed.
-                        error!("hang up stream reader due to polling error: {}", e);
-
-                        // Drop the reader, then the error might be caught by the writer side.
-                        drop(stream_reader);
-                        // Then hang up this stream by breaking the loop.
-                        break 'outer;
+                // We allow data to flow for `expected_barrier_latency_ms` milliseconds.
+                while now.elapsed().as_millis() < expected_barrier_latency_ms as u128 {
+                    tokio::select! {
+                        reader = inject_source_rx.recv() => { stream_reader = reader.unwrap(); }
+                        chunk = stream_reader.next() => { msg_tx.send(chunk).await.unwrap(); }
                     }
                 }
+
+                // Here we consider two cases:
+                //
+                // 1. Barrier arrived before waiting for notified. In this case, this await will
+                // complete instantly, and we will continue to produce new data.
+                // 2. Barrier arrived after waiting for notified. Then source will be stalled.
+
+                notifier.notified().await;
             }
+        });
+        'outer: loop {
+            match msg_rx.recv().await.unwrap() {
+                Ok(chunk) => yield chunk,
+                Err(e) => {
+                    error!("hang up stream reader due to polling error: {}", e);
+                    handler.abort();
+                    // Then hang up this stream by breaking the loop.
+                    break 'outer;
+                }
+            }
+            // if let Ok(reader) = inject_source_rx.try_recv() {
+            //     stream_reader = reader;
+            // }
+            // match stream_reader.next().await {
+            //     Ok(chunk) => yield chunk,
+            //     Err(e) => {
+            //         // TODO: report this error to meta service to mark the actors failed.
+            //         error!("hang up stream reader due to polling error: {}", e);
 
-            // Here we consider two cases:
-            //
-            // 1. Barrier arrived before waiting for notified. In this case, this await will
-            // complete instantly, and we will continue to produce new data.
-            // 2. Barrier arrived after waiting for notified. Then source will be stalled.
-
-            notifier.notified().await;
+            //         // Drop the reader, then the error might be caught by the writer side.
+            //         drop(stream_reader);
+            //         // Then hang up this stream by breaking the loop.
+            //         break 'outer;
+            //     }
+            // }
+            // }
         }
 
         futures::future::pending().await
@@ -201,7 +220,7 @@ impl SourceReader {
 
     fn into_stream(
         self,
-        inject_source: UnboundedReceiver<Box<SourceStreamReaderImpl>>,
+        inject_source: Receiver<Box<SourceStreamReaderImpl>>,
     ) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunkWithState>>> {
         let notifier = Arc::new(Notify::new());
 
@@ -351,8 +370,7 @@ impl<S: StateStore> SourceExecutor<S> {
         };
         yield Message::Barrier(barrier);
 
-        let (inject_source_tx, inject_source_rx) =
-            unbounded_channel::<Box<SourceStreamReaderImpl>>();
+        let (inject_source_tx, inject_source_rx) = channel::<Box<SourceStreamReaderImpl>>(std::mem::size_of::<Box<SourceStreamReaderImpl>>());
         #[for_await]
         for msg in reader.into_stream(inject_source_rx) {
             match msg {
@@ -376,13 +394,15 @@ impl<S: StateStore> SourceExecutor<S> {
                                                 .build_stream_source_reader(Some(target_state))
                                                 .await
                                                 .map_err(StreamExecutorError::source_error)?;
-                                            inject_source_tx.send(reader).to_rw_result().map_err(
-                                                |e| {
+                                            inject_source_tx
+                                                .send(reader)
+                                                .await
+                                                .to_rw_result()
+                                                .map_err(|e| {
                                                     StreamExecutorError::channel_closed(
                                                         e.to_string(),
                                                     )
-                                                },
-                                            )?;
+                                                })?;
                                         }
                                     }
                                 }
