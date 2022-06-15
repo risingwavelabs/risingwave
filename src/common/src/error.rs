@@ -109,6 +109,8 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
+    #[error("RPC error: {0:?}")]
+    RpcError(BoxedError),
     #[error("Parse error: {0}")]
     ParseError(String),
     #[error("Bind error: {0}")]
@@ -337,6 +339,7 @@ impl ErrorCode {
             ErrorCode::ArrayError(_) => 29,
             ErrorCode::SchedulerError(_) => 30,
             ErrorCode::SinkError(_) => 31,
+            ErrorCode::RpcError(_) => 32,
             ErrorCode::UnknownError(_) => 101,
         }
     }
@@ -367,6 +370,18 @@ impl From<ProstFieldNotFound> for RwError {
     }
 }
 
+impl From<tonic::Status> for RwError {
+    fn from(err: tonic::Status) -> Self {
+        ErrorCode::RpcError(err.into()).into()
+    }
+}
+
+impl From<tonic::transport::Error> for RwError {
+    fn from(err: tonic::transport::Error) -> Self {
+        ErrorCode::RpcError(err.into()).into()
+    }
+}
+
 /// Convert `RwError` into `tonic::Status`. Generally used in `map_err`.
 pub fn tonic_err(err: impl Into<RwError>) -> tonic::Status {
     err.into().into()
@@ -394,20 +409,6 @@ impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
         self.map_err(|e| {
             ErrorCode::InternalError(format!("{}: {}", func(), e.to_error_str())).into()
         })
-    }
-}
-
-impl ToErrorStr for tonic::Status {
-    /// [`tonic::Status`] means no transportation error but only application-level failure.
-    /// In this case we focus on the message rather than other fields.
-    fn to_error_str(self) -> String {
-        self.message().to_string()
-    }
-}
-
-impl ToErrorStr for tonic::transport::Error {
-    fn to_error_str(self) -> String {
-        format!("tonic transport error: {}", self)
     }
 }
 

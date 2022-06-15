@@ -9,6 +9,7 @@ include ./const.slt.part
 include ./query.slt.part
 include ./join.slt.part
 include ./range_scan.slt.part
+include ./order_by.slt.part
 
 statement ok
 SET QUERY_MODE TO distributed;

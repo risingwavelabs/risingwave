@@ -22,7 +22,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::GeneralCellBasedRowDeserializer;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -57,7 +57,7 @@ pub struct ManagedTopNBottomNState<S: StateStore> {
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
     /// For deserializing `Row`.
-    cell_based_row_deserializer: CellBasedRowDeserializer,
+    cell_based_row_deserializer: GeneralCellBasedRowDeserializer,
 }
 
 impl<S: StateStore> ManagedTopNBottomNState<S> {
@@ -67,7 +67,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         keyspace: Keyspace<S>,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
-        cell_based_row_deserializer: CellBasedRowDeserializer,
+        cell_based_row_deserializer: GeneralCellBasedRowDeserializer,
     ) -> Self {
         Self {
             top_n: BTreeMap::new(),
@@ -347,6 +347,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
@@ -367,7 +368,7 @@ mod tests {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
+        let cell_based_row_deserializer = make_cell_based_row_deserializer(table_column_descs);
 
         ManagedTopNBottomNState::new(
             Some(1),
