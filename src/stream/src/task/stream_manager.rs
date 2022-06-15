@@ -30,7 +30,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
-use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
@@ -88,9 +87,6 @@ pub struct LocalStreamManagerCore {
 /// `LocalStreamManager` manages all stream executors in this project.
 pub struct LocalStreamManager {
     core: Mutex<LocalStreamManagerCore>,
-
-    /// Save collect rx
-    collect_complete_receiver: Mutex<HashMap<u64, oneshot::Receiver<CollectResult>>>,
 }
 
 pub struct ExecutorParams {
@@ -141,7 +137,6 @@ impl LocalStreamManager {
     fn with_core(core: LocalStreamManagerCore) -> Self {
         Self {
             core: Mutex::new(core),
-            collect_complete_receiver: Mutex::new(HashMap::default()),
         }
     }
 
@@ -164,8 +159,7 @@ impl LocalStreamManager {
         Self::with_core(LocalStreamManagerCore::for_test())
     }
 
-    /// Broadcast a barrier to all senders. save this receiver which will get notified when this
-    /// barrier is finished.
+    /// Broadcast a barrier to all senders. Save a receiver in barrier manager
     pub fn send_barrier(
         &self,
         barrier: &Barrier,
@@ -174,12 +168,7 @@ impl LocalStreamManager {
     ) -> Result<()> {
         let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
-        let rx = barrier_manager
-            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
-            .expect("no rx for local mode");
-        self.collect_complete_receiver
-            .lock()
-            .insert(barrier.epoch.prev, rx);
+        barrier_manager.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
         Ok(())
     }
 
@@ -190,7 +179,11 @@ impl LocalStreamManager {
         prev_epoch: u64,
         need_sync: bool,
     ) -> CollectResult {
-        let rx = self.get_collect_rx(prev_epoch);
+        let rx = {
+            let core = self.core.lock();
+            let mut barrier_manager = core.context.lock_barrier_manager();
+            barrier_manager.remove_collect_rx(prev_epoch)
+        };
         // Wait for all actors finishing this barrier.
         let mut collect_result = rx.await.unwrap();
 
@@ -215,18 +208,6 @@ impl LocalStreamManager {
         collect_result
     }
 
-    fn get_collect_rx(&self, prev_epoch: u64) -> oneshot::Receiver<CollectResult> {
-        self.collect_complete_receiver
-            .lock()
-            .remove(&prev_epoch)
-            .unwrap_or_else(|| {
-                panic!(
-                    "barrier collect complete receiver for prev epoch {} not exists",
-                    prev_epoch
-                )
-            })
-    }
-
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
     /// this barrier is finished.
     #[cfg(test)]
@@ -237,6 +218,7 @@ impl LocalStreamManager {
         let mut barrier_manager = core.context.lock_barrier_manager();
         assert!(barrier_manager.is_local_mode());
         barrier_manager.send_barrier(barrier, empty(), empty())?;
+        barrier_manager.remove_collect_rx(barrier.epoch.prev);
         Ok(())
     }
 

@@ -275,7 +275,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
-    async fn fetch_cached_state<'a>(&'a self, key: &'a K) -> RwResult<Option<JoinEntryState<S>>> {
+    async fn fetch_cached_state(&self, key: &K) -> RwResult<Option<JoinEntryState<S>>> {
         let keyspace = self.get_state_keyspace(key)?;
         JoinEntryState::with_cached_state(
             keyspace,

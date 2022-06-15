@@ -66,6 +66,9 @@ pub struct LocalBarrierManager {
 
     /// Current barrier collection state.
     state: BarrierState,
+
+    /// Save collect rx
+    collect_complete_receiver: HashMap<u64, Option<oneshot::Receiver<CollectResult>>>,
 }
 
 impl Default for LocalBarrierManager {
@@ -80,6 +83,7 @@ impl LocalBarrierManager {
             senders: HashMap::new(),
             span: tracing::Span::none(),
             state,
+            collect_complete_receiver: HashMap::default(),
         }
     }
 
@@ -99,14 +103,14 @@ impl LocalBarrierManager {
         self.senders.keys().cloned().collect()
     }
 
-    /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
+    /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
     /// barrier is finished, in managed mode.
     pub fn send_barrier(
         &mut self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<Option<oneshot::Receiver<CollectResult>>> {
+    ) -> Result<()> {
         let to_send = {
             let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
             match &self.state {
@@ -153,7 +157,22 @@ impl LocalBarrierManager {
             }
         }
 
-        Ok(rx)
+        self.collect_complete_receiver
+            .insert(barrier.epoch.prev, rx);
+        Ok(())
+    }
+
+    /// Use `prev_epoch` to remove collect rx and return rx.
+    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> oneshot::Receiver<CollectResult> {
+        self.collect_complete_receiver
+            .remove(&prev_epoch)
+            .unwrap_or_else(|| {
+                panic!(
+                    "barrier collect complete receiver for prev epoch {} not exists",
+                    prev_epoch
+                )
+            })
+            .expect("no rx for local mode")
     }
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
