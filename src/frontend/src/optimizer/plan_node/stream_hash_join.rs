@@ -55,7 +55,8 @@ impl StreamHashJoin {
             JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
             _ => false,
         };
-        let dist_l = Self::derive_dist(
+
+        let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
             &logical
@@ -63,13 +64,8 @@ impl StreamHashJoin {
                 .composite(&logical.i2o_col_mapping()),
         );
 
-        let dist_r = Self::derive_dist(
-            logical.left().distribution(),
-            logical.right().distribution(),
-            &logical
-                .r2i_col_mapping()
-                .composite(&logical.i2o_col_mapping()),
-        );
+        let dist_l = logical.left().distribution().clone();
+        let dist_r = logical.right().distribution().clone();
 
         let force_delta = if let Some(config) = ctx.inner().session_ctx.get_config(DELTA_JOIN) {
             config.is_set(false)
@@ -82,7 +78,7 @@ impl StreamHashJoin {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.to_vec(),
-            dist_l.clone(),
+            dist,
             append_only,
         );
 
