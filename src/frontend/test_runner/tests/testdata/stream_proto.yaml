@@ -501,9 +501,6 @@
                 - 0
           columnIndex2columnId:
             1: 0
-    pkIndices:
-      - 0
-      - 1
     fields:
       - dataType:
           typeName: INT64
