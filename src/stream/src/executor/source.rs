@@ -381,7 +381,11 @@ impl<S: StateStore> SourceExecutor<S> {
                                     match self.get_diff(target_splits) {
                                         None => {}
                                         Some(target_state) => {
-                                            log::info!("actor {:?} apply source split change to {:?}", self.actor_id, target_state);
+                                            log::info!(
+                                                "actor {:?} apply source split change to {:?}",
+                                                self.actor_id,
+                                                target_state
+                                            );
                                             let reader = self
                                                 .build_stream_source_reader(Some(
                                                     target_state.clone(),
