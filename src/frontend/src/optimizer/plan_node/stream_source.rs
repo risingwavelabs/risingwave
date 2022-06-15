@@ -59,12 +59,8 @@ impl fmt::Display for StreamSource {
             .field(
                 "columns",
                 &format_args!("[{}]", &self.column_names().join(", ")),
-            );
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
-        builder.finish()
+            )
+            .finish()
     }
 }
 
