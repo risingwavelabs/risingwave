@@ -114,9 +114,11 @@ impl ManagedValueState {
 
         // Persist value into relational table. The inserted row should concat with pk (pk is in
         // front of value). In this case, the pk is just group key.
+
         let mut v = vec![];
         v.extend_from_slice(&self.pk.as_ref().unwrap_or(&Row(vec![])).0);
         v.push(self.state.get_output()?);
+
         state_table.insert(Row::new(v))?;
 
         self.is_dirty = false;

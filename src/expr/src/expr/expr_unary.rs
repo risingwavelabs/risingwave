@@ -211,6 +211,13 @@ pub fn new_unary_expr(
 
     let expr: BoxedExpression = match (expr_type, return_type.clone(), child_expr.return_type()) {
         (ProstType::Cast, _, _) => gen_cast! { child_expr, return_type, },
+        (ProstType::BoolOut, _, DataType::Boolean) => {
+            Box::new(UnaryExpression::<BoolArray, Utf8Array, _>::new(
+                child_expr,
+                return_type,
+                bool_out,
+            ))
+        }
         (ProstType::Not, _, _) => {
             Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
                 child_expr,

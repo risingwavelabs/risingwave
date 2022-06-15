@@ -107,4 +107,10 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
         self.meta_client.get_compaction_groups().await
     }
+
+    async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()> {
+        self.meta_client
+            .trigger_manual_compaction(compaction_group_id)
+            .await
+    }
 }

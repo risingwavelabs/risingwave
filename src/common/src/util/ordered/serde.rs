@@ -146,6 +146,10 @@ impl OrderedRowDeserializer {
         }
         Ok(OrderedRow(values))
     }
+
+    pub fn get_order_types(&self) -> &[OrderType] {
+        &self.order_types
+    }
 }
 
 type KeyBytes = Vec<u8>;
