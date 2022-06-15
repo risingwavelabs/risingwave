@@ -285,6 +285,8 @@ where
     /// We use worker node id as the `context_id`.
     /// If the `context_id` is provided, the transaction will abort if the `context_id` is not
     /// valid, which means the worker node is not a valid member of the cluster.
+    /// This operation is protected by mutex of compaction, so that other thread can not
+    /// call `release_contexts` even if it has removed `context_id` from cluster manager.
     async fn commit_trx(
         &self,
         meta_store: &S,
