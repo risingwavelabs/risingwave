@@ -188,7 +188,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         Ok(())
     }
 
-    /// This function scans rows by `StateTableRowIter` , which scan rows from the
+    /// This function scans rows by `StateTableRowIter`, which scan rows from the
     /// `shared_storage`(`cell_based_table`) and memory(`mem_table`) .
     pub async fn scan_from_relational_table(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         let state_table_iter = self.state_table.iter(epoch).await?;
