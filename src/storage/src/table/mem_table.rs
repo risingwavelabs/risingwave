@@ -96,12 +96,10 @@ impl MemTable {
                         old_value
                     );
                 }
-                x @ RowOp::Update(_) => {
-                    if let RowOp::Update(ref mut value) = x {
-                        let (original_old_value, original_new_value) = std::mem::take(value);
-                        debug_assert_eq!(original_new_value, old_value);
-                        e.insert(RowOp::Delete(original_old_value));
-                    }
+                RowOp::Update(value) => {
+                    let (original_old_value, original_new_value) = std::mem::take(value);
+                    debug_assert_eq!(original_new_value, old_value);
+                    e.insert(RowOp::Delete(original_old_value));
                 }
             },
         }
@@ -126,12 +124,10 @@ impl MemTable {
                         old_value
                     );
                 }
-                x @ RowOp::Update(_) => {
-                    if let RowOp::Update(ref mut value) = x {
-                        let (original_old_value, original_new_value) = std::mem::take(value);
-                        debug_assert_eq!(original_new_value, old_value);
-                        e.insert(RowOp::Update((original_old_value, new_value)));
-                    }
+                RowOp::Update(value) => {
+                    let (original_old_value, original_new_value) = std::mem::take(value);
+                    debug_assert_eq!(original_new_value, old_value);
+                    e.insert(RowOp::Update((original_old_value, new_value)));
                 }
             },
         }
