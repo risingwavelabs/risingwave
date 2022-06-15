@@ -172,12 +172,9 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
-<<<<<<< HEAD
             sink_by_name: HashMap::new(),
             sink_name_by_id: HashMap::new(),
-=======
             owner: schema.owner.clone(),
->>>>>>> main
         }
     }
 }
