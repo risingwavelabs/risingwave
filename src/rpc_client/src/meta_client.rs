@@ -74,7 +74,7 @@ type DatabaseId = u32;
 type SchemaId = u32;
 
 /// Client to meta server. Cloning the instance is lightweight.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MetaClient {
     worker_id: Option<u32>,
     pub inner: GrpcMetaClient,

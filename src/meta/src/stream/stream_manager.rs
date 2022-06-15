@@ -740,6 +740,13 @@ mod tests {
             Ok(Response::new(InjectBarrierResponse::default()))
         }
 
+        async fn barrier_complete(
+            &self,
+            _request: Request<BarrierCompleteRequest>,
+        ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
+            Ok(Response::new(BarrierCompleteResponse::default()))
+        }
+
         async fn create_source(
             &self,
             _request: Request<CreateSourceRequest>,
@@ -785,6 +792,7 @@ mod tests {
                 actor_ids: Mutex::new(HashSet::new()),
                 actor_infos: Mutex::new(HashMap::new()),
             });
+
             let fake_service = FakeStreamService {
                 inner: state.clone(),
             };
@@ -798,6 +806,7 @@ mod tests {
                     .await
                     .unwrap();
             });
+
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
