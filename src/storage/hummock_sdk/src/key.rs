@@ -165,7 +165,7 @@ fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
 }
 
 /// Transform the given `prefix` to a key range.
-pub fn range_of_prefix(prefix: &[u8]) -> impl RangeBounds<Vec<u8>> {
+pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     if prefix.is_empty() {
         (Unbounded, Unbounded)
     } else {
@@ -177,11 +177,11 @@ pub fn range_of_prefix(prefix: &[u8]) -> impl RangeBounds<Vec<u8>> {
 pub fn prefixed_range<B: AsRef<[u8]>>(
     range: impl RangeBounds<B>,
     prefix: &[u8],
-) -> impl RangeBounds<Vec<u8>> {
+) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     let start = match range.start_bound() {
         Included(b) => Included([prefix, b.as_ref()].concat()),
         Excluded(_) => unimplemented!(),
-        Unbounded => Unbounded,
+        Unbounded => Included(prefix.to_vec()),
     };
 
     let end = match range.end_bound() {
