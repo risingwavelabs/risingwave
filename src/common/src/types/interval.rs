@@ -99,7 +99,7 @@ impl IntervalUnit {
         let month = (self.months * 30) as i64 * DAY_MS;
         self.ms = self.ms + month + (self.days) as i64 * DAY_MS;
         self.days = (self.ms / DAY_MS) as i32;
-        self.ms = self.ms % DAY_MS;
+        self.ms %= DAY_MS;
         self.months = 0;
     }
 
@@ -272,7 +272,7 @@ impl PartialEq for IntervalUnit {
         interval.justify_interval();
         let mut other = *other;
         other.justify_interval();
-        return interval.days == other.days && interval.ms == other.ms;
+        interval.days == other.days && interval.ms == other.ms
     }
 }
 
