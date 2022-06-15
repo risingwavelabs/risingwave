@@ -336,6 +336,11 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_processing_time[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_latency("Actor Execution Time", [
+                panels.target(
+                    "rate(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
         ])
     ]
 
