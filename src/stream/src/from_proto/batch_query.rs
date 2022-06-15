@@ -46,10 +46,12 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new_adhoc(
+        let table = CellBasedTable::new(
             keyspace,
             column_descs,
+            None,
             Arc::new(StateStoreMetrics::unused()),
+            None,
         );
         let key_indices = node
             .get_distribution_keys()
