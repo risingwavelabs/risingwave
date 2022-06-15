@@ -203,12 +203,12 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
         let pk_serializer = self
-                .cell_based_table
-                .pk_serializer
-                .clone()
-                .expect("pk_serializer is None");
-            let order_types = &pk_serializer.into_order_types()[0..pk_prefix.size()];
-            let prefix_serializer = OrderedRowSerializer::new(order_types.into());
+            .cell_based_table
+            .pk_serializer
+            .clone()
+            .expect("pk_serializer is None");
+        let order_types = &pk_serializer.into_order_types()[0..pk_prefix.size()];
+        let prefix_serializer = OrderedRowSerializer::new(order_types.into());
         let encoded_start_key = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_bounds = range_of_prefix(&encoded_start_key);
 

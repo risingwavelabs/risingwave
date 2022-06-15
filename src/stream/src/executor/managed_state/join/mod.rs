@@ -245,7 +245,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let table_iter = self
             .state_table
-            .iter_with_pk_prefix(&key, self.current_epoch).await?;
+            .iter_with_pk_prefix(&key, self.current_epoch)
+            .await?;
         pin_mut!(table_iter);
 
         let mut cached = BTreeMap::new();
@@ -266,18 +267,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .map_err(RwError::from)
     }
 
-    fn get_table_pk(&self, join_key: &K, pk: Row) -> RwResult<Row> {
-        let mut key = join_key
-            .clone()
-            .deserialize(self.join_key_data_types.iter())?;
-        key.0.extend(pk.0);
-        Ok(key)
-    }
-
     /// Insert a key
     pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()> {
         if let Some(entry) = self.inner.get_mut(join_key) {
-            entry.insert(pk.clone(), value.clone());
+            entry.insert(pk, value.clone());
         }
 
         // If no cache maintained, only update the flush buffer.
@@ -288,7 +281,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Delete a key
     pub fn delete(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()> {
         if let Some(entry) = self.inner.get_mut(join_key) {
-            entry.remove(pk.clone());
+            entry.remove(pk);
         }
 
         // If no cache maintained, only update the flush buffer.
