@@ -70,6 +70,8 @@ message ExprNode {
     CHAR_LENGTH = 225;
     REPEAT = 226;
     CONCAT_OP = 227;
+    // BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL.
+    BOOL_OUT = 228;
 
     // Boolean comparison
     IS_TRUE = 301;
