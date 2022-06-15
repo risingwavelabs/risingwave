@@ -144,7 +144,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
 impl<K: HashKey, S: StateStore> JoinSide<K, S> {
     // WARNING: Please do not call this until we implement it.
     fn is_dirty(&self) -> bool {
-        false
+        unimplemented!()
     }
 
     #[allow(dead_code)]
@@ -512,9 +512,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         self.side_r.ht.flush().await?;
 
         // evict the LRU cache
-        assert!(!self.side_l.is_dirty());
+        // assert!(!self.side_l.is_dirty());
         self.side_l.ht.evict_to_target_cap();
-        assert!(!self.side_r.is_dirty());
+        // assert!(!self.side_r.is_dirty());
         self.side_r.ht.evict_to_target_cap();
         Ok(())
     }
