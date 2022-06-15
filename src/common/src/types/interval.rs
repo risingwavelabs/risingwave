@@ -95,6 +95,13 @@ impl IntervalUnit {
         }
     }
 
+    pub fn justify_interval(&mut self) {
+        let month = (self.months * 30) as i64 * DAY_MS;
+        self.ms = self.ms + month + (self.days) as i64 * DAY_MS;
+        self.days = (self.ms / DAY_MS) as i32;
+        self.ms -= (self.days) as i64 * DAY_MS;
+    }
+
     #[must_use]
     pub fn negative(&self) -> Self {
         IntervalUnit {
@@ -250,9 +257,11 @@ impl PartialOrd for IntervalUnit {
 
 impl Hash for IntervalUnit {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.months.hash(state);
-        self.ms.hash(state);
-        self.days.hash(state);
+        let mut interval = *self;
+        interval.justify_interval();
+        interval.months.hash(state);
+        interval.ms.hash(state);
+        interval.days.hash(state);
     }
 }
 
