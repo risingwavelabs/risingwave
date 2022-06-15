@@ -135,6 +135,8 @@ impl ExprImpl {
         if self.return_type() == DataType::Boolean {
             return Ok(FunctionCall::new(ExprType::BoolOut, vec![self])?.into());
         }
+        // Use normal cast for other types. Both `assign` and `explicit` can pass the castability
+        // check and there is no difference.
         self.cast_assign(DataType::Varchar)
     }
 }
