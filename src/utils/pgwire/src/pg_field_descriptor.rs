@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Port from PgFieldDescriptor.java
 #[derive(Debug, Clone)]
 pub struct PgFieldDescriptor {
     name: String,

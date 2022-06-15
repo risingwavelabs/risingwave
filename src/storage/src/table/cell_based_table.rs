@@ -70,7 +70,6 @@ pub struct CellBasedTable<S: StateStore> {
     column_ids: Vec<ColumnId>,
 
     /// Statistics.
-    #[expect(dead_code)]
     stats: Arc<StateStoreMetrics>,
 
     /// Indices of distribution keys in full row for computing value meta. None if value meta is
@@ -148,7 +147,7 @@ impl<S: StateStore> CellBasedTable<S> {
         // TODO: encode vnode into key
         // let vnode = self.compute_vnode_by_row(pk);
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let serialized_pk = serialize_pk(pk, pk_serializer);
+        let serialized_pk = serialize_pk::<false>(pk, pk_serializer);
         let sentinel_key =
             serialize_pk_and_column_id(&serialized_pk, &SENTINEL_CELL_ID).map_err(err)?;
         let mut get_res = Vec::new();
@@ -163,6 +162,7 @@ impl<S: StateStore> CellBasedTable<S> {
         }
         for column_id in &self.column_ids {
             let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
+
             let state_store_get_res = self.keyspace.get(&key, epoch).await?;
             if let Some(state_store_get_res) = state_store_get_res {
                 get_res.push((key, state_store_get_res));
@@ -196,7 +196,9 @@ impl<S: StateStore> CellBasedTable<S> {
         // TODO: encode vnode into key
         // let vnode = self.compute_vnode_by_row(value);
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let start_key = self.keyspace.prefixed_key(&serialize_pk(pk, pk_serializer));
+        let start_key = self
+            .keyspace
+            .prefixed_key(&serialize_pk::<false>(pk, pk_serializer));
         let key_range = range_of_prefix(&start_key);
 
         let state_store_range_scan_res = self
@@ -230,7 +232,6 @@ impl<S: StateStore> CellBasedTable<S> {
             // If value meta is computed here, then the cell based table is guaranteed to have
             // distribution keys. Also, it is guaranteed that distribution key indices will
             // not exceed the length of pk. So we simply do unwrap here.
-
             match row_op {
                 RowOp::Insert(row) => {
                     let value_meta = if WITH_VALUE_META {
@@ -344,6 +345,7 @@ impl<S: StateStore> CellBasedTable<S> {
             self.keyspace.clone(),
             self.mapping.clone(),
             epoch,
+            self.stats.clone(),
             pk_descs,
         )
         .await
@@ -361,11 +363,11 @@ impl<S: StateStore> CellBasedTable<S> {
                 let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
                 let mut key = pk_prefix.clone();
                 key.0.push(k.clone());
-                let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
+                let serialized_key = serialize_pk::<false>(&key, &pk_prefix_serializer);
                 if is_start_bound {
                     Included(
                         self.keyspace
-                            .prefixed_key(&serialize_pk(&key, &pk_prefix_serializer)),
+                            .prefixed_key(&serialize_pk::<false>(&key, &pk_prefix_serializer)),
                     )
                 } else {
                     // Should use excluded next key for end bound.
@@ -377,7 +379,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
                 let mut key = pk_prefix.clone();
                 key.0.push(k.clone());
-                let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
+                let serialized_key = serialize_pk::<false>(&key, &pk_prefix_serializer);
                 if is_start_bound {
                     // storage doesn't support excluded begin key yet, so transform it to included
                     Included(self.keyspace.prefixed_key(&next_key(&serialized_key)))
@@ -387,7 +389,7 @@ impl<S: StateStore> CellBasedTable<S> {
             }
             Unbounded => {
                 let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-                let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+                let serialized_pk_prefix = serialize_pk::<false>(pk_prefix, &pk_prefix_serializer);
                 if is_start_bound {
                     Included(self.keyspace.prefixed_key(&serialized_pk_prefix))
                 } else {
@@ -432,7 +434,7 @@ impl<S: StateStore> CellBasedTable<S> {
     ) -> StorageResult<CellBasedTableRowIter<S>> {
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-        let serialized_pk_prefix = &serialize_pk(&pk_prefix, &prefix_serializer)[..];
+        let serialized_pk_prefix = serialize_pk::<false>(&pk_prefix, &prefix_serializer);
 
         let start_key = self.keyspace.prefixed_key(&serialized_pk_prefix);
         let key_range = range_of_prefix(&start_key);
@@ -465,7 +467,7 @@ fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
 pub struct CellBasedTableRowIter<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
-    /// Cell-based row deserializer
+
     cell_based_row_deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
@@ -572,6 +574,7 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
         keyspace: Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
         epoch: u64,
+        _stats: Arc<StateStoreMetrics>,
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<Self> {
         let inner = CellBasedTableRowIter::new(&keyspace, table_descs.clone(), epoch).await?;
