@@ -35,6 +35,7 @@ use risingwave_pb::hummock::{
     SstableInfo,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
@@ -48,8 +49,9 @@ use crate::hummock::model::{
     INVALID_TIMESTAMP,
 };
 use crate::manager::{IdCategory, MetaSrvEnv};
-use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
+use crate::model::{MetadataModel, ValTransaction, VarTransaction};
 use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
 
 // Update to states are performed as follow:
@@ -114,7 +116,7 @@ macro_rules! commit_multi_var {
                     $val_txn.apply_to_txn(&mut trx)?;
                 )*
                 // Commit to state store
-                $hummock_mgr.commit_trx($hummock_mgr.env.meta_store(), trx, $context_id)
+                $hummock_mgr.commit_trx($hummock_mgr.env.meta_store(), trx, $context_id, $hummock_mgr.env.get_leader_info())
                 .await?;
                 // Upon successful commit, commit the change to local in-mem state
                 $(
@@ -283,22 +285,33 @@ where
     /// We use worker node id as the `context_id`.
     /// If the `context_id` is provided, the transaction will abort if the `context_id` is not
     /// valid, which means the worker node is not a valid member of the cluster.
+    /// This operation is protected by mutex of compaction, so that other thread can not
+    /// call `release_contexts` even if it has removed `context_id` from cluster manager.
     async fn commit_trx(
         &self,
         meta_store: &S,
         mut trx: Transaction,
         context_id: Option<HummockContextId>,
+        info: MetaLeaderInfo,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
                 // Using the preserved meta id is allowed.
-            } else if let Some(worker) = self.cluster_manager.get_worker_by_id(context_id).await {
-                trx.check_exists(Worker::cf_name(), worker.key()?.encode_to_vec());
-            } else {
+            } else if self
+                .cluster_manager
+                .get_worker_by_id(context_id)
+                .await
+                .is_none()
+            {
                 // The worker is not found in cluster.
                 return Err(Error::InvalidContext(context_id));
             }
         }
+        trx.check_equal(
+            META_CF_NAME.to_owned(),
+            META_LEADER_KEY.as_bytes().to_vec(),
+            info.encode_to_vec(),
+        );
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
