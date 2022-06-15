@@ -99,7 +99,8 @@ impl IntervalUnit {
         let month = (self.months * 30) as i64 * DAY_MS;
         self.ms = self.ms + month + (self.days) as i64 * DAY_MS;
         self.days = (self.ms / DAY_MS) as i32;
-        self.ms -= (self.days) as i64 * DAY_MS;
+        self.ms = self.ms % DAY_MS;
+        self.months = 0;
     }
 
     #[must_use]
@@ -267,9 +268,11 @@ impl Hash for IntervalUnit {
 
 impl PartialEq for IntervalUnit {
     fn eq(&self, other: &Self) -> bool {
-        let diff = *self - *other;
-        let days = (diff.months * 30 + diff.days) as i64;
-        days * DAY_MS + diff.ms == 0
+        let mut interval = *self;
+        interval.justify_interval();
+        let mut other = *other;
+        other.justify_interval();
+        return interval.days == other.days && interval.ms == other.ms;
     }
 }
 
