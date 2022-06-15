@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounterVec, GenericGaugeVec};
-use prometheus::{
-    register_gauge_vec_with_registry, register_int_counter_vec_with_registry, Registry,
+use prometheus::{ register_gauge_vec_with_registry,
+    register_int_counter_vec_with_registry, Registry,
 };
 
 pub struct StreamingMetrics {
@@ -22,7 +22,7 @@ pub struct StreamingMetrics {
     pub executor_row_count: GenericCounterVec<AtomicU64>,
     pub actor_processing_time: GenericGaugeVec<AtomicF64>,
     pub actor_barrier_time: GenericGaugeVec<AtomicF64>,
-    pub actor_execution_time: GenericCounterVec<AtomicU64>,
+    pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
 }
@@ -61,9 +61,9 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let actor_execution_time = register_int_counter_vec_with_registry!(
+        let actor_execution_time = register_gauge_vec_with_registry!(
             "stream_actor_actor_execution_time",
-            "Total execution time (ms) of an actor",
+            "Total execution time (s) of an actor",
             &["actor_id"],
             registry
         )

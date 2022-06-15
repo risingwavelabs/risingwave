@@ -64,7 +64,8 @@ pub struct LocalStreamManagerCore {
 
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
-
+    /// Store all actor execution time montioring tasks.
+    actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
@@ -356,6 +357,7 @@ impl LocalStreamManagerCore {
             context: Arc::new(context),
             actor_infos: HashMap::new(),
             actors: HashMap::new(),
+            actor_monitor_tasks: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
@@ -655,17 +657,18 @@ impl LocalStreamManagerCore {
             );
 
             let actor_id_str = actor_id.to_string();
-            let metrics_monitor = monitor.clone();
+            
             let metrics = self.streaming_metrics.clone();
-            tokio::spawn(async move {
-                for interval in metrics_monitor.intervals() {
+            let task = tokio::spawn(async move {
+                loop {
                     metrics
                         .actor_execution_time
                         .with_label_values(&[&actor_id_str])
-                        .inc_by(interval.total_scheduled_duration.subsec_millis() as u64);
+                        .set(monitor.cumulative().total_poll_duration.as_secs_f64());
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             });
+            self.actor_monitor_tasks.insert(actor_id, task);
         }
 
         Ok(())
@@ -711,7 +714,8 @@ impl LocalStreamManagerCore {
     fn drop_actor(&mut self, actor_id: ActorId) {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
-
+        self.actor_monitor_tasks.get(&actor_id).unwrap().abort();
+        self.actor_monitor_tasks.remove(&actor_id);
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
@@ -723,6 +727,8 @@ impl LocalStreamManagerCore {
     fn drop_all_actors(&mut self) {
         for (actor_id, handle) in self.handles.drain() {
             self.context.retain(|&(up_id, _)| up_id != actor_id);
+            self.actor_monitor_tasks.get(&actor_id).unwrap().abort();
+            self.actor_monitor_tasks.remove(&actor_id);
             self.actors.remove(&actor_id);
             // Task should have already stopped when this method is invoked.
             handle.abort();
