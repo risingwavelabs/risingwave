@@ -337,30 +337,13 @@ mod tests {
             let value: &str = rows[0].get(1);
             assert_eq!(value, "AA");
         }
-    }
-
-    #[tokio::test]
-    async fn test_psql_extended_mode_no_param() {
-        let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
-
-        // Connect to the database.
-        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
-            .await
-            .unwrap();
-
-        // The connection object performs the actual communication with the database,
-        // so spawn it off to run on its own.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
-            }
-        });
-
-        let rows = client.query("SELECT 'AA','BB';", &[]).await.unwrap();
-        let value: &str = rows[0].get(0);
-        assert_eq!(value, "AA");
-        let value: &str = rows[0].get(1);
-        assert_eq!(value, "BB");
+        // no params
+        {
+            let rows = client.query("SELECT 'AA','BB';", &[]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "AA");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "BB");
+        }
     }
 }
