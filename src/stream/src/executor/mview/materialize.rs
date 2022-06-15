@@ -177,7 +177,6 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
-    use risingwave_common::consistent_hash::VNODE_BITMAP_LEN;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
@@ -224,9 +223,7 @@ mod tests {
             ],
         );
 
-        let bitmap_inner = [0b11111111; VNODE_BITMAP_LEN].to_vec();
-        let keyspace =
-            Keyspace::table_root_with_vnodes(memory_state_store.clone(), &table_id, bitmap_inner);
+        let keyspace = Keyspace::table_root(memory_state_store.clone(), &table_id);
         let order_types = vec![OrderType::Ascending];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),

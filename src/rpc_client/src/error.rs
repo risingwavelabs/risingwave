@@ -12,5 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod vnode;
-pub use vnode::*;
+pub use anyhow::anyhow;
+use risingwave_common::error::{ErrorCode, RwError};
+use thiserror::Error;
+
+pub type Result<T> = std::result::Result<T, RpcError>;
+
+#[derive(Error, Debug)]
+pub enum RpcError {
+    #[error("Transport error: {0}")]
+    TrasnportError(#[from] tonic::transport::Error),
+
+    #[error("gRPC status: {0}")]
+    GrpcStatus(#[from] tonic::Status),
+
+    #[error(transparent)]
+    Internal(#[from] anyhow::Error),
+}
+
+impl From<RpcError> for RwError {
+    fn from(r: RpcError) -> Self {
+        ErrorCode::RpcError(r.into()).into()
+    }
+}
