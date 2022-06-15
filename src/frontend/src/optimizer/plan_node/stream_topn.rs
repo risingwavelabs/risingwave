@@ -55,7 +55,7 @@ impl fmt::Display for StreamTopN {
             f.debug_struct("StreamTopN")
         };
 
-        builder.field("order", self.logical.topn_order());
+        builder.field("order", &format_args!("{}", self.logical.topn_order()));
         builder.field("limit", &format_args!("{}", self.logical.limit()));
         builder.field("offset", &format_args!("{}", self.logical.offset()));
 
