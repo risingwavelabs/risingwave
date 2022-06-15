@@ -29,14 +29,14 @@ impl<S: StateStore> DedupPkStateTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let cell_deserializer = DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs);
+        let cell_serializer = DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs);
         StateTableExtended::new_extended(
             keyspace,
             column_descs,
             order_types,
             dist_key_indices,
             pk_indices,
-            cell_deserializer,
+            cell_serializer,
         )
     }
 }

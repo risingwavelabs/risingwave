@@ -59,6 +59,7 @@ pub fn make_cell_based_row_deserializer(
     pk_indices: Vec<usize>,
 ) -> GeneralCellBasedRowDeserializer {
     // let pk_indices = vec![2];
+    // let pk_indices = vec![2];
     // println!("pk_indices: {:#?}", pk_indices);
     let pk_descs = table_column_descs
         .iter()
@@ -169,6 +170,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
     ) -> Result<Option<(Vec<u8>, Row)>> {
         let res = self.deserialize_inner(pk_with_cell_id, cell)?;
         if let Some((pk, row)) = res {
+            println!("deserializing dedup pk: {:#?}", pk);
             let pk_row = self.raw_key_to_dedup_pk_row(&pk)?;
             Ok(Some((pk, self.dedup_pk_row_to_row(&pk_row, row))))
         } else {
@@ -230,6 +232,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
     ) -> Option<(Vec<u8>, Row)> {
         let res = self.take_inner();
         if let Some((pk, row)) = res {
+            println!("deserializing dedup pk: {:#?}", pk);
             let pk_row = self.raw_key_to_dedup_pk_row(&pk).unwrap(); // FIXME
             Some((pk, self.dedup_pk_row_to_row(&pk_row, row)))
         } else {
