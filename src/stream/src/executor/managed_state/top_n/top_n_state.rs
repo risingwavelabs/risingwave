@@ -16,11 +16,13 @@ use std::ops::Index;
 
 use futures::pin_mut;
 use futures::stream::StreamExt;
+use itertools::Itertools;
 use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -62,7 +64,20 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         ordered_row_deserializer: OrderedRowDeserializer,
         pk_indices: PkIndices,
     ) -> Self {
-        let order_type = ordered_row_deserializer.get_order_types().to_vec();
+        let order_types = match TOP_N_TYPE {
+            TOP_N_MIN => ordered_row_deserializer.get_order_types().to_vec(),
+            TOP_N_MAX => ordered_row_deserializer
+                .get_order_types()
+                .to_vec()
+                .iter()
+                .map(|t| match *t {
+                    OrderType::Ascending => OrderType::Descending,
+                    OrderType::Descending => OrderType::Ascending,
+                })
+                .collect_vec(),
+            _ => unreachable!(),
+        };
+
         let column_descs = data_types
             .iter()
             .enumerate()
@@ -70,7 +85,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = StateTable::new(keyspace, column_descs, order_type, None, pk_indices);
+        let state_table = StateTable::new(keyspace, column_descs, order_types, None, pk_indices);
         Self {
             top_n: BTreeMap::new(),
             state_table,
@@ -177,8 +192,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // This is because other keys may be more qualified to stay in cache.
         // TODO: This needs to be changed when transaction on Hummock is implemented.
         match TOP_N_TYPE {
-            TOP_N_MIN => self.state_table.insert::<false>(value.clone())?,
-            TOP_N_MAX => self.state_table.insert::<true>(value.clone())?,
+            TOP_N_MIN => self.state_table.insert(value.clone())?,
+            TOP_N_MAX => self.state_table.insert(value.clone())?,
             _ => unreachable!(),
         }
         if !need_to_flush {
@@ -226,8 +241,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ) -> StreamExecutorResult<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
         match TOP_N_TYPE {
-            TOP_N_MIN => self.state_table.delete::<false>(value)?,
-            TOP_N_MAX => self.state_table.delete::<true>(value)?,
+            TOP_N_MIN => self.state_table.delete(value)?,
+            TOP_N_MAX => self.state_table.delete(value)?,
             _ => unreachable!(),
         }
 

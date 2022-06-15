@@ -223,12 +223,9 @@ pub fn serialize_pk_and_row_state(
     }
 }
 
-pub fn serialize_pk<const REVERSE: bool>(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
+pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
     let mut result = vec![];
     serializer.serialize(pk, &mut result);
-    if REVERSE {
-        result.iter_mut().for_each(|byte| *byte = !*byte);
-    }
     result
 }
 

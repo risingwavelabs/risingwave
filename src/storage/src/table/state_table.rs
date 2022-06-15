@@ -30,7 +30,6 @@ use super::cell_based_table::{CellBasedTable, CellBasedTableStreamingIter};
 use super::mem_table::{MemTable, RowOp};
 use crate::cell_based_row_deserializer::{make_column_desc_index, ColumnDescMapping};
 use crate::error::{StorageError, StorageResult};
-use crate::monitor::StateStoreMetrics;
 use crate::{Keyspace, StateStore};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
@@ -66,7 +65,6 @@ impl<S: StateStore> StateTable<S> {
                 cell_based_keyspace,
                 cell_based_column_descs,
                 Some(OrderedRowSerializer::new(order_types)),
-                Arc::new(StateStoreMetrics::unused()),
                 dist_key_indices,
             ),
             pk_indices,
@@ -84,8 +82,7 @@ impl<S: StateStore> StateTable<S> {
     /// read methods
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: change to Cow to avoid unnecessary clone.
-        let pk_bytes =
-            serialize_pk::<false>(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+        let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         let mem_table_res = self.mem_table.get_row(&pk_bytes)?;
         match mem_table_res {
             Some(row_op) => match row_op {
@@ -98,26 +95,24 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// write methods
-    pub fn insert<const RVERSE: bool>(&mut self, value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, value: Row) -> StorageResult<()> {
         let mut datums = vec![];
         for pk_indice in &self.pk_indices {
             datums.push(value.index(*pk_indice).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes =
-            serialize_pk::<RVERSE>(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         self.mem_table.insert(pk_bytes, value)?;
         Ok(())
     }
 
-    pub fn delete<const RVERSE: bool>(&mut self, old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
         let mut datums = vec![];
         for pk_indice in &self.pk_indices {
             datums.push(old_value.index(*pk_indice).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes =
-            serialize_pk::<RVERSE>(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }
@@ -186,10 +181,10 @@ impl<S: StateStore> StateTable<S> {
 
         let encoded_start_key = pk_bounds
             .start_bound()
-            .map(|pk| serialize_pk::<false>(pk.as_ref(), pk_serializer.unwrap()));
+            .map(|pk| serialize_pk(pk.as_ref(), pk_serializer.unwrap()));
         let encoded_end_key = pk_bounds
             .end_bound()
-            .map(|pk| serialize_pk::<false>(pk.as_ref(), pk_serializer.unwrap()));
+            .map(|pk| serialize_pk(pk.as_ref(), pk_serializer.unwrap()));
         let encoded_key_bounds = (encoded_start_key, encoded_end_key);
 
         self.iter_with_encoded_key_bounds(encoded_key_bounds, epoch)
@@ -203,7 +198,7 @@ impl<S: StateStore> StateTable<S> {
         prefix_serializer: OrderedRowSerializer,
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
-        let encoded_start_key = serialize_pk::<false>(pk_prefix, &prefix_serializer);
+        let encoded_start_key = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_bounds = range_of_prefix(&encoded_start_key);
 
         self.iter_with_encoded_key_bounds(encoded_key_bounds, epoch)
