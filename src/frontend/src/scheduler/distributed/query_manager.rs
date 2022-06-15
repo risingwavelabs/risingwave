@@ -121,7 +121,6 @@ impl QueryManager {
         query: Query,
     ) -> SchedulerResult<impl DataChunkStream> {
         let query_id = query.query_id().clone();
-        // Cheat compiler to resolve type
         let epoch = self
             .hummock_snapshot_manager
             .get_epoch(query_id.clone())
