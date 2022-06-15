@@ -89,7 +89,7 @@ impl<S: StateStore> StateTable<S> {
 
     /// Get a single row from state table. This function will return a Cow. If the value is from
     /// memtable, it will be a [`Cow::Borrowed`]. If is from cell based table, it will be an owned
-    /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `to_owned`.
+    /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
     pub async fn get_row_ref(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Cow<Row>>> {
         // TODO: change to Cow to avoid unnecessary clone.
         let pk_bytes = serialize_pk(pk, &self.pk_serializer);
@@ -188,7 +188,7 @@ impl<S: StateStore> StateTable<S> {
         self.iter_with_pk_bounds::<_, Row>(.., epoch).await
     }
 
-    /// This function scans rows from the relational table with specific `pk_prefix`.
+    /// This function scans rows from the relational table with specific `pk_bounds`.
     pub async fn iter_with_pk_bounds<R, B>(
         &self,
         pk_bounds: R,
@@ -257,7 +257,7 @@ where
     /// `mem_table` is returned according to the operation(RowOp) on it.
     #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
     async fn into_stream(self) {
-        let cell_based_table_iter = self.cell_based_table_iter.peekable();
+        let cell_based_table_iter = self.cell_based_table_iter.fuse().peekable();
         pin_mut!(cell_based_table_iter);
 
         let mut mem_table_iter = self.mem_table_iter.fuse().peekable();
