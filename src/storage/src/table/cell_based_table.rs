@@ -694,13 +694,7 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         table_descs: Arc<ColumnDescMapping>,
         epoch: u64,
     ) -> StorageResult<Self> {
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
-        let iter = keyspace.iter(epoch).await?;
-        let iter = Self {
-            iter,
-            cell_based_row_deserializer,
-        };
-        Ok(iter)
+        Self::new_with_bounds::<_, &[u8]>(keyspace, table_descs, .., epoch).await
     }
 
     pub async fn new_with_bounds<R, B>(
