@@ -71,8 +71,7 @@ impl_plan_tree_node_for_unary! { StreamSimpleAgg }
 impl ToStreamProst for StreamSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let (internal_tables, column_index2column_id) =
-            self.logical.infer_internal_table_catalog(self.input());
+        let (internal_tables, column_index2column_id) = self.logical.infer_internal_table_catalog();
         // TODO: local or global simple agg?
         ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self

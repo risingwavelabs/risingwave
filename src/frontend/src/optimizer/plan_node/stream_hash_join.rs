@@ -195,8 +195,8 @@ impl ToStreamProst for StreamHashJoin {
     }
 }
 
-fn infer_internal_table_catalog(plan_node: PlanRef) -> TableCatalog {
-    let base = plan_node.plan_base();
+fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
+    let base = input.plan_base();
     let schema = &base.schema;
     let pk_indices = &base.pk_indices;
     let columns = schema
@@ -223,6 +223,6 @@ fn infer_internal_table_catalog(plan_node: PlanRef) -> TableCatalog {
         pks: pk_indices.clone(),
         distribution_keys: base.dist.dist_column_indices().to_vec(),
         is_index_on: None,
-        appendonly: plan_node.append_only(),
+        appendonly: input.append_only(),
     }
 }

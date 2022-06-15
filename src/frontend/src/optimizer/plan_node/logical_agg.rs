@@ -124,21 +124,17 @@ pub struct LogicalAgg {
 }
 
 impl LogicalAgg {
-    pub fn infer_internal_table_catalog(
-        &self,
-        plan_node: PlanRef,
-    ) -> (Vec<TableCatalog>, HashMap<usize, i32>) {
+    pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, HashMap<usize, i32>) {
         let mut table_catalogs = vec![];
         let mut column_index2columb_id = HashMap::new();
-        let base = plan_node.plan_base();
+        let base = self.input.plan_base();
         let schema = &base.schema;
         let fields = schema.fields();
-        let pk_indices = &base.pk_indices;
         for agg_call in &self.agg_calls {
             let mut internal_pk_indices = vec![];
             let mut columns = vec![];
             let mut order_desc = vec![];
-            for &idx in pk_indices {
+            for &idx in &self.group_keys {
                 let column_id = columns.len() as i32;
                 internal_pk_indices.push(column_id as usize); // Currently our column index is same as column id
                 column_index2columb_id.insert(idx, column_id);
