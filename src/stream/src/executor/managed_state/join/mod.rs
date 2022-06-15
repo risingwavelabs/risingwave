@@ -32,7 +32,7 @@ use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
-type DegreeType = i64;
+type DegreeType = u64;
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
 pub struct JoinRow {
@@ -86,7 +86,7 @@ impl JoinRow {
 
     /// Make degree as the last datum of row
     pub fn into_row(mut self) -> Row {
-        self.row.0.push(Some(ScalarImpl::Int64(self.degree)));
+        self.row.0.push(Some(ScalarImpl::Int64(self.degree as i64)));
         self.row
     }
 
@@ -97,7 +97,7 @@ impl JoinRow {
             .pop()
             .expect("missing degree in JoinRow")
             .expect("degree should not be null");
-        let degree = degree_datum.into_int64();
+        let degree = degree_datum.into_int64() as u64;
         JoinRow {
             row: Row(datums),
             degree,
@@ -156,8 +156,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let table_pk_indices = [join_key_indices, pk_indices.clone()].concat();
 
-        // Order type doesn't matter here. Arbitrarily choose one.
-        let order_types = vec![OrderType::Descending; table_pk_indices.len()];
+        // Order type doesn not affect correctness. Choose Ascending for better performance.
+        let order_types = vec![OrderType::Ascending; table_pk_indices.len()];
 
         let state_table = StateTable::new(
             keyspace,
