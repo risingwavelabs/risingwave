@@ -124,7 +124,6 @@ pub(crate) fn gen_create_index_plan(
         .gen_create_index_plan(
             index_name.to_string(),
             table.id(),
-            session.user_name().to_string(),
         )?
     };
 

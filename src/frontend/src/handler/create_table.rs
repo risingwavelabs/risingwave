@@ -120,12 +120,12 @@ pub(crate) fn gen_materialized_source_plan(
             required_cols,
             out_names,
         )
-        .gen_create_mv_plan(source.name.clone(), owner)?
+        .gen_create_mv_plan(source.name.clone())?
     };
-    let table = materialize
+    let mut table = materialize
         .table()
         .to_prost(source.schema_id, source.database_id);
-
+    table.owner = owner;
     Ok((materialize.into(), table))
 }
 
