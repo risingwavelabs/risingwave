@@ -470,18 +470,7 @@
                     columnType:
                       typeName: INT64
                       isNullable: true
-                    name: _row_id
-                - columnDesc:
-                    columnType:
-                      typeName: INT64
-                      isNullable: true
-                    columnId: 1
-              orderColumnIds:
-                - 0
-              orders:
-                - ASCENDING
-              pk:
-                - 0
+              owner: root
             - id: 4294967294
               schemaId: 2147483646
               databaseId: 2147483646
@@ -490,20 +479,7 @@
                     columnType:
                       typeName: INT64
                       isNullable: true
-                    name: _row_id
-                - columnDesc:
-                    columnType:
-                      typeName: INT64
-                      isNullable: true
-                    columnId: 1
-              orderColumnIds:
-                - 0
-              orders:
-                - ASCENDING
-              pk:
-                - 0
-          columnIndex2columnId:
-            1: 0
+              owner: root
     fields:
       - dataType:
           typeName: INT64
@@ -706,9 +682,9 @@
                   columns:
                     - columnDesc:
                         columnType:
-                          typeName: INT64
+                          typeName: INT32
                           isNullable: true
-                        name: _row_id
+                        name: v2
                     - columnDesc:
                         columnType:
                           typeName: INT64
@@ -722,15 +698,16 @@
                     - 0
                   pk:
                     - 0
+                  owner: root
                 - id: 4294967294
                   schemaId: 2147483646
                   databaseId: 2147483646
                   columns:
                     - columnDesc:
                         columnType:
-                          typeName: INT64
+                          typeName: INT32
                           isNullable: true
-                        name: _row_id
+                        name: v2
                     - columnDesc:
                         columnType:
                           typeName: INT64
@@ -744,8 +721,9 @@
                     - 0
                   pk:
                     - 0
+                  owner: root
               columnIndex2columnId:
-                2: 0
+                0: 0
         pkIndices:
           - 1
         fields:
