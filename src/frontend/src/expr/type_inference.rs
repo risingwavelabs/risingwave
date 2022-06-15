@@ -449,18 +449,6 @@ fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
     );
     insert_cast_seq(&mut m, &[T::Date, T::Timestamp, T::Timestampz]);
     insert_cast_seq(&mut m, &[T::Time, T::Interval]);
-    // Allow explicit cast operation between the same type, for types not included above.
-    // Ideally we should remove all such useless casts. But for now we just forbid them in contexts
-    // that only allow implicit or assign cast operations, and the user can still write them
-    // explicitly.
-    //
-    // Note this is different in PG, where same type cast is used for sizing (e.g. `NUMERIC(18,3)`
-    // to `NUMERIC(20,4)`). Sizing casts are only available for `numeric`, `timestamp`,
-    // `timestamptz`, `time`, `interval` and these are implicit. https://www.postgresql.org/docs/current/typeconv-query.html
-    //
-    // As we do not support size parameters in types, there are no sizing casts.
-    m.insert((T::Boolean, T::Boolean), CastContext::Explicit);
-    m.insert((T::Varchar, T::Varchar), CastContext::Explicit);
 
     // Casting to and from string type.
     for t in [
@@ -504,8 +492,11 @@ fn insert_cast_seq(
         for (target_index, target_type) in types.iter().enumerate() {
             let cast_context = match source_index.cmp(&target_index) {
                 std::cmp::Ordering::Less => CastContext::Implicit,
-                // See comments in `build_cast_map` for why same type cast is marked as explicit.
-                std::cmp::Ordering::Equal => CastContext::Explicit,
+                // Unnecessary cast between the same type should have been removed.
+                // Note that sizing cast between `NUMERIC(18, 3)` and `NUMERIC(20, 4)` or between
+                // `int` and `int not null` may still be necessary. But we do not have such types
+                // yet.
+                std::cmp::Ordering::Equal => continue,
                 std::cmp::Ordering::Greater => CastContext::Assign,
             };
             m.insert((*source_type, *target_type), cast_context);
@@ -737,19 +728,19 @@ mod tests {
         assert_eq!(
             actual,
             vec![
-                "T T    T     ", // bool
-                " TTTTTTT     ",
-                "TTTTTTTT     ",
-                " TTTTTTT     ",
-                " TTTTTTT     ",
-                " TTTTTTT     ",
-                " TTTTTTT     ",
-                "TTTTTTTTTTTTT", // varchar
-                "       TTTT  ",
-                "       TTTTT ",
-                "       TTTTT ",
-                "       T   TT",
-                "       T   TT",
+                "  T    T     ", // bool
+                "  TTTTTT     ",
+                "TT TTTTT     ",
+                " TT TTTT     ",
+                " TTT TTT     ",
+                " TTTT TT     ",
+                " TTTTT T     ",
+                "TTTTTTT TTTTT", // varchar
+                "       T TT  ",
+                "       TT TT ",
+                "       TTT T ",
+                "       T    T",
+                "       T   T ",
             ]
         );
     }

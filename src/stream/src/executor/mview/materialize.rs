@@ -111,11 +111,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                         }
 
                         // assemble pk row
-                        let arrange_row = Row(self
-                            .arrange_columns
-                            .iter()
-                            .map(|col_idx| chunk.column_at(*col_idx).array_ref().datum_at(idx))
-                            .collect_vec());
 
                         // assemble row
                         let row = Row(chunk
@@ -126,10 +121,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                         match op {
                             Insert | UpdateInsert => {
-                                self.state_table.insert(&arrange_row, row)?;
+                                self.state_table.insert(row)?;
                             }
                             Delete | UpdateDelete => {
-                                self.state_table.delete(&arrange_row, row)?;
+                                self.state_table.delete(row)?;
                             }
                         }
                     }
