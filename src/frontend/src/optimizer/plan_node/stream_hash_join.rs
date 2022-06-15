@@ -228,5 +228,6 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
         distribution_keys: base.dist.dist_column_indices().to_vec(),
         is_index_on: None,
         appendonly: input.append_only(),
+        owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
     }
 }

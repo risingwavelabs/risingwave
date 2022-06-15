@@ -187,6 +187,7 @@ impl LogicalAgg {
                 is_index_on: None,
                 distribution_keys: base.dist.dist_column_indices().to_vec(),
                 appendonly: false,
+                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             });
         }
         (table_catalogs, column_index2columb_id)
