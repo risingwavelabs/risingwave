@@ -49,6 +49,7 @@ pub mod cache;
 pub mod catalog;
 pub mod collection;
 pub mod config;
+pub mod consistent_hashing;
 pub mod hash;
 pub mod monitor;
 pub mod service;

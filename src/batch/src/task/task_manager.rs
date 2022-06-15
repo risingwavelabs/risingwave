@@ -19,10 +19,10 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
+use risingwave_pb::common::VNodeRanges;
 use risingwave_pb::task_service::GetDataResponse;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
@@ -48,12 +48,12 @@ impl BatchManager {
         &self,
         tid: &ProstTaskId,
         plan: PlanFragment,
-        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
+        vnode_ranges: VNodeRanges,
         epoch: u64,
         context: ComputeNodeContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
-        let task = BatchTaskExecution::new(tid, vnode_bitmap, plan, context, epoch)?;
+        let task = BatchTaskExecution::new(tid, vnode_ranges, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
 
@@ -177,7 +177,6 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::hash::EMPTY_VNODE_BITMAP;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
@@ -247,14 +246,14 @@ mod tests {
             .fire_task(
                 &task_id,
                 plan.clone(),
-                EMPTY_VNODE_BITMAP,
+                Default::default(),
                 0,
                 context.clone(),
             )
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, EMPTY_VNODE_BITMAP, 0, context)
+            .fire_task(&task_id, plan, Default::default(), 0, context)
             .await
             .unwrap_err();
         assert!(err
@@ -296,7 +295,7 @@ mod tests {
             .fire_task(
                 &task_id,
                 plan.clone(),
-                EMPTY_VNODE_BITMAP,
+                Default::default(),
                 0,
                 context.clone(),
             )

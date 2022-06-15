@@ -55,7 +55,7 @@ impl TaskService for BatchServiceImpl {
             task_id,
             plan,
             epoch,
-            vnode_bitmap,
+            vnode_ranges,
         } = request.into_inner();
 
         let res = self
@@ -63,7 +63,7 @@ impl TaskService for BatchServiceImpl {
             .fire_task(
                 &task_id.expect("no task id found"),
                 plan.expect("no plan found").clone(),
-                vnode_bitmap.try_into().expect("vnode bitmap is not valid"),
+                vnode_ranges.expect("vnode bitmap is not valid"),
                 epoch,
                 ComputeNodeContext::new(self.env.clone()),
             )
@@ -130,7 +130,7 @@ impl TaskService for BatchServiceImpl {
             task_id,
             plan,
             epoch,
-            vnode_bitmap,
+            vnode_ranges,
         } = req.into_inner();
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
@@ -141,7 +141,7 @@ impl TaskService for BatchServiceImpl {
         );
         let task = BatchTaskExecution::new(
             &task_id,
-            vnode_bitmap.try_into().expect("vnode bitmap is not valid"),
+            vnode_ranges.expect("vnode bitmap is not valid"),
             plan,
             context,
             epoch,

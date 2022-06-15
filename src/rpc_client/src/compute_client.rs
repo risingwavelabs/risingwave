@@ -16,10 +16,10 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
+use risingwave_pb::common::VNodeRanges;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -93,7 +93,7 @@ impl ComputeClient {
         &self,
         task_id: TaskId,
         plan: PlanNode,
-        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
+        vnode_ranges: VNodeRanges,
         epoch: u64,
     ) -> Result<()> {
         let plan = PlanFragment {
@@ -108,7 +108,7 @@ impl ComputeClient {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch,
-                vnode_bitmap: vnode_bitmap.to_vec(),
+                vnode_ranges: Some(vnode_ranges),
             })
             .await?;
         Ok(())
@@ -118,7 +118,7 @@ impl ComputeClient {
         &self,
         task_id: TaskId,
         plan: PlanFragment,
-        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
+        vnode_ranges: VNodeRanges,
         epoch: u64,
     ) -> Result<()> {
         let _ = self
@@ -126,7 +126,7 @@ impl ComputeClient {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch,
-                vnode_bitmap: vnode_bitmap.to_vec(),
+                vnode_ranges: Some(vnode_ranges),
             })
             .await?;
         Ok(())

@@ -19,13 +19,13 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
-use risingwave_common::hash::VNODE_BITMAP_LEN;
+use risingwave_common::consistent_hashing::build_vnode_mapping;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
-use risingwave_pb::common::HostAddress;
+use risingwave_pb::common::{HostAddress, VNodeRanges};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -291,6 +291,11 @@ impl StageRunner {
 
     async fn schedule_tasks(&self) -> SchedulerResult<()> {
         let mut futures = vec![];
+
+        // FIXME: use proper vnode_ranges
+        let parallel_units = vec![];
+        let (_, _, vnode_ranges_mapping) = build_vnode_mapping(&parallel_units);
+
         for id in 0..self.stage.parallelism {
             let task_id = TaskIdProst {
                 query_id: self.stage.query_id.id.clone(),
@@ -298,9 +303,10 @@ impl StageRunner {
                 task_id: id,
             };
             let plan_fragment = self.create_plan_fragment(id);
-            let vnode_bitmap = todo!();
+            let parallel_unit_id = parallel_units[id as usize];
+            let vnode_ranges = vnode_ranges_mapping[&parallel_unit_id].clone();
             futures.push(async {
-                self.schedule_task(task_id, plan_fragment, vnode_bitmap)
+                self.schedule_task(task_id, plan_fragment, vnode_ranges)
                     .await
             });
         }
@@ -315,7 +321,7 @@ impl StageRunner {
         &self,
         task_id: TaskIdProst,
         plan_fragment: PlanFragment,
-        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
+        vnode_ranges: VNodeRanges,
     ) -> SchedulerResult<()> {
         let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
 
@@ -327,7 +333,7 @@ impl StageRunner {
 
         let t_id = task_id.task_id;
         compute_client
-            .create_task2(task_id, plan_fragment, vnode_bitmap, self.epoch)
+            .create_task2(task_id, plan_fragment, vnode_ranges, self.epoch)
             .await
             .map_err(|e| anyhow!(e))?;
 

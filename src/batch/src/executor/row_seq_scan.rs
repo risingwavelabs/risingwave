@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
@@ -39,7 +38,6 @@ use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
 pub struct RowSeqScanExecutor<S: StateStore> {
-    vnode_bitmap: [u8; VNODE_BITMAP_LEN],
     chunk_size: usize,
     schema: Schema,
     identity: String,
@@ -58,12 +56,10 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         schema: Schema,
         scan_type: ScanType<S>,
         chunk_size: usize,
-        vnode_bitmap: [u8; VNODE_BITMAP_LEN],
         identity: String,
         stats: Arc<BatchMetrics>,
     ) -> Self {
         Self {
-            vnode_bitmap,
             chunk_size,
             schema,
             identity,
@@ -159,7 +155,15 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 None,
             );
 
-            todo!("use source.vnode_bitmap to scan different ranges");
+            let vnode_ranges = source.vnode_ranges;
+            vnode_ranges
+                .starts
+                .iter()
+                .zip_eq(vnode_ranges.ends.iter())
+                .map(|(start, end)| {
+                    todo!("create vnode range iterators");
+                })
+                .collect_vec();
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
                 let iter = table.dedup_pk_iter(source.epoch, &pk_descs).await?;
@@ -187,7 +191,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 table.schema().clone(),
                 scan_type,
                 RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
-                *source.vnode_bitmap,
                 source.plan_node().get_identity().clone(),
                 batch_stats,
             )))

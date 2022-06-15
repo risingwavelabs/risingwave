@@ -15,8 +15,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_common::hash::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::consistent_hashing::build_vnode_mapping;
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::common::ParallelUnit;
 
 use super::TableId;
@@ -144,31 +146,10 @@ impl HashMappingManagerCore {
         fragment_id: FragmentId,
         parallel_units: &[ParallelUnit],
     ) -> Vec<ParallelUnitId> {
-        let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
-        let mut owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
+        let (vnode_mapping, owner_mapping, _) =
+            build_vnode_mapping(&parallel_units.iter().map(|pu| pu.id).collect_vec());
+
         let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
-        let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
-        let mut init_bound = hash_shard_size;
-
-        parallel_units.iter().for_each(|parallel_unit| {
-            let parallel_unit_id = parallel_unit.id;
-            vnode_mapping.resize(init_bound, parallel_unit_id);
-            let vnodes = (init_bound - hash_shard_size..init_bound)
-                .map(|id| id as VirtualNode)
-                .collect();
-            owner_mapping.insert(parallel_unit_id, vnodes);
-            init_bound += hash_shard_size;
-        });
-
-        let mut parallel_unit_iter = parallel_units.iter().cycle();
-        for vnode in init_bound - hash_shard_size..VIRTUAL_NODE_COUNT {
-            let id = parallel_unit_iter.next().unwrap().id;
-            vnode_mapping.push(id);
-            owner_mapping
-                .entry(id)
-                .or_default()
-                .push(vnode as VirtualNode);
-        }
 
         owner_mapping.iter().for_each(|(parallel_unit_id, vnodes)| {
             let vnode_count = vnodes.len();

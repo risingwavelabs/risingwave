@@ -20,8 +20,8 @@ use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
+use risingwave_common::consistent_hashing::full_vnode_range;
 use risingwave_common::error::RwError;
-use risingwave_common::hash::FULL_VNODE_BITMAP;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -80,8 +80,8 @@ impl LocalQueryExecution {
         self.epoch = Some(epoch);
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
-        let executor =
-            ExecutorBuilder::new(&plan_node, &task_id, &FULL_VNODE_BITMAP, context, epoch);
+        let vnode_ranges = full_vnode_range();
+        let executor = ExecutorBuilder::new(&plan_node, &task_id, &vnode_ranges, context, epoch);
         let executor = executor.build().await?;
 
         #[for_await]
