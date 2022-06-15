@@ -18,7 +18,7 @@ use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::next_key;
+use risingwave_hummock_sdk::key::range_of_prefix;
 
 use crate::error::StorageResult;
 use crate::{StateStore, StateStoreIter};
@@ -101,7 +101,7 @@ impl<S: StateStore> Keyspace<S> {
         limit: Option<usize>,
         epoch: u64,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
+        let range = range_of_prefix(&self.prefix);
         let mut pairs = self.store.scan(range, limit, epoch).await?;
         pairs
             .iter_mut()
@@ -112,7 +112,7 @@ impl<S: StateStore> Keyspace<S> {
     /// Gets an iterator with the prefix of this keyspace.
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     async fn iter_inner(&'_ self, epoch: u64) -> StorageResult<S::Iter> {
-        let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
+        let range = range_of_prefix(&self.prefix);
         self.store.iter(range, epoch).await
     }
 

@@ -25,7 +25,7 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::next_key;
+use risingwave_hummock_sdk::key::range_of_prefix;
 
 use super::cell_based_table::{CellBasedTable, CellBasedTableStreamingIter};
 use super::mem_table::{MemTable, RowOp};
@@ -145,10 +145,7 @@ impl<S: StateStore> StateTable<S> {
 
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
-        let cell_based_bounds = (
-            Included(self.keyspace.key().to_vec()),
-            Excluded(next_key(self.keyspace.key())),
-        );
+        let cell_based_bounds = range_of_prefix(self.keyspace.key());
         let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
         let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
         Ok(StateTableRowIter::new(
@@ -225,68 +222,45 @@ impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix(
         &self,
-        pk_prefix: Option<&Row>,
+        pk_prefix: &Row,
         prefix_serializer: OrderedRowSerializer,
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
-        if let Some(pk_prefix) = pk_prefix.as_ref() {
-            let key_bytes = serialize_pk::<false>(pk_prefix, &prefix_serializer);
-            let start_key_with_prefix = self.keyspace.prefixed_key(&key_bytes);
-            let cell_based_bounds = (
-                Included(start_key_with_prefix.clone()),
-                Excluded(next_key(start_key_with_prefix.as_slice())),
-            );
+        let key_bytes = serialize_pk::<false>(pk_prefix, &prefix_serializer);
+        let start_key_with_prefix = self.keyspace.prefixed_key(&key_bytes);
+        let cell_based_bounds = range_of_prefix(&start_key_with_prefix);
 
-            let mem_table_bounds = (
-                Included(key_bytes.clone()),
-                Excluded(next_key(key_bytes.as_slice())),
-            );
-            let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
-            Ok(StateTableRowIter::new(
-                &self.keyspace,
-                self.column_mapping.clone(),
-                mem_table_iter,
-                cell_based_bounds,
-                epoch,
-            )
-            .into_stream())
-        } else {
-            let cell_based_bounds = (
-                Included(self.keyspace.key().to_vec()),
-                Excluded(next_key(self.keyspace.key())),
-            );
-            let mem_table_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (Unbounded, Unbounded);
-            let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
-            Ok(StateTableRowIter::new(
-                &self.keyspace,
-                self.column_mapping.clone(),
-                mem_table_iter,
-                cell_based_bounds,
-                epoch,
-            )
-            .into_stream())
-        }
+        let mem_table_bounds = range_of_prefix(&key_bytes);
+        let mem_table_iter = self.mem_table.buffer.range(mem_table_bounds);
+        Ok(StateTableRowIter::new(
+            &self.keyspace,
+            self.column_mapping.clone(),
+            mem_table_iter,
+            cell_based_bounds,
+            epoch,
+        )
+        .into_stream())
     }
 }
 
 pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>>;
 
-struct StateTableRowIter<'a, S: StateStore> {
+struct StateTableRowIter<'a, S: StateStore, R> {
     keyspace: &'a Keyspace<S>,
     table_descs: Arc<ColumnDescMapping>,
     mem_table_iter: Range<'a, Vec<u8>, RowOp>,
-    cell_based_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    cell_based_bounds: R,
     epoch: u64,
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommited data).
 /// It will merge the result of `mem_table_iter` and `cell_based_streaming_iter`.
-impl<'a, S: StateStore> StateTableRowIter<'a, S> {
+impl<'a, S: StateStore, R: RangeBounds<Vec<u8>> + Send> StateTableRowIter<'a, S, R> {
     pub fn new(
         keyspace: &'a Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
         mem_table_iter: Range<'a, Vec<u8>, RowOp>,
-        cell_based_bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        cell_based_bounds: R,
         epoch: u64,
     ) -> Self {
         Self {

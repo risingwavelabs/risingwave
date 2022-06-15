@@ -29,7 +29,7 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::next_key;
+use risingwave_hummock_sdk::key::{next_key, range_of_prefix};
 
 use super::mem_table::RowOp;
 use super::TableIter;
@@ -199,12 +199,12 @@ impl<S: StateStore> CellBasedTable<S> {
         let start_key = self
             .keyspace
             .prefixed_key(&serialize_pk::<false>(pk, pk_serializer));
-        let end_key = next_key(&start_key);
+        let key_range = range_of_prefix(&start_key);
 
         let state_store_range_scan_res = self
             .keyspace
             .state_store()
-            .scan(start_key..end_key, None, epoch)
+            .scan(key_range, None, epoch)
             .await?;
         let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
         for (key, value) in state_store_range_scan_res {
@@ -434,20 +434,20 @@ impl<S: StateStore> CellBasedTable<S> {
     ) -> StorageResult<CellBasedTableRowIter<S>> {
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-        let serialized_pk_prefix = &serialize_pk::<false>(&pk_prefix, &prefix_serializer)[..];
-        let start_key = Included(self.keyspace.prefixed_key(&serialized_pk_prefix));
-        let next_key = Excluded(self.keyspace.prefixed_key(next_key(serialized_pk_prefix)));
+        let serialized_pk_prefix = serialize_pk::<false>(&pk_prefix, &prefix_serializer);
+
+        let start_key = self.keyspace.prefixed_key(&serialized_pk_prefix);
+        let key_range = range_of_prefix(&start_key);
 
         trace!(
-            "iter_with_pk_prefix: start_key: {:?}, next_key: {:?}",
-            start_key,
-            next_key
+            "iter_with_pk_prefix: key_range {:?}",
+            (key_range.start_bound(), key_range.end_bound())
         );
 
         CellBasedTableRowIter::new_with_bounds(
             &self.keyspace,
             self.mapping.clone(),
-            (start_key, next_key),
+            key_range,
             epoch,
         )
         .await
