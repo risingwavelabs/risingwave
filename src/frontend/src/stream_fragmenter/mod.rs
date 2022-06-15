@@ -361,11 +361,14 @@ impl StreamFragmenter {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::catalog::Table;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::{AggCall, InputRefExpr};
+    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
     use risingwave_pb::stream_plan::*;
+    use risingwave_pb::catalog::Table as ProstTable;
 
     use super::*;
 
@@ -387,6 +390,36 @@ mod tests {
         }
     }
 
+    fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
+        ColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_type: Some(DataType {
+                    type_name: column_type as i32,
+                    ..Default::default()
+                }),
+                column_id,
+                ..Default::default()
+            }),
+            is_hidden: false,
+        }
+    }
+    
+    fn make_internal_table(is_agg_value: bool) -> ProstTable {
+        let mut columns = vec![make_column(TypeName::Int64, 0)];
+        if !is_agg_value {
+            columns.push(make_column(TypeName::Int32, 1));
+        }
+        ProstTable {
+            id: TableId::placeholder().table_id,
+            name: String::new(),
+            columns,
+            order_column_ids: vec![0],
+            orders: vec![2],
+            pk: vec![2],
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn test_assign_local_table_id_to_stream_node() {
         // let fragmenter = StreamFragmenter {};
@@ -398,6 +431,14 @@ mod tests {
             // test HashJoin Type
             let mut stream_node = StreamNode {
                 node_body: Some(NodeBody::HashJoin(HashJoinNode {
+                    left_table: Some(Table {
+                        id: 0,
+                        ..Default::default()
+                    }),
+                    right_table: Some(Table {
+                        id: 0,
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 })),
                 ..Default::default()
@@ -426,6 +467,11 @@ mod tests {
                         make_sum_aggcall(0),
                         make_sum_aggcall(1),
                         make_sum_aggcall(2),
+                    ],
+                    internal_tables: vec![
+                        make_internal_table(true),
+                        make_internal_table(false),
+                        make_internal_table(false),
                     ],
                     ..Default::default()
                 })),
@@ -456,6 +502,12 @@ mod tests {
                         make_sum_aggcall(1),
                         make_sum_aggcall(2),
                         make_sum_aggcall(3),
+                    ],
+                    internal_tables: vec![
+                        make_internal_table(true),
+                        make_internal_table(false),
+                        make_internal_table(false),
+                        make_internal_table(false),
                     ],
                     ..Default::default()
                 })),
