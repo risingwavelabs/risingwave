@@ -316,22 +316,26 @@ where
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
 
-            let all_data_iter = state_table
-                .iter_with_pk_prefix(
-                    self.group_key.as_ref(),
-                    OrderedRowSerializer::new(vec![
-                        if EXTREME_TYPE == variants::EXTREME_MAX {
-                            OrderType::Descending
-                        } else {
-                            OrderType::Ascending
-                        };
-                        self.group_key
-                            .as_ref()
-                            .map_or(0, |key| key.size())
-                    ]),
-                    epoch,
-                )
-                .await?;
+            let all_data_iter = if let Some(gk) = self.group_key.as_ref() {
+                state_table
+                    .iter_with_pk_prefix(
+                        gk,
+                        OrderedRowSerializer::new(vec![
+                            if EXTREME_TYPE == variants::EXTREME_MAX {
+                                OrderType::Descending
+                            } else {
+                                OrderType::Ascending
+                            };
+                            self.group_key
+                                .as_ref()
+                                .map_or(0, |key| key.size())
+                        ]),
+                        epoch,
+                    )
+                    .await?
+            } else {
+                state_table.iter(epoch).await?
+            };
             pin_mut!(all_data_iter);
 
             for _ in 0..self.top_n_count.unwrap_or(usize::MAX) {
