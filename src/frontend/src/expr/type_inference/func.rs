@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::vec;
 
 use itertools::iproduct;
 use risingwave_common::error::{ErrorCode, Result};
