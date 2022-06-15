@@ -215,10 +215,6 @@ impl fmt::Display for StreamMaterialize {
         if pk_column_names != order_descs {
             builder.field("order_descs", &format_args!("[{}]", order_descs));
         }
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
         builder.finish()
     }
 }

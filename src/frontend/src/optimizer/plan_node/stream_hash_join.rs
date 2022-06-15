@@ -45,6 +45,9 @@ pub struct StreamHashJoin {
 
     dist_key_l: Distribution,
     dist_key_r: Distribution,
+    /// Whether can optimize for append-only stream.
+    /// It is true if input of both side is append-only
+    is_append_only: bool,
 }
 
 impl StreamHashJoin {
@@ -89,6 +92,7 @@ impl StreamHashJoin {
             is_delta: force_delta,
             dist_key_l: dist_l,
             dist_key_r: dist_r,
+            is_append_only: append_only,
         }
     }
 
@@ -126,17 +130,15 @@ impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut builder = if self.is_delta {
             f.debug_struct("StreamDeltaHashJoin")
+        } else if self.is_append_only {
+            f.debug_struct("StreamAppendOnlyHashJoin")
         } else {
             f.debug_struct("StreamHashJoin")
         };
         builder
             .field("type", &format_args!("{:?}", self.logical.join_type()))
-            .field("predicate", &format_args!("{}", self.eq_join_predicate()));
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
-        builder.finish()
+            .field("predicate", &format_args!("{}", self.eq_join_predicate()))
+            .finish()
     }
 }
 
@@ -180,7 +182,6 @@ impl ToStreamProst for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            is_delta_join: self.is_delta,
             dist_key_l: self
                 .dist_key_l
                 .dist_column_indices()
@@ -193,6 +194,8 @@ impl ToStreamProst for StreamHashJoin {
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect_vec(),
+            is_delta_join: self.is_delta,
+            is_append_only: self.is_append_only,
             ..Default::default()
         })
     }

@@ -114,10 +114,12 @@ impl ManagedValueState {
 
         // Persist value into relational table. The inserted row should concat with pk (pk is in
         // front of value). In this case, the pk is just group key.
+
         let mut v = vec![];
         v.extend_from_slice(&self.pk.as_ref().unwrap_or(&Row(vec![])).0);
         v.push(self.state.get_output()?);
-        state_table.insert(self.pk.as_ref().unwrap_or(&Row(vec![])), Row::new(v))?;
+
+        state_table.insert(Row::new(v))?;
 
         self.is_dirty = false;
         Ok(())
@@ -211,7 +213,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only() {
         let keyspace = create_in_memory_keyspace();
-        let pk_index = vec![0_usize, 1_usize];
+        let pk_index = vec![];
         let mut state_table = StateTable::new(
             keyspace.clone(),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],

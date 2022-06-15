@@ -282,7 +282,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let table_pk = self.get_table_pk(join_key, pk)?;
         // If no cache maintained, only update the flush buffer.
-        self.state_table.insert(&table_pk, value.into_row())?;
+        self.state_table.insert(value.into_row())?;
         Ok(())
     }
 
@@ -294,7 +294,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let table_pk = self.get_table_pk(join_key, pk)?;
         // If no cache maintained, only update the flush buffer.
-        self.state_table.delete(&table_pk, value.into_row())?;
+        self.state_table.delete(value.into_row())?;
         Ok(())
     }
 

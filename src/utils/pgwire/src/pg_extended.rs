@@ -73,7 +73,8 @@ fn replace_params(query_string: String, generic_params: &[usize], params: &[Stri
 
     for &param_idx in generic_params {
         let pattern =
-            Regex::new(format!(r"(?P<x>\${0})(?P<y>[,;\s]+)|\${0}$", param_idx).as_str()).unwrap();
+            Regex::new(format!(r"(?P<x>\${0})(?P<y>[^\d]{{1}})|\${0}$", param_idx).as_str())
+                .unwrap();
         let param = &params[param_idx.sub(1)];
         tmp = pattern
             .replace_all(&tmp, format!("{}$y", param))
@@ -254,6 +255,19 @@ mod tests {
                 &params,
             );
             assert!(res == "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;");
+        }
+
+        {
+            let raw_params = vec!["A".into(), "B".into()];
+            let type_description = vec![TypeOid::Varchar; 2];
+            let params = parse_params(&type_description, &raw_params);
+
+            let res = replace_params(
+                "INSERT INTO nperson (name,data) VALUES ($1,$2)".to_string(),
+                &[1, 2],
+                &params,
+            );
+            assert!(res == "INSERT INTO nperson (name,data) VALUES ('A','B')");
         }
     }
 }

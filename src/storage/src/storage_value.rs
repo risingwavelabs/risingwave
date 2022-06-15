@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bytes::{Buf, BufMut, Bytes};
-use risingwave_common::consistent_hash::VirtualNode;
+use risingwave_common::hash::VirtualNode;
 
 /// Size of value meta in bytes. Since there might exist paddings between fields in `ValueMeta`, we
 /// can't simply use `size_of` to retrieve its size.

@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::{ExchangeSource as ProstExchangeSource, TaskOutputId};
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
@@ -74,7 +74,7 @@ impl ExchangeSource for GrpcExchangeSource {
             None => return Ok(None),
             Some(r) => r,
         };
-        let task_data = res.to_rw_result()?;
+        let task_data = res?;
         let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact()?;
         trace!(
             "Receiver taskOutput = {:?}, data = {:?}",

@@ -50,9 +50,13 @@ impl StreamSimpleAgg {
 
 impl fmt::Display for StreamSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("StreamSimpleAgg")
-            .field("aggs", &self.agg_calls())
-            .finish()
+        let mut builder = if self.input().append_only() {
+            f.debug_struct("StreamAppendOnlySimpleAgg")
+        } else {
+            f.debug_struct("StreamSimpleAgg")
+        };
+        builder.field("aggs", &self.agg_calls());
+        builder.finish()
     }
 }
 
@@ -86,7 +90,7 @@ impl ToStreamProst for StreamSimpleAgg {
                 .map(|idx| *idx as u32)
                 .collect_vec(),
             table_ids: vec![],
-            append_only: self.append_only(),
+            is_append_only: self.input().append_only(),
         })
     }
 }
