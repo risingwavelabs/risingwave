@@ -164,7 +164,7 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             lower_sub_keyspace,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
-            pk_indices.clone(),
+            internal_key_indices.clone(),
         );
         let managed_middle_state = ManagedTopNBottomNState::new(
             cache_size,
@@ -172,7 +172,7 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             middle_sub_keyspace,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
-            pk_indices.clone(),
+            internal_key_indices.clone(),
         );
         let managed_highest_state = ManagedTopNState::<S, TOP_N_MIN>::new(
             cache_size,
@@ -180,7 +180,7 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             higher_sub_keyspace,
             row_data_types,
             ordered_row_deserializer,
-            pk_indices.clone(),
+            internal_key_indices.clone(),
         );
         Ok(Self {
             info: ExecutorInfo {
