@@ -140,8 +140,6 @@ message StreamChunk {
   repeated Column columns = 3;
 }
 
-message NothingMutation {}
-
 message StopMutation {
   repeated uint32 actors = 1;
 }
@@ -179,7 +177,6 @@ message Epoch {
 message Barrier {
   Epoch epoch = 1;
   oneof mutation {
-    NothingMutation nothing = 2;
     StopMutation stop = 3;
     UpdateMutation update = 4;
     AddMutation add = 5;

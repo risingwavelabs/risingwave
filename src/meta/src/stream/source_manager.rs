@@ -659,7 +659,7 @@ where
         };
 
         if !diff.is_empty() {
-            let command = Command::Plain(Mutation::Splits(SourceChangeSplitMutation {
+            let command = Command::Plain(Some(Mutation::Splits(SourceChangeSplitMutation {
                 mutations: diff
                     .iter()
                     .filter(|(_, splits)| !splits.is_empty())
@@ -672,7 +672,7 @@ where
                             .collect(),
                     })
                     .collect(),
-            }));
+            })));
 
             log::debug!("pushing down mutation {:#?}", command);
 
