@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
-use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Sub};
 
@@ -39,7 +37,7 @@ use super::*;
 ///
 /// FIXME: if this derives `PartialEq` and `PartialOrd`, caller must guarantee the fields are valid.
 #[derive(
-Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+    Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
 )]
 pub struct IntervalUnit {
     months: i32,
