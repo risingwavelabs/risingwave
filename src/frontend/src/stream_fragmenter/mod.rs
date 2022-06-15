@@ -361,14 +361,13 @@ impl StreamFragmenter {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::catalog::Table;
+    use risingwave_pb::catalog::{Table, Table as ProstTable};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::{AggCall, InputRefExpr};
     use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
     use risingwave_pb::stream_plan::*;
-    use risingwave_pb::catalog::Table as ProstTable;
 
     use super::*;
 
@@ -403,7 +402,7 @@ mod tests {
             is_hidden: false,
         }
     }
-    
+
     fn make_internal_table(is_agg_value: bool) -> ProstTable {
         let mut columns = vec![make_column(TypeName::Int64, 0)];
         if !is_agg_value {

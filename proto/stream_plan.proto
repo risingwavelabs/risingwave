@@ -2,11 +2,11 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "catalog.proto";
 import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
-import "catalog.proto";
 
 option optimize_for = SPEED;
 
