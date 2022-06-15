@@ -74,10 +74,19 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
+    pub fn get_pk_indices(&self) -> &[usize] {
+        &self.pk_indices
+    }
+
+    pub fn get_mem_table(&self) -> &MemTable {
+        &self.mem_table
+    }
+
     /// read methods
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: change to Cow to avoid unnecessary clone.
-        let pk_bytes = serialize_pk(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+        let pk_bytes =
+            serialize_pk::<false>(pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         let mem_table_res = self.mem_table.get_row(&pk_bytes).map_err(err)?;
         match mem_table_res {
             Some(row_op) => match row_op {
@@ -90,24 +99,26 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// write methods
-    pub fn insert(&mut self, value: Row) -> StorageResult<()> {
+    pub fn insert<const RVERSE: bool>(&mut self, value: Row) -> StorageResult<()> {
         let mut datums = vec![];
         for pk_indice in &self.pk_indices {
             datums.push(value.index(*pk_indice).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+        let pk_bytes =
+            serialize_pk::<RVERSE>(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         self.mem_table.insert(pk_bytes, value)?;
         Ok(())
     }
 
-    pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
+    pub fn delete<const RVERSE: bool>(&mut self, old_value: Row) -> StorageResult<()> {
         let mut datums = vec![];
         for pk_indice in &self.pk_indices {
             datums.push(old_value.index(*pk_indice).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
+        let pk_bytes =
+            serialize_pk::<RVERSE>(&pk, self.cell_based_table.pk_serializer.as_ref().unwrap());
         self.mem_table.delete(pk_bytes, old_value)?;
         Ok(())
     }
@@ -168,35 +179,35 @@ impl<S: StateStore> StateTable<S> {
         let cell_based_start_key = match pk_bounds.start_bound() {
             Included(k) => Included(
                 self.keyspace
-                    .prefixed_key(&serialize_pk(k.as_ref(), pk_serializer)),
+                    .prefixed_key(&serialize_pk::<false>(k.as_ref(), pk_serializer)),
             ),
             Excluded(k) => Excluded(
                 self.keyspace
-                    .prefixed_key(&serialize_pk(k.as_ref(), pk_serializer)),
+                    .prefixed_key(&serialize_pk::<false>(k.as_ref(), pk_serializer)),
             ),
             Unbounded => Unbounded,
         };
         let cell_based_end_key = match pk_bounds.end_bound() {
             Included(k) => Included(
                 self.keyspace
-                    .prefixed_key(&serialize_pk(k.as_ref(), pk_serializer)),
+                    .prefixed_key(&serialize_pk::<false>(k.as_ref(), pk_serializer)),
             ),
             Excluded(k) => Excluded(
                 self.keyspace
-                    .prefixed_key(&serialize_pk(k.as_ref(), pk_serializer)),
+                    .prefixed_key(&serialize_pk::<false>(k.as_ref(), pk_serializer)),
             ),
             Unbounded => Unbounded,
         };
         let cell_based_bounds = (cell_based_start_key, cell_based_end_key);
 
         let mem_table_start_key = match pk_bounds.start_bound() {
-            Included(k) => Included(serialize_pk(k.as_ref(), pk_serializer)),
-            Excluded(k) => Excluded(serialize_pk(k.as_ref(), pk_serializer)),
+            Included(k) => Included(serialize_pk::<false>(k.as_ref(), pk_serializer)),
+            Excluded(k) => Excluded(serialize_pk::<false>(k.as_ref(), pk_serializer)),
             Unbounded => Unbounded,
         };
         let mem_table_end_key = match pk_bounds.end_bound() {
-            Included(k) => Included(serialize_pk(k.as_ref(), pk_serializer)),
-            Excluded(k) => Excluded(serialize_pk(k.as_ref(), pk_serializer)),
+            Included(k) => Included(serialize_pk::<false>(k.as_ref(), pk_serializer)),
+            Excluded(k) => Excluded(serialize_pk::<false>(k.as_ref(), pk_serializer)),
             Unbounded => Unbounded,
         };
         let mem_table_bounds = (mem_table_start_key, mem_table_end_key);
@@ -219,7 +230,7 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
         if let Some(pk_prefix) = pk_prefix.as_ref() {
-            let key_bytes = serialize_pk(pk_prefix, &prefix_serializer);
+            let key_bytes = serialize_pk::<false>(pk_prefix, &prefix_serializer);
             let start_key_with_prefix = self.keyspace.prefixed_key(&key_bytes);
             let cell_based_bounds = (
                 Included(start_key_with_prefix.clone()),
@@ -317,6 +328,7 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                 (None, None) => break,
                 (Some(_), None) => {
                     let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+
                     yield Cow::Owned(row);
                 }
                 (None, Some(_)) => {
@@ -336,17 +348,20 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                     match cell_based_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
                             // cell_based_table_item will be return
+
                             let row: Row = cell_based_table_iter.next().await.unwrap()?.1;
+
                             yield Cow::Owned(row);
                         }
                         Ordering::Equal => {
-                            // mem_table_item will be return, while both
-                            // and mem_table_iter need to execute
+                            // mem_table_item will be return, while both cell_based_streaming_iter
+                            // and mem_table_iter need to execute next()
                             // once.
-
                             let row_op = mem_table_iter.next().unwrap().1;
                             match row_op {
-                                RowOp::Insert(row) => yield Cow::Borrowed(row),
+                                RowOp::Insert(row) => {
+                                    yield Cow::Borrowed(row);
+                                }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update((old_row, new_row)) => {
                                     debug_assert!(old_row == cell_based_row);
@@ -357,10 +372,11 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                         }
                         Ordering::Greater => {
                             // mem_table_item will be return
-
                             let row_op = mem_table_iter.next().unwrap().1;
                             match row_op {
-                                RowOp::Insert(row) => yield Cow::Borrowed(row),
+                                RowOp::Insert(row) => {
+                                    yield Cow::Borrowed(row);
+                                }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update(_) => unreachable!(),
                             }
