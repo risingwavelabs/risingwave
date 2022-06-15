@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc, DEFAULT_SUPPER_USER};
+use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
@@ -132,7 +132,7 @@ impl TableCatalog {
                 .map(|k| *k as i32)
                 .collect_vec(),
             appendonly: self.appendonly,
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner: self.owner.clone(),
         }
     }
 }

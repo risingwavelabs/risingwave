@@ -51,7 +51,12 @@ impl CatalogReader {
 pub trait CatalogWriter: Send + Sync {
     async fn create_database(&self, db_name: &str, owner: String) -> Result<()>;
 
-    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()>;
+    async fn create_schema(
+        &self,
+        db_id: DatabaseId,
+        schema_name: &str,
+        owner: String,
+    ) -> Result<()>;
 
     async fn create_materialized_view(
         &self,
@@ -99,14 +104,19 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+    async fn create_schema(
+        &self,
+        db_id: DatabaseId,
+        schema_name: &str,
+        owner: String,
+    ) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_schema(ProstSchema {
                 id: 0,
                 name: schema_name.to_string(),
                 database_id: db_id,
-                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+                owner,
             })
             .await?;
         self.wait_version(version).await

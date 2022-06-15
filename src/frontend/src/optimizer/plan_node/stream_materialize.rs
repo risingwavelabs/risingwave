@@ -76,6 +76,7 @@ impl StreamMaterialize {
         user_cols: FixedBitSet,
         out_names: Vec<String>,
         is_index_on: Option<TableId>,
+        owner: String,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -163,7 +164,7 @@ impl StreamMaterialize {
             is_index_on,
             distribution_keys: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner,
         };
 
         Ok(Self { base, input, table })

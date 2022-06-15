@@ -139,13 +139,18 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+    async fn create_schema(
+        &self,
+        db_id: DatabaseId,
+        schema_name: &str,
+        owner: String,
+    ) -> Result<()> {
         let id = self.gen_id();
         self.catalog.write().create_schema(ProstSchema {
             id,
             name: schema_name.to_string(),
             database_id: db_id,
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner,
         });
         self.add_schema_id(id, db_id);
         Ok(())

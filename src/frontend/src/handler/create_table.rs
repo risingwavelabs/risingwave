@@ -91,7 +91,8 @@ pub(crate) fn gen_create_table_plan(
             properties: with_options.into(),
         }),
     )?;
-    let (plan, table) = gen_materialized_source_plan(context, source.clone())?;
+    let (plan, table) =
+        gen_materialized_source_plan(context, source.clone(), session.user_name().to_string())?;
     Ok((plan, source, table))
 }
 
@@ -100,6 +101,7 @@ pub(crate) fn gen_create_table_plan(
 pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
     source: ProstSource,
+    owner: String,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
@@ -118,7 +120,7 @@ pub(crate) fn gen_materialized_source_plan(
             required_cols,
             out_names,
         )
-        .gen_create_mv_plan(source.name.clone())?
+        .gen_create_mv_plan(source.name.clone(), owner)?
     };
     let table = materialize
         .table()

@@ -127,7 +127,7 @@ impl fmt::Display for AlterTableOperation {
                 write!(f, "RENAME CONSTRAINT {} TO {}", old_name, new_name)
             }
             AlterTableOperation::ChangeOwner { new_owner_name } => {
-                write!(f, "CHANGE OWNER TO {}", new_owner_name)
+                write!(f, "OWNER TO {}", new_owner_name)
             }
         }
     }
