@@ -403,6 +403,7 @@ define_keywords!(
     SETS,
     SHOW,
     SIMILAR,
+    SINK,
     SMALLINT,
     SNAPSHOT,
     SOME,
