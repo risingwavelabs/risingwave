@@ -36,7 +36,6 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::Keyspace;
@@ -202,11 +201,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
-    let table = CellBasedTable::new_adhoc(
-        keyspace,
-        column_descs.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-    );
+    let table = CellBasedTable::new(keyspace, column_descs.clone(), None, None);
 
     let ordered_column_descs: Vec<OrderedColumnDesc> = column_descs
         .iter()
@@ -388,11 +383,7 @@ async fn test_row_seq_scan() -> Result<()> {
         None,
         vec![0_usize],
     );
-    let table = CellBasedTable::new_adhoc(
-        keyspace,
-        column_descs.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-    );
+    let table = CellBasedTable::new(keyspace, column_descs.clone(), None, None);
 
     let epoch: u64 = 0;
 

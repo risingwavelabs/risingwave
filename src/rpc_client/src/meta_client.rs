@@ -39,9 +39,9 @@ use risingwave_pb::hummock::{
     PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
     ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
     ReportVacuumTaskResponse, SstableInfo, SubscribeCompactTasksRequest,
-    SubscribeCompactTasksResponse, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse,
-    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
-    VacuumTask,
+    SubscribeCompactTasksResponse, TriggerManualCompactionRequest, TriggerManualCompactionResponse,
+    UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse, UnpinSnapshotRequest,
+    UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse, VacuumTask,
 };
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -74,7 +74,7 @@ type DatabaseId = u32;
 type SchemaId = u32;
 
 /// Client to meta server. Cloning the instance is lightweight.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MetaClient {
     worker_id: Option<u32>,
     pub inner: GrpcMetaClient,
@@ -448,6 +448,15 @@ impl HummockMetaClient for MetaClient {
         let resp = self.inner.get_compaction_groups(req).await?;
         Ok(resp.compaction_groups)
     }
+
+    async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()> {
+        let req = TriggerManualCompactionRequest {
+            compaction_group_id,
+        };
+
+        self.inner.trigger_manual_compaction(req).await?;
+        Ok(())
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -556,6 +565,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
+            ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }

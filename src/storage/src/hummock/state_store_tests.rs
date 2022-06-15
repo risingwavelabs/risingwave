@@ -14,9 +14,8 @@
 
 use std::sync::Arc;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use futures::executor::block_on;
-use risingwave_common::consistent_hash::{VNodeBitmap, VNODE_BITMAP_LEN};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -85,14 +84,10 @@ async fn test_basic() {
     hummock_storage.ingest_batch(batch1, epoch1).await.unwrap();
 
     // Get the value after flushing to remote.
-    let value = hummock_storage
-        .get(&anchor, epoch1, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111"));
     let value = hummock_storage
-        .get(&Bytes::from("bb"), epoch1, None)
+        .get(&Bytes::from("bb"), epoch1)
         .await
         .unwrap()
         .unwrap();
@@ -100,7 +95,7 @@ async fn test_basic() {
 
     // Test looking for a nonexistent key. `next()` would return the next key.
     let value = hummock_storage
-        .get(&Bytes::from("ab"), epoch1, None)
+        .get(&Bytes::from("ab"), epoch1)
         .await
         .unwrap();
     assert_eq!(value, None);
@@ -110,11 +105,7 @@ async fn test_basic() {
     hummock_storage.ingest_batch(batch2, epoch2).await.unwrap();
 
     // Get the value after flushing to remote.
-    let value = hummock_storage
-        .get(&anchor, epoch2, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111111"));
 
     // Write the third batch.
@@ -122,42 +113,34 @@ async fn test_basic() {
     hummock_storage.ingest_batch(batch3, epoch3).await.unwrap();
 
     // Get the value after flushing to remote.
-    let value = hummock_storage.get(&anchor, epoch3, None).await.unwrap();
+    let value = hummock_storage.get(&anchor, epoch3).await.unwrap();
     assert_eq!(value, None);
 
     // Get non-existent maximum key.
     let value = hummock_storage
-        .get(&Bytes::from("ff"), epoch3, None)
+        .get(&Bytes::from("ff"), epoch3)
         .await
         .unwrap();
     assert_eq!(value, None);
 
     // Write aa bb
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch1, Default::default())
+        .iter(..=b"ee".to_vec(), epoch1)
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 2);
 
     // Get the anchor value at the first snapshot
-    let value = hummock_storage
-        .get(&anchor, epoch1, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111"));
 
     // Get the anchor value at the second snapshot
-    let value = hummock_storage
-        .get(&anchor, epoch2, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111111"));
     // Update aa, write cc
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch2, Default::default())
+        .iter(..=b"ee".to_vec(), epoch2)
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;
@@ -165,7 +148,7 @@ async fn test_basic() {
 
     // Delete aa, write dd,ee
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch3, Default::default())
+        .iter(..=b"ee".to_vec(), epoch3)
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;
@@ -182,86 +165,16 @@ async fn test_basic() {
         .unwrap();
     hummock_storage.wait_epoch(epoch1).await.unwrap();
     let value = hummock_storage
-        .get(&Bytes::from("bb"), epoch2, None)
+        .get(&Bytes::from("bb"), epoch2)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(value, Bytes::from("222"));
     let value = hummock_storage
-        .get(&Bytes::from("dd"), epoch2, None)
+        .get(&Bytes::from("dd"), epoch2)
         .await
         .unwrap();
     assert!(value.is_none());
-}
-
-#[tokio::test]
-async fn test_vnode_filter() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let storage = HummockStorage::with_default_stats(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-    )
-    .await
-    .unwrap();
-
-    let val = Bytes::from(&b"value"[..]);
-    let table_count = 2;
-    let mut batch = Vec::with_capacity(table_count);
-    for table_id in 0..table_count as u32 {
-        let mut key = BytesMut::from(&b"t"[..]);
-        key.put_u32(table_id);
-        batch.push((key.freeze(), StorageValue::new_default_put(val.clone())));
-    }
-
-    let epoch: u64 = 1;
-    storage.ingest_batch(batch, epoch).await.unwrap();
-    storage.sync(Some(epoch)).await.unwrap();
-    meta_client
-        .commit_epoch(
-            epoch,
-            storage.local_version_manager.get_uncommitted_ssts(epoch),
-        )
-        .await
-        .unwrap();
-
-    let value_with_dummy_filter = storage
-        .get_with_vnode_set(
-            &Bytes::from(&b"t\0\0\0\0"[..]),
-            epoch,
-            Some(&VNodeBitmap::new(0, [1; VNODE_BITMAP_LEN].to_vec())),
-        )
-        .await
-        .unwrap();
-    assert_eq!(value_with_dummy_filter.unwrap(), Bytes::from(&b"value"[..]));
-
-    let value_with_blockall_filter = storage
-        .get_with_vnode_set(
-            &Bytes::from(&b"t\0\0\0\0"[..]),
-            epoch,
-            Some(&VNodeBitmap::new(0, [0; VNODE_BITMAP_LEN].to_vec())),
-        )
-        .await
-        .unwrap();
-    assert!(value_with_blockall_filter.is_none());
-
-    let value_with_mismatch_dummy_filter = storage
-        .get_with_vnode_set(
-            &Bytes::from(&b"t\0\0\0\0"[..]),
-            epoch,
-            Some(&VNodeBitmap::new(5, [1; VNODE_BITMAP_LEN].to_vec())),
-        )
-        .await
-        .unwrap();
-    assert!(value_with_mismatch_dummy_filter.is_none());
 }
 
 #[tokio::test]
@@ -413,16 +326,12 @@ async fn test_reload_storage() {
     .unwrap();
 
     // Get the value after flushing to remote.
-    let value = hummock_storage
-        .get(&anchor, epoch1, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111"));
 
     // Test looking for a nonexistent key. `next()` would return the next key.
     let value = hummock_storage
-        .get(&Bytes::from("ab"), epoch1, None)
+        .get(&Bytes::from("ab"), epoch1)
         .await
         .unwrap();
     assert_eq!(value, None);
@@ -432,39 +341,27 @@ async fn test_reload_storage() {
     hummock_storage.ingest_batch(batch2, epoch2).await.unwrap();
 
     // Get the value after flushing to remote.
-    let value = hummock_storage
-        .get(&anchor, epoch2, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111111"));
 
     // Write aa bb
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch1, Default::default())
+        .iter(..=b"ee".to_vec(), epoch1)
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 2);
 
     // Get the anchor value at the first snapshot
-    let value = hummock_storage
-        .get(&anchor, epoch1, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111"));
 
     // Get the anchor value at the second snapshot
-    let value = hummock_storage
-        .get(&anchor, epoch2, None)
-        .await
-        .unwrap()
-        .unwrap();
+    let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(value, Bytes::from("111111"));
     // Update aa, write cc
     let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch2, Default::default())
+        .iter(..=b"ee".to_vec(), epoch2)
         .await
         .unwrap();
     let len = count_iter(&mut iter).await;
@@ -502,25 +399,25 @@ async fn test_write_anytime() {
         // check point get
         assert_eq!(
             "111".as_bytes(),
-            block_on(hummock_storage.get("aa".as_bytes(), epoch, None))
+            block_on(hummock_storage.get("aa".as_bytes(), epoch))
                 .unwrap()
                 .unwrap()
         );
         assert_eq!(
             "222".as_bytes(),
-            block_on(hummock_storage.get("bb".as_bytes(), epoch, None))
+            block_on(hummock_storage.get("bb".as_bytes(), epoch))
                 .unwrap()
                 .unwrap()
         );
         assert_eq!(
             "333".as_bytes(),
-            block_on(hummock_storage.get("cc".as_bytes(), epoch, None))
+            block_on(hummock_storage.get("cc".as_bytes(), epoch))
                 .unwrap()
                 .unwrap()
         );
         // check iter
         let mut iter =
-            block_on(hummock_storage.iter("aa".as_bytes()..="cc".as_bytes(), epoch, None)).unwrap();
+            block_on(hummock_storage.iter("aa".as_bytes()..="cc".as_bytes(), epoch)).unwrap();
         assert_eq!(
             (Bytes::from("aa"), Bytes::from("111")),
             block_on(iter.next()).unwrap().unwrap()
@@ -552,21 +449,21 @@ async fn test_write_anytime() {
         // check point get
         assert_eq!(
             "111_new".as_bytes(),
-            block_on(hummock_storage.get("aa".as_bytes(), epoch, None))
+            block_on(hummock_storage.get("aa".as_bytes(), epoch))
                 .unwrap()
                 .unwrap()
         );
-        assert!(block_on(hummock_storage.get("bb".as_bytes(), epoch, None))
+        assert!(block_on(hummock_storage.get("bb".as_bytes(), epoch))
             .unwrap()
             .is_none());
         assert_eq!(
             "333".as_bytes(),
-            block_on(hummock_storage.get("cc".as_bytes(), epoch, None))
+            block_on(hummock_storage.get("cc".as_bytes(), epoch))
                 .unwrap()
                 .unwrap()
         );
         let mut iter =
-            block_on(hummock_storage.iter("aa".as_bytes()..="cc".as_bytes(), epoch, None)).unwrap();
+            block_on(hummock_storage.iter("aa".as_bytes()..="cc".as_bytes(), epoch)).unwrap();
         assert_eq!(
             (Bytes::from("aa"), Bytes::from("111_new")),
             block_on(iter.next()).unwrap().unwrap()

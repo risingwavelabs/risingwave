@@ -18,6 +18,7 @@ use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Statement, WithProperties};
 
+use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_table::gen_create_table_plan;
 use crate::binder::Binder;
@@ -57,6 +58,13 @@ pub(super) fn handle_explain(
             )?
             .0
         }
+
+        Statement::CreateIndex {
+            name,
+            table_name,
+            columns,
+            ..
+        } => gen_create_index_plan(&*session, planner.ctx(), name, table_name, columns)?.0,
 
         stmt => {
             let bound = {

@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::collections::BinaryHeap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -48,14 +48,14 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     proto_sources: Vec<ProstExchangeSource>,
     sources: Vec<Box<dyn ExchangeSource>>,
     /// Mock-able CreateSource.
-    source_creator: PhantomData<CS>,
+    source_creators: Vec<CS>,
     schema: Schema,
     first_execution: bool,
     task_id: TaskId,
     identity: String,
 }
 
-impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
+impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
     /// We assume that the source would always send `Some(chunk)` with cardinality > 0
     /// or `None`, but never `Some(chunk)` with cardinality == 0.
     async fn get_source_chunk(&mut self, source_idx: usize) -> Result<()> {
@@ -88,7 +88,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorI
     }
 }
 
-impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor
+impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> Executor
     for MergeSortExchangeExecutorImpl<CS, C>
 {
     fn schema(&self) -> &Schema {
@@ -106,16 +106,16 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor
 /// Everytime `execute` is called, it tries to produce a chunk of size
 /// `K_PROCESSING_WINDOW_SIZE`. It is possible that the chunk's size is smaller than the
 /// `K_PROCESSING_WINDOW_SIZE` as the executor runs out of input from `sources`.
-impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
+impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         // If this is the first time execution, we first get one chunk from each source
         // and put one row of each chunk into the heap
         if self.first_execution {
             for source_idx in 0..self.proto_sources.len() {
-                let new_source =
-                    CS::create_source(self.context.clone(), &self.proto_sources[source_idx])
-                        .await?;
+                let new_source = self.source_creators[source_idx]
+                    .create_source(self.context.clone(), &self.proto_sources[source_idx])
+                    .await?;
                 self.sources.push(new_source);
                 self.get_source_chunk(source_idx).await?;
                 if let Some(chunk) = &self.source_inputs[source_idx] {
@@ -212,6 +212,7 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
 
         let exchange_node = sort_merge_node.get_exchange()?;
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
+        let source_creators = vec![DefaultCreateSource {}; proto_sources.len()];
         ensure!(!exchange_node.get_sources().is_empty());
         let fields = exchange_node
             .get_input_schema()
@@ -227,7 +228,7 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             min_heap: BinaryHeap::new(),
             proto_sources,
             sources: vec![],
-            source_creator: PhantomData,
+            source_creators,
             schema: Schema { fields },
             first_execution: true,
             task_id: source.task_id.clone(),
@@ -238,7 +239,6 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::Debug;
     use std::sync::Arc;
 
     use futures::StreamExt;
@@ -248,46 +248,26 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
+    use crate::executor::test_utils::{FakeCreateSource, FakeExchangeSource};
     use crate::task::ComputeNodeContext;
 
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
-        #[derive(Debug)]
-        struct FakeExchangeSource {
-            chunk: Option<DataChunk>,
-        }
-
-        #[async_trait::async_trait]
-        impl ExchangeSource for FakeExchangeSource {
-            async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-                let chunk = self.chunk.take();
-                Ok(chunk)
-            }
-        }
-
-        #[derive(Debug)]
-        struct FakeCreateSource {}
-
-        #[async_trait::async_trait]
-        impl CreateSource for FakeCreateSource {
-            async fn create_source(
-                _: impl BatchTaskContext,
-                _: &ProstExchangeSource,
-            ) -> Result<Box<dyn ExchangeSource>> {
-                let chunk = DataChunk::from_pretty(
-                    "i
+        let chunk = DataChunk::from_pretty(
+            "i
                      1
                      2
                      3",
-                );
-                Ok(Box::new(FakeExchangeSource { chunk: Some(chunk) }))
-            }
-        }
+        );
+        let fake_exchange_source = FakeExchangeSource::new(vec![Some(chunk)]);
+        let fake_create_source = FakeCreateSource::new(fake_exchange_source);
 
         let mut proto_sources: Vec<ProstExchangeSource> = vec![];
+        let mut source_creators = vec![];
         let num_sources = 2;
         for _ in 0..num_sources {
             proto_sources.push(ProstExchangeSource::default());
+            source_creators.push(fake_create_source.clone());
         }
         let order_pairs = Arc::new(vec![OrderPair {
             column_idx: 0,
@@ -304,7 +284,7 @@ mod tests {
             min_heap: BinaryHeap::new(),
             proto_sources,
             sources: vec![],
-            source_creator: PhantomData,
+            source_creators,
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int32)],
             },
