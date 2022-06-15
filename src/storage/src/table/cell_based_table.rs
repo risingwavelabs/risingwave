@@ -384,10 +384,10 @@ impl<S: StateStore> CellBasedTable<S> {
             Unbounded => {
                 let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
                 let serialized_pk_prefix = serialize_pk::<false>(pk_prefix, &pk_prefix_serializer);
-                if is_start_bound {
-                    Included(serialized_pk_prefix)
-                } else if pk_prefix.size() == 0 {
+                if pk_prefix.size() == 0 {
                     Unbounded
+                } else if is_start_bound {
+                    Included(serialized_pk_prefix)
                 } else {
                     Excluded(next_key(&serialized_pk_prefix))
                 }
