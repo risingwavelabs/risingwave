@@ -293,7 +293,7 @@ impl StageRunner {
         let mut futures = vec![];
 
         // FIXME: use proper vnode_ranges
-        let parallel_units = vec![];
+        let parallel_units: &[u32] = todo!();
         let (_, _, vnode_ranges_mapping) = build_vnode_mapping(&parallel_units);
 
         for id in 0..self.stage.parallelism {
