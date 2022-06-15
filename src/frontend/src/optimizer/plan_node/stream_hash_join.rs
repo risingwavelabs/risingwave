@@ -195,7 +195,6 @@ impl ToStreamProst for StreamHashJoin {
                 DatabaseId::placeholder() as u32,
             )),
             is_append_only: self.is_append_only,
-            ..Default::default()
         })
     }
 }
