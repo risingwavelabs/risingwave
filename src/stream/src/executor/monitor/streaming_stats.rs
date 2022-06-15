@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounterVec, GenericGaugeVec};
-use prometheus::{ register_gauge_vec_with_registry,
-    register_int_counter_vec_with_registry, Registry,
+use prometheus::{
+    register_gauge_vec_with_registry, register_int_counter_vec_with_registry, Registry,
 };
 
 pub struct StreamingMetrics {

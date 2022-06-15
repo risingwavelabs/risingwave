@@ -657,7 +657,7 @@ impl LocalStreamManagerCore {
             );
 
             let actor_id_str = actor_id.to_string();
-            
+
             let metrics = self.streaming_metrics.clone();
             let task = tokio::spawn(async move {
                 loop {
