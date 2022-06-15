@@ -57,8 +57,7 @@ pub struct CellBasedTable<S: StateStore> {
     column_descs: Vec<ColumnDesc>,
 
     /// Mapping from column id to column index
-    /// TODO: all CellBasedTable users should have a pk serializer, we should remove this option.
-    pub pk_serializer: Option<OrderedRowSerializer>,
+    pk_serializer: Option<OrderedRowSerializer>,
 
     /// Used for serializing the row.
     cell_based_row_serializer: CellBasedRowSerializer,
@@ -600,10 +599,7 @@ impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
 impl<S: StateStore> CellTableChunkIter for DedupPkCellBasedTableRowIter<S> {}
 
 #[async_trait::async_trait]
-pub trait CellTableChunkIter
-where
-    Self: TableIter,
-{
+pub trait CellTableChunkIter: TableIter {
     async fn collect_data_chunk(
         &mut self,
         schema: &Schema,
