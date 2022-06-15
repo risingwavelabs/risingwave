@@ -130,11 +130,11 @@ pub struct MockCatalogWriter {
 
 #[async_trait::async_trait]
 impl CatalogWriter for MockCatalogWriter {
-    async fn create_database(&self, db_name: &str) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
         self.catalog.write().create_database(ProstDatabase {
             name: db_name.to_string(),
             id: self.gen_id(),
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner,
         });
         Ok(())
     }

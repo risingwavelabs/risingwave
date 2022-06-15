@@ -46,7 +46,8 @@ pub async fn handle_create_database(
     }
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_database(&database_name).await?;
+    let owner: String = session.user_name().to_string();
+    catalog_writer.create_database(&database_name, owner).await?;
 
     // Default create dev schema.
     let db_id = {

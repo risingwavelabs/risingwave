@@ -49,7 +49,7 @@ impl CatalogReader {
 /// the version.
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
-    async fn create_database(&self, db_name: &str) -> Result<()>;
+    async fn create_database(&self, db_name: &str, owner: String) -> Result<()>;
 
     async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()>;
 
@@ -87,13 +87,13 @@ pub struct CatalogWriterImpl {
 
 #[async_trait::async_trait]
 impl CatalogWriter for CatalogWriterImpl {
-    async fn create_database(&self, db_name: &str) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_database(ProstDatabase {
                 name: db_name.to_string(),
                 id: 0,
-                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+                owner,
             })
             .await?;
         self.wait_version(version).await
