@@ -851,6 +851,9 @@ mod tests {
                 meta_metrics.clone(),
             ));
 
+            let compaction_group_manager =
+                Arc::new(CompactionGroupManager::new(env.clone()).await?);
+
             let source_manager = Arc::new(
                 SourceManager::new(
                     env.clone(),
@@ -858,6 +861,7 @@ mod tests {
                     barrier_manager.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
+                    compaction_group_manager.clone(),
                 )
                 .await?,
             );

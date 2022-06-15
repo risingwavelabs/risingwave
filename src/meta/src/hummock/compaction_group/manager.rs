@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
+use std::io::Read;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -24,13 +25,19 @@ use tokio::sync::RwLock;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
-use crate::manager::MetaSrvEnv;
+use crate::manager::{CatalogManager, MetaSrvEnv, SourceId};
 use crate::model::{MetadataModel, TableFragments, ValTransaction, VarTransaction};
 use crate::storage::{MetaStore, Transaction};
+use crate::stream::FragmentManager;
 
 pub type CompactionGroupManagerRef<S> = Arc<CompactionGroupManager<S>>;
 
 /// `CompactionGroupManager` manages `CompactionGroup`'s members.
+///
+/// Note that all hummock state store user should register to `CompactionGroupManager`. It includes:
+/// - Materialized View via register_table_fragments.
+/// - Materialized Source via register_table_fragments.
+/// - Source via register_source.
 pub struct CompactionGroupManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     inner: RwLock<CompactionGroupManagerInner>,
@@ -73,8 +80,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
         let mut pairs = vec![];
-        // MV or source
-        // existing_table_ids include the table_ref_id (source and materialized_view) +
+        // existing_table_ids include the table_ref_id (materialized_view) +
         // internal_table_id (stateful executor)
         pairs.push((
             Prefix::from(table_fragments.table_id().table_id),
@@ -114,10 +120,33 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .await
     }
 
-    /// Unregisters members that doesn't belong to `table_fragments_list` from compaction groups
+    pub async fn register_source(&self, source_id: u32) -> Result<()> {
+        self.inner
+            .write()
+            .await
+            .register(
+                &[(
+                    source_id.into(),
+                    StaticCompactionGroupId::StateDefault.into(),
+                )],
+                self.env.meta_store(),
+            )
+            .await
+    }
+
+    pub async fn unregister_source(&self, source_id: u32) -> Result<()> {
+        self.inner
+            .write()
+            .await
+            .unregister(&[source_id.into()], self.env.meta_store())
+            .await
+    }
+
+    /// Unregisters stale members
     pub async fn purge_stale_members(
         &self,
-        table_fragments_list: &[&TableFragments],
+        table_fragments_list: &[TableFragments],
+        source_ids: &[SourceId],
     ) -> Result<()> {
         let mut guard = self.inner.write().await;
         let registered_members = guard
@@ -135,6 +164,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
                     .chain(std::iter::once(table_fragments.table_id().table_id))
                     .collect_vec()
             })
+            .chain(source_ids.iter().cloned())
             .collect_vec();
         let to_unregister = registered_members
             .into_iter()
@@ -146,7 +176,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .await
     }
 
-    pub async fn internal_table_ids_by_compation_group_id(
+    pub async fn internal_table_ids_by_compaction_group_id(
         &self,
         compaction_group_id: u64,
     ) -> Result<HashSet<u32>> {
@@ -359,8 +389,11 @@ mod tests {
             TableFragments::new(TableId::new(10), Default::default(), [11, 12, 13].into());
         let table_fragment_2 =
             TableFragments::new(TableId::new(20), Default::default(), [21, 22, 23].into());
+        let source_1 = 100;
+        let source_2 = 200;
+        let source_3 = 300;
 
-        // Test register_stream_nodes
+        // Test register_table_fragments
         let registered_number = || async {
             compaction_group_manager
                 .compaction_groups()
@@ -381,23 +414,59 @@ mod tests {
             .unwrap();
         assert_eq!(registered_number().await, 8);
 
-        // Test unregister_stream_nodes
+        // Test unregister_table_fragments
         compaction_group_manager
             .unregister_table_fragments(&table_fragment_1)
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
 
-        // Test purge_stale_members
+        // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge_stale_members(&[&table_fragment_2])
+            .purge_stale_members(&[table_fragment_2], &[])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
-            .purge_stale_members(&[])
+            .purge_stale_members(&[], &[])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 0);
+
+        // Test register_source
+        compaction_group_manager
+            .register_source(source_1)
+            .await
+            .unwrap();
+        assert_eq!(registered_number().await, 1);
+        compaction_group_manager
+            .register_source(source_2)
+            .await
+            .unwrap();
+        assert_eq!(registered_number().await, 2);
+        compaction_group_manager
+            .register_source(source_2)
+            .await
+            .unwrap();
+        assert_eq!(registered_number().await, 2);
+        compaction_group_manager
+            .register_source(source_3)
+            .await
+            .unwrap();
+        assert_eq!(registered_number().await, 3);
+
+        // Test unregister_source
+        compaction_group_manager
+            .unregister_source(source_2)
+            .await
+            .unwrap();
+        assert_eq!(registered_number().await, 2);
+
+        // Test purge_stale_members: source
+        compaction_group_manager
+            .purge_stale_members(&[], &[source_3])
+            .await
+            .unwrap();
+        assert_eq!(registered_number().await, 1);
     }
 }
