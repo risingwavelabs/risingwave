@@ -39,32 +39,27 @@ pub fn build_vnode_mapping(
     let mut owner_mapping_ranges: HashMap<ParallelUnitId, VNodeRanges> = HashMap::new();
 
     let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
+    let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
+    let mut init_bound = 0;
 
-    for (i, &parallel_unit_id) in parallel_units.iter().enumerate() {
-        vnode_mapping.extend(vec![parallel_unit_id; hash_shard_size]);
-        let vnodes = (i * hash_shard_size..(i + 1) * hash_shard_size)
-            .map(|id| id as VirtualNode)
-            .collect();
+    parallel_units.iter().for_each(|&parallel_unit_id| {
+        let vnode_count = if one_more_count > 0 {
+            one_more_count -= 1;
+            hash_shard_size + 1
+        } else {
+            hash_shard_size
+        };
+        init_bound += vnode_count;
+        vnode_mapping.resize(init_bound, parallel_unit_id);
+        let vnode_range = init_bound - vnode_count..init_bound;
+        let vnodes = vnode_range.clone().map(|id| id as VirtualNode).collect();
         owner_mapping.insert(parallel_unit_id, vnodes);
         let ranges = owner_mapping_ranges.entry(parallel_unit_id).or_default();
-        ranges.starts.push((i * hash_shard_size) as u64);
-        ranges.ends.push(((i + 1) * hash_shard_size - 1) as u64);
-    }
+        ranges.starts.push(vnode_range.start as u64);
+        ranges.ends.push((vnode_range.end - 1) as u64);
 
-    let mut parallel_unit_iter = parallel_units.iter().cycle();
-    for vnode in
-        (VIRTUAL_NODE_COUNT - VIRTUAL_NODE_COUNT % parallel_units.len())..VIRTUAL_NODE_COUNT
-    {
-        let id = *parallel_unit_iter.next().unwrap();
-        vnode_mapping.push(id);
-        owner_mapping
-            .entry(id)
-            .or_default()
-            .push(vnode as VirtualNode);
-        let ranges = owner_mapping_ranges.entry(id).or_default();
-        ranges.starts.push(vnode as u64);
-        ranges.ends.push(vnode as u64);
-    }
+        init_bound += hash_shard_size;
+    });
 
     (vnode_mapping, owner_mapping, owner_mapping_ranges)
 }
