@@ -33,8 +33,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         // Get table id and used as keyspace prefix.
-        let append_only = node.get_append_only();
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
+        let is_append_only = node.is_append_only;
         let source_r = params.input.remove(1);
         let source_l = params.input.remove(0);
         let params_l = JoinParams::new(
@@ -42,9 +42,17 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
+            node.get_dist_key_l()
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
         );
         let params_r = JoinParams::new(
             node.get_right_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
+            node.get_dist_key_r()
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
@@ -55,12 +63,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             Err(_) => None,
         };
         trace!("Join non-equi condition: {:?}", condition);
-
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
 
         macro_rules! impl_create_hash_join_executor {
             ([], $( { $join_type_proto:ident, $join_type:ident } ),*) => {
@@ -111,10 +113,9 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
-            key_indices,
             keyspace_l: Keyspace::table_root(store.clone(), &left_table_id),
             keyspace_r: Keyspace::table_root(store, &right_table_id),
-            append_only,
+            is_append_only,
         };
 
         for_all_join_types! { impl_create_hash_join_executor };
@@ -134,10 +135,9 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<RowExpression>,
     op_info: String,
-    key_indices: Vec<usize>,
     keyspace_l: Keyspace<S>,
     keyspace_r: Keyspace<S>,
-    append_only: bool,
+    is_append_only: bool,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
@@ -156,10 +156,9 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.executor_id,
             args.cond,
             args.op_info,
-            args.key_indices,
             args.keyspace_l,
             args.keyspace_r,
-            args.append_only,
+            args.is_append_only,
         )))
     }
 }

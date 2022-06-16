@@ -4397,6 +4397,7 @@ dependencies = [
 name = "risingwave_rpc_client"
 version = "0.1.9"
 dependencies = [
+ "anyhow",
  "async-trait",
  "futures",
  "log",
@@ -4408,6 +4409,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
+ "thiserror",
  "tokio-retry",
  "tracing",
  "workspace-hack",
@@ -4605,6 +4607,7 @@ dependencies = [
  "static_assertions",
  "stats_alloc",
  "thiserror",
+ "tokio-metrics",
  "tokio-stream",
  "tower",
  "tracing",
@@ -5359,6 +5362,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tokio-metrics"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcb585a0069b53171684e22d5255984ec30d1c7304fd0a4a9a603ffd8c765cdd"
+dependencies = [
+ "futures-util",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]

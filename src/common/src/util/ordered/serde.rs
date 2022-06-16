@@ -114,6 +114,10 @@ impl OrderedRowSerializer {
             append_to.extend(serializer.into_inner());
         }
     }
+
+    pub fn into_order_types(self) -> Vec<OrderType> {
+        self.order_types
+    }
 }
 
 /// Deserializer of the `Row`.
@@ -145,6 +149,10 @@ impl OrderedRowDeserializer {
             values.push(datum);
         }
         Ok(OrderedRow(values))
+    }
+
+    pub fn get_order_types(&self) -> &[OrderType] {
+        &self.order_types
     }
 }
 
