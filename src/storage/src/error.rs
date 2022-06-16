@@ -22,7 +22,6 @@ pub enum StorageError {
     #[error("Hummock error: {0}")]
     Hummock(
         #[backtrace]
-        #[source]
         #[from]
         HummockError,
     ),
