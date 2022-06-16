@@ -82,15 +82,12 @@ impl CellSerializer for DedupPkCellBasedRowSerializer {
         row: Row,
         column_ids: &[ColumnId],
     ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
-        println!("=== serializing pk: {:#?}", pk);
-        println!("=== serializing row: {:#?}", row);
         let row = self.remove_dup_pk_datums(row);
         let column_ids = &self.remove_dup_pk_column_ids(column_ids);
         let res = serialize_pk_and_row(pk, &row, column_ids)?
             .into_iter()
             .flatten()
             .collect_vec();
-        println!("=== serialized result: {:#?}", res);
         Ok(res)
     }
 

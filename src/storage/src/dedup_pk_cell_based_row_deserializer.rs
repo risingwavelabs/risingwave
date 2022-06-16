@@ -68,10 +68,6 @@ pub fn make_cell_based_row_deserializer(
         .filter(|(i, _d)| pk_indices.contains(i))
         .map(|(_i, d)| d)
         .collect_vec();
-    // let order_types = data_types
-    //     .iter()
-    //     .map(|_| OrderType::Ascending) // FIXME: THIS IS A HACK
-    //     .collect();
 
     let col_id_to_row_idx: HashMap<ColumnId, usize> = table_column_descs
         .iter()
@@ -127,7 +123,6 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
             .pk_decoder
             .deserialize(pk)
             .map_err(StorageError::CellBasedTable)?;
-        println!("deserialized row from pk: {:#?}", ordered_row);
         Ok(ordered_row.into_row())
     }
 
@@ -159,28 +154,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
     ) -> Result<Option<(Vec<u8>, Row)>> {
         let res = self.deserialize_inner(pk_with_cell_id, cell)?;
         if let Some((pk, row)) = res {
-            println!("deserializing dedup pk: {:#?}", pk);
             let pk_row = self.raw_key_to_dedup_pk_row(&pk)?;
-            Ok(Some((pk, self.dedup_pk_row_to_row(&pk_row, row))))
-        } else {
-            Ok(res)
-        }
-    }
-
-    pub fn deserialize_with_prefix(
-        &mut self,
-        pk_with_cell_id: impl AsRef<[u8]>,
-        cell: impl AsRef<[u8]>,
-        prefix_datums: Vec<Datum>,
-    ) -> Result<Option<(Vec<u8>, Row)>> {
-        let res = self.deserialize_inner(pk_with_cell_id, cell)?;
-        if let Some((pk, row)) = res {
-            println!("deserializing dedup pk: {:#?}", pk);
-            let mut pk_row = prefix_datums;
-            let mut partial_pk_row = self.raw_key_to_dedup_pk_row(&pk)?;
-            pk_row.append(&mut partial_pk_row.0);
-            let pk_row = Row(pk_row);
-            println!("deserializing pk with prefix: {:#?}", pk_row);
             Ok(Some((pk, self.dedup_pk_row_to_row(&pk_row, row))))
         } else {
             Ok(res)
@@ -235,25 +209,9 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         Ok(result)
     }
 
-    pub fn take_with_prefix(&mut self, prefix_datums: Vec<Datum>) -> Option<(Vec<u8>, Row)> {
-        let res = self.take_inner();
-        if let Some((pk, row)) = res {
-            println!("deserializing dedup pk: {:#?}", pk);
-            let mut pk_row = prefix_datums;
-            let mut partial_pk_row = self.raw_key_to_dedup_pk_row(&pk).unwrap(); // FIXME;
-            pk_row.append(&mut partial_pk_row.0);
-            let pk_row = Row(pk_row);
-            println!("deserializing pk with prefix: {:#?}", pk_row);
-            Some((pk, self.dedup_pk_row_to_row(&pk_row, row)))
-        } else {
-            res
-        }
-    }
-
     pub fn take(&mut self) -> Option<(Vec<u8>, Row)> {
         let res = self.take_inner();
         if let Some((pk, row)) = res {
-            println!("deserializing dedup pk: {:#?}", pk);
             let pk_row = self.raw_key_to_dedup_pk_row(&pk).unwrap(); // FIXME
             Some((pk, self.dedup_pk_row_to_row(&pk_row, row)))
         } else {
