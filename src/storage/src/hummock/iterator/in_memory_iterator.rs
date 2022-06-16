@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::VersionedComparator;
@@ -26,27 +40,27 @@ impl InMemoryTableIterator {
     pub fn new(table: TableHolder) -> Self {
         Self {
             block_iter: None,
-            cur_idx: table.value().blocks.len(),
+            cur_idx: 0,
             table,
             stats: StoreLocalStatistic::default(),
         }
     }
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
-    async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.table.value().blocks.len() as isize || idx < 0 {
+    async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+        if idx >= self.table.value().blocks.len() {
             self.block_iter = None;
         } else {
-            let block = BlockHolder::from_ref_block(&self.table.value().blocks[idx as usize]);
+            let block = BlockHolder::from_ref_block(&self.table.value().blocks[idx]);
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
-                block_iter.seek_le(key);
+                block_iter.seek(key);
             } else {
-                block_iter.seek_to_last();
+                block_iter.seek_to_first();
             }
 
             self.block_iter = Some(block_iter);
-            self.cur_idx = idx as usize;
+            self.cur_idx = idx;
         }
 
         Ok(())
@@ -60,13 +74,13 @@ impl HummockIterator for InMemoryTableIterator {
     async fn next(&mut self) -> HummockResult<()> {
         self.stats.scan_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
-        block_iter.prev();
+        block_iter.next();
 
         if block_iter.is_valid() {
             Ok(())
         } else {
-            // seek to the previous block
-            self.seek_idx(self.cur_idx as isize - 1, None).await
+            // seek to next block
+            self.seek_idx(self.cur_idx + 1, None).await
         }
     }
 
@@ -86,8 +100,7 @@ impl HummockIterator for InMemoryTableIterator {
     /// Instead of setting idx to 0th block, a `BackwardSSTableIterator` rewinds to the last block
     /// in the table.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.table.value().blocks.len() as isize - 1, None)
-            .await
+        self.seek_idx(0, None).await
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
@@ -104,12 +117,11 @@ impl HummockIterator for InMemoryTableIterator {
                 ord == std::cmp::Ordering::Less || ord == std::cmp::Ordering::Equal
             })
             .saturating_sub(1); // considering the boundary of 0
-        let block_idx = block_idx as isize;
 
         self.seek_idx(block_idx, Some(key)).await?;
         if !self.is_valid() {
-            // Seek to prev block
-            self.seek_idx(block_idx - 1, None).await?;
+            // Seek to next block
+            self.seek_idx(block_idx + 1, None).await?;
         }
 
         Ok(())
