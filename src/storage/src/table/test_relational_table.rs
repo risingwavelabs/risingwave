@@ -1829,7 +1829,7 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
     // ---------- Init reader
     let table = CellBasedTable::new_for_test(keyspace.clone(), actual_column_descs, order_types);
     let epoch: u64 = 0;
-    let mut iter = table
+    let iter = table
         .batch_dedup_pk_iter(epoch, &pk_ordered_descs)
         .await
         .unwrap();
