@@ -27,24 +27,7 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<Dat
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
     let input_type_names = inputs_type.iter().map(name_of).collect();
-    infer_type_name(func_type, input_type_names).map(|type_name| match type_name {
-        DataTypeName::Boolean => DataType::Boolean,
-        DataTypeName::Int16 => DataType::Int16,
-        DataTypeName::Int32 => DataType::Int32,
-        DataTypeName::Int64 => DataType::Int64,
-        DataTypeName::Decimal => DataType::Decimal,
-        DataTypeName::Float32 => DataType::Float32,
-        DataTypeName::Float64 => DataType::Float64,
-        DataTypeName::Varchar => DataType::Varchar,
-        DataTypeName::Date => DataType::Date,
-        DataTypeName::Timestamp => DataType::Timestamp,
-        DataTypeName::Timestampz => DataType::Timestampz,
-        DataTypeName::Time => DataType::Time,
-        DataTypeName::Interval => DataType::Interval,
-        DataTypeName::Struct | DataTypeName::List => {
-            panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
-        }
-    })
+    infer_type_name(func_type, input_type_names).map(Into::into)
 }
 
 /// Infer the return type name without parameters like length or precision.
