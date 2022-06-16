@@ -92,7 +92,7 @@ impl<S: StateStore> CellBasedTable<S> {
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
-        let column_ids = generate_column_id(&column_descs);
+        let column_ids = column_descs.iter().map(|d| d.column_id).collect();
 
         Self {
             keyspace,
@@ -308,14 +308,19 @@ impl<S: StateStore> CellBasedTable<S> {
 }
 
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
+
+/// The [`CellBasedIter`] used in streaming executor.
 pub type StreamingIter<S: StateStore> = impl PkAndRowStream;
+/// The [`CellBasedIter`] used in batch executor, which will wait for the epoch before iteration.
 pub type BatchIter<S: StateStore> = impl PkAndRowStream;
-pub type DedupPkBatchIter<S: StateStore> = impl PkAndRowStream;
+/// The [`CellBasedIter`] used in batch executor if pk is not persisted, which will wait for the
+/// epoch before iteration.
+pub type BatchDedupPkIter<S: StateStore> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
     async fn next_row(&mut self) -> StorageResult<Option<Row>> {
-        StreamExt::next(self)
+        self.next()
             .await
             .transpose()
             .map(|r| r.map(|(_pk, row)| row))
@@ -324,6 +329,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 
 /// Iterator functions.
 impl<S: StateStore> CellBasedTable<S> {
+    /// Get a [`StreamingIter`] with given `encoded_key_range`.
     pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
@@ -343,6 +349,7 @@ impl<S: StateStore> CellBasedTable<S> {
         .into_stream())
     }
 
+    /// Get a [`BatchIter`] with given `encoded_key_range`.
     pub(super) async fn batch_iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
@@ -376,8 +383,8 @@ impl<S: StateStore> CellBasedTable<S> {
         epoch: u64,
         // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
         pk_descs: &[OrderedColumnDesc],
-    ) -> StorageResult<DedupPkBatchIter<S>> {
-        Ok(DedupPkCellBasedTableRowIter::new(
+    ) -> StorageResult<BatchDedupPkIter<S>> {
+        Ok(DedupPkCellBasedIter::new(
             self.batch_iter(epoch).await?,
             self.mapping.clone(),
             pk_descs,
@@ -484,17 +491,15 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 }
 
-fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
-    column_descs.iter().map(|d| d.column_id).collect()
-}
-
 const STREAMING_ITER_TYPE: bool = true;
 const BATCH_ITER_TYPE: bool = false;
 
-/// [`CellBasedTableStreamingIter`] is used for streaming executor, and will not wait for epoch.
+/// [`CellBasedIter`] iterates on the cell-based table.
+/// If `ITER_TYPE` is `BATCH`, it will wait for the given epoch to be committed before iteration.
 struct CellBasedIter<S: StateStore, const ITER_TYPE: bool> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
+
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
@@ -543,15 +548,15 @@ impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
     }
 }
 
-// Provides a layer on top of CellBasedTableRowIter
-// for decoding pk into its constituent datums in a row
-//
-// Given the following row: | user_id | age | name |
-// if pk was derived from `user_id, name`
-// we can decode pk -> user_id, name,
-// and retrieve the row: |_| age |_|,
-// then fill in empty spots with datum decoded from pk: | user_id | age | name |
-struct DedupPkCellBasedTableRowIter<I> {
+/// Provides a layer on top of [`CellBasedIter`]
+/// for decoding pk into its constituent datums in a row.
+///
+/// Given the following row: | user_id | age | name |,
+/// if pk was derived from `user_id, name`
+/// we can decode pk -> user_id, name,
+/// and retrieve the row: |_| age |_|,
+/// then fill in empty spots with datum decoded from pk: | user_id | age | name |
+struct DedupPkCellBasedIter<I> {
     inner: I,
     pk_decoder: OrderedRowDeserializer,
 
@@ -561,7 +566,7 @@ struct DedupPkCellBasedTableRowIter<I> {
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
-impl<I> DedupPkCellBasedTableRowIter<I> {
+impl<I> DedupPkCellBasedIter<I> {
     async fn new(
         inner: I,
         table_descs: Arc<ColumnDescMapping>,
@@ -604,7 +609,7 @@ impl<I> DedupPkCellBasedTableRowIter<I> {
     }
 }
 
-impl<I: PkAndRowStream> DedupPkCellBasedTableRowIter<I> {
+impl<I: PkAndRowStream> DedupPkCellBasedIter<I> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(self) {
