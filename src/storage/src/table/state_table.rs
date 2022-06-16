@@ -16,7 +16,6 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{Index, RangeBounds};
-use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -28,16 +27,12 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 
 use super::cell_based_table::CellBasedTable;
 use super::mem_table::{MemTable, RowOp};
-use crate::cell_based_row_deserializer::{make_column_desc_index, ColumnDescMapping};
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
-    keyspace: Keyspace<S>,
-    column_mapping: Arc<ColumnDescMapping>,
-
     /// buffer key/values
     mem_table: MemTable,
 
@@ -58,17 +53,13 @@ impl<S: StateStore> StateTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let cell_based_keyspace = keyspace.clone();
-        let cell_based_column_descs = column_descs.clone();
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
         Self {
-            keyspace,
-            column_mapping: Arc::new(make_column_desc_index(column_descs)),
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
-                cell_based_keyspace,
-                cell_based_column_descs,
+                keyspace,
+                column_descs,
                 Some(pk_serializer.clone()),
                 dist_key_indices,
             ),

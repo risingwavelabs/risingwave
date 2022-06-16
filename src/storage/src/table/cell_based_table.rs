@@ -13,20 +13,17 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::marker::PhantomData;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::{for_await, try_stream};
+use futures::{Stream, StreamExt};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use log::trace;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
+use risingwave_common::array::Row;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema};
 use risingwave_common::error::RwError;
 use risingwave_common::types::Datum;
 use risingwave_common::util::hash_util::CRC32FastBuilder;

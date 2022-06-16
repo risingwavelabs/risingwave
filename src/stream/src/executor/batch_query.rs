@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -20,6 +20,7 @@ use risingwave_common::catalog::{OrderedColumnDesc, Schema};
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -72,29 +73,28 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
-        let mut iter = self
+        let iter = self
             .table
             .batch_dedup_pk_iter(epoch, &self.pk_descs)
             .await?;
+        pin_mut!(iter);
 
-        todo!()
-
-        // while let Some(data_chunk) = iter
-        //     .collect_data_chunk(self.schema(), Some(self.batch_size))
-        //     .await?
-        // {
-        //     // Filter out rows
-        //     let filtered_data_chunk = match self.filter_chunk(data_chunk) {
-        //         Some(chunk) => chunk,
-        //         None => {
-        //             continue;
-        //         }
-        //     };
-        //     let compacted_chunk = filtered_data_chunk.compact()?;
-        //     let ops = vec![Op::Insert; compacted_chunk.cardinality()];
-        //     let stream_chunk = StreamChunk::from_parts(ops, compacted_chunk);
-        //     yield Message::Chunk(stream_chunk);
-        // }
+        while let Some(data_chunk) = iter
+            .collect_data_chunk(self.schema(), Some(self.batch_size))
+            .await?
+        {
+            // Filter out rows
+            let filtered_data_chunk = match self.filter_chunk(data_chunk) {
+                Some(chunk) => chunk,
+                None => {
+                    continue;
+                }
+            };
+            let compacted_chunk = filtered_data_chunk.compact()?;
+            let ops = vec![Op::Insert; compacted_chunk.cardinality()];
+            let stream_chunk = StreamChunk::from_parts(ops, compacted_chunk);
+            yield Message::Chunk(stream_chunk);
+        }
     }
 
     /// Now we use hash as a workaround for supporting parallelized chain.

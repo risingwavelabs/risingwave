@@ -1044,7 +1044,7 @@ async fn test_cell_based_table_iter() {
     state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
-    let mut iter = table.batch_iter(epoch).await.unwrap();
+    let iter = table.batch_iter(epoch).await.unwrap();
     pin_mut!(iter);
 
     let res = iter.next_row().await.unwrap();
@@ -1150,8 +1150,8 @@ async fn test_multi_cell_based_table_iter() {
     state_1.commit(epoch).await.unwrap();
     state_2.commit(epoch).await.unwrap();
 
-    let mut iter_1 = table_1.batch_iter(epoch).await.unwrap();
-    let mut iter_2 = table_2.batch_iter(epoch).await.unwrap();
+    let iter_1 = table_1.batch_iter(epoch).await.unwrap();
+    let iter_2 = table_2.batch_iter(epoch).await.unwrap();
     pin_mut!(iter_1);
     pin_mut!(iter_2);
 
@@ -1256,12 +1256,11 @@ async fn test_dedup_cell_based_table_iter_with(
     let mut actual_rows = vec![];
 
     // ---------- Init reader
-    let mut iter = table
+    let iter = table
         .batch_dedup_pk_iter(epoch, &pk_ordered_descs)
         .await
         .unwrap();
     pin_mut!(iter);
-
 
     for _ in 0..rows.len() {
         // ---------- Read + Deserialize from storage
@@ -1366,7 +1365,7 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
     state.commit(epoch).await.unwrap();
 
     let chunk = {
-        let mut iter = table.batch_iter(u64::MAX).await.unwrap();
+        let iter = table.batch_iter(u64::MAX).await.unwrap();
         pin_mut!(iter);
         iter.collect_data_chunk(table.schema(), None)
             .await
