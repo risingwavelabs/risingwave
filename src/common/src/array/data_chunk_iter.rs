@@ -219,7 +219,7 @@ impl Row {
         Self(values)
     }
 
-    pub fn empty() -> &'static Self {
+    pub fn empty<'a>() -> &'a Self {
         static EMPTY_ROW: Row = Row(Vec::new());
         &EMPTY_ROW
     }
