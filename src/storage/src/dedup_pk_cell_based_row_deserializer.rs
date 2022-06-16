@@ -16,19 +16,15 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use itertools::Itertools;
-
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::deserialize_column_id;
-use risingwave_common::util::value_encoding::deserialize_cell;
-use risingwave_common::types::DataType;
-
-use risingwave_common::util::ordered::OrderedRowDeserializer;
+use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::ordered::{deserialize_column_id, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::deserialize_cell;
 
 use crate::error::{StorageError, StorageResult};
 
@@ -82,11 +78,11 @@ pub fn make_cell_based_row_deserializer(
         .collect();
 
     // let order_types = order_types
-        // .into_iter()
-        // .enumerate()
-        // .filter(|(i, d)| pk_indices.contains(i))
-        // .map(|(i, d)| d)
-        // .collect();
+    // .into_iter()
+    // .enumerate()
+    // .filter(|(i, d)| pk_indices.contains(i))
+    // .map(|(i, d)| d)
+    // .collect();
 
     let col_id_to_row_idx: HashMap<ColumnId, usize> = table_column_descs
         .iter()
@@ -95,15 +91,15 @@ pub fn make_cell_based_row_deserializer(
         .collect();
 
     let pk_to_row_mapping = pk_descs
-            .iter()
-            .map(|d| {
-                if d.data_type.mem_cmp_eq_value_enc() {
-                    col_id_to_row_idx.get(&d.column_id).copied()
-                } else {
-                    None
-                }
-            })
-            .collect();
+        .iter()
+        .map(|d| {
+            if d.data_type.mem_cmp_eq_value_enc() {
+                col_id_to_row_idx.get(&d.column_id).copied()
+            } else {
+                None
+            }
+        })
+        .collect();
 
     let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
     GeneralCellBasedRowDeserializer::new(
@@ -122,7 +118,11 @@ pub fn make_column_desc_index(table_column_descs: Vec<ColumnDesc>) -> ColumnDesc
 }
 
 impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
-    pub fn new(column_mapping: Desc, pk_decoder: OrderedRowDeserializer, pk_to_row_mapping: Vec<Option<usize>>) -> Self {
+    pub fn new(
+        column_mapping: Desc,
+        pk_decoder: OrderedRowDeserializer,
+        pk_to_row_mapping: Vec<Option<usize>>,
+    ) -> Self {
         let num_cells = column_mapping.len();
         Self {
             columns: column_mapping,
@@ -176,7 +176,6 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         } else {
             Ok(res)
         }
-
     }
 
     pub fn deserialize_with_prefix(
@@ -197,7 +196,6 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         } else {
             Ok(res)
         }
-
     }
 
     /// When we encounter a new key, we can be sure that the previous row has been fully
@@ -248,10 +246,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         Ok(result)
     }
 
-    pub fn take_with_prefix(
-        &mut self,
-        prefix_datums: Vec<Datum>,
-    ) -> Option<(Vec<u8>, Row)> {
+    pub fn take_with_prefix(&mut self, prefix_datums: Vec<Datum>) -> Option<(Vec<u8>, Row)> {
         let res = self.take_inner();
         if let Some((pk, row)) = res {
             println!("deserializing dedup pk: {:#?}", pk);
@@ -266,9 +261,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         }
     }
 
-    pub fn take(
-        &mut self,
-    ) -> Option<(Vec<u8>, Row)> {
+    pub fn take(&mut self) -> Option<(Vec<u8>, Row)> {
         let res = self.take_inner();
         if let Some((pk, row)) = res {
             println!("deserializing dedup pk: {:#?}", pk);

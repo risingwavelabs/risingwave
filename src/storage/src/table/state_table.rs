@@ -25,12 +25,11 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use crate::cell_serializer::CellSerializer;
-use super::cell_based_table::CellBasedTable;
-use super::cell_based_table::CellBasedTableExtended;
-use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use super::cell_based_table::{CellBasedTable, CellBasedTableExtended};
 use super::mem_table::{MemTable, RowOp};
 use crate::cell_based_row_deserializer::{make_column_desc_index, ColumnDescMapping};
+use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::cell_serializer::CellSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 
