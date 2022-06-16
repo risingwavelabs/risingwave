@@ -26,9 +26,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
-use risingwave_storage::table::cell_based_table::{
-    BatchIter, CellBasedTable, DedupPkBatchIter, DedupPkCellBasedTableRowIter,
-};
+use risingwave_storage::table::cell_based_table::{BatchIter, CellBasedTable, DedupPkBatchIter};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 

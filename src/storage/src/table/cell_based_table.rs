@@ -366,7 +366,7 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    pub async fn iter(&self, epoch: u64) -> StorageResult<BatchIter<S>> {
+    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<BatchIter<S>> {
         self.batch_iter_with_encoded_key_range::<_, &[u8]>(.., epoch)
             .await
     }
@@ -381,7 +381,7 @@ impl<S: StateStore> CellBasedTable<S> {
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<DedupPkBatchIter<S>> {
         Ok(DedupPkCellBasedTableRowIter::new(
-            self.iter(epoch).await?,
+            self.batch_iter(epoch).await?,
             self.mapping.clone(),
             pk_descs,
         )
@@ -529,7 +529,7 @@ impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
 
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
-    pub async fn into_stream(mut self) {
+    async fn into_stream(mut self) {
         while let Some((key, value)) = self.iter.next().await? {
             if let Some(pk_and_row) = self
                 .cell_based_row_deserializer
@@ -554,7 +554,7 @@ impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
 // we can decode pk -> user_id, name,
 // and retrieve the row: |_| age |_|,
 // then fill in empty spots with datum decoded from pk: | user_id | age | name |
-pub struct DedupPkCellBasedTableRowIter<I> {
+struct DedupPkCellBasedTableRowIter<I> {
     inner: I,
     pk_decoder: OrderedRowDeserializer,
 
@@ -565,7 +565,7 @@ pub struct DedupPkCellBasedTableRowIter<I> {
 }
 
 impl<I> DedupPkCellBasedTableRowIter<I> {
-    pub async fn new(
+    async fn new(
         inner: I,
         table_descs: Arc<ColumnDescMapping>,
         pk_descs: &[OrderedColumnDesc],
@@ -610,7 +610,7 @@ impl<I> DedupPkCellBasedTableRowIter<I> {
 impl<I: PkAndRowStream> DedupPkCellBasedTableRowIter<I> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
-    pub async fn into_stream(self) {
+    async fn into_stream(self) {
         #[for_await]
         for r in self.inner {
             let (pk_vec, Row(mut row_inner)) = r?;
