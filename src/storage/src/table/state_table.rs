@@ -60,7 +60,7 @@ impl<S: StateStore> StateTable<S> {
     ) -> Self {
         let cell_based_keyspace = keyspace.clone();
         let cell_based_column_descs = column_descs.clone();
-        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
+        let pk_serializer = OrderedRowSerializer::new(order_types);
 
         Self {
             keyspace,
@@ -69,7 +69,7 @@ impl<S: StateStore> StateTable<S> {
             cell_based_table: CellBasedTable::new(
                 cell_based_keyspace,
                 cell_based_column_descs,
-                Some(OrderedRowSerializer::new(order_types)),
+                Some(pk_serializer.clone()),
                 dist_key_indices,
             ),
             pk_serializer,
@@ -138,8 +138,13 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    pub fn update(&mut self, _pk: Row, _old_value: Row, _new_value: Row) -> StorageResult<()> {
-        todo!()
+    /// Update a row. The old and new value should have the same pk.
+    pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
+        let pk = old_value.by_indices(&self.pk_indices);
+        debug_assert_eq!(pk, new_value.by_indices(&self.pk_indices));
+        let pk_bytes = serialize_pk(&pk, &self.pk_serializer);
+        self.mem_table.update(pk_bytes, old_value, new_value)?;
+        Ok(())
     }
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
@@ -216,9 +221,10 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_with_pk_prefix(
         &self,
         pk_prefix: &Row,
-        prefix_serializer: OrderedRowSerializer,
         epoch: u64,
     ) -> StorageResult<impl RowStream<'_>> {
+        let order_types = &self.pk_serializer.clone().into_order_types()[0..pk_prefix.size()];
+        let prefix_serializer = OrderedRowSerializer::new(order_types.into());
         let encoded_start_key = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_bounds = range_of_prefix(&encoded_start_key);
 
