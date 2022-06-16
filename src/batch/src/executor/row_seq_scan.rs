@@ -27,7 +27,7 @@ use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_storage::table::cell_based_table::{
-    BatchIter, CellBasedTable, DedupPkCellBasedTableRowIter,
+    BatchIter, CellBasedTable, DedupPkBatchIter, DedupPkCellBasedTableRowIter,
 };
 use risingwave_storage::table::TableIter;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
@@ -49,7 +49,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 }
 
 pub enum ScanType<S: StateStore> {
-    TableScan(DedupPkCellBasedTableRowIter<S>),
+    TableScan(DedupPkBatchIter<S>),
     RangeScan(BatchIter<S>),
     PointGet(Option<Row>),
 }
@@ -169,8 +169,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
                 let iter = table.batch_dedup_pk_iter(source.epoch, &pk_descs).await?;
-                // ScanType::TableScan(iter)
-                todo!()
+                ScanType::TableScan(iter)
             } else if pk_prefix_value.size() == pk_descs.len() {
                 keyspace.state_store().wait_epoch(source.epoch).await?;
                 let row = table.get_row(&pk_prefix_value, source.epoch).await?;
@@ -221,25 +220,26 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     async fn do_execute(self: Box<Self>) {
         if !self.should_ignore() {
             match self.scan_type {
-                ScanType::TableScan(mut iter) => loop {
-                    // let timer = self.stats.row_seq_scan_next_duration.start_timer();
+                ScanType::TableScan(iter) => {
+                    pin_mut!(iter);
+                    loop {
+                        let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
-                    // let chunk = iter
-                    //     .collect_data_chunk(&self.schema, Some(self.chunk_size))
-                    //     .await
-                    //     .map_err(RwError::from)?;
-                    // timer.observe_duration();
+                        let chunk = iter
+                            .collect_data_chunk(&self.schema, Some(self.chunk_size))
+                            .await
+                            .map_err(RwError::from)?;
+                        timer.observe_duration();
 
-                    // if let Some(chunk) = chunk {
-                    //     yield chunk
-                    // } else {
-                    //     break;
-                    // }
-                    todo!()
-                },
+                        if let Some(chunk) = chunk {
+                            yield chunk
+                        } else {
+                            break;
+                        }
+                    }
+                }
                 ScanType::RangeScan(iter) => {
                     pin_mut!(iter);
-
                     loop {
                         // TODO: same as TableScan except iter type
                         let timer = self.stats.row_seq_scan_next_duration.start_timer();

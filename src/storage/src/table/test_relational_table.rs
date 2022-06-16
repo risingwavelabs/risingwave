@@ -1253,7 +1253,7 @@ async fn test_dedup_cell_based_table_iter_with(
     // commit batch
     batch.ingest(epoch).await.unwrap();
 
-    // let mut actual_rows = vec![];
+    let mut actual_rows = vec![];
 
     // ---------- Init reader
     let mut iter = table
@@ -1262,21 +1262,20 @@ async fn test_dedup_cell_based_table_iter_with(
         .unwrap();
     pin_mut!(iter);
 
-    todo!();
 
-    // for _ in 0..rows.len() {
-    //     // ---------- Read + Deserialize from storage
-    //     let actual = iter.next_row().await.unwrap();
-    //     assert!(actual.is_some());
-    //     actual_rows.push(actual.unwrap());
-    // }
+    for _ in 0..rows.len() {
+        // ---------- Read + Deserialize from storage
+        let actual = iter.next_row().await.unwrap();
+        assert!(actual.is_some());
+        actual_rows.push(actual.unwrap());
+    }
 
-    // actual_rows.sort();
-    // let mut rows = rows;
-    // rows.sort();
+    actual_rows.sort();
+    let mut rows = rows;
+    rows.sort();
 
     // ---------- Verify
-    // assert_eq!(actual_rows, rows);
+    assert_eq!(actual_rows, rows);
 }
 
 #[tokio::test]

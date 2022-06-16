@@ -16,11 +16,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::{pin_mut, Stream, StreamExt};
+use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use log::trace;
 use risingwave_common::array::column::Column;
@@ -312,9 +313,21 @@ impl<S: StateStore> CellBasedTable<S> {
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 pub type StreamingIter<S: StateStore> = impl PkAndRowStream;
 pub type BatchIter<S: StateStore> = impl PkAndRowStream;
+pub type DedupPkBatchIter<S: StateStore> = impl PkAndRowStream;
 
+#[async_trait::async_trait]
+impl<S: PkAndRowStream + Unpin> TableIter for S {
+    async fn next_row(&mut self) -> StorageResult<Option<Row>> {
+        StreamExt::next(self)
+            .await
+            .transpose()
+            .map(|r| r.map(|(_pk, row)| row))
+    }
+}
+
+/// Iterator functions.
 impl<S: StateStore> CellBasedTable<S> {
-    pub async fn streaming_iter_with_encoded_key_range<R, B>(
+    pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
         epoch: u64,
@@ -333,7 +346,7 @@ impl<S: StateStore> CellBasedTable<S> {
         .into_stream())
     }
 
-    pub async fn batch_iter_with_encoded_key_range<R, B>(
+    pub(super) async fn batch_iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
         epoch: u64,
@@ -351,10 +364,7 @@ impl<S: StateStore> CellBasedTable<S> {
         .await?
         .into_stream())
     }
-}
 
-/// Iterator functions.
-impl<S: StateStore> CellBasedTable<S> {
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&self, epoch: u64) -> StorageResult<BatchIter<S>> {
         self.batch_iter_with_encoded_key_range::<_, &[u8]>(.., epoch)
@@ -369,55 +379,14 @@ impl<S: StateStore> CellBasedTable<S> {
         epoch: u64,
         // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
         pk_descs: &[OrderedColumnDesc],
-    ) -> StorageResult<()> {
-        todo!()
-    }
-
-    fn serialize_pk_bound(
-        &self,
-        pk_prefix: &Row,
-        next_col_bound: Bound<&Datum>,
-        is_start_bound: bool,
-    ) -> Bound<Vec<u8>> {
-        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        match next_col_bound {
-            Included(k) => {
-                let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
-                let mut key = pk_prefix.clone();
-                key.0.push(k.clone());
-                let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
-                if is_start_bound {
-                    Included(serialized_key)
-                } else {
-                    // Should use excluded next key for end bound.
-                    // Otherwise keys starting with the bound is not included.
-                    Excluded(next_key(&serialized_key))
-                }
-            }
-            Excluded(k) => {
-                let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
-                let mut key = pk_prefix.clone();
-                key.0.push(k.clone());
-                let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
-                if is_start_bound {
-                    // storage doesn't support excluded begin key yet, so transform it to included
-                    Included(next_key(&serialized_key))
-                } else {
-                    Excluded(serialized_key)
-                }
-            }
-            Unbounded => {
-                let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-                let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
-                if pk_prefix.size() == 0 {
-                    Unbounded
-                } else if is_start_bound {
-                    Included(serialized_pk_prefix)
-                } else {
-                    Excluded(next_key(&serialized_pk_prefix))
-                }
-            }
-        }
+    ) -> StorageResult<DedupPkBatchIter<S>> {
+        Ok(DedupPkCellBasedTableRowIter::new(
+            self.iter(epoch).await?,
+            self.mapping.clone(),
+            pk_descs,
+        )
+        .await?
+        .into_stream())
     }
 
     pub async fn batch_iter_with_pk_bounds(
@@ -426,8 +395,66 @@ impl<S: StateStore> CellBasedTable<S> {
         pk_prefix: Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<BatchIter<S>> {
-        let start_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.start_bound(), true);
-        let end_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.end_bound(), false);
+        fn serialize_pk_bound(
+            pk_serializer: &OrderedRowSerializer,
+            pk_prefix: &Row,
+            next_col_bound: Bound<&Datum>,
+            is_start_bound: bool,
+        ) -> Bound<Vec<u8>> {
+            match next_col_bound {
+                Included(k) => {
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                    let mut key = pk_prefix.clone();
+                    key.0.push(k.clone());
+                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
+                    if is_start_bound {
+                        Included(serialized_key)
+                    } else {
+                        // Should use excluded next key for end bound.
+                        // Otherwise keys starting with the bound is not included.
+                        Excluded(next_key(&serialized_key))
+                    }
+                }
+                Excluded(k) => {
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                    let mut key = pk_prefix.clone();
+                    key.0.push(k.clone());
+                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
+                    if is_start_bound {
+                        // storage doesn't support excluded begin key yet, so transform it to
+                        // included
+                        Included(next_key(&serialized_key))
+                    } else {
+                        Excluded(serialized_key)
+                    }
+                }
+                Unbounded => {
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+                    let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+                    if pk_prefix.size() == 0 {
+                        Unbounded
+                    } else if is_start_bound {
+                        Included(serialized_pk_prefix)
+                    } else {
+                        Excluded(next_key(&serialized_pk_prefix))
+                    }
+                }
+            }
+        }
+
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
+        let start_key = serialize_pk_bound(
+            pk_serializer,
+            &pk_prefix,
+            next_col_bounds.start_bound(),
+            true,
+        );
+        let end_key = serialize_pk_bound(
+            pk_serializer,
+            &pk_prefix,
+            next_col_bounds.end_bound(),
+            false,
+        );
 
         trace!(
             "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
@@ -462,87 +489,6 @@ impl<S: StateStore> CellBasedTable<S> {
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
-}
-
-// Provides a layer on top of CellBasedTableRowIter
-// for decoding pk into its constituent datums in a row
-//
-// Given the following row: | user_id | age | name |
-// if pk was derived from `user_id, name`
-// we can decode pk -> user_id, name,
-// and retrieve the row: |_| age |_|,
-// then fill in empty spots with datum decoded from pk: | user_id | age | name |
-pub struct DedupPkCellBasedTableRowIter<I> {
-    inner: I,
-    pk_decoder: OrderedRowDeserializer,
-
-    // Maps pk fields with:
-    // 1. same value and memcomparable encoding,
-    // 2. corresponding row positions. e.g. _row_id is unlikely to be part of selected row.
-    pk_to_row_mapping: Vec<Option<usize>>,
-}
-
-impl<I> DedupPkCellBasedTableRowIter<I> {
-    pub async fn new(
-        inner: I,
-        table_descs: Arc<ColumnDescMapping>,
-        epoch: u64,
-        pk_descs: &[OrderedColumnDesc],
-    ) -> StorageResult<Self> {
-        let (data_types, order_types) = pk_descs
-            .iter()
-            .map(|ordered_desc| {
-                (
-                    ordered_desc.column_desc.data_type.clone(),
-                    ordered_desc.order,
-                )
-            })
-            .unzip();
-        let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
-
-        // TODO: pre-calculate this instead of calculate it every time when creating new iterator
-        let col_id_to_row_idx: HashMap<ColumnId, usize> = table_descs
-            .iter()
-            .map(|(column_id, (_, idx))| (*column_id, *idx))
-            .collect();
-
-        let pk_to_row_mapping = pk_descs
-            .iter()
-            .map(|d| {
-                let column_desc = &d.column_desc;
-                if column_desc.data_type.mem_cmp_eq_value_enc() {
-                    col_id_to_row_idx.get(&column_desc.column_id).copied()
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        Ok(Self {
-            inner,
-            pk_decoder,
-            pk_to_row_mapping,
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl<I: PkAndRowStream + Unpin> TableIter for DedupPkCellBasedTableRowIter<I> {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>> {
-        if let Some((pk_vec, Row(mut row_inner))) =
-            StreamExt::next(&mut self.inner).await.transpose()?
-        {
-            let pk_decoded = self.pk_decoder.deserialize(&pk_vec).map_err(err)?;
-            for (pk_idx, datum) in pk_decoded.into_vec().into_iter().enumerate() {
-                if let Some(row_idx) = self.pk_to_row_mapping[pk_idx] {
-                    row_inner[row_idx] = datum;
-                }
-            }
-            Ok(Some(Row(row_inner)))
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 const STREAMING_ITER_TYPE: bool = true;
@@ -600,12 +546,81 @@ impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
     }
 }
 
-#[async_trait::async_trait]
-impl<S: PkAndRowStream + Unpin> TableIter for S {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>> {
-        StreamExt::next(self)
-            .await
-            .transpose()
-            .map(|r| r.map(|(_pk, row)| row))
+// Provides a layer on top of CellBasedTableRowIter
+// for decoding pk into its constituent datums in a row
+//
+// Given the following row: | user_id | age | name |
+// if pk was derived from `user_id, name`
+// we can decode pk -> user_id, name,
+// and retrieve the row: |_| age |_|,
+// then fill in empty spots with datum decoded from pk: | user_id | age | name |
+pub struct DedupPkCellBasedTableRowIter<I> {
+    inner: I,
+    pk_decoder: OrderedRowDeserializer,
+
+    // Maps pk fields with:
+    // 1. same value and memcomparable encoding,
+    // 2. corresponding row positions. e.g. _row_id is unlikely to be part of selected row.
+    pk_to_row_mapping: Vec<Option<usize>>,
+}
+
+impl<I> DedupPkCellBasedTableRowIter<I> {
+    pub async fn new(
+        inner: I,
+        table_descs: Arc<ColumnDescMapping>,
+        pk_descs: &[OrderedColumnDesc],
+    ) -> StorageResult<Self> {
+        let (data_types, order_types) = pk_descs
+            .iter()
+            .map(|ordered_desc| {
+                (
+                    ordered_desc.column_desc.data_type.clone(),
+                    ordered_desc.order,
+                )
+            })
+            .unzip();
+        let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
+
+        // TODO: pre-calculate this instead of calculate it every time when creating new iterator
+        let col_id_to_row_idx: HashMap<ColumnId, usize> = table_descs
+            .iter()
+            .map(|(column_id, (_, idx))| (*column_id, *idx))
+            .collect();
+
+        let pk_to_row_mapping = pk_descs
+            .iter()
+            .map(|d| {
+                let column_desc = &d.column_desc;
+                if column_desc.data_type.mem_cmp_eq_value_enc() {
+                    col_id_to_row_idx.get(&column_desc.column_id).copied()
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(Self {
+            inner,
+            pk_decoder,
+            pk_to_row_mapping,
+        })
+    }
+}
+
+impl<I: PkAndRowStream> DedupPkCellBasedTableRowIter<I> {
+    /// Yield a row with its primary key.
+    #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+    pub async fn into_stream(self) {
+        #[for_await]
+        for r in self.inner {
+            let (pk_vec, Row(mut row_inner)) = r?;
+            let pk_decoded = self.pk_decoder.deserialize(&pk_vec).map_err(err)?;
+            for (pk_idx, datum) in pk_decoded.into_vec().into_iter().enumerate() {
+                if let Some(row_idx) = self.pk_to_row_mapping[pk_idx] {
+                    row_inner[row_idx] = datum;
+                }
+            }
+            yield (pk_vec, Row(row_inner));
+        }
     }
 }
