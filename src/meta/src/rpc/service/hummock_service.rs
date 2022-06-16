@@ -240,7 +240,6 @@ where
         let request = request.into_inner();
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
-            // key_range: request.key_range,
             level: request.level as usize,
             ..Default::default()
         };
