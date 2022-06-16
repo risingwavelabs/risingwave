@@ -415,18 +415,27 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let mut all_rows = vec![];
 
+        let prefix_datums = lookup_row.0.clone();
+        let prefix_mapping = vec![0];
+
         for (pk_with_cell_id, cell) in all_cells {
             tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}", pk_with_cell_id, cell);
-            if let Some((_, row)) = self
+            if let Some((_, mut row)) = self
                 .arrangement
                 .deserializer
                 .deserialize(&pk_with_cell_id, &cell)?
             {
+                for (i, d) in prefix_mapping.iter().zip_eq(prefix_datums.iter()) {
+                    row.0[*i] = d.clone();
+                }
                 all_rows.push(row);
             }
         }
 
-        if let Some((_, last_row)) = self.arrangement.deserializer.take() {
+        if let Some((_, mut last_row)) = self.arrangement.deserializer.take() {
+            for (i, d) in prefix_mapping.iter().zip_eq(prefix_datums.iter()) {
+                last_row.0[*i] = d.clone();
+            }
             all_rows.push(last_row);
         }
 

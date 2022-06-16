@@ -179,6 +179,27 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
 
     }
 
+    pub fn deserialize_with_prefix(
+        &mut self,
+        pk_with_cell_id: impl AsRef<[u8]>,
+        cell: impl AsRef<[u8]>,
+        prefix_datums: Vec<Datum>,
+    ) -> Result<Option<(Vec<u8>, Row)>> {
+        let res = self.deserialize_inner(pk_with_cell_id, cell)?;
+        if let Some((pk, row)) = res {
+            println!("deserializing dedup pk: {:#?}", pk);
+            let mut pk_row = prefix_datums;
+            let mut partial_pk_row = self.raw_key_to_dedup_pk_row(&pk)?;
+            pk_row.append(&mut partial_pk_row.0);
+            let pk_row = Row(pk_row);
+            println!("deserializing pk with prefix: {:#?}", pk_row);
+            Ok(Some((pk, self.dedup_pk_row_to_row(&pk_row, row))))
+        } else {
+            Ok(res)
+        }
+
+    }
+
     /// When we encounter a new key, we can be sure that the previous row has been fully
     /// deserialized. Then we return the key and the value of the previous row.
     fn deserialize_inner(
@@ -225,6 +246,24 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         }
 
         Ok(result)
+    }
+
+    pub fn take_with_prefix(
+        &mut self,
+        prefix_datums: Vec<Datum>,
+    ) -> Option<(Vec<u8>, Row)> {
+        let res = self.take_inner();
+        if let Some((pk, row)) = res {
+            println!("deserializing dedup pk: {:#?}", pk);
+            let mut pk_row = prefix_datums;
+            let mut partial_pk_row = self.raw_key_to_dedup_pk_row(&pk).unwrap(); // FIXME;
+            pk_row.append(&mut partial_pk_row.0);
+            let pk_row = Row(pk_row);
+            println!("deserializing pk with prefix: {:#?}", pk_row);
+            Some((pk, self.dedup_pk_row_to_row(&pk_row, row)))
+        } else {
+            res
+        }
     }
 
     pub fn take(
