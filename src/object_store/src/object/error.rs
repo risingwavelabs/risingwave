@@ -38,7 +38,6 @@ enum ObjectErrorInner {
 #[derive(Error)]
 #[error("{inner}")]
 pub struct ObjectError {
-    #[source]
     #[from]
     inner: ObjectErrorInner,
 
