@@ -551,11 +551,11 @@ impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
 /// Provides a layer on top of [`CellBasedIter`]
 /// for decoding pk into its constituent datums in a row.
 ///
-/// Given the following row: | user_id | age | name |,
+/// Given the following row: `| user_id | age | name |`,
 /// if pk was derived from `user_id, name`
-/// we can decode pk -> user_id, name,
-/// and retrieve the row: |_| age |_|,
-/// then fill in empty spots with datum decoded from pk: | user_id | age | name |
+/// we can decode pk -> `user_id, name`,
+/// and retrieve the row: `|_| age |_|`,
+/// then fill in empty spots with datum decoded from pk: `| user_id | age | name |`
 struct DedupPkCellBasedIter<I> {
     inner: I,
     pk_decoder: OrderedRowDeserializer,
