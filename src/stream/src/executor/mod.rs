@@ -331,7 +331,7 @@ impl Mutation {
                             source_splits: match splits.clone() {
                                 Some(split) => split
                                     .into_iter()
-                                    .map(|s| s.to_json_bytes().to_vec())
+                                    .map(|s| s.encode_to_bytes().to_vec())
                                     .collect::<Vec<_>>(),
                                 None => vec![],
                             },
@@ -360,7 +360,7 @@ impl Mutation {
                     })
                     .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
             ),
-            ProstMutation::Add(adds) => Some(
+            ProstMutation::Add(adds) =>
                 Mutation::AddOutput(AddOutput {
                     map: adds
                         .mutations
@@ -387,7 +387,7 @@ impl Mutation {
                         })
                         .collect(),
                 })
-                    .into(), ),
+                    .into(),
             ProstMutation::Splits(s) => {
                 let mut change_splits: Vec<(ActorId, ConnectorState)> =
                     Vec::with_capacity(s.mutations.len());
