@@ -156,10 +156,11 @@ impl FunctionCall {
                 Ok(DataType::Varchar)
             }
 
-            _ => infer_type(
-                func_type,
-                inputs.iter().map(|expr| expr.return_type()).collect(),
-            ),
+            _ => {
+                let ret;
+                (inputs, ret) = infer_type(func_type, inputs)?;
+                Ok(ret)
+            }
         }?;
         Ok(Self {
             func_type,

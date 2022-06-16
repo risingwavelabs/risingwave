@@ -19,15 +19,16 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use super::{name_of, DataTypeName};
-use crate::expr::ExprType;
+use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
-pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
+pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
-    let input_type_names = inputs_type.iter().map(name_of).collect();
-    infer_type_name(func_type, input_type_names).map(Into::into)
+    let input_type_names = inputs.iter().map(|e| name_of(&e.return_type())).collect();
+    let ret = infer_type_name(func_type, input_type_names)?.into();
+    Ok((inputs, ret))
 }
 
 /// Infer the return type name without parameters like length or precision.
@@ -310,18 +311,28 @@ lazy_static::lazy_static! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expr::Literal;
+
+    fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
+        let inputs = inputs_type
+            .into_iter()
+            .map(|t| Literal::new(None, t).into())
+            .collect();
+        let (_, ret) = infer_type(func_type, inputs)?;
+        Ok(ret)
+    }
 
     fn test_simple_infer_type(
         func_type: ExprType,
         inputs_type: Vec<DataType>,
         expected_type_name: DataType,
     ) {
-        let ret = infer_type(func_type, inputs_type).unwrap();
+        let ret = infer_type_v0(func_type, inputs_type).unwrap();
         assert_eq!(ret, expected_type_name);
     }
 
     fn test_infer_type_not_exist(func_type: ExprType, inputs_type: Vec<DataType>) {
-        let ret = infer_type(func_type, inputs_type);
+        let ret = infer_type_v0(func_type, inputs_type);
         assert!(ret.is_err());
     }
 
