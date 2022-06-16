@@ -22,6 +22,7 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::hummock::iterator::{
     DirectionEnum, HummockIterator, HummockIteratorDirection, ReadOptions,
 };
+use crate::hummock::table_acessor::TableAcessor;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
@@ -37,7 +38,7 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// All non-overlapping tables.
     tables: Vec<SstableInfo>,
 
-    sstable_store: SstableStoreRef,
+    sstable_store: TI::Accessor,
 
     stats: StoreLocalStatistic,
     read_options: Arc<ReadOptions>,
@@ -49,7 +50,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// and arranged in descending order when it serves as a backward iterator.
     pub fn new(
         tables: Vec<SstableInfo>,
-        sstable_store: SstableStoreRef,
+        sstable_store: TI::Accessor,
         read_options: Arc<ReadOptions>,
     ) -> Self {
         Self {

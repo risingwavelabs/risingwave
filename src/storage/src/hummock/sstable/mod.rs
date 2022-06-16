@@ -16,6 +16,9 @@
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
+
+use std::fmt::{Debug, Formatter};
+
 pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
@@ -35,6 +38,7 @@ use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 pub mod group_builder;
+mod in_memory_table;
 mod utils;
 
 pub use utils::CompressionAlgorithm;
@@ -47,16 +51,29 @@ const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
 
-#[derive(Clone, Debug)]
 /// [`Sstable`] is a handle for accessing SST.
 pub struct Sstable {
     pub id: HummockSSTableId,
     pub meta: SstableMeta,
+    pub blocks: Vec<Box<Block>>,
+}
+
+impl Debug for Sstable {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GrpcExchangeSource")
+            .field("id", &self.id)
+            .field("meta", &self.meta)
+            .finish()
+    }
 }
 
 impl Sstable {
     pub fn new(id: HummockSSTableId, meta: SstableMeta) -> Self {
-        Self { id, meta }
+        Self {
+            id,
+            meta,
+            blocks: vec![],
+        }
     }
 
     pub fn has_bloom_filter(&self) -> bool {

@@ -46,6 +46,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
+use crate::hummock::table_acessor::TableAcessor;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::HummockError;
@@ -565,9 +566,13 @@ impl Compactor {
             unit_id,
         } in sealed_builders
         {
-            let sst = Sstable { id: table_id, meta };
+            let sst = Sstable {
+                id: table_id,
+                meta,
+                blocks: vec![],
+            };
             let len = data_len;
-            ssts.push((sst.clone(), unit_id, vnode_bitmaps));
+            ssts.push((sst, unit_id, vnode_bitmaps));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {

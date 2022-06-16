@@ -135,6 +135,7 @@ where
                         Sstable {
                             id: table_id,
                             meta: meta_clone,
+                            blocks: vec![],
                         },
                         data,
                         CachePolicy::Fill,

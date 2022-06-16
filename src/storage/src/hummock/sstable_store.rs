@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
+use crate::hummock::table_acessor::TableAcessor;
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::StoreLocalStatistic;
 
@@ -90,9 +91,9 @@ impl SstableStore {
                 self.add_block_cache(sst.id, block_idx as u64, data.slice(offset..offset + len))
                     .unwrap();
             }
-            self.meta_cache
-                .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst.clone()));
         }
+        self.meta_cache
+            .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst));
 
         Ok(())
     }
@@ -292,7 +293,11 @@ impl SstableStore {
                         .map_err(HummockError::object_io_error)?;
                     let size = buf.len();
                     let meta = SstableMeta::decode(&mut &buf[..])?;
-                    let sst = Box::new(Sstable { id, meta });
+                    let sst = Box::new(Sstable {
+                        id,
+                        meta,
+                        blocks: vec![],
+                    });
                     Ok((sst, size))
                 })
                 .map(|result| match result {
@@ -306,38 +311,6 @@ impl SstableStore {
         }
         let _ = try_join_all(results).await?;
         Ok(())
-    }
-
-    pub async fn sstable(
-        &self,
-        sst_id: HummockSSTableId,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<TableHolder> {
-        stats.cache_meta_block_total += 1;
-
-        let entry = self
-            .meta_cache
-            .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || async {
-                stats.cache_meta_block_miss += 1;
-                let path = self.get_sst_meta_path(sst_id);
-                let buf = self
-                    .store
-                    .read(&path, None)
-                    .await
-                    .map_err(HummockError::object_io_error)?;
-                let size = buf.len();
-                let meta = SstableMeta::decode(&mut &buf[..])?;
-                let sst = Box::new(Sstable { id: sst_id, meta });
-                Ok((sst, size))
-            })
-            .await
-            .map_err(|e| {
-                HummockError::other(format!(
-                    "meta cache lookup request dedup get cancel: {:?}",
-                    e,
-                ))
-            })??;
-        Ok(entry)
     }
 
     pub fn get_sst_meta_path(&self, sst_id: HummockSSTableId) -> String {
@@ -375,3 +348,41 @@ impl SstableStore {
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;
+
+#[async_trait::async_trait]
+impl TableAcessor for SstableStoreRef {
+    async fn sstable(
+        &self,
+        sst_id: HummockSSTableId,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        stats.cache_meta_block_total += 1;
+        let entry = self
+            .meta_cache
+            .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || async {
+                stats.cache_meta_block_miss += 1;
+                let path = self.get_sst_meta_path(sst_id);
+                let buf = self
+                    .store
+                    .read(&path, None)
+                    .await
+                    .map_err(HummockError::object_io_error)?;
+                let size = buf.len();
+                let meta = SstableMeta::decode(&mut &buf[..])?;
+                let sst = Box::new(Sstable {
+                    id: sst_id,
+                    meta,
+                    blocks: vec![],
+                });
+                Ok((sst, size))
+            })
+            .await
+            .map_err(|e| {
+                HummockError::other(format!(
+                    "meta cache lookup request dedup get cancel: {:?}",
+                    e,
+                ))
+            })??;
+        Ok(entry)
+    }
+}

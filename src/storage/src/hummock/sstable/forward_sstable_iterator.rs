@@ -20,13 +20,15 @@ use risingwave_hummock_sdk::VersionedComparator;
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator, ReadOptions};
+use crate::hummock::table_acessor::TableAcessor;
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SSTableIteratorType: HummockIterator + 'static {
+    type Accessor: TableAcessor;
     fn create(
         table: TableHolder,
-        sstable_store: SstableStoreRef,
+        sstable_store: Self::Accessor,
         read_options: Arc<ReadOptions>,
     ) -> Self;
 }
@@ -168,6 +170,8 @@ impl HummockIterator for SSTableIterator {
 }
 
 impl SSTableIteratorType for SSTableIterator {
+    type Accessor = SstableStoreRef;
+
     fn create(
         table: TableHolder,
         sstable_store: SstableStoreRef,

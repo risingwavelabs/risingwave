@@ -38,6 +38,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
 };
+use crate::hummock::table_acessor::TableAcessor;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
@@ -75,6 +76,7 @@ impl HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
+        acessor: <<T as HummockIteratorType>::SstableIteratorType as SSTableIteratorType>::Accessor,
     ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
@@ -96,7 +98,7 @@ impl HummockStorage {
             overlapped_iters.push(
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
-                    self.sstable_store.clone(),
+                    acessor.clone(),
                     self.stats.clone(),
                     &mut stats,
                     read_options.clone(),
@@ -138,18 +140,15 @@ impl HummockStorage {
 
                 overlapped_iters.push(Box::new(ConcatIteratorInner::<T::SstableIteratorType>::new(
                     tables,
-                    self.sstable_store(),
+                    acessor.clone(),
                     read_options.clone(),
                 )) as BoxedHummockIterator<T::Direction>);
             } else {
                 for table_info in table_infos.into_iter().rev() {
-                    let table = self
-                        .sstable_store
-                        .sstable(table_info.id, &mut stats)
-                        .await?;
+                    let table = acessor.sstable(table_info.id, &mut stats).await?;
                     overlapped_iters.push(Box::new(T::SstableIteratorType::create(
                         table,
-                        self.sstable_store(),
+                        acessor.clone(),
                         read_options.clone(),
                     )));
                 }
@@ -384,7 +383,7 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, ForwardIter>(key_range, epoch)
+        self.iter_inner::<R, B, ForwardIter>(key_range, epoch, self.sstable_store())
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -398,7 +397,7 @@ impl StateStore for HummockStorage {
             key_range.end_bound().map(|v| v.as_ref().to_vec()),
             key_range.start_bound().map(|v| v.as_ref().to_vec()),
         );
-        self.iter_inner::<_, _, BackwardIter>(key_range, epoch)
+        self.iter_inner::<_, _, BackwardIter>(key_range, epoch, self.sstable_store())
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {

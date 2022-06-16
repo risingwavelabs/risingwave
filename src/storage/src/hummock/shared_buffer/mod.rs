@@ -32,6 +32,7 @@ use crate::hummock::iterator::{
 };
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::state_store::HummockIteratorType;
+use crate::hummock::table_acessor::TableAcessor;
 use crate::hummock::utils::{filter_single_sst, range_overlap};
 use crate::hummock::{HummockResult, SSTableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -100,7 +101,7 @@ pub(crate) fn to_order_sorted(
 
 pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
     uncommitted_data: &OrderSortedUncommittedData,
-    sstable_store: Arc<SstableStore>,
+    sstable_store: <<T as HummockIteratorType>::SstableIteratorType as SSTableIteratorType>::Accessor,
     stats: Arc<StateStoreMetrics>,
     local_stats: &mut StoreLocalStatistic,
     read_options: Arc<ReadOptions>,

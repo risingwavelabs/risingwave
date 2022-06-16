@@ -30,6 +30,7 @@ const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
 enum BlockEntry {
     Cache(CachableEntry<(HummockSSTableId, u64), Box<Block>>),
     Owned(Box<Block>),
+    RefEntry,
 }
 
 pub struct BlockHolder {
@@ -38,6 +39,14 @@ pub struct BlockHolder {
 }
 
 impl BlockHolder {
+    pub fn from_ref_block(block: &Box<Block>) -> Self {
+        let ptr = block.as_ref() as *const _;
+        Self {
+            _handle: BlockEntry::RefEntry,
+            block: ptr,
+        }
+    }
+
     pub fn from_owned_block(block: Box<Block>) -> Self {
         let ptr = block.as_ref() as *const _;
         Self {
