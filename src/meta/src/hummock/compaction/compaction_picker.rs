@@ -15,11 +15,11 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use risingwave_pb::hummock::{KeyRange, Level, SstableInfo};
+use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapInfo};
-use crate::hummock::compaction::SearchResult;
+use crate::hummock::compaction::{ManualCompactionOption, SearchResult};
 use crate::hummock::level_handler::LevelHandler;
 
 pub trait CompactionPicker {
@@ -190,42 +190,21 @@ impl CompactionPicker for MinOverlappingPicker {
     }
 }
 
-pub struct ManualCompactionOption {
-    key_range: KeyRange,
-    internal_table_id: HashSet<u32>,
-}
-
-impl Default for ManualCompactionOption {
-    fn default() -> Self {
-        Self {
-            key_range: KeyRange {
-                left: vec![],
-                right: vec![],
-                inf: true,
-            },
-            internal_table_id: HashSet::default(),
-        }
-    }
-}
-
 pub struct ManualCompactionPicker {
     compact_task_id: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
-    level: usize,
     option: ManualCompactionOption,
 }
 
 impl ManualCompactionPicker {
     pub fn new(
         compact_task_id: u64,
-        level: usize,
         overlap_strategy: Arc<dyn OverlapStrategy>,
         option: ManualCompactionOption,
     ) -> Self {
         Self {
             compact_task_id,
             overlap_strategy,
-            level,
             option,
         }
     }
@@ -237,7 +216,8 @@ impl CompactionPicker for ManualCompactionPicker {
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {
-        let target_level = self.level + 1;
+        let level = self.option.level;
+        let target_level = level + 1;
 
         let mut select_input_ssts = vec![];
         let mut tmp_sst_info = SstableInfo::default();
@@ -245,7 +225,7 @@ impl CompactionPicker for ManualCompactionPicker {
         tmp_sst_info.key_range = Some(self.option.key_range.clone());
         range_overlap_info.update(&tmp_sst_info);
 
-        let level_table_infos: Vec<SstableInfo> = levels[self.level]
+        let level_table_infos: Vec<SstableInfo> = levels[level]
             .table_infos
             .iter()
             .filter(|sst_info| range_overlap_info.check_overlap(sst_info))
@@ -274,7 +254,7 @@ impl CompactionPicker for ManualCompactionPicker {
             .collect();
 
         for table in &level_table_infos {
-            if level_handlers[self.level].is_pending_compact(&table.id) {
+            if level_handlers[level].is_pending_compact(&table.id) {
                 continue;
             }
 
@@ -303,15 +283,15 @@ impl CompactionPicker for ManualCompactionPicker {
             .overlap_strategy
             .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos);
 
-        level_handlers[self.level].add_pending_task(self.compact_task_id, &select_input_ssts);
+        level_handlers[level].add_pending_task(self.compact_task_id, &select_input_ssts);
         if !target_input_ssts.is_empty() {
             level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
         }
 
         Some(SearchResult {
             select_level: Level {
-                level_idx: self.level as u32,
-                level_type: levels[self.level].level_type,
+                level_idx: level as u32,
+                level_type: levels[level].level_type,
                 table_infos: select_input_ssts,
                 total_file_size: 0,
             },
@@ -329,7 +309,7 @@ impl CompactionPicker for ManualCompactionPicker {
 #[cfg(test)]
 pub mod tests {
     use risingwave_pb::common::VNodeBitmap;
-    use risingwave_pb::hummock::LevelType;
+    pub use risingwave_pb::hummock::{KeyRange, LevelType};
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
@@ -504,19 +484,17 @@ pub mod tests {
 
         {
             // test key_range option
-            let mut option = ManualCompactionOption::default();
-            let key_range = KeyRange {
-                left: iterator_test_key_of_epoch(1, 0, 1),
-                right: iterator_test_key_of_epoch(1, 201, 1),
-                inf: false,
+            let option = ManualCompactionOption {
+                level: 1,
+                key_range: KeyRange {
+                    left: iterator_test_key_of_epoch(1, 0, 1),
+                    right: iterator_test_key_of_epoch(1, 201, 1),
+                    inf: false,
+                },
+                ..Default::default()
             };
-            option.key_range = key_range;
-            let picker = ManualCompactionPicker::new(
-                0,
-                1,
-                Arc::new(RangeOverlapStrategy::default()),
-                option,
-            );
+            let picker =
+                ManualCompactionPicker::new(0, Arc::new(RangeOverlapStrategy::default()), option);
             let result = picker
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
@@ -531,12 +509,8 @@ pub mod tests {
 
             // test all key range
             let option = ManualCompactionOption::default();
-            let picker = ManualCompactionPicker::new(
-                0,
-                1,
-                Arc::new(RangeOverlapStrategy::default()),
-                option,
-            );
+            let picker =
+                ManualCompactionPicker::new(0, Arc::new(RangeOverlapStrategy::default()), option);
             let result = picker
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
@@ -557,16 +531,13 @@ pub mod tests {
 
             // test internal_table_id
             let option = ManualCompactionOption {
+                level: 1,
                 internal_table_id: HashSet::from([2]),
                 ..Default::default()
             };
 
-            let picker = ManualCompactionPicker::new(
-                0,
-                1,
-                Arc::new(RangeOverlapStrategy::default()),
-                option,
-            );
+            let picker =
+                ManualCompactionPicker::new(0, Arc::new(RangeOverlapStrategy::default()), option);
 
             let result = picker
                 .pick_compaction(&levels, &mut levels_handler)
@@ -590,21 +561,17 @@ pub mod tests {
 
             // test key range filter first
             let option = ManualCompactionOption {
+                level: 1,
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 101, 1),
                     right: iterator_test_key_of_epoch(1, 199, 1),
                     inf: false,
                 },
                 internal_table_id: HashSet::from([2]),
-                ..Default::default()
             };
 
-            let picker = ManualCompactionPicker::new(
-                0,
-                1,
-                Arc::new(RangeOverlapStrategy::default()),
-                option,
-            );
+            let picker =
+                ManualCompactionPicker::new(0, Arc::new(RangeOverlapStrategy::default()), option);
 
             let result = picker
                 .pick_compaction(&levels, &mut levels_handler)

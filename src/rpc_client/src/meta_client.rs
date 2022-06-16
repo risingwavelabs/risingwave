@@ -437,6 +437,7 @@ impl HummockMetaClient for MetaClient {
     async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()> {
         let req = TriggerManualCompactionRequest {
             compaction_group_id,
+            ..Default::default()
         };
 
         self.inner.trigger_manual_compaction(req).await?;

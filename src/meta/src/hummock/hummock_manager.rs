@@ -39,7 +39,7 @@ use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
-use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
@@ -551,9 +551,10 @@ where
         Ok(())
     }
 
-    pub async fn get_compact_task(
+    pub async fn get_compact_task_impl(
         &self,
         compaction_group_id: CompactionGroupId,
+        manual_compaction_option: Option<ManualCompactionOption>,
     ) -> Result<Option<CompactTask>> {
         // TODO #2065: Remove this line after split levels by compaction group.
         // All SSTs belongs to `StateDefault` currently.
@@ -589,6 +590,7 @@ where
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
             compaction_group_id,
+            manual_compaction_option,
         );
 
         let ret = match compact_task {
@@ -658,6 +660,22 @@ where
         }
 
         ret
+    }
+
+    pub async fn get_compact_task(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Result<Option<CompactTask>> {
+        self.get_compact_task_impl(compaction_group_id, None).await
+    }
+
+    pub async fn manual_get_compact_task(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        manual_compaction_option: ManualCompactionOption,
+    ) -> Result<Option<CompactTask>> {
+        self.get_compact_task_impl(compaction_group_id, Some(manual_compaction_option))
+            .await
     }
 
     /// Assigns a compaction task to a compactor
@@ -1344,6 +1362,7 @@ where
     pub async fn trigger_manual_compaction(
         &self,
         compaction_group: CompactionGroupId,
+        manual_compaction_option: ManualCompactionOption,
     ) -> Result<()> {
         let start_time = Instant::now();
 
@@ -1361,8 +1380,10 @@ where
             Some(compactor) => compactor,
         };
 
-        // 2. compact_task
-        let compact_task = self.get_compact_task(compaction_group).await;
+        // 2. manual_get_compact_task
+        let compact_task = self
+            .manual_get_compact_task(compaction_group, manual_compaction_option)
+            .await;
         let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {

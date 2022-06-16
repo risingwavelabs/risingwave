@@ -29,6 +29,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, Hummock
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, HummockVersion, KeyRange, Level};
 
+use crate::hummock::compaction::compaction_picker::{CompactionPicker, ManualCompactionPicker};
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
     HashStrategy, OverlapStrategy, RangeOverlapStrategy,
@@ -108,15 +109,24 @@ impl CompactStatus {
         levels: &[Level],
         task_id: HummockCompactionTaskId,
         compaction_group_id: CompactionGroupId,
+        manual_compaction_option: Option<ManualCompactionOption>,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
-        let ret = match self.pick_compaction(levels, task_id) {
-            Some(ret) => ret,
-            None => return None,
-        };
+        let ret;
+        if let Some(manual_compaction_option) = manual_compaction_option {
+            ret = match self.manual_pick_compaction(levels, task_id, manual_compaction_option) {
+                Some(ret) => ret,
+                None => return None,
+            };
+        } else {
+            ret = match self.pick_compaction(levels, task_id) {
+                Some(ret) => ret,
+                None => return None,
+            };
+        }
 
         let select_level_id = ret.select_level.level_idx;
         let target_level_id = ret.target_level.level_idx;
@@ -152,6 +162,23 @@ impl CompactStatus {
     ) -> Option<SearchResult> {
         self.compaction_selector
             .pick_compaction(task_id, levels, &mut self.level_handlers)
+    }
+
+    fn manual_pick_compaction(
+        &mut self,
+        levels: &[Level],
+        task_id: HummockCompactionTaskId,
+        manual_compaction_option: ManualCompactionOption,
+    ) -> Option<SearchResult> {
+        // manual_compaction no need to select level
+        // level determined by option
+        let picker = ManualCompactionPicker::new(
+            task_id,
+            create_overlap_strategy(self.compaction_config.compaction_mode()),
+            manual_compaction_option,
+        );
+
+        picker.pick_compaction(levels, &mut self.level_handlers)
     }
 
     /// Declares a task is either finished or canceled.
@@ -243,5 +270,26 @@ impl CompactStatus {
 
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ManualCompactionOption {
+    pub key_range: KeyRange,
+    pub internal_table_id: HashSet<u32>,
+    pub level: usize,
+}
+
+impl Default for ManualCompactionOption {
+    fn default() -> Self {
+        Self {
+            key_range: KeyRange {
+                left: vec![],
+                right: vec![],
+                inf: true,
+            },
+            internal_table_id: HashSet::default(),
+            level: 1,
+        }
     }
 }

@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, ErrorCode};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
+use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumTrigger};
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
+use crate::stream::FragmentManagerRef;
 
 pub struct HummockServiceImpl<S>
 where
@@ -32,6 +36,7 @@ where
     compactor_manager: CompactorManagerRef,
     vacuum_trigger: Arc<VacuumTrigger<S>>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
 }
 
 impl<S> HummockServiceImpl<S>
@@ -43,12 +48,14 @@ where
         compactor_manager: CompactorManagerRef,
         vacuum_trigger: Arc<VacuumTrigger<S>>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
             compactor_manager,
             vacuum_trigger,
             compaction_group_manager,
+            fragment_manager,
         }
     }
 }
@@ -230,10 +237,40 @@ where
         &self,
         request: Request<TriggerManualCompactionRequest>,
     ) -> Result<Response<TriggerManualCompactionResponse>, Status> {
-        let compaction_group_id = request.into_inner().compaction_group_id;
+        let request = request.into_inner();
+        let compaction_group_id = request.compaction_group_id;
+        let mut option = ManualCompactionOption {
+            // key_range: request.key_range,
+            level: request.level as usize,
+            ..Default::default()
+        };
+
+        match request.key_range {
+            Some(key_range) => {
+                option.key_range = key_range;
+            }
+
+            None => {
+                option.key_range = KeyRange {
+                    inf: true,
+                    ..Default::default()
+                }
+            }
+        }
+
+        // get internal_table_id by fragment_manager
+        let table_id = TableId::new(request.table_id);
+        if let Ok(table_frgament) = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id)
+            .await
+        {
+            option.internal_table_id = HashSet::from_iter(table_frgament.internal_table_ids());
+        }
+
         let result_state = match self
             .hummock_manager
-            .trigger_manual_compaction(compaction_group_id)
+            .trigger_manual_compaction(compaction_group_id, option)
             .await
         {
             Ok(_) => None,
