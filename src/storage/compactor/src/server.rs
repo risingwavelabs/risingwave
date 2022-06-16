@@ -41,7 +41,7 @@ pub async fn compactor_serve(
     client_addr: HostAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, Sender<()>) {
-    let config = {
+    let mut config = {
         if opts.config_path.is_empty() {
             CompactorConfig::default()
         } else {
@@ -68,6 +68,10 @@ pub async fn compactor_serve(
         meta_client.clone(),
         hummock_metrics.clone(),
     ));
+
+    // TODO: remove it after we can configure compactor independently.
+    config.storage.meta_cache_capacity_mb = config.storage.block_cache_capacity_mb;
+
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
     let object_store = Arc::new(ObjectStoreImpl::new(

@@ -18,6 +18,12 @@ pub struct StorageTableAcessor {
     store: SstableStoreRef,
 }
 
+impl StorageTableAcessor {
+    pub fn new(store: SstableStoreRef) -> Self {
+        Self { store }
+    }
+}
+
 #[async_trait::async_trait]
 impl TableAcessor for StorageTableAcessor {
     async fn sstable(

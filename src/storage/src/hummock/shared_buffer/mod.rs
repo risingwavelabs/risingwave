@@ -34,7 +34,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::state_store::HummockIteratorType;
 use crate::hummock::table_acessor::TableAcessor;
 use crate::hummock::utils::{filter_single_sst, range_overlap};
-use crate::hummock::{HummockResult, SSTableIteratorType, SstableStore};
+use crate::hummock::{HummockResult, SSTableIteratorType};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[derive(Debug, Clone, PartialEq)]

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::VersionedComparator;
 
-use crate::hummock::iterator::{Backward, ConcatIteratorInner, HummockIterator, ReadOptions};
+use crate::hummock::iterator::{ConcatIteratorInner, Forward, HummockIterator, ReadOptions};
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::table_acessor::StorageTableAcessor;
 use crate::hummock::value::HummockValue;
@@ -55,7 +55,7 @@ impl InMemoryTableIterator {
 
 #[async_trait::async_trait]
 impl HummockIterator for InMemoryTableIterator {
-    type Direction = Backward;
+    type Direction = Forward;
 
     async fn next(&mut self) -> HummockResult<()> {
         self.stats.scan_key_count += 1;

@@ -46,14 +46,13 @@ pub struct SSTableIterator {
 
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
-    options: Arc<ReadOptions>,
 }
 
 impl SSTableIterator {
     pub fn new(
         table: TableHolder,
         sstable_store: SstableStoreRef,
-        options: Arc<ReadOptions>,
+        _options: Arc<ReadOptions>,
     ) -> Self {
         Self {
             block_iter: None,
@@ -61,7 +60,6 @@ impl SSTableIterator {
             sst: table,
             sstable_store,
             stats: StoreLocalStatistic::default(),
-            options,
         }
     }
 
@@ -76,20 +74,15 @@ impl SSTableIterator {
         if idx >= self.sst.value().block_count() {
             self.block_iter = None;
         } else {
-            let block = if self.options.prefetch {
-                self.sstable_store
-                    .get_with_prefetch(self.sst.value(), idx as u64, &mut self.stats)
-                    .await?
-            } else {
-                self.sstable_store
-                    .get(
-                        self.sst.value(),
-                        idx as u64,
-                        crate::hummock::CachePolicy::Fill,
-                        &mut self.stats,
-                    )
-                    .await?
-            };
+            let block = self
+                .sstable_store
+                .get(
+                    self.sst.value(),
+                    idx as u64,
+                    crate::hummock::CachePolicy::Fill,
+                    &mut self.stats,
+                )
+                .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
                 block_iter.seek(key);

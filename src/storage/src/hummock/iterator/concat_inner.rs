@@ -24,7 +24,7 @@ use crate::hummock::iterator::{
 };
 use crate::hummock::table_acessor::TableAcessor;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
+use crate::hummock::{HummockResult, SSTableIteratorType};
 use crate::monitor::StoreLocalStatistic;
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.

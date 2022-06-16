@@ -46,6 +46,7 @@ pub struct CapacitySplitTableBuilder<B> {
     current_builder: Option<SSTableBuilder>,
 
     sstable_store: SstableStoreRef,
+    policy: CachePolicy,
 }
 
 impl<B, F> CapacitySplitTableBuilder<B>
@@ -54,12 +55,13 @@ where
     F: Future<Output = HummockResult<SSTableBuilder>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(get_id_and_builder: B, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(get_id_and_builder: B, policy: CachePolicy, sstable_store: SstableStoreRef) -> Self {
         Self {
             get_id_and_builder,
             sealed_builders: Vec::new(),
             current_builder: None,
             sstable_store,
+            policy,
         }
     }
 
@@ -129,6 +131,7 @@ where
             let len = data.len();
             let sstable_store = self.sstable_store.clone();
             let meta_clone = meta.clone();
+            let policy = self.policy;
             let upload_join_handle = tokio::spawn(async move {
                 sstable_store
                     .put(
@@ -138,7 +141,7 @@ where
                             blocks: vec![],
                         },
                         data,
-                        CachePolicy::Fill,
+                        policy,
                     )
                     .await
             });
@@ -190,7 +193,11 @@ mod tests {
                 },
             ))
         };
-        let builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
+        let builder = CapacitySplitTableBuilder::new(
+            get_id_and_builder,
+            CachePolicy::Disable,
+            mock_sstable_store(),
+        );
         let results = builder.finish();
         assert!(results.is_empty());
     }
@@ -213,7 +220,11 @@ mod tests {
                 },
             ))
         };
-        let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
+        let mut builder = CapacitySplitTableBuilder::new(
+            get_id_and_builder,
+            CachePolicy::Disable,
+            mock_sstable_store(),
+        );
 
         for i in 0..table_capacity {
             builder
@@ -241,6 +252,7 @@ mod tests {
                     default_builder_opt_for_test(),
                 ))
             },
+            CachePolicy::Disable,
             mock_sstable_store(),
         );
         let mut epoch = 100;
@@ -285,6 +297,7 @@ mod tests {
                     default_builder_opt_for_test(),
                 ))
             },
+            CachePolicy::Disable,
             mock_sstable_store(),
         );
 

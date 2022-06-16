@@ -36,20 +36,20 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
-use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
-use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
+use super::iterator::{BoxedForwardHummockIterator, MergeIterator};
+use super::{HummockResult, SSTableBuilder, SSTableIteratorType, Sstable};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::group_builder::KeyValueGrouping;
-use crate::hummock::iterator::ReadOptions;
+use crate::hummock::iterator::{BackwardMemoryConcatIterator, InMemoryTableIterator, ReadOptions};
 use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
-use crate::hummock::table_acessor::TableAcessor;
+use crate::hummock::table_acessor::{StorageTableAcessor, TableAcessor};
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::HummockError;
+use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
@@ -374,24 +374,6 @@ impl Compactor {
                 })
                 .collect(),
         );
-        let tables = compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| table.id)
-            .collect_vec();
-        if let Err(e) = compactor
-            .context
-            .sstable_store
-            .prefetch_sstables(tables)
-            .await
-        {
-            tracing::warn!(
-                "Compaction task {} prefetch failed with error: {:#?}",
-                compact_task.task_id,
-                e
-            );
-        }
 
         // TODO #2065: re-enable it after all states are registered correctly.
         let compaction_filter = DummyCompactionFilter::default();
@@ -511,6 +493,7 @@ impl Compactor {
         iter: BoxedForwardHummockIterator,
         vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
         compaction_filter: impl CompactionFilter,
+        policy: CachePolicy,
     ) -> HummockResult<CompactOutput> {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
@@ -532,6 +515,7 @@ impl Compactor {
                 Ok(builder)
             },
             VirtualNodeGrouping::new(vnode2unit),
+            policy,
             self.context.sstable_store.clone(),
         );
 
@@ -611,8 +595,14 @@ impl Compactor {
         vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
-        self.compact_key_range_impl(split_index, iter, vnode2unit, dummy_compaction_filter)
-            .await
+        self.compact_key_range_impl(
+            split_index,
+            iter,
+            vnode2unit,
+            dummy_compaction_filter,
+            CachePolicy::Fill,
+        )
+        .await
     }
 
     async fn compact_key_range_with_filter(
@@ -622,8 +612,14 @@ impl Compactor {
         vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
         compaction_filter: impl CompactionFilter,
     ) -> HummockResult<CompactOutput> {
-        self.compact_key_range_impl(split_index, iter, vnode2unit, compaction_filter)
-            .await
+        self.compact_key_range_impl(
+            split_index,
+            iter,
+            vnode2unit,
+            compaction_filter,
+            CachePolicy::Disable,
+        )
+        .await
     }
 
     /// Build the merge iterator based on the given input ssts.
@@ -632,6 +628,8 @@ impl Compactor {
         let mut stats = StoreLocalStatistic::default();
         let read_options = Arc::new(ReadOptions { prefetch: true });
 
+        // TODO: check memory limit
+        let accessor = StorageTableAcessor::new(self.context.sstable_store.clone());
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -649,21 +647,17 @@ impl Compactor {
             // }
 
             if can_concat(&level.get_table_infos().iter().collect_vec()) {
-                table_iters.push(Box::new(ConcatIterator::new(
+                table_iters.push(Box::new(BackwardMemoryConcatIterator::new(
                     level.table_infos.clone(),
-                    self.context.sstable_store.clone(),
+                    accessor.clone(),
                     read_options.clone(),
-                )));
+                )) as BoxedForwardHummockIterator);
             } else {
                 for table_info in &level.table_infos {
-                    let table = self
-                        .context
-                        .sstable_store
-                        .sstable(table_info.id, &mut stats)
-                        .await?;
-                    table_iters.push(Box::new(SSTableIterator::create(
+                    let table = accessor.sstable(table_info.id, &mut stats).await?;
+                    table_iters.push(Box::new(InMemoryTableIterator::create(
                         table,
-                        self.context.sstable_store.clone(),
+                        accessor.clone(),
                         read_options.clone(),
                     )));
                 }

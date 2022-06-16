@@ -13,25 +13,22 @@
 // limitations under the License.
 
 use std::clone::Clone;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
-use futures::channel::oneshot::{channel, Sender};
-use futures::future::{try_join_all, FutureExt};
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::table_acessor::TableAcessor;
-use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
+use crate::hummock::{
+    BlockHolder, BlockMeta, CachableEntry, HummockError, HummockResult, LruCache,
+};
 use crate::monitor::StoreLocalStatistic;
 
-const MAX_META_CACHE_SHARD_BITS: usize = 5;
+const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 64 * 1024 * 1024; // 64MB
-const PREFETCH_BLOCK_COUNT: usize = 20;
 
 pub type TableHolder = CachableEntry<HummockSSTableId, Box<Sstable>>;
 
@@ -51,7 +48,6 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSSTableId, Box<Sstable>>>,
-    prefetch_request: Arc<Mutex<HashMap<u64, Vec<Sender<()>>>>>,
 }
 
 impl SstableStore {
@@ -71,7 +67,6 @@ impl SstableStore {
             store,
             block_cache: BlockCache::new(block_cache_capacity),
             meta_cache,
-            prefetch_request: Arc::new(Default::default()),
         }
     }
 
@@ -96,50 +91,6 @@ impl SstableStore {
             .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst));
 
         Ok(())
-    }
-
-    pub async fn get_with_prefetch(
-        &self,
-        sst: &Sstable,
-        block_index: u64,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<BlockHolder> {
-        loop {
-            stats.cache_data_block_total += 1;
-            if let Some(block) = self.block_cache.get(sst.id, block_index) {
-                return Ok(block);
-            }
-            stats.cache_data_block_miss += 1;
-            let timer = Instant::now();
-            let pending_request = {
-                let mut pending_request = self.prefetch_request.lock().unwrap();
-                if let Some(que) = pending_request.get_mut(&sst.id) {
-                    let (tx, rc) = channel();
-                    que.push(tx);
-                    Some(rc)
-                } else {
-                    // query again to avoid the previous prefetch request just finished before we
-                    // get lock.
-                    if let Some(block) = self.block_cache.get(sst.id, block_index) {
-                        return Ok(block);
-                    }
-                    pending_request.insert(sst.id, vec![]);
-                    None
-                }
-            };
-            if let Some(rc) = pending_request {
-                let _ = rc.await;
-                continue;
-            }
-            let ret = self.get_data(sst, block_index as usize).await;
-            let mut prefetch_request = self.prefetch_request.lock().unwrap();
-            let pending_requests = prefetch_request.remove(&sst.id).unwrap();
-            for p in pending_requests {
-                let _ = p.send(());
-            }
-            stats.remote_io_time += timer.elapsed().as_secs_f64();
-            return ret;
-        }
     }
 
     async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
@@ -178,50 +129,22 @@ impl SstableStore {
         Ok(())
     }
 
-    async fn get_data(&self, sst: &Sstable, block_index: usize) -> HummockResult<BlockHolder> {
-        let block_meta = sst
-            .meta
-            .block_metas
-            .get(block_index)
-            .ok_or_else(HummockError::invalid_block)?;
-        let mut read_size = block_meta.len;
-        let end_index = std::cmp::min(
-            block_index + 1 + PREFETCH_BLOCK_COUNT,
-            sst.meta.block_metas.len(),
-        );
-        if block_index + 1 < sst.meta.block_metas.len() {
-            for block in &sst.meta.block_metas[(block_index + 1)..end_index] {
-                read_size += block.len;
-            }
-        }
-
-        let block_loc = BlockLocation {
-            offset: block_meta.offset as usize,
-            size: read_size as usize,
-        };
-        let data_path = self.get_sst_data_path(sst.id);
+    async fn load_data(&self, sst_id: u64, metas: &[BlockMeta]) -> HummockResult<Vec<Box<Block>>> {
+        let data_path = self.get_sst_data_path(sst_id);
         let block_data = self
             .store
-            .read(&data_path, Some(block_loc))
+            .read(&data_path, None)
             .await
             .map_err(HummockError::object_io_error)?;
-        let block = Block::decode(block_data.slice(..block_meta.len as usize))?;
-        let ret = self
-            .block_cache
-            .insert(sst.id, block_index as u64, Box::new(block));
-        if block_index + 1 < sst.meta.block_metas.len() {
-            let mut index_offset = block_index as u64 + 1;
-            let mut offset = block_meta.len as usize;
-            for block_meta in &sst.meta.block_metas[(block_index + 1)..end_index] {
-                let end_offset = offset + block_meta.len as usize;
-                let block = Block::decode(block_data.slice(offset..end_offset))?;
-                self.block_cache
-                    .insert(sst.id, index_offset, Box::new(block));
-                offset = end_offset;
-                index_offset += 1;
-            }
+        let mut offset = 0;
+        let mut blocks = vec![];
+        for block_meta in metas {
+            let end_offset = offset + block_meta.len as usize;
+            let block = Block::decode(block_data.slice(offset..end_offset))?;
+            blocks.push(Box::new(block));
+            offset = end_offset;
         }
-        Ok(ret)
+        Ok(blocks)
     }
 
     pub async fn get(
@@ -278,41 +201,6 @@ impl SstableStore {
         }
     }
 
-    pub async fn prefetch_sstables(&self, sst_ids: Vec<u64>) -> HummockResult<()> {
-        let mut results = vec![];
-        for sst_id in sst_ids {
-            let id = sst_id;
-            let f = self
-                .meta_cache
-                .lookup_with_request_dedup(sst_id, sst_id, move || async move {
-                    let path = self.get_sst_meta_path(id);
-                    let buf = self
-                        .store
-                        .read(&path, None)
-                        .await
-                        .map_err(HummockError::object_io_error)?;
-                    let size = buf.len();
-                    let meta = SstableMeta::decode(&mut &buf[..])?;
-                    let sst = Box::new(Sstable {
-                        id,
-                        meta,
-                        blocks: vec![],
-                    });
-                    Ok((sst, size))
-                })
-                .map(|result| match result {
-                    Ok(inner_result) => inner_result,
-                    Err(e) => Err(HummockError::other(format!(
-                        "prefetch table lookup request dedup get cancel: {:?}",
-                        e,
-                    ))),
-                });
-            results.push(f);
-        }
-        let _ = try_join_all(results).await?;
-        Ok(())
-    }
-
     pub fn get_sst_meta_path(&self, sst_id: HummockSSTableId) -> String {
         let mut ret = format!("{}/{}.meta", self.path, sst_id);
         if !is_remote_sst_id(sst_id) {
@@ -353,52 +241,45 @@ impl SstableStore {
         load_data: bool,
     ) -> HummockResult<TableHolder> {
         stats.cache_meta_block_total += 1;
-        let entry = self
-            .meta_cache
-            .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || async {
-                stats.cache_meta_block_miss += 1;
-                let path = self.get_sst_meta_path(sst_id);
-                let buf = self
-                    .store
-                    .read(&path, None)
-                    .await
-                    .map_err(HummockError::object_io_error)?;
-                let size = buf.len();
-                let meta = SstableMeta::decode(&mut &buf[..])?;
-                let blocks = if load_data {
-                    let data_path = self.get_sst_data_path(sst_id);
-                    let block_data = self
+        loop {
+            let entry = self
+                .meta_cache
+                .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || async {
+                    stats.cache_meta_block_miss += 1;
+                    let path = self.get_sst_meta_path(sst_id);
+                    let buf = self
                         .store
-                        .read(&data_path, None)
+                        .read(&path, None)
                         .await
                         .map_err(HummockError::object_io_error)?;
-                    let mut offset = 0;
-                    let mut blocks = vec![];
-                    for block_meta in &meta.block_metas {
-                        let end_offset = offset + block_meta.len as usize;
-                        let block = Block::decode(block_data.slice(offset..end_offset))?;
-                        blocks.push(Box::new(block));
-                        offset = end_offset;
-                    }
-                    blocks
-                } else {
-                    vec![]
-                };
-                let sst = Box::new(Sstable {
-                    id: sst_id,
-                    meta,
-                    blocks,
-                });
-                Ok((sst, size))
-            })
-            .await
-            .map_err(|e| {
-                HummockError::other(format!(
-                    "meta cache lookup request dedup get cancel: {:?}",
-                    e,
-                ))
-            })??;
-        Ok(entry)
+                    let mut size = buf.len();
+                    let meta = SstableMeta::decode(&mut &buf[..])?;
+                    let blocks = if load_data {
+                        size = meta.estimated_size as usize;
+                        self.load_data(sst_id, &meta.block_metas).await?
+                    } else {
+                        vec![]
+                    };
+                    let sst = Box::new(Sstable {
+                        id: sst_id,
+                        meta,
+                        blocks,
+                    });
+                    Ok((sst, size))
+                })
+                .await
+                .map_err(|e| {
+                    HummockError::other(format!(
+                        "meta cache lookup request dedup get cancel: {:?}",
+                        e,
+                    ))
+                })??;
+            if !load_data || !entry.value().blocks.is_empty() {
+                return Ok(entry);
+            }
+            drop(entry);
+            self.meta_cache.erase(sst_id, &sst_id);
+        }
     }
 }
 
