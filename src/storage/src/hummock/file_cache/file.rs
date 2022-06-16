@@ -185,8 +185,8 @@ impl CacheFile {
             id: options.id,
 
             fs_block_size: options.fs_block_size,
-            block_size: block_size,
-            meta_blocks: meta_blocks,
+            block_size,
+            meta_blocks,
             fallocate_unit: options.fallocate_unit,
 
             core: Arc::new(CacheFileCore {
