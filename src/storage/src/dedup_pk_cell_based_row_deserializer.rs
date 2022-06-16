@@ -26,7 +26,7 @@ use risingwave_common::util::ordered::{deserialize_column_id, OrderedRowDeserial
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageError;
 
 pub type ColumnDescMapping = HashMap<ColumnId, (ColumnDesc, usize)>;
 pub type GeneralCellBasedRowDeserializer = CellBasedRowDeserializer<Arc<ColumnDescMapping>>;
@@ -54,35 +54,24 @@ pub fn make_cell_based_row_deserializer(
     data_types: Vec<DataType>,
     pk_indices: Vec<usize>,
 ) -> GeneralCellBasedRowDeserializer {
-    // let pk_indices = vec![2];
-    // let pk_indices = vec![2];
-    // println!("pk_indices: {:#?}", pk_indices);
     let pk_descs = table_column_descs
         .iter()
         .enumerate()
-        .filter(|(i, d)| pk_indices.contains(i))
-        .map(|(i, d)| d)
+        .filter(|(i, _d)| pk_indices.contains(i))
+        .map(|(_i, d)| d)
         .cloned()
         .collect_vec();
 
     let data_types = data_types
         .into_iter()
         .enumerate()
-        .filter(|(i, d)| pk_indices.contains(i))
-        .map(|(i, d)| d)
+        .filter(|(i, _d)| pk_indices.contains(i))
+        .map(|(_i, d)| d)
         .collect_vec();
-    println!("data_types: {:#?}", data_types);
-    let order_types = data_types
-        .iter()
-        .map(|_| OrderType::Ascending) // FIXME: THIS IS A HACK
-        .collect();
-
-    // let order_types = order_types
-    // .into_iter()
-    // .enumerate()
-    // .filter(|(i, d)| pk_indices.contains(i))
-    // .map(|(i, d)| d)
-    // .collect();
+    // let order_types = data_types
+    //     .iter()
+    //     .map(|_| OrderType::Ascending) // FIXME: THIS IS A HACK
+    //     .collect();
 
     let col_id_to_row_idx: HashMap<ColumnId, usize> = table_column_descs
         .iter()

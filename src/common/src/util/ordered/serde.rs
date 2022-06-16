@@ -96,7 +96,6 @@ impl OrderedRowSerializer {
         append_to: &mut Vec<u8>,
     ) {
         for (datum, order_type) in datums.zip_eq(self.order_types.iter()) {
-            println!("serializing join key datum: {:#?}", datum);
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
             serialize_datum_into(datum, &mut serializer).unwrap();

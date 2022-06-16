@@ -400,11 +400,9 @@ impl<S: StateStore> LookupExecutor<S> {
         // Serialize join key to a state store key.
         let key_prefix = {
             let mut key_prefix = vec![];
-            println!("==== serialize datums start");
             self.arrangement
                 .serializer
                 .serialize_datums(lookup_row.0.iter(), &mut key_prefix);
-            println!("==== serialize datums end");
             key_prefix
         };
 
