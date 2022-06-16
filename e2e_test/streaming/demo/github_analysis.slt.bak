@@ -1,26 +1,12 @@
-# Calculate topK star count and topK star increment repo in 10 minutes.
+# Calculate topK star increment repo in 10 minutes.
 
 statement ok
-CREATE TABLE github (
-    repository_id VARCHAR,
-    star_count BIGINT,
-    create_at TIMESTAMP
-);
+create materialized source github_star (created_at timestamp , id varchar, name varchar)
+with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest' ) row format json;
 
 statement ok
-INSERT INTO github values
-('mysql',37,'2013-06-08 09:37:54'),
-('mongo',39,'2013-06-08 09:37:54'),
-('pgsql',52,'2013-06-08 09:37:54'),
-('risingwave',99,'2013-06-08 09:37:54');
-
-# Get the min record in 10 minutes group by repo and window start time.
-statement ok
-CREATE MATERIALIZED VIEW time_view as
-SELECT min(star_count) as star_count, repository_id, window_start
-FROM (SELECT repository_id, star_count, window_start
-FROM tumble(github, create_at, interval '10' minute))
-GROUP BY repository_id, window_start;
+CREATE MATERIALIZED VIEW time_view SELECT name, id, window_start
+FROM tumble(s1, created_at, interval '10' minute);
 
 query TTT
 SELECT * from time_view where repository_id = 'mysql';
