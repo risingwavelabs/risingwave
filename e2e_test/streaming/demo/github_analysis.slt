@@ -1,3 +1,5 @@
+# Calculate topK star count and topK star increment repo in 10 minutes.
+
 statement ok
 CREATE TABLE github (
     repository_id VARCHAR,
@@ -6,48 +8,91 @@ CREATE TABLE github (
 );
 
 statement ok
-insert into github values
-('CS1001',37,'2013-06-08 09:37:54'),
-('CS1002',39,'2013-06-08 09:37:54'),
-('CS1003',52,'2013-06-08 09:37:54'),
-('CS1004',99,'2013-06-08 09:37:54');
+INSERT INTO github values
+('mysql',37,'2013-06-08 09:37:54'),
+('mongo',39,'2013-06-08 09:37:54'),
+('pgsql',52,'2013-06-08 09:37:54'),
+('risingwave',99,'2013-06-08 09:37:54');
 
+# Get the min record in 10 minutes group by repo and window start time.
 statement ok
 CREATE MATERIALIZED VIEW time_view as
-SELECT repository_id, star_count, window_start
-FROM tumble(github, create_at, interval '10' minute);
+SELECT min(star_count) as star_count, repository_id, window_start
+FROM (SELECT repository_id, star_count, window_start
+FROM tumble(github, create_at, interval '10' minute))
+GROUP BY repository_id, window_start;
+
+query TTT
+SELECT * from time_view where repository_id = 'mysql';
+----
+37 mysql 2013-06-08 09:30:00
 
 statement ok
-insert into github values
-('CS1001',57,'2013-06-08 09:47:54'),
-('CS1002',69,'2013-06-08 09:47:54'),
-('CS1003',82,'2013-06-08 09:47:54'),
-('CS1004',139,'2013-06-08 09:47:54');
+INSERT INTO github values
+('mysql',47,'2013-06-08 09:42:54'),
+('mongo',49,'2013-06-08 09:42:54'),
+('pgsql',62,'2013-06-08 09:42:54'),
+('risingwave',109,'2013-06-08 09:42:54');
 
+statement ok
+INSERT INTO github values
+('mysql',57,'2013-06-08 09:47:54'),
+('mongo',69,'2013-06-08 09:47:54'),
+('pgsql',82,'2013-06-08 09:47:54'),
+('risingwave',139,'2013-06-08 09:47:54');
+
+# Create mv to calculate diff value in gap time.
 statement ok
 CREATE MATERIALIZED VIEW diff_view as
-select t2.star_count - t1.star_count as diff, t2.repository_id, t2.window_start
+select t2.star_count - t1.star_count as diff, t2.repository_id, t1.window_start
 from time_view as t1 cross join time_view as
 t2 where t1.window_start = t2.window_start - Interval '10' minute and t1.repository_id = t2.repository_id;
 
+# Create mv to cross join diff_view and time_view.
+# Have bug
+# statement ok
+# CREATE MATERIALIZED VIEW diff_time_view as
+# select star_count,t1.repository_id as repository_id,diff,t1.window_start as window_start
+# from time_view as t1 cross join diff_view as t2
+# where t1.repository_id = t2.repository_id
+# and t1.window_start = t2.window_start;
+
+query TTT
+SELECT * from diff_view where repository_id = 'mysql';
+----
+10 mysql 2013-06-08 09:30:00
+
+statement ok
+INSERT INTO github values
+('mysql',113,'2013-06-08 09:58:03'),
+('mongo',129,'2013-06-08 09:58:04'),
+('pgsql',132,'2013-06-08 09:58:05'),
+('risingwave',169,'2013-06-08 09:58:06');
+
+# 1. Get top K star increment repo in 10 minutes;
 statement ok
 CREATE MATERIALIZED VIEW topK_star_increment_view as
-select * from diff_view
+SELECT * from diff_view
 where window_start = (select max(window_start) from diff_view)
 order by diff desc;
 
+query TTT
+SELECT * from topK_star_increment_view limit 1;
+----
+80 mongo 2013-06-08 09:40:00
+
+# 2. Get top K star count repo in 10 minutes;
 statement ok
 CREATE MATERIALIZED VIEW topK_star_count_view as
 select * from time_view
 where window_start = (select max(window_start) from time_view)
 order by star_count desc;
 
-statement ok
-insert into github values
-('CS1001',113,'2013-06-08 09:58:03'),
-('CS1002',129,'2013-06-08 09:58:04'),
-('CS1003',132,'2013-06-08 09:58:05'),
-('CS1004',169,'2013-06-08 09:58:06');
+query TTT
+SELECT * from topK_star_count_view limit 1;
+----
+169 risingwave 2013-06-08 09:50:00
+
 
 
 
