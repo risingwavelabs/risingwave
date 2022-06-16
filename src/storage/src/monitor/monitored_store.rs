@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
-use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use tracing::error;
 
@@ -77,17 +76,12 @@ where
 
     define_state_store_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        vnode: Option<&'a VNodeBitmap>,
-    ) -> Self::GetFuture<'_> {
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
-                .get(key, epoch, vnode)
+                .get(key, epoch)
                 .await
                 .inspect_err(|e| error!("Failed in get: {:?}", e))?;
             timer.observe_duration();
@@ -106,7 +100,6 @@ where
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Option<VNodeBitmap>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -116,7 +109,7 @@ where
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(key_range, limit, epoch, vnodes)
+                .scan(key_range, limit, epoch)
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();
@@ -134,7 +127,6 @@ where
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -144,7 +136,7 @@ where
             let timer = self.stats.range_backward_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(key_range, limit, epoch, vnodes)
+                .scan(key_range, limit, epoch)
                 .await
                 .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
             timer.observe_duration();
@@ -183,34 +175,21 @@ where
         }
     }
 
-    fn iter<R, B>(
-        &self,
-        key_range: R,
-        epoch: u64,
-        vnodes: Option<VNodeBitmap>,
-    ) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move {
-            self.monitored_iter(self.inner.iter(key_range, epoch, vnodes))
-                .await
-        }
+        async move { self.monitored_iter(self.inner.iter(key_range, epoch)).await }
     }
 
-    fn backward_iter<R, B>(
-        &self,
-        key_range: R,
-        epoch: u64,
-        vnodes: Option<VNodeBitmap>,
-    ) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.monitored_iter(self.inner.backward_iter(key_range, epoch, vnodes))
+            self.monitored_iter(self.inner.backward_iter(key_range, epoch))
                 .await
         }
     }

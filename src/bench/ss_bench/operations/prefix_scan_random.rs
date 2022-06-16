@@ -64,7 +64,6 @@ impl Operations {
                             prefix.chunk().to_vec()..next_key(prefix.chunk()),
                             None,
                             u64::MAX,
-                            Default::default(),
                         )
                         .await
                         .unwrap();

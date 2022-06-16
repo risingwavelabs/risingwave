@@ -14,25 +14,30 @@
 
 mod join_entry_state;
 use std::alloc::Global;
+use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut, Index};
-use std::sync::Arc;
 
-use bytes::Buf;
+use futures::pin_mut;
+use futures_async_stream::for_await;
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
-use risingwave_common::array::{Row, RowDeserializer};
+use risingwave_common::array::Row;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::error::{ErrorCode, Result as RwResult};
+use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
+type DegreeType = u64;
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
 pub struct JoinRow {
     pub row: Row,
-    degree: u64,
+    degree: DegreeType,
 }
 
 impl Index<usize> for JoinRow {
@@ -44,7 +49,7 @@ impl Index<usize> for JoinRow {
 }
 
 impl JoinRow {
-    pub fn new(row: Row, degree: u64) -> Self {
+    pub fn new(row: Row, degree: DegreeType) -> Self {
         Self { row, degree }
     }
 
@@ -57,12 +62,12 @@ impl JoinRow {
         self.degree == 0
     }
 
-    pub fn inc_degree(&mut self) -> u64 {
+    pub fn inc_degree(&mut self) -> DegreeType {
         self.degree += 1;
         self.degree
     }
 
-    pub fn dec_degree(&mut self) -> RwResult<u64> {
+    pub fn dec_degree(&mut self) -> RwResult<DegreeType> {
         if self.degree == 0 {
             return Err(
                 ErrorCode::InternalError("Tried to decrement zero join row degree".into()).into(),
@@ -79,47 +84,34 @@ impl JoinRow {
             .collect_vec())
     }
 
-    /// Serialize the `JoinRow` into a value encoding bytes.
-    pub fn serialize(&self) -> RwResult<Vec<u8>> {
-        let mut vec = Vec::with_capacity(10);
-
-        // Serialize row.
-        vec.extend(self.row.value_encode()?);
-
-        // Serialize degree.
-        vec.extend(self.degree.to_le_bytes());
-
-        Ok(vec)
-    }
-}
-
-/// Deserializer of the `JoinRow`.
-pub struct JoinRowDeserializer {
-    data_types: Vec<DataType>,
-}
-
-impl JoinRowDeserializer {
-    /// Creates a new `RowDeserializer` with row schema.
-    pub fn new(schema: Vec<DataType>) -> Self {
-        JoinRowDeserializer { data_types: schema }
+    /// Make degree as the last datum of row
+    pub fn into_row(mut self) -> Row {
+        self.row.0.push(Some(ScalarImpl::Int64(self.degree as i64)));
+        self.row
     }
 
-    /// Deserialize the [`JoinRow`] from a value encoding bytes.
-    pub fn deserialize(&self, mut data: impl Buf) -> RwResult<JoinRow> {
-        let deserializer = RowDeserializer::new(self.data_types.clone());
-        let row = deserializer.value_decode(&mut data)?;
-        let degree = data.get_u64_le();
-        Ok(JoinRow { row, degree })
+    /// Convert [`Row`] with last datum as degree to [`JoinRow`]
+    pub fn from_row(row: Row) -> Self {
+        let mut datums = row.0;
+        let degree_datum = datums
+            .pop()
+            .expect("missing degree in JoinRow")
+            .expect("degree should not be null");
+        let degree = degree_datum.into_int64() as u64;
+        JoinRow {
+            row: Row(datums),
+            degree,
+        }
     }
 }
 
 type PkType = Row;
 
 pub type StateValueType = JoinRow;
-pub type HashValueType<S> = JoinEntryState<S>;
+pub type HashValueType = JoinEntryState;
 
-type JoinHashMapInner<K, S> =
-    EvictableHashMap<K, HashValueType<S>, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+type JoinHashMapInner<K> =
+    EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Allocator
@@ -127,17 +119,15 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Store the join states.
     // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
     // itself. Use the field is safe iff the struct is constructed with [`moveit`](https://crates.io/crates/moveit)'s way.
-    inner: JoinHashMapInner<K, S>,
+    inner: JoinHashMapInner<K>,
     /// Data types of the columns
-    data_types: Arc<[DataType]>,
-    /// Data types of the columns
-    join_key_data_types: Arc<[DataType]>,
-    /// Data types of primary keys
-    pk_data_types: Arc<[DataType]>,
-    /// The keyspace to operate on.
-    keyspace: Keyspace<S>,
+    join_key_data_types: Vec<DataType>,
+    /// Indices of the primary keys
+    pk_indices: Vec<usize>,
     /// Current epoch
     current_epoch: u64,
+    /// State table
+    state_table: StateTable<S>,
 }
 
 impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
@@ -146,17 +136,36 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         target_cap: usize,
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
-        data_types: Vec<DataType>,
+        mut data_types: Vec<DataType>,
         keyspace: Keyspace<S>,
+        dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        let pk_data_types = pk_indices
-            .iter()
-            .map(|idx| data_types[*idx].clone())
-            .collect_vec();
         let join_key_data_types = join_key_indices
             .iter()
             .map(|idx| data_types[*idx].clone())
             .collect_vec();
+
+        // Put the degree to the last column of the table.
+        data_types.push(DataType::Int64);
+
+        let column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
+            .collect_vec();
+
+        let table_pk_indices = [join_key_indices, pk_indices.clone()].concat();
+
+        // Order type doesn not affect correctness. Choose Ascending for better performance.
+        let order_types = vec![OrderType::Ascending; table_pk_indices.len()];
+
+        let state_table = StateTable::new(
+            keyspace,
+            column_descs,
+            order_types,
+            dist_key_indices,
+            table_pk_indices,
+        );
         let alloc = StatsAlloc::new(Global).shared();
         Self {
             inner: EvictableHashMap::with_hasher_in(
@@ -164,11 +173,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 PrecomputedBuildHasher,
                 alloc.clone(),
             ),
-            data_types: data_types.into(),
-            join_key_data_types: join_key_data_types.into(),
-            pk_data_types: pk_data_types.into(),
-            keyspace,
+            join_key_data_types,
+            pk_indices,
             current_epoch: 0,
+            state_table,
             alloc,
         }
     }
@@ -184,140 +192,130 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.current_epoch = epoch;
     }
 
-    fn get_state_keyspace(&self, key: &K) -> RwResult<Keyspace<S>> {
-        // TODO: in pure in-memory engine, we should not do this serialization.
-        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
-        let key_encoded = key.serialize().unwrap();
-        Ok(self.keyspace.append(key_encoded))
-    }
-
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
-    /// up in remote storage and return, if still not exist, return None.
-    #[allow(dead_code)]
-    pub async fn get<'a, 'b>(&'a mut self, key: &'b K) -> Option<&'a HashValueType<S>> {
+    /// up in remote storage and return. If not exist in remote storage, a
+    /// `JoinEntryState` with empty cache will be returned.
+    #[cfg(any())]
+    pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
             Some(_) => self.inner.get(key),
             None => {
                 let remote_state = self.fetch_cached_state(key).await.unwrap();
-                remote_state.map(|rv| {
-                    self.inner.put(key.clone(), rv);
-                    self.inner.get(key).unwrap()
-                })
+                self.inner.put(key.clone(), remote_state);
+                self.inner.get(key)
             }
         }
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
-    /// up in remote storage and return, if still not exist, return None.
-    pub async fn get_mut(&mut self, key: &K) -> Option<&mut HashValueType<S>> {
+    /// up in remote storage and return. If not exist in remote storage, a
+    /// `JoinEntryState` with empty cache will be returned.
+    #[cfg(any())]
+    pub async fn get_mut<'a>(&'a mut self, key: &'a K) -> Option<&'a mut HashValueType> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
             Some(_) => self.inner.get_mut(key),
             None => {
                 let remote_state = self.fetch_cached_state(key).await.unwrap();
-                remote_state.map(|rv| {
-                    self.inner.put(key.clone(), rv);
-                    self.inner.get_mut(key).unwrap()
-                })
+                self.inner.put(key.clone(), remote_state);
+                self.inner.get_mut(key)
             }
         }
     }
 
-    /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
-    /// up in remote storage and return the [`JoinEntryState`] without cached state, if still not
-    /// exist, return None.
-    pub async fn get_mut_without_cached<'a, 'b: 'a>(
-        &'a mut self,
-        key: &'b K,
-    ) -> RwResult<Option<&'a mut HashValueType<S>>> {
-        let state = self.inner.get(key);
-        // TODO: we should probably implement a entry function for `LruCache`
+    /// Remove the key in the memory, returning the value at the key if the
+    /// key was previously in the map. If does not exist, look
+    /// up in remote storage and return. If not exist in remote storage, a
+    /// `JoinEntryState` with empty cache will be returned.
+    /// WARNING: This will NOT remove anything from remote storage.
+    pub async fn remove_state<'a>(&mut self, key: &K) -> Option<HashValueType> {
+        let state = self.inner.pop(key);
         match state {
-            Some(_) => Ok(self.inner.get_mut(key)),
-            None => {
-                let keyspace = self.get_state_keyspace(key)?;
-                let all_data = keyspace.scan(None, self.current_epoch).await.unwrap();
-                let total_count = all_data.len();
-                if total_count > 0 {
-                    let state = JoinEntryState::new(
-                        keyspace,
-                        self.data_types.clone(),
-                        self.pk_data_types.clone(),
-                    );
-                    self.inner.put(key.clone(), state);
-                    Ok(Some(self.inner.get_mut(key).unwrap()))
-                } else {
-                    Ok(None)
-                }
-            }
-        }
-    }
-
-    /// Returns true if the key in the memory or remote storage, otherwise false.
-    #[allow(dead_code)]
-    pub async fn contains(&mut self, key: &K) -> bool {
-        let contains = self.inner.contains(key);
-        if contains {
-            true
-        } else {
-            let remote_state = self.fetch_cached_state(key).await.unwrap();
-            match remote_state {
-                Some(rv) => {
-                    self.inner.put(key.clone(), rv);
-                    true
-                }
-                None => false,
-            }
+            Some(_) => state,
+            None => Some(self.fetch_cached_state(key).await.unwrap()),
         }
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
-    async fn fetch_cached_state(&self, key: &K) -> RwResult<Option<JoinEntryState<S>>> {
-        let keyspace = self.get_state_keyspace(key)?;
-        JoinEntryState::with_cached_state(
-            keyspace,
-            self.data_types.clone(),
-            self.pk_data_types.clone(),
-            self.current_epoch,
-        )
-        .await
+    /// Will return a empty `JoinEntryState` even when state does not exist in remote.
+    async fn fetch_cached_state(&self, key: &K) -> RwResult<JoinEntryState> {
+        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
+
+        let table_iter = self
+            .state_table
+            .iter_with_pk_prefix(&key, self.current_epoch)
+            .await?;
+        pin_mut!(table_iter);
+
+        let mut cached = BTreeMap::new();
+        #[for_await]
+        for row in table_iter {
+            let row = row?.into_owned();
+            let pk = row.by_indices(&self.pk_indices);
+
+            cached.insert(pk, JoinRow::from_row(row));
+        }
+        Ok(JoinEntryState::with_cached(cached))
     }
 
-    /// Create a [`JoinEntryState`] without cached state. Should only be called if the key
-    /// does not exist in memory or remote storage.
-    pub async fn init_without_cache(&mut self, key: &K) -> RwResult<()> {
-        let keyspace = self.get_state_keyspace(key)?;
-        let state = JoinEntryState::new(
-            keyspace,
-            self.data_types.clone(),
-            self.pk_data_types.clone(),
-        );
-        self.inner.put(key.clone(), state);
+    pub async fn flush(&mut self) -> RwResult<()> {
+        self.state_table
+            .commit_with_value_meta(self.current_epoch)
+            .await
+            .map_err(RwError::from)
+    }
+
+    /// Insert a key
+    pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()> {
+        if let Some(entry) = self.inner.get_mut(join_key) {
+            entry.insert(pk, value.clone());
+        }
+
+        // If no cache maintained, only update the flush buffer.
+        self.state_table.insert(value.into_row())?;
         Ok(())
     }
 
-    /// Get or create a [`JoinEntryState`] without cached state. Should only be called if the key
-    /// does not exist in memory or remote storage.
-    pub async fn get_or_init_without_cache<'a, 'b: 'a>(
-        &'a mut self,
-        key: &'b K,
-    ) -> RwResult<&'a mut JoinEntryState<S>> {
-        // TODO: we should probably implement a entry function for `LruCache`
-        let contains = self.inner.contains(key);
-        if contains {
-            Ok(self.inner.get_mut(key).unwrap())
-        } else {
-            self.init_without_cache(key).await?;
-            Ok(self.inner.get_mut(key).unwrap())
+    /// Delete a key
+    pub fn delete(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()> {
+        if let Some(entry) = self.inner.get_mut(join_key) {
+            entry.remove(pk);
         }
+
+        // If no cache maintained, only update the flush buffer.
+        self.state_table.delete(value.into_row())?;
+        Ok(())
+    }
+
+    /// Insert a [`JoinEntryState`]
+    pub fn insert_state(&mut self, key: &K, state: JoinEntryState) {
+        self.inner.put(key.clone(), state);
+    }
+
+    pub fn inc_degree(&mut self, join_row: &mut JoinRow) -> RwResult<()> {
+        let old_row = join_row.clone().into_row();
+        join_row.inc_degree();
+        let new_row = join_row.clone().into_row();
+
+        self.state_table.update(old_row, new_row)?;
+        Ok(())
+    }
+
+    pub fn dec_degree(&mut self, join_row: &mut JoinRow) -> RwResult<()> {
+        let old_row = join_row.clone().into_row();
+        join_row.dec_degree()?;
+        let new_row = join_row.clone().into_row();
+
+        self.state_table.update(old_row, new_row)?;
+        Ok(())
     }
 }
 
 impl<K: HashKey, S: StateStore> Deref for JoinHashMap<K, S> {
-    type Target = JoinHashMapInner<K, S>;
+    type Target = JoinHashMapInner<K>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner

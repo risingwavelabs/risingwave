@@ -181,7 +181,7 @@ async fn test_hummock_compaction_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
+        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await
         .unwrap();
 
@@ -295,7 +295,7 @@ async fn test_hummock_table() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
+        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await
         .unwrap();
 
@@ -349,7 +349,7 @@ async fn test_hummock_transaction() {
 
         // Commit epoch1
         hummock_manager
-            .commit_epoch(epoch1, to_grouped_sstable_info(&tables_in_epoch1))
+            .commit_epoch(epoch1, to_local_sstable_info(&tables_in_epoch1))
             .await
             .unwrap();
         committed_tables.extend(tables_in_epoch1.clone());
@@ -396,7 +396,7 @@ async fn test_hummock_transaction() {
 
         // Commit epoch2
         hummock_manager
-            .commit_epoch(epoch2, to_grouped_sstable_info(&tables_in_epoch2))
+            .commit_epoch(epoch2, to_local_sstable_info(&tables_in_epoch2))
             .await
             .unwrap();
         committed_tables.extend(tables_in_epoch2);
@@ -559,7 +559,7 @@ async fn test_hummock_manager_basic() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
+        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await
         .unwrap();
 
@@ -660,7 +660,7 @@ async fn test_retryable_pin_version() {
         );
         // Increase the version
         hummock_manager
-            .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
+            .commit_epoch(epoch, to_local_sstable_info(&test_tables))
             .await
             .unwrap();
         epoch += 1;
@@ -693,7 +693,7 @@ async fn test_retryable_pin_version() {
         );
         // Increase the version
         hummock_manager
-            .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
+            .commit_epoch(epoch, to_local_sstable_info(&test_tables))
             .await
             .unwrap();
         epoch += 1;
@@ -731,7 +731,7 @@ async fn test_pin_snapshot_response_lost() {
     );
     // [ ] -> [ e0 ]
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
+        .commit_epoch(epoch, to_local_sstable_info(&test_tables))
         .await
         .unwrap();
     epoch += 1;
@@ -758,7 +758,7 @@ async fn test_pin_snapshot_response_lost() {
     );
     // [ e0:pinned ] -> [ e0:pinned, e1 ]
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
+        .commit_epoch(epoch, to_local_sstable_info(&test_tables))
         .await
         .unwrap();
     epoch += 1;
@@ -794,7 +794,7 @@ async fn test_pin_snapshot_response_lost() {
     );
     // [ e0, e1:pinned ] -> [ e0, e1:pinned, e2 ]
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
+        .commit_epoch(epoch, to_local_sstable_info(&test_tables))
         .await
         .unwrap();
     epoch += 1;
@@ -821,7 +821,7 @@ async fn test_pin_snapshot_response_lost() {
     );
     // [ e0, e1:pinned, e2:pinned ] -> [ e0, e1:pinned, e2:pinned, e3 ]
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
+        .commit_epoch(epoch, to_local_sstable_info(&test_tables))
         .await
         .unwrap();
     epoch += 1;
@@ -847,7 +847,7 @@ async fn test_print_compact_task() {
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
+        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await
         .unwrap();
 
@@ -876,7 +876,7 @@ async fn test_invalid_sst_id() {
     let epoch = 1;
     let ssts = generate_test_tables(epoch, vec![HummockSSTableId::MAX]);
     let error = hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&ssts))
+        .commit_epoch(epoch, to_local_sstable_info(&ssts))
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InternalError(_)));
@@ -910,8 +910,107 @@ async fn test_mark_orphan_ssts() {
     );
     // Cannot commit_epoch for marked SST ids.
     let error = hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&ssts))
+        .commit_epoch(epoch, to_local_sstable_info(&ssts))
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InternalError(_)));
+}
+
+#[tokio::test]
+async fn test_trigger_manual_compaction() {
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let sst_num = 2usize;
+
+    // Construct vnode mappings for generating compaction tasks.
+    let parallel_units = cluster_manager
+        .list_parallel_units(Some(ParallelUnitType::Hash))
+        .await;
+    env.hash_mapping_manager()
+        .build_fragment_hash_mapping(1, &parallel_units);
+    for table_id in 1..sst_num + 2 {
+        env.hash_mapping_manager()
+            .set_fragment_state_table(1, table_id as u32);
+    }
+
+    {
+        // to check no compactor
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .await;
+
+        assert_eq!(
+            "internal error: trigger_manual_compaction No compactor is available. compaction_group 2",
+            result.err().unwrap().to_string()
+        );
+    }
+
+    // No compaction task available.
+    let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
+    let receiver = compactor_manager_ref.add_compactor(context_id);
+    {
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .await;
+        assert_eq!("internal error: trigger_manual_compaction No compaction_task is available. compaction_group 2", result.err().unwrap().to_string());
+    }
+
+    // Add some sstables and commit.
+    let epoch: u64 = 1;
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    hummock_manager
+        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
+        .await
+        .unwrap();
+
+    // check safe epoch in hummock version
+    let version_id1 = CurrentHummockVersionId::get(env.meta_store())
+        .await
+        .unwrap()
+        .unwrap();
+    let hummock_version1 = HummockVersion::select(env.meta_store(), &version_id1.id())
+        .await
+        .unwrap()
+        .unwrap();
+
+    // safe epoch should be INVALID before success compaction
+    assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
+
+    {
+        // to check compactor send task fail
+        drop(receiver);
+        {
+            let result = hummock_manager
+                .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+                .await;
+            assert!(result.is_err());
+        }
+    }
+
+    compactor_manager_ref.remove_compactor(context_id);
+    let _receiver = compactor_manager_ref.add_compactor(context_id);
+
+    {
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .await;
+        assert!(result.is_ok());
+    }
+
+    let task_id: u64 = 3;
+    let compact_task = hummock_manager
+        .compaction_task_from_assignment_for_test(task_id)
+        .await
+        .unwrap()
+        .compact_task
+        .unwrap();
+    assert_eq!(task_id, compact_task.task_id);
+
+    {
+        // all sst pending , test no compaction avail
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .await;
+        assert!(result.is_err());
+    }
 }

@@ -25,12 +25,12 @@ use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
-use crate::hummock::{HummockManager, HummockManagerRef};
+use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
-pub fn to_grouped_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
+pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
     ssts.iter()
         .map(|sst| (StaticCompactionGroupId::StateDefault.into(), sst.clone()))
         .collect_vec()
@@ -52,7 +52,7 @@ where
     ];
     let test_tables = generate_test_tables(epoch, table_ids);
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables))
+        .commit_epoch(epoch, to_local_sstable_info(&test_tables))
         .await
         .unwrap();
     // Current state: {v0: [], v1: [test_tables]}
@@ -86,7 +86,7 @@ where
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
     hummock_manager
-        .commit_epoch(epoch, to_grouped_sstable_info(&test_tables_3))
+        .commit_epoch(epoch, to_local_sstable_info(&test_tables_3))
         .await
         .unwrap();
     // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables], v3:
@@ -175,12 +175,15 @@ pub async fn setup_compute_env(
             .unwrap(),
     );
 
+    let compactor_manager = Arc::new(CompactorManager::new());
+
     let hummock_manager = Arc::new(
         HummockManager::new(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
             compaction_group_manager,
+            compactor_manager,
         )
         .await
         .unwrap(),

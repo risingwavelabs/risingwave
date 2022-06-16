@@ -16,14 +16,12 @@ use std::collections::{HashMap, HashSet};
 
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::SplitImpl;
+use risingwave_connector::{SplitImpl, SplitMetaData};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{
-    AddMutation, DispatcherMutation, NothingMutation, SourceChangeSplit, StopMutation,
-};
+use risingwave_pb::data::{AddMutation, DispatcherMutation, SourceChangeSplit, StopMutation};
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
@@ -42,7 +40,7 @@ pub enum Command {
     ///
     /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
-    Plain(Mutation),
+    Plain(Option<Mutation>),
 
     /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableId`]. The
     /// catalog has ensured that this materialized view is safe to be dropped by reference counts
@@ -69,7 +67,7 @@ pub enum Command {
 
 impl Command {
     pub fn checkpoint() -> Self {
-        Self::Plain(Mutation::Nothing(NothingMutation {}))
+        Self::Plain(None)
     }
 
     pub fn creating_table_id(&self) -> Option<TableId> {
@@ -124,13 +122,13 @@ where
     S: MetaStore,
 {
     /// Generate a mutation for the given command.
-    pub async fn to_mutation(&self) -> Result<Mutation> {
+    pub async fn to_mutation(&self) -> Result<Option<Mutation>> {
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
                 let actors = self.fragment_manager.get_table_actor_ids(table_id).await?;
-                Mutation::Stop(StopMutation { actors })
+                Some(Mutation::Stop(StopMutation { actors }))
             }
 
             Command::CreateMaterializedView {
@@ -159,13 +157,13 @@ where
                             split_type,
                             source_splits: splits
                                 .iter()
-                                .map(|split| split.to_json_bytes().to_vec())
+                                .map(|split| split.encode_to_bytes().to_vec())
                                 .collect(),
                         }
                     })
                     .collect();
 
-                Mutation::Add(AddMutation { mutations, splits })
+                Some(Mutation::Add(AddMutation { mutations, splits }))
             }
         };
 
@@ -203,7 +201,7 @@ where
                             request_id,
                             actor_ids: actors.to_owned(),
                         };
-                        client.drop_actors(request).await.to_rw_result()?;
+                        client.drop_actors(request).await?;
 
                         Ok::<_, RwError>(())
                     }

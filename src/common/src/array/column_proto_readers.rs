@@ -86,7 +86,7 @@ fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateWrapper> 
 }
 
 fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveTimeWrapper> {
-    match cursor.read_i64::<BigEndian>() {
+    match cursor.read_u64::<BigEndian>() {
         Ok(t) => NaiveTimeWrapper::from_protobuf(t),
         Err(e) => bail!("Failed to read i64 from NaiveTime buffer: {}", e),
     }

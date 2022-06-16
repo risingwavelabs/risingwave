@@ -234,7 +234,10 @@ impl LocalVersionManager {
         let batch_size = SharedBufferBatch::measure_batch_size(&sorted_items);
         while !self.buffer_tracker.can_write() {
             // TODO: may apply high-low memory threshold here to avoid always await here.
-            self.flush_shared_buffer().await?;
+            if !self.flush_shared_buffer().await? {
+                // The flush has no effect. yield to avoid occupying the execution endlessly.
+                tokio::task::yield_now().await;
+            }
         }
 
         // TODO #2065: use correct compaction group id
@@ -270,7 +273,7 @@ impl LocalVersionManager {
         Ok(batch_size)
     }
 
-    pub async fn flush_shared_buffer(&self) -> HummockResult<()> {
+    pub async fn flush_shared_buffer(&self) -> HummockResult<bool> {
         // The current implementation is a trivial one, which issue only one flush task and wait for
         // the task to finish.
         //
@@ -287,7 +290,7 @@ impl LocalVersionManager {
         }
         let task = match task {
             Some(task) => task,
-            None => return Ok(()),
+            None => return Ok(false),
         };
 
         let epoch = task.epoch;
@@ -312,7 +315,7 @@ impl LocalVersionManager {
         match task_result {
             Ok(ssts) => {
                 shared_buffer_guard.succeed_upload_task(order_index, ssts);
-                Ok(())
+                Ok(true)
             }
             Err(e) => {
                 shared_buffer_guard.fail_upload_task(order_index);

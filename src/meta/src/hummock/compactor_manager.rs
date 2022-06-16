@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use rand::Rng;
 use risingwave_common::error::{ErrorCode, Result, ToErrorStr};
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
@@ -105,6 +106,17 @@ impl CompactorManager {
         Some(compactor)
     }
 
+    pub fn random_compactor(&self) -> Option<Arc<Compactor>> {
+        let guard = self.inner.read();
+        if guard.compactors.is_empty() {
+            return None;
+        }
+
+        let compactor_index = rand::thread_rng().gen::<usize>() % guard.compactors.len();
+        let compactor = guard.compactors[compactor_index].clone();
+        Some(compactor)
+    }
+
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
@@ -136,7 +148,7 @@ mod tests {
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::test_utils::{
-        generate_test_tables, setup_compute_env, to_grouped_sstable_info,
+        generate_test_tables, setup_compute_env, to_local_sstable_info,
     };
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::storage::MetaStore;
@@ -153,7 +165,7 @@ mod tests {
             vec![hummock_manager_ref.get_new_table_id().await.unwrap()],
         );
         hummock_manager_ref
-            .commit_epoch(epoch, to_grouped_sstable_info(&original_tables))
+            .commit_epoch(epoch, to_local_sstable_info(&original_tables))
             .await
             .unwrap();
     }

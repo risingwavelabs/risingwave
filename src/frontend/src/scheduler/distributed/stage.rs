@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::mem::swap;
+use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -256,9 +256,7 @@ impl StageRunner {
         {
             // Changing state
             let mut s = self.state.write().await;
-            let mut tmp_s = StageState::Failed;
-            swap(&mut *s, &mut tmp_s);
-            match tmp_s {
+            match mem::replace(&mut *s, StageState::Failed) {
                 StageState::Started { sender, handle } => {
                     *s = StageState::Running {
                         _sender: sender,
@@ -270,16 +268,8 @@ impl StageRunner {
         }
 
         // All tasks scheduled, send `StageScheduled` event to `QueryRunner`.
-        self.msg_sender
-            .send(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
-            .await
-            .map_err(|e| {
-                Internal(anyhow!(
-                    "Failed to send stage scheduled event: {:?}, reason: {:?}",
-                    self.stage.id,
-                    e
-                ))
-            })?;
+        self.send_event(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
+            .await?;
 
         Ok(())
     }
@@ -320,10 +310,11 @@ impl StageRunner {
         task_id: TaskIdProst,
         plan_fragment: PlanFragment,
     ) -> SchedulerResult<()> {
-        let worker_node = self.worker_node_manager.next_random()?;
+        let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
+
         let compute_client = self
             .compute_client_pool
-            .get_client_for_addr(worker_node.host.as_ref().unwrap().into())
+            .get_client_for_addr((&worker_node_addr).into())
             .await
             .map_err(|e| anyhow!(e))?;
 
@@ -335,7 +326,7 @@ impl StageRunner {
 
         self.tasks[&t_id].inner.store(Arc::new(TaskStatus {
             _task_id: t_id,
-            location: Some(worker_node.host.unwrap()),
+            location: Some(worker_node_addr),
         }));
 
         Ok(())
@@ -363,7 +354,7 @@ impl StageRunner {
                     .children
                     .iter()
                     .find(|child_stage| {
-                        child_stage.stage.id == execution_plan_node.stage_id.unwrap()
+                        child_stage.stage.id == execution_plan_node.source_stage_id.unwrap()
                     })
                     .map(|child_stage| child_stage.all_exchange_sources_for(task_id))
                     .unwrap();
