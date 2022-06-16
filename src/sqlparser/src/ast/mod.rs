@@ -620,6 +620,7 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
+    Sink { _schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
@@ -647,6 +648,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
+            ShowObject::Sink { _schema } => write!(f, "SINKS{}", fmt_schema(_schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
@@ -751,6 +753,8 @@ pub enum Statement {
         is_materialized: bool,
         stmt: CreateSourceStatement,
     },
+    /// CREATE SINK
+    CreateSink { stmt: CreateSinkStatement },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -1090,6 +1094,7 @@ impl fmt::Display for Statement {
                     ""
                 }
             ),
+            Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1482,6 +1487,15 @@ pub enum FunctionArg {
     Unnamed(FunctionArgExpr),
 }
 
+impl FunctionArg {
+    pub fn get_expr(&self) -> FunctionArgExpr {
+        match self {
+            FunctionArg::Named { name: _, arg } => arg.clone(),
+            FunctionArg::Unnamed(arg) => arg.clone(),
+        }
+    }
+}
+
 impl fmt::Display for FunctionArg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -1528,6 +1542,7 @@ pub enum ObjectType {
     Schema,
     Source,
     MaterializedSource,
+    Sink,
     Database,
     User,
 }
@@ -1542,6 +1557,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Schema => "SCHEMA",
             ObjectType::Source => "SOURCE",
             ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
+            ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
         })
@@ -1560,6 +1576,8 @@ impl ParseTo for ObjectType {
             ObjectType::MaterializedSource
         } else if parser.parse_keyword(Keyword::SOURCE) {
             ObjectType::Source
+        } else if parser.parse_keyword(Keyword::SINK) {
+            ObjectType::Sink
         } else if parser.parse_keyword(Keyword::INDEX) {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {
@@ -1570,7 +1588,7 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SCHEMA, DATABASE or USER after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
                 parser.peek_token(),
             );
         };

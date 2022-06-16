@@ -25,7 +25,7 @@ TODO: Find a suitable testing framework
 Start the RisingWave database.
 ```bash
 ./risedev d
-sqllogictest -p 4566 -d dev -u root './e2e_test/streaming/tpch_snapshot.slt'
+sqllogictest -p 4566 -d dev './e2e_test/streaming/tpch_snapshot.slt'
 ```
 Install Dependencies.
 ```bash

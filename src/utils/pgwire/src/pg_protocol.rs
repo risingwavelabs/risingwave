@@ -14,9 +14,8 @@
 
 use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind, Result};
-use std::ops::Sub;
-use std::str;
 use std::sync::Arc;
+use std::{str, vec};
 
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -165,9 +164,6 @@ where
             FeMessage::Parse(m) => {
                 let query = cstr_to_str(&m.query_string).unwrap();
 
-                // TODO: make sure the query is a complete statement.
-                assert!(query.trim_end().ends_with(';'));
-
                 // 1. Create the types description.
                 let type_ids = m.type_ids;
                 let types: Vec<TypeOid> = type_ids
@@ -176,29 +172,49 @@ where
                     .collect();
 
                 // 2. Create the row description.
-                let rows: Vec<PgFieldDescriptor> = query
-                    .split(&[' ', ',', ';'])
-                    .skip(1)
-                    .into_iter()
-                    .map(|x| {
-                        if let Some(str) = x.strip_prefix('$') {
-                            if let Ok(i) = str.parse() {
-                                i
-                            } else {
-                                -1
+
+                let rows: Vec<PgFieldDescriptor> = if query.starts_with("SELECT")
+                    || query.starts_with("select")
+                {
+                    if types.is_empty() {
+                        let session = self.session.clone().unwrap();
+                        let rows_res = session.infer_return_type(query).await;
+                        match rows_res {
+                            Ok(r) => r,
+                            Err(e) => {
+                                self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+                                // TODO: Error handle needed modified later.
+                                unimplemented!();
                             }
-                        } else {
-                            -1
                         }
-                    })
-                    .take_while(|x: &i32| x.is_positive())
-                    .map(|x| {
-                        // NOTE Make sure the type_description include all generic parametre
-                        // description we needed.
-                        assert!((x.sub(1) as usize) < types.len());
-                        PgFieldDescriptor::new(String::new(), types[x.sub(1) as usize].to_owned())
-                    })
-                    .collect();
+                    } else {
+                        query
+                            .split(&[' ', ',', ';'])
+                            .skip(1)
+                            .into_iter()
+                            .take_while(|x| !x.is_empty())
+                            .map(|x| {
+                                // NOTE: Assume all output are generic params.
+                                let str = x.strip_prefix('$').unwrap();
+                                // NOTE: Assume all generic are valid.
+                                let v: i32 = str.parse().unwrap();
+                                assert!(v.is_positive());
+                                v
+                            })
+                            .map(|x| {
+                                // NOTE Make sure the type_description include all generic parametre
+                                // description we needed.
+                                assert!(((x - 1) as usize) < types.len());
+                                PgFieldDescriptor::new(
+                                    String::new(),
+                                    types[(x - 1) as usize].to_owned(),
+                                )
+                            })
+                            .collect()
+                    }
+                } else {
+                    vec![]
+                };
 
                 // 3. Create the statement.
                 let statement = PgStatement::new(

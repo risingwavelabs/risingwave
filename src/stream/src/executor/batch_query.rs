@@ -72,7 +72,7 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
-        let mut iter = self.table.iter_with_pk(epoch, &self.pk_descs).await?;
+        let mut iter = self.table.dedup_pk_iter(epoch, &self.pk_descs).await?;
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(self.schema(), Some(self.batch_size))
@@ -85,9 +85,7 @@ where
                     continue;
                 }
             };
-            let compacted_chunk = filtered_data_chunk
-                .compact()
-                .map_err(StreamExecutorError::eval_error)?;
+            let compacted_chunk = filtered_data_chunk.compact()?;
             let ops = vec![Op::Insert; compacted_chunk.cardinality()];
             let stream_chunk = StreamChunk::from_parts(ops, compacted_chunk);
             yield Message::Chunk(stream_chunk);

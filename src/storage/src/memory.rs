@@ -112,6 +112,7 @@ impl StateStore for MemoryStateStore {
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
             let range_bounds = key.to_vec()..=key.to_vec();
+            // We do not really care about vnodes here, so we just use the default value.
             let res = self.scan(range_bounds, Some(1), epoch).await?;
 
             Ok(match res.as_slice() {

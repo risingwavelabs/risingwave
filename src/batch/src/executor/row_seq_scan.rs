@@ -157,18 +157,16 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
-            let storage_stats = state_store.stats();
             let batch_stats = source.context().stats();
             let table = CellBasedTable::new(
                 keyspace.clone(),
                 column_descs,
                 Some(ordered_row_serializer),
-                storage_stats,
                 None,
             );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
-                let iter = table.iter_with_pk(source.epoch, &pk_descs).await?;
+                let iter = table.dedup_pk_iter(source.epoch, &pk_descs).await?;
                 ScanType::TableScan(iter)
             } else if pk_prefix_value.size() == pk_descs.len() {
                 keyspace.state_store().wait_epoch(source.epoch).await?;

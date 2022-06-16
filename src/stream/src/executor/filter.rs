@@ -24,7 +24,6 @@ use super::{
     Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
     StreamExecutorResult,
 };
-use crate::executor::error::StreamExecutorError;
 
 pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
 
@@ -77,14 +76,11 @@ impl SimpleExecutor for SimpleFilterExecutor {
         &mut self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
+        let chunk = chunk.compact()?;
 
         let (data_chunk, ops) = chunk.into_parts();
 
-        let pred_output = self
-            .expr
-            .eval(&data_chunk)
-            .map_err(StreamExecutorError::eval_error)?;
+        let pred_output = self.expr.eval(&data_chunk)?;
 
         let (columns, vis) = data_chunk.into_parts();
 

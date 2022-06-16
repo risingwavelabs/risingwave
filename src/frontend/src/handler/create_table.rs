@@ -22,7 +22,9 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
+use risingwave_sqlparser::ast::{
+    ColumnDef, DataType as AstDataType, ObjectName, SqlOption, WithProperties,
+};
 
 use super::create_source::make_prost_source;
 use crate::binder::expr::{bind_data_type, bind_struct_field};
@@ -79,15 +81,18 @@ pub(crate) fn gen_create_table_plan(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
+    with_options: WithProperties,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let source = make_prost_source(
         session,
         table_name,
         Info::TableSource(TableSourceInfo {
             columns: bind_sql_columns(columns)?,
+            properties: with_options.into(),
         }),
     )?;
-    let (plan, table) = gen_materialized_source_plan(context, source.clone())?;
+    let (plan, table) =
+        gen_materialized_source_plan(context, source.clone(), session.user_name().to_string())?;
     Ok((plan, source, table))
 }
 
@@ -96,6 +101,7 @@ pub(crate) fn gen_create_table_plan(
 pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
     source: ProstSource,
+    owner: String,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
@@ -116,10 +122,10 @@ pub(crate) fn gen_materialized_source_plan(
         )
         .gen_create_mv_plan(source.name.clone())?
     };
-    let table = materialize
+    let mut table = materialize
         .table()
         .to_prost(source.schema_id, source.database_id);
-
+    table.owner = owner;
     Ok((materialize.into(), table))
 }
 
@@ -127,12 +133,18 @@ pub async fn handle_create_table(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
+    with_options: Vec<SqlOption>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, source, table) = {
-        let (plan, source, table) =
-            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
+        let (plan, source, table) = gen_create_table_plan(
+            &session,
+            context.into(),
+            table_name.clone(),
+            columns,
+            WithProperties(with_options),
+        )?;
         let plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(plan);
 
@@ -166,7 +178,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>);";
+        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with ('appendonly' = true);";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
@@ -180,6 +192,7 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(source.name, "t");
+        assert!(source.append_only);
 
         // Check table exists.
         let table = catalog_reader

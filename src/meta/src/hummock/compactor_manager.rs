@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use rand::Rng;
 use risingwave_common::error::{ErrorCode, Result, ToErrorStr};
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
@@ -105,6 +106,17 @@ impl CompactorManager {
         Some(compactor)
     }
 
+    pub fn random_compactor(&self) -> Option<Arc<Compactor>> {
+        let guard = self.inner.read();
+        if guard.compactors.is_empty() {
+            return None;
+        }
+
+        let compactor_index = rand::thread_rng().gen::<usize>() % guard.compactors.len();
+        let compactor = guard.compactors[compactor_index].clone();
+        Some(compactor)
+    }
+
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
@@ -132,7 +144,7 @@ impl CompactorManager {
 #[cfg(test)]
 mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_pb::hummock::{CompactMetrics, CompactTask, TableSetStatistics};
+    use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::test_utils::{generate_test_tables, setup_compute_env};
@@ -165,11 +177,6 @@ mod tests {
             task_id,
             target_level: 0,
             is_target_ultimate_and_leveling: false,
-            metrics: Some(CompactMetrics {
-                read_level_n: Some(TableSetStatistics::default()),
-                read_level_nplus1: Some(TableSetStatistics::default()),
-                write: Some(TableSetStatistics::default()),
-            }),
             task_status: false,
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),

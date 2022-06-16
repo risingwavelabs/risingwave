@@ -44,7 +44,7 @@ pub struct DatagenProperties {
     /// 'fields.v1.kind'='sequence',
     /// 'fields.v1.start'='1',
     /// 'fields.v1.end'='1000',
-    /// 'fields.v1.kind'='random',
+    /// 'fields.v2.kind'='random',
     /// datagen will create v1 by self-incrementing from 1 to 1000
     /// datagen will create v2 by randomly generating from default_min to default_max
     #[serde(flatten)]

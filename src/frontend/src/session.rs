@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
@@ -138,6 +139,7 @@ pub struct FrontendEnv {
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    server_addr: HostAddr,
 }
 
 impl FrontendEnv {
@@ -166,6 +168,7 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
             compute_client_pool,
         );
+        let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         Self {
             meta_client,
             catalog_writer,
@@ -175,6 +178,7 @@ impl FrontendEnv {
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
+            server_addr,
         }
     }
 
@@ -254,6 +258,7 @@ impl FrontendEnv {
                 meta_client: frontend_meta_client,
                 query_manager,
                 hummock_snapshot_manager,
+                server_addr: frontend_address,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -303,6 +308,10 @@ impl FrontendEnv {
 
     pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManagerRef {
         &self.hummock_snapshot_manager
+    }
+
+    pub fn server_address(&self) -> &HostAddr {
+        &self.server_addr
     }
 }
 
@@ -541,6 +550,28 @@ impl Session for SessionImpl {
             e
         })?;
         Ok(rsp)
+    }
+
+    async fn infer_return_type(
+        self: Arc<Self>,
+        sql: &str,
+    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
+        // Parse sql.
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
+            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        // With pgwire, there would be at most 1 statement in the vec.
+        assert!(stmts.len() <= 1);
+        if stmts.is_empty() {
+            return Ok(vec![]);
+        }
+        let stmt = stmts.swap_remove(0);
+        let rsp = handle(self, stmt).await.map_err(|e| {
+            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        Ok(rsp.get_row_desc())
     }
 
     fn user_authenticator(&self) -> &UserAuthenticator {

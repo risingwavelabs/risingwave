@@ -55,7 +55,7 @@ impl CompactorService {
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
-        add_storage_backend(&config.id, provide_minio, provide_aws_s3, cmd)?;
+        add_storage_backend(&config.id, provide_minio, provide_aws_s3, false, cmd)?;
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;

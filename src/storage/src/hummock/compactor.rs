@@ -35,11 +35,11 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::group_builder::KeyValueGroupingImpl::VirtualNode;
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
 use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
 use crate::hummock::compaction_executor::CompactionExecutor;
+use crate::hummock::group_builder::KeyValueGrouping;
 use crate::hummock::iterator::ReadOptions;
 use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -98,6 +98,7 @@ trait CompactionFilter {
     }
 }
 
+#[derive(Clone, Default)]
 pub struct DummyCompactionFilter;
 impl CompactionFilter for DummyCompactionFilter {}
 
@@ -107,6 +108,7 @@ pub struct StateCleanUpCompactionFilter {
 }
 
 impl StateCleanUpCompactionFilter {
+    #[expect(dead_code)]
     fn new(table_id_set: HashSet<u32>) -> Self {
         StateCleanUpCompactionFilter {
             existing_table_ids: table_id_set,
@@ -136,7 +138,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, Vec<VNodeBitmap>)>);
+pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<VNodeBitmap>)>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -151,7 +153,7 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         payload: &UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
+    ) -> HummockResult<Vec<(Sstable, u64, Vec<VNodeBitmap>)>> {
         let mut start_user_keys = payload
             .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
@@ -188,7 +190,6 @@ impl Compactor {
             task_id: 0,
             target_level: 0,
             is_target_ultimate_and_leveling: false,
-            metrics: None,
             task_status: false,
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
@@ -253,7 +254,7 @@ impl Compactor {
             let mut level0 = Vec::with_capacity(parallelism);
 
             for (_, sst) in output_ssts {
-                for (table, _) in &sst {
+                for (table, _, _) in &sst {
                     compactor
                         .context
                         .stats
@@ -296,37 +297,47 @@ impl Compactor {
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
         tracing::info!("Ready to handle compaction task: {}", compact_task.task_id,);
-        let mut compaction_read_bytes = compact_task.input_ssts[0]
+        let group_label = compact_task.compaction_group_id.to_string();
+        let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
+        let compaction_read_bytes = compact_task.input_ssts[0]
             .table_infos
             .iter()
             .map(|t| t.file_size)
-            .sum();
-        if let Some(metrics) = compact_task.metrics.as_mut() {
-            if let Some(read) = metrics.read_level_n.as_mut() {
-                read.level_idx = compact_task.input_ssts[0].level_idx;
-                read.cnt = compact_task.input_ssts[0].table_infos.len() as u64;
-                read.size_kb = compaction_read_bytes / 1024;
-            }
-        }
+            .sum::<u64>();
+        context
+            .stats
+            .compact_read_current_level
+            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
+            .inc_by(compaction_read_bytes);
+        context
+            .stats
+            .compact_read_sstn_current_level
+            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
+            .inc_by(compact_task.input_ssts[0].table_infos.len() as u64);
+        context
+            .stats
+            .compact_frequency
+            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
+            .inc();
+
         if compact_task.input_ssts.len() > 1 {
             let sec_level_read_bytes: u64 = compact_task.input_ssts[1]
                 .table_infos
                 .iter()
                 .map(|t| t.file_size)
                 .sum();
-            if let Some(metrics) = compact_task.metrics.as_mut() {
-                if let Some(read) = metrics.read_level_nplus1.as_mut() {
-                    read.level_idx = compact_task.input_ssts[1].level_idx;
-                    read.cnt = compact_task.input_ssts[1].table_infos.len() as u64;
-                    read.size_kb = sec_level_read_bytes / 1024;
-                }
-            }
-            compaction_read_bytes += sec_level_read_bytes;
+            let next_level_label = compact_task.input_ssts[1].level_idx.to_string();
+            context
+                .stats
+                .compact_read_next_level
+                .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+                .inc_by(sec_level_read_bytes);
+            context
+                .stats
+                .compact_read_sstn_next_level
+                .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+                .inc_by(compact_task.input_ssts[1].table_infos.len() as u64);
         }
-        context
-            .stats
-            .compaction_read_bytes
-            .inc_by(compaction_read_bytes);
 
         let timer = context
             .stats
@@ -381,8 +392,11 @@ impl Compactor {
             );
         }
 
-        let compaction_filter =
-            StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
+        // TODO #2065: re-enable it after all states are registered correctly.
+        let compaction_filter = DummyCompactionFilter::default();
+        // let compaction_filter =
+        //     StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.
+        // existing_table_ids));
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
@@ -444,7 +458,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, vnode_bitmaps) in ssts {
+            for (sst, unit_id, vnode_bitmaps) in ssts {
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -454,21 +468,26 @@ impl Compactor {
                     }),
                     file_size: sst.meta.estimated_size as u64,
                     vnode_bitmaps,
+                    unit_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
             }
         }
+
+        let group_label = self.compact_task.compaction_group_id.to_string();
+        let level_label = self.compact_task.target_level.to_string();
         self.context
             .stats
-            .compaction_write_bytes
+            .compact_write_bytes
+            .with_label_values(&[group_label.as_str(), level_label.as_str()])
             .inc_by(compaction_write_bytes);
-        if let Some(metrics) = self.compact_task.metrics.as_mut() {
-            if let Some(write) = metrics.write.as_mut() {
-                write.cnt = self.compact_task.sorted_output_ssts.len() as u64;
-                write.size_kb = compaction_write_bytes / 1024;
-            }
-        }
+        self.context
+            .stats
+            .compact_write_sstn
+            .with_label_values(&[group_label.as_str(), level_label.as_str()])
+            .inc_by(self.compact_task.sorted_output_ssts.len() as u64);
+
         if let Err(e) = self
             .context
             .hummock_meta_client
@@ -507,11 +526,11 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let builder = SSTableBuilder::new(self.context.options.as_ref().into());
+                let builder = SSTableBuilder::new(table_id, self.context.options.as_ref().into());
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
-                Ok((table_id, builder))
+                Ok(builder)
             },
-            VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
+            VirtualNodeGrouping::new(vnode2unit),
             self.context.sstable_store.clone(),
         );
 
@@ -543,11 +562,12 @@ impl Compactor {
             vnode_bitmaps,
             upload_join_handle,
             data_len,
+            unit_id,
         } in sealed_builders
         {
             let sst = Sstable { id: table_id, meta };
             let len = data_len;
-            ssts.push((sst.clone(), vnode_bitmaps));
+            ssts.push((sst.clone(), unit_id, vnode_bitmaps));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
@@ -779,8 +799,8 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    async fn compact_and_build_sst<B, F>(
-        sst_builder: &mut GroupedSstableBuilder<B>,
+    async fn compact_and_build_sst<B, G, F>(
+        sst_builder: &mut GroupedSstableBuilder<B, G>,
         kr: KeyRange,
         mut iter: BoxedForwardHummockIterator,
         has_user_key_overlap: bool,
@@ -789,7 +809,8 @@ impl Compactor {
     ) -> HummockResult<()>
     where
         B: Clone + Fn() -> F,
-        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+        G: KeyValueGrouping,
+        F: Future<Output = HummockResult<SSTableBuilder>>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;

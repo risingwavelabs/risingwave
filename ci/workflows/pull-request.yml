@@ -17,6 +17,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
 
   - label: "end-to-end test (parallel)"
@@ -27,6 +28,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
 
   - label: "end-to-end source test"
@@ -37,11 +39,13 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
 
   - label: "unit test"
     command: "ci/scripts/unit-test.sh"
     plugins:
+      - ./ci/plugins/swapfile
       - seek-oss/aws-sm#v2.3.1:
           env:
             CODECOV_TOKEN: my-codecov-token
@@ -50,6 +54,14 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
+    timeout_in_minutes: 15
+
+  - label: "pre unit test"
+    command: "ci/scripts/pre-unit-test.sh"
+    plugins:
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
     timeout_in_minutes: 15
 
   - label: "unit test (deterministic simulation)"

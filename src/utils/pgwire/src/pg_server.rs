@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
 
@@ -37,7 +38,10 @@ pub trait SessionManager: Send + Sync + 'static {
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
     async fn run_statement(self: Arc<Self>, sql: &str) -> Result<PgResponse, BoxedError>;
-
+    async fn infer_return_type(
+        self: Arc<Self>,
+        sql: &str,
+    ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
     fn user_authenticator(&self) -> &UserAuthenticator;
 }
 
@@ -134,6 +138,7 @@ mod tests {
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
+    use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionManager, UserAuthenticator};
     use crate::types::Row;
@@ -160,10 +165,19 @@ mod tests {
             self: Arc<Self>,
             sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
+            // split a statement and trim \' around the intput param to construct result.
+            // Ex:
+            //    SELECT 'a','b' -> result: a , b
             let res: Vec<Option<String>> = sql
                 .split(&[' ', ',', ';'])
                 .skip(1)
-                .map(|x| Some(x.to_string()))
+                .map(|x| {
+                    Some(
+                        x.trim_start_matches('\'')
+                            .trim_end_matches('\'')
+                            .to_string(),
+                    )
+                })
                 .collect();
 
             Ok(PgResponse::new(
@@ -177,6 +191,17 @@ mod tests {
 
         fn user_authenticator(&self) -> &UserAuthenticator {
             &UserAuthenticator::None
+        }
+
+        async fn infer_return_type(
+            self: Arc<Self>,
+            sql: &str,
+        ) -> Result<Vec<PgFieldDescriptor>, super::BoxedError> {
+            let count = sql.split(&[' ', ',', ';']).skip(1).count();
+            Ok(vec![
+                PgFieldDescriptor::new("".to_string(), TypeOid::Varchar,);
+                count
+            ])
         }
     }
 
@@ -311,6 +336,14 @@ mod tests {
             assert_eq!(value, "BB");
             let value: &str = rows[0].get(1);
             assert_eq!(value, "AA");
+        }
+        // no params
+        {
+            let rows = client.query("SELECT 'AA','BB';", &[]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "AA");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "BB");
         }
     }
 }

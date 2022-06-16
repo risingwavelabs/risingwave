@@ -33,6 +33,7 @@ use risingwave_pb::stream_plan::{
     SimpleAggNode, SourceNode, StreamNode,
 };
 
+use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
@@ -165,7 +166,7 @@ fn make_stream_node() -> StreamNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
             table_ids: vec![],
-            append_only: false,
+            is_append_only: false,
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
@@ -197,7 +198,7 @@ fn make_stream_node() -> StreamNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
             table_ids: vec![],
-            append_only: false,
+            is_append_only: false,
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
@@ -261,7 +262,9 @@ async fn test_fragmenter() -> Result<()> {
 
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
+    let compaction_group_manager = Arc::new(CompactionGroupManager::new(env.clone()).await?);
+    let fragment_manager =
+        Arc::new(FragmentManager::new(env.clone(), compaction_group_manager).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = StreamFragmenter::build_graph(stream_node);

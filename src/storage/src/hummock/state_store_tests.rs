@@ -14,10 +14,8 @@
 
 use std::sync::Arc;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use futures::executor::block_on;
-use risingwave_common::consistent_hash::VNodeBitmap;
-use risingwave_common::hash::VNODE_BITMAP_LEN;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -180,76 +178,6 @@ async fn test_basic() {
 }
 
 #[tokio::test]
-async fn test_vnode_filter() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let storage = HummockStorage::with_default_stats(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-    )
-    .await
-    .unwrap();
-
-    let val = Bytes::from(&b"value"[..]);
-    let table_count = 2;
-    let mut batch = Vec::with_capacity(table_count);
-    for table_id in 0..table_count as u32 {
-        let mut key = BytesMut::from(&b"t"[..]);
-        key.put_u32(table_id);
-        batch.push((key.freeze(), StorageValue::new_default_put(val.clone())));
-    }
-
-    let epoch: u64 = 1;
-    storage.ingest_batch(batch, epoch).await.unwrap();
-    storage.sync(Some(epoch)).await.unwrap();
-    meta_client
-        .commit_epoch(
-            epoch,
-            storage.local_version_manager.get_uncommitted_ssts(epoch),
-        )
-        .await
-        .unwrap();
-
-    let value_with_dummy_filter = storage
-        .get_with_vnode_set(
-            &Bytes::from(&b"t\0\0\0\0"[..]),
-            epoch,
-            Some(VNodeBitmap::new(0, [1; VNODE_BITMAP_LEN].to_vec())),
-        )
-        .await
-        .unwrap();
-    assert_eq!(value_with_dummy_filter.unwrap(), Bytes::from(&b"value"[..]));
-
-    let value_with_blockall_filter = storage
-        .get_with_vnode_set(
-            &Bytes::from(&b"t\0\0\0\0"[..]),
-            epoch,
-            Some(VNodeBitmap::new(0, [0; VNODE_BITMAP_LEN].to_vec())),
-        )
-        .await
-        .unwrap();
-    assert!(value_with_blockall_filter.is_none());
-
-    let value_with_mismatch_dummy_filter = storage
-        .get_with_vnode_set(
-            &Bytes::from(&b"t\0\0\0\0"[..]),
-            epoch,
-            Some(VNodeBitmap::new(5, [1; VNODE_BITMAP_LEN].to_vec())),
-        )
-        .await
-        .unwrap();
-    assert!(value_with_mismatch_dummy_filter.is_none());
-}
-
-#[tokio::test]
 async fn test_state_store_sync() {
     let sstable_store = mock_sstable_store();
 
@@ -331,7 +259,7 @@ async fn test_state_store_sync() {
     //     hummock_storage.shared_buffer_manager().size() as u64
     // );
 
-    // triger a sync
+    // trigger a sync
     hummock_storage.sync(Some(epoch)).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.

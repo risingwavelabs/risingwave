@@ -16,10 +16,9 @@ use std::fmt::Formatter;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::types::Row;
-/// Port from StatementType.java.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types)]
 pub enum StatementType {
     INSERT,
     DELETE,

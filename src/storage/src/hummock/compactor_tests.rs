@@ -48,15 +48,15 @@ mod tests {
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
-        let storage = HummockStorage::with_default_stats(
+
+        HummockStorage::with_default_stats(
             options.clone(),
             sstable_store,
             hummock_meta_client.clone(),
             Arc::new(StateStoreMetrics::unused()),
         )
         .await
-        .unwrap();
-        storage
+        .unwrap()
     }
 
     #[tokio::test]
@@ -169,6 +169,8 @@ mod tests {
     }
 
     #[tokio::test]
+    // TODO #2065: re-enable it after all states are registered correctly.
+    #[ignore]
     async fn test_compaction_drop_all_key() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -247,6 +249,8 @@ mod tests {
     }
 
     #[tokio::test]
+    // TODO #2065: re-enable it after all states are registered correctly.
+    #[ignore]
     async fn test_compaction_drop_key_by_existing_table_id() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;

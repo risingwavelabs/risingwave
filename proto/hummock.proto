@@ -21,6 +21,7 @@ message SstableInfo {
   KeyRange key_range = 2;
   uint64 file_size = 3;
   repeated common.VNodeBitmap vnode_bitmaps = 4;
+  uint64 unit_id = 5;
 }
 
 enum LevelType {
@@ -106,18 +107,6 @@ message KeyRange {
   bool inf = 3;
 }
 
-message TableSetStatistics {
-  uint32 level_idx = 1;
-  uint64 size_kb = 2;
-  uint64 cnt = 3;
-}
-
-message CompactMetrics {
-  TableSetStatistics read_level_n = 1;
-  TableSetStatistics read_level_nplus1 = 2;
-  TableSetStatistics write = 3;
-}
-
 message CompactTask {
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated Level input_ssts = 1;
@@ -133,7 +122,6 @@ message CompactTask {
   // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool is_target_ultimate_and_leveling = 7;
-  CompactMetrics metrics = 8;
   bool task_status = 9;
   // Hash mapping from virtual node to parallel unit. Since one compactor might deal with SSTs
   // with data for more than one relational state tables, here a vector is required.
@@ -230,6 +218,21 @@ message ReportVacuumTaskResponse {
   common.Status status = 1;
 }
 
+message GetCompactionGroupsRequest {}
+
+message GetCompactionGroupsResponse {
+  common.Status status = 1;
+  repeated CompactionGroup compaction_groups = 2;
+}
+
+message TriggerManualCompactionRequest {
+  uint64 compaction_group_id = 1;
+}
+
+message TriggerManualCompactionResponse {
+  common.Status status = 1;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
@@ -240,6 +243,8 @@ service HummockManagerService {
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
+  rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
+  rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
 }
 
 service CompactorService {}

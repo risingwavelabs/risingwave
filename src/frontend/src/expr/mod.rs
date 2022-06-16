@@ -79,6 +79,12 @@ impl ExprImpl {
         Literal::new(Some(v.to_scalar_value()), DataType::Boolean).into()
     }
 
+    /// A literal varchar value.
+    #[inline(always)]
+    pub fn literal_varchar(v: String) -> Self {
+        Literal::new(Some(v.to_scalar_value()), DataType::Varchar).into()
+    }
+
     /// A `count(*)` aggregate function.
     #[inline(always)]
     pub fn count_star() -> Self {
@@ -113,6 +119,25 @@ impl ExprImpl {
     /// Shorthand to create cast expr to `target` type in explicit context.
     pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl> {
         FunctionCall::new_cast(self, target, CastContext::Explicit)
+    }
+
+    /// Create "cast" expr to string (`varchar`) type. This is different from a real cast, as
+    /// boolean is converted to a single char rather than full word.
+    ///
+    /// Choose between `cast_output` and `cast_{assign,explicit}(Varchar)` based on `PostgreSQL`'s
+    /// behavior on bools. For example, `concat(':', true)` is `:t` but `':' || true` is `:true`.
+    /// All other types have the same behavior when formatting to output and casting to string.
+    ///
+    /// References in `PostgreSQL`:
+    /// * [cast](https://github.com/postgres/postgres/blob/a3ff08e0b08dbfeb777ccfa8f13ebaa95d064c04/src/include/catalog/pg_cast.dat#L437-L444)
+    /// * [impl](https://github.com/postgres/postgres/blob/27b77ecf9f4d5be211900eda54d8155ada50d696/src/backend/utils/adt/bool.c#L204-L209)
+    pub fn cast_output(self) -> Result<ExprImpl> {
+        if self.return_type() == DataType::Boolean {
+            return Ok(FunctionCall::new(ExprType::BoolOut, vec![self])?.into());
+        }
+        // Use normal cast for other types. Both `assign` and `explicit` can pass the castability
+        // check and there is no difference.
+        self.cast_assign(DataType::Varchar)
     }
 }
 

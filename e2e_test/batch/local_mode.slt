@@ -4,7 +4,12 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 SET QUERY_MODE TO local;
 
-#include ./boolean.slt.part
+include ./basic/boolean.slt.part
+include ./basic/const.slt.part
+include ./basic/query.slt.part
+include ./basic/join.slt.part
+include ./basic/range_scan.slt.part
+include ./basic/order_by.slt.part
 
 statement ok
 SET QUERY_MODE TO distributed;

@@ -86,10 +86,11 @@ pub struct SSTableBuilder {
     /// Last added full key.
     last_full_key: Bytes,
     key_count: usize,
+    sstable_id: u64,
 }
 
 impl SSTableBuilder {
-    pub fn new(options: SSTableBuilderOptions) -> Self {
+    pub fn new(sstable_id: u64, options: SSTableBuilderOptions) -> Self {
         Self {
             options: options.clone(),
             buf: BytesMut::with_capacity(options.capacity),
@@ -99,6 +100,7 @@ impl SSTableBuilder {
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             last_full_key: Bytes::default(),
             key_count: 0,
+            sstable_id,
         }
     }
 
@@ -108,7 +110,7 @@ impl SSTableBuilder {
         if self.block_builder.is_none() {
             self.last_full_key.clear();
             self.block_builder = Some(BlockBuilder::new(BlockBuilderOptions {
-                capacity: self.options.capacity,
+                capacity: self.options.block_capacity,
                 restart_interval: self.options.restart_interval,
                 compression_algorithm: self.options.compression_algorithm,
             }));
@@ -162,7 +164,7 @@ impl SSTableBuilder {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
+    pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<VNodeBitmap>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.to_vec();
         self.build_block();
@@ -187,6 +189,7 @@ impl SSTableBuilder {
         };
 
         (
+            self.sstable_id,
             self.buf.freeze(),
             meta,
             self.vnode_bitmaps
@@ -248,20 +251,20 @@ pub(super) mod tests {
             compression_algorithm: CompressionAlgorithm::None,
         };
 
-        let b = SSTableBuilder::new(opt);
+        let b = SSTableBuilder::new(0, opt);
 
         b.finish();
     }
 
     #[test]
     fn test_smallest_key_and_largest_key() {
-        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
+        let mut b = SSTableBuilder::new(0, default_builder_opt_for_test());
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)));
         }
 
-        let (_, meta, _) = b.finish();
+        let (_, _, meta, _) = b.finish();
 
         assert_eq!(test_key_of(0), meta.smallest_key);
         assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), meta.largest_key);

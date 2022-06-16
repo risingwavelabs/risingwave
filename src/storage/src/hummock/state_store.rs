@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
@@ -85,7 +84,7 @@ impl HummockStorage {
         let read_options = Arc::new(ReadOptions::default());
         let mut overlapped_iters = vec![];
 
-        let (shared_buffer_data, pinned_version) = self.read_filter(epoch, &key_range, None)?;
+        let (shared_buffer_data, pinned_version) = self.read_filter(epoch, &key_range)?;
 
         let mut stats = StoreLocalStatistic::default();
 
@@ -109,7 +108,7 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, None);
+            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
             }
@@ -186,15 +185,9 @@ impl HummockStorage {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    pub async fn get_with_vnode_set<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        vnode_set: Option<VNodeBitmap>,
-    ) -> StorageResult<Option<Bytes>> {
+    pub async fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> StorageResult<Option<Bytes>> {
         let mut stats = StoreLocalStatistic::default();
-        let (shared_buffer_data, pinned_version) =
-            self.read_filter(epoch, &(key..=key), vnode_set.as_ref())?;
+        let (shared_buffer_data, pinned_version) = self.read_filter(epoch, &(key..=key))?;
 
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
@@ -254,8 +247,7 @@ impl HummockStorage {
                 continue;
             }
             {
-                let table_infos =
-                    prune_ssts(level.table_infos.iter(), &(key..=key), vnode_set.as_ref());
+                let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
@@ -279,12 +271,11 @@ impl HummockStorage {
         Ok(None)
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn read_filter<R, B>(
         &self,
         epoch: HummockEpoch,
         key_range: &R,
-        vnode_set: Option<&VNodeBitmap>,
     ) -> HummockResult<(
         Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
         Arc<PinnedVersion>,
@@ -301,7 +292,7 @@ impl HummockStorage {
         let shared_buffer_data = read_version
             .shared_buffer
             .iter()
-            .map(|shared_buffer| shared_buffer.get_overlap_data(key_range, vnode_set))
+            .map(|shared_buffer| shared_buffer.get_overlap_data(key_range))
             .collect();
 
         Ok((shared_buffer_data, read_version.pinned_version))
@@ -314,7 +305,7 @@ impl StateStore for HummockStorage {
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
-        async move { self.get_with_vnode_set(key, epoch, None).await }
+        async move { self.get(key, epoch).await }
     }
 
     fn scan<R, B>(

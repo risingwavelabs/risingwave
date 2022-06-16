@@ -806,7 +806,7 @@ fn parse_string_agg() {
     assert_eq!(
         SelectItem::UnnamedExpr(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new("a"))),
-            op: BinaryOperator::StringConcat,
+            op: BinaryOperator::Concat,
             right: Box::new(Expr::Identifier(Ident::new("b"))),
         }),
         select.projection[0]

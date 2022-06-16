@@ -63,7 +63,6 @@ impl StreamEnvironment {
     pub fn for_test() -> Self {
         use risingwave_source::MemSourceManager;
         use risingwave_storage::monitor::StateStoreMetrics;
-
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_manager: Arc::new(MemSourceManager::default()),

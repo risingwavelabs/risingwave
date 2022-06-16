@@ -30,11 +30,12 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, CompactionConfig, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
-    SstableIdInfo, SstableInfo,
+    CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
+    HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
+    SstableInfo,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
@@ -42,16 +43,17 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
+use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
     INVALID_TIMESTAMP,
 };
+use crate::hummock::CompactorManagerRef;
 use crate::manager::{IdCategory, MetaSrvEnv};
-use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
+use crate::model::{MetadataModel, ValTransaction, VarTransaction};
 use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::FragmentManagerRef;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -69,13 +71,10 @@ pub struct HummockManager<S: MetaStore> {
 
     metrics: Arc<MetaMetrics>,
 
-    /// `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
+    // `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
     compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
-    // TODO: refactor to remove this field
-    config: Arc<CompactionConfig>,
 
-    // for compaction to get some info (e.g. existing_table_ids)
-    fragment_manager: FragmentManagerRef<S>,
+    compactor_manager: CompactorManagerRef,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -84,7 +83,6 @@ pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
 struct Compaction {
     /// Compaction task that is already assigned to a compactor
     compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
-    // TODO: may want fine-grained lock for each compaction group
     /// `CompactStatus` of each compaction group
     compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
     /// Available compaction task ids for use
@@ -121,7 +119,7 @@ macro_rules! commit_multi_var {
                     $val_txn.apply_to_txn(&mut trx)?;
                 )*
                 // Commit to state store
-                $hummock_mgr.commit_trx($hummock_mgr.env.meta_store(), trx, $context_id)
+                $hummock_mgr.commit_trx($hummock_mgr.env.meta_store(), trx, $context_id, $hummock_mgr.env.get_leader_info())
                 .await?;
                 // Upon successful commit, commit the change to local in-mem state
                 $(
@@ -165,9 +163,8 @@ where
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        compactor_manager: CompactorManagerRef,
     ) -> Result<HummockManager<S>> {
-        let config = compaction_group_manager.config().clone();
         let instance = HummockManager {
             env,
             versioning: RwLock::new(Default::default()),
@@ -176,8 +173,7 @@ where
             cluster_manager,
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
-            config: Arc::new(config),
-            fragment_manager,
+            compactor_manager,
         };
 
         instance.load_meta_store_state().await?;
@@ -242,7 +238,16 @@ where
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
-            for l in 0..self.config.max_level {
+            // TODO #2065: Initialize independent levels via corresponding compaction group' config.
+            // Currently all SSTs belongs to `StateDefault`.
+            let max_level = self
+                .compaction_group_manager
+                .compaction_group(StaticCompactionGroupId::StateDefault.into())
+                .await
+                .unwrap()
+                .compaction_config()
+                .max_level;
+            for l in 0..max_level {
                 init_version.levels.push(Level {
                     level_idx: (l + 1) as u32,
                     level_type: LevelType::Nonoverlapping as i32,
@@ -285,22 +290,33 @@ where
     /// We use worker node id as the `context_id`.
     /// If the `context_id` is provided, the transaction will abort if the `context_id` is not
     /// valid, which means the worker node is not a valid member of the cluster.
+    /// This operation is protected by mutex of compaction, so that other thread can not
+    /// call `release_contexts` even if it has removed `context_id` from cluster manager.
     async fn commit_trx(
         &self,
         meta_store: &S,
         mut trx: Transaction,
         context_id: Option<HummockContextId>,
+        info: MetaLeaderInfo,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
                 // Using the preserved meta id is allowed.
-            } else if let Some(worker) = self.cluster_manager.get_worker_by_id(context_id).await {
-                trx.check_exists(Worker::cf_name(), worker.key()?.encode_to_vec());
-            } else {
+            } else if self
+                .cluster_manager
+                .get_worker_by_id(context_id)
+                .await
+                .is_none()
+            {
                 // The worker is not found in cluster.
                 return Err(Error::InvalidContext(context_id));
             }
         }
+        trx.check_equal(
+            META_CF_NAME.to_owned(),
+            META_LEADER_KEY.as_bytes().to_vec(),
+            info.encode_to_vec(),
+        );
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
@@ -520,9 +536,6 @@ where
             .collect_vec();
         // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
         // epochs below specific watermark.
-        // let mut snapshots_change = !to_unpin.is_empty();
-        tracing::info!("Unpin epochs {:?}", to_unpin);
-
         for epoch in &to_unpin {
             context_pinned_snapshot.unpin_snapshot(*epoch);
         }
@@ -544,7 +557,7 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
-        // TODO: remove this line after split levels by compaction group.
+        // TODO #2065: Remove this line after split levels by compaction group.
         // All SSTs belongs to `StateDefault` currently.
         if compaction_group_id != u64::from(StaticCompactionGroupId::StateDefault) {
             return Ok(None);
@@ -579,10 +592,15 @@ where
             task_id as HummockCompactionTaskId,
             compaction_group_id,
         );
-        let existing_table_ids_from_meta = self.fragment_manager.existing_table_ids().await?;
+
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
+                let existing_table_ids_from_meta = self
+                    .compaction_group_manager
+                    .internal_table_ids_by_compation_group_id(compaction_group_id)
+                    .await?;
+
                 compact_task.watermark = {
                     let versioning_guard = self.versioning.read().await;
                     let current_version_id = versioning_guard.current_version_id.id();
@@ -803,9 +821,6 @@ where
                 ))?,
             self.versioning.read().await.current_version_ref(),
         );
-        if let Some(ref compact_task_metrics) = compact_task.metrics {
-            trigger_rw_stat(&self.metrics, compact_task_metrics);
-        }
 
         self.try_send_compaction_request(compact_task.compaction_group_id);
 
@@ -1335,10 +1350,105 @@ where
     }
 
     /// Sends a compaction request to compaction scheduler.
-    fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
+    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
         if let Some(sender) = self.compaction_scheduler.read().as_ref() {
             return sender.try_send(compaction_group);
         }
         false
+    }
+
+    pub async fn trigger_manual_compaction(
+        &self,
+        compaction_group: CompactionGroupId,
+    ) -> Result<()> {
+        let start_time = Instant::now();
+
+        // 1. select_compactor
+        let compactor = self.compactor_manager.random_compactor();
+        let compactor = match compactor {
+            None => {
+                tracing::warn!("trigger_manual_compaction No compactor is available.");
+                return Err(Error::InternalError(format!(
+                    "trigger_manual_compaction No compactor is available. compaction_group {}",
+                    compaction_group
+                )));
+            }
+
+            Some(compactor) => compactor,
+        };
+
+        // 2. compact_task
+        let compact_task = self.get_compact_task(compaction_group).await;
+        let compact_task = match compact_task {
+            Ok(Some(compact_task)) => compact_task,
+            Ok(None) => {
+                // No compaction task available.
+                return Err(Error::InternalError(format!(
+                    "trigger_manual_compaction No compaction_task is available. compaction_group {}",
+                    compaction_group
+                )));
+            }
+            Err(err) => {
+                tracing::warn!("Failed to get compaction task: {:#?}.", err);
+                return Err(Error::InternalError(format!(
+                    "Failed to get compaction task: {:#?} compaction_group {}",
+                    err, compaction_group
+                )));
+            }
+        };
+
+        let send_task = async {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                compactor
+                    .send_task(Some(compact_task.clone()), None)
+                    .await
+                    .is_ok()
+            })
+            .await
+            .unwrap_or(false)
+        };
+
+        match self
+            .assign_compaction_task(&compact_task, compactor.context_id(), send_task)
+            .await
+        {
+            Ok(_) => {}
+
+            Err(error) => {
+                // cancel task in memory
+                let mut compaction_guard = self.compaction.write().await;
+                let compaction = compaction_guard.deref_mut();
+                let compact_status = compaction
+                    .compaction_statuses
+                    .get_mut(&compact_task.task_id)
+                    .unwrap();
+                compact_status.cancel_compaction_tasks_if(|pending_task_id| {
+                    pending_task_id == compact_task.task_id
+                });
+
+                return Err(error);
+            }
+        }
+
+        tracing::info!(
+            "Trigger manual compaction task. {}. cost time: {:?}",
+            compact_task_to_string(&compact_task),
+            start_time.elapsed(),
+        );
+
+        Ok(())
+    }
+
+    pub fn compactor_manager_ref_for_test(&self) -> CompactorManagerRef {
+        self.compactor_manager.clone()
+    }
+
+    pub async fn compaction_task_from_assignment_for_test(
+        &self,
+        task_id: u64,
+    ) -> Option<CompactTaskAssignment> {
+        let compaction_guard = self.compaction.read().await;
+        let assignment_ref = &compaction_guard.compact_task_assignment;
+        assignment_ref.get(&task_id).cloned()
     }
 }
