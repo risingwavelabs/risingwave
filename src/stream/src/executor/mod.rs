@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -28,7 +27,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
-use risingwave_connector::{ConnectorState, SplitImpl};
+use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
@@ -332,7 +331,7 @@ impl Mutation {
                             source_splits: match splits.clone() {
                                 Some(split) => split
                                     .into_iter()
-                                    .map(|s| s.to_json_bytes().to_vec())
+                                    .map(|s| s.encode_to_bytes().to_vec())
                                     .collect::<Vec<_>>(),
                                 None => vec![],
                             },
@@ -348,6 +347,7 @@ impl Mutation {
             ProstMutation::Stop(stop) => {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
             }
+
             ProstMutation::Update(update) => Mutation::UpdateOutputs(
                 update
                     .mutations
@@ -380,13 +380,7 @@ impl Mutation {
                             split
                                 .source_splits
                                 .iter()
-                                .map(|s| {
-                                    SplitImpl::restore_from_bytes(
-                                        split.borrow().split_type.clone(),
-                                        s,
-                                    )
-                                    .unwrap()
-                                })
+                                .map(|s| SplitImpl::restore_from_bytes(s).unwrap())
                                 .collect_vec(),
                         )
                     })
@@ -402,12 +396,7 @@ impl Mutation {
                         let split_impl = change_split
                             .source_splits
                             .iter()
-                            .map(|split| {
-                                SplitImpl::restore_from_bytes(
-                                    change_split.split_type.clone(),
-                                    split,
-                                )
-                            })
+                            .map(|split| SplitImpl::restore_from_bytes(split))
                             .collect::<anyhow::Result<Vec<SplitImpl>>>()
                             .to_rw_result()?;
                         change_splits.push((change_split.actor_id, Some(split_impl)));
