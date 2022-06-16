@@ -631,6 +631,7 @@ impl Compactor {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
         let mut stats = StoreLocalStatistic::default();
         let read_options = Arc::new(ReadOptions { prefetch: true });
+
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;

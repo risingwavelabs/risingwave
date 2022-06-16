@@ -178,7 +178,7 @@ impl SstableStore {
         Ok(())
     }
 
-    pub async fn get_data(&self, sst: &Sstable, block_index: usize) -> HummockResult<BlockHolder> {
+    async fn get_data(&self, sst: &Sstable, block_index: usize) -> HummockResult<BlockHolder> {
         let block_meta = sst
             .meta
             .block_metas
@@ -345,16 +345,12 @@ impl SstableStore {
     pub fn clear_block_cache(&self) {
         self.block_cache.clear();
     }
-}
 
-pub type SstableStoreRef = Arc<SstableStore>;
-
-#[async_trait::async_trait]
-impl TableAcessor for SstableStoreRef {
-    async fn sstable(
+    pub async fn load_table(
         &self,
         sst_id: HummockSSTableId,
         stats: &mut StoreLocalStatistic,
+        load_data: bool,
     ) -> HummockResult<TableHolder> {
         stats.cache_meta_block_total += 1;
         let entry = self
@@ -369,10 +365,29 @@ impl TableAcessor for SstableStoreRef {
                     .map_err(HummockError::object_io_error)?;
                 let size = buf.len();
                 let meta = SstableMeta::decode(&mut &buf[..])?;
+                let blocks = if load_data {
+                    let data_path = self.get_sst_data_path(sst_id);
+                    let block_data = self
+                        .store
+                        .read(&data_path, None)
+                        .await
+                        .map_err(HummockError::object_io_error)?;
+                    let mut offset = 0;
+                    let mut blocks = vec![];
+                    for block_meta in &meta.block_metas {
+                        let end_offset = offset + block_meta.len as usize;
+                        let block = Block::decode(block_data.slice(offset..end_offset))?;
+                        blocks.push(Box::new(block));
+                        offset = end_offset;
+                    }
+                    blocks
+                } else {
+                    vec![]
+                };
                 let sst = Box::new(Sstable {
                     id: sst_id,
                     meta,
-                    blocks: vec![],
+                    blocks,
                 });
                 Ok((sst, size))
             })
@@ -384,5 +399,18 @@ impl TableAcessor for SstableStoreRef {
                 ))
             })??;
         Ok(entry)
+    }
+}
+
+pub type SstableStoreRef = Arc<SstableStore>;
+
+#[async_trait::async_trait]
+impl TableAcessor for SstableStoreRef {
+    async fn sstable(
+        &self,
+        sst_id: HummockSSTableId,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        self.load_table(sst_id, stats, false).await
     }
 }

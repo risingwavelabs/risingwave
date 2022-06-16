@@ -27,8 +27,10 @@ pub use backward_user::*;
 mod forward_merge;
 pub use forward_merge::*;
 pub mod forward_user;
+mod in_memory_iterator;
 mod merge_inner;
 pub use forward_user::*;
+pub use in_memory_iterator::{BackwardMemoryConcatIterator, InMemoryTableIterator};
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
 
 #[cfg(test)]

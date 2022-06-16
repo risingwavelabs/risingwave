@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use crate::hummock::iterator::concat_inner::ConcatIteratorInner;
-use crate::hummock::table_acessor::TableAcessor;
 use crate::hummock::BackwardSSTableIterator;
 
 /// Iterates backwards on multiple non-overlapping tables.

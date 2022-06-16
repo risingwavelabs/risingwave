@@ -1,6 +1,6 @@
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use crate::hummock::sstable_store::TableHolder;
+use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
@@ -11,4 +11,20 @@ pub trait TableAcessor: Clone + Sync + Send {
         sst_id: HummockSSTableId,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder>;
+}
+
+#[derive(Clone)]
+pub struct StorageTableAcessor {
+    store: SstableStoreRef,
+}
+
+#[async_trait::async_trait]
+impl TableAcessor for StorageTableAcessor {
+    async fn sstable(
+        &self,
+        sst_id: HummockSSTableId,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        self.store.load_table(sst_id, stats, true).await
+    }
 }

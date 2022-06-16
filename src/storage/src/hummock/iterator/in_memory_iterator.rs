@@ -2,16 +2,12 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::VersionedComparator;
 
-use crate::hummock::iterator::{Backward, HummockIterator, ReadOptions};
-use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::hummock::iterator::{Backward, ConcatIteratorInner, HummockIterator, ReadOptions};
+use crate::hummock::sstable_store::TableHolder;
+use crate::hummock::table_acessor::StorageTableAcessor;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{Block, BlockHolder, BlockIterator, HummockResult};
+use crate::hummock::{BlockHolder, BlockIterator, HummockResult, SSTableIteratorType};
 use crate::monitor::StoreLocalStatistic;
-
-pub struct InMemoryTable {
-    inner: TableHolder,
-    blocks: Vec<Box<Block>>,
-}
 
 pub struct InMemoryTableIterator {
     /// The iterator of the current block.
@@ -21,16 +17,16 @@ pub struct InMemoryTableIterator {
     cur_idx: usize,
 
     /// Reference to the table
-    table: InMemoryTable,
+    table: TableHolder,
 
     stats: StoreLocalStatistic,
 }
 
 impl InMemoryTableIterator {
-    pub fn new(table: InMemoryTable) -> Self {
+    pub fn new(table: TableHolder) -> Self {
         Self {
             block_iter: None,
-            cur_idx: table.blocks.len(),
+            cur_idx: table.value().blocks.len(),
             table,
             stats: StoreLocalStatistic::default(),
         }
@@ -38,10 +34,10 @@ impl InMemoryTableIterator {
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.table.blocks.len() as isize || idx < 0 {
+        if idx >= self.table.value().blocks.len() as isize || idx < 0 {
             self.block_iter = None;
         } else {
-            let block = BlockHolder::from_ref_block(&self.table.blocks[idx as usize]);
+            let block = BlockHolder::from_ref_block(&self.table.value().blocks[idx as usize]);
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
                 block_iter.seek_le(key);
@@ -90,14 +86,13 @@ impl HummockIterator for InMemoryTableIterator {
     /// Instead of setting idx to 0th block, a `BackwardSSTableIterator` rewinds to the last block
     /// in the table.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.table.inner.value().blocks.len() as isize - 1, None)
+        self.seek_idx(self.table.value().blocks.len() as isize - 1, None)
             .await
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self
             .table
-            .inner
             .value()
             .meta
             .block_metas
@@ -124,3 +119,17 @@ impl HummockIterator for InMemoryTableIterator {
         stats.add(&self.stats)
     }
 }
+
+impl SSTableIteratorType for InMemoryTableIterator {
+    type Accessor = StorageTableAcessor;
+
+    fn create(
+        table: TableHolder,
+        _sstable_store: Self::Accessor,
+        _read_options: Arc<ReadOptions>,
+    ) -> Self {
+        InMemoryTableIterator::new(table)
+    }
+}
+
+pub type BackwardMemoryConcatIterator = ConcatIteratorInner<InMemoryTableIterator>;
