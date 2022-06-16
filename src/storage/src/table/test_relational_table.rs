@@ -1833,6 +1833,7 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
         .batch_dedup_pk_iter(epoch, &pk_ordered_descs)
         .await
         .unwrap();
+    pin_mut!(iter);
 
     // ---------- Read + Deserialize from storage
     let expected_2 = Row(vec![
@@ -1840,7 +1841,7 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
         Some(22_i32.into()),
         Some(222_i32.into()),
     ]);
-    let actual_2 = iter.next().await.unwrap();
+    let actual_2 = iter.next_row().await.unwrap();
     assert!(actual_2.is_some());
     assert_eq!(actual_2.unwrap(), expected_2);
 
@@ -1849,7 +1850,7 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
         Some(11_i32.into()),
         Some(111_i32.into()),
     ]);
-    let actual_1 = iter.next().await.unwrap();
+    let actual_1 = iter.next_row().await.unwrap();
     assert!(actual_1.is_some());
     assert_eq!(actual_1.unwrap(), expected_1);
 }
