@@ -54,7 +54,10 @@ impl<S: StateStore> SourceStateHandler<S> {
     /// and needs to be invoked by the ``SourceReader`` to call it,
     /// and will return the error when the dependent ``StateStore`` handles the error.
     /// The caller should ensure that the passed parameters are not empty.
-    pub async fn take_snapshot(&self, states: Vec<SplitImpl>, epoch: u64) -> Result<()> {
+    pub async fn take_snapshot<SS>(&self, states: Vec<SS>, epoch: u64) -> Result<()>
+    where
+        SS: SplitMetaData,
+    {
         if states.is_empty() {
             // TODO should be a clear Error Code
             Err(anyhow!("states require not null"))
@@ -101,11 +104,10 @@ impl<S: StateStore> SourceStateHandler<S> {
         stream_source_split: &SplitImpl,
         epoch: u64,
     ) -> RwResult<Option<SplitImpl>> {
-        let connector_type = stream_source_split.get_type();
+        // let connector_type = stream_source_split.get_type();
         match self.restore_states(stream_source_split.id(), epoch).await {
             Ok(Some(s)) => Ok(Some(
-                SplitImpl::restore_from_bytes(connector_type, &s)
-                    .map_err(|e| internal_error(e.to_string()))?,
+                SplitImpl::restore_from_bytes(&s).map_err(|e| internal_error(e.to_string()))?,
             )),
             Ok(None) => Ok(None),
             Err(e) => Err(internal_error(e.to_string())),

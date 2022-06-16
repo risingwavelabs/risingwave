@@ -24,7 +24,7 @@ use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamC
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::state::SourceStateHandler;
-use risingwave_connector::{ConnectorState, SplitImpl};
+use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{channel, Receiver, UnboundedReceiver};

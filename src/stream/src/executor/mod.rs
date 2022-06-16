@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -28,7 +27,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
-use risingwave_connector::{ConnectorState, SplitImpl};
+use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
@@ -105,7 +104,7 @@ pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 
-pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
+pub trait MessageStream = futures::Stream<Item=MessageStreamItem> + Send;
 
 /// The maximum chunk length produced by executor at a time.
 const PROCESSING_WINDOW_SIZE: usize = 1024;
@@ -155,8 +154,8 @@ pub trait Executor: Send + 'static {
     }
 
     fn boxed(self) -> BoxedExecutor
-    where
-        Self: Sized + Send + 'static,
+        where
+            Self: Sized + Send + 'static,
     {
         Box::new(self)
     }
@@ -348,6 +347,7 @@ impl Mutation {
             ProstMutation::Stop(stop) => {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
             }
+
             ProstMutation::Update(update) => Mutation::UpdateOutputs(
                 update
                     .mutations
@@ -360,38 +360,34 @@ impl Mutation {
                     })
                     .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
             ),
-            ProstMutation::Add(adds) => Mutation::AddOutput(AddOutput {
-                map: adds
-                    .mutations
-                    .iter()
-                    .map(|mutation| {
-                        (
-                            (mutation.actor_id, mutation.dispatcher_id),
-                            mutation.get_info().clone(),
-                        )
-                    })
-                    .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
-                splits: adds
-                    .splits
-                    .iter()
-                    .map(|split| {
-                        (
-                            split.actor_id,
-                            split
-                                .source_splits
-                                .iter()
-                                .map(|s| {
-                                    SplitImpl::restore_from_bytes(
-                                        split.borrow().split_type.clone(),
-                                        s,
-                                    )
-                                    .unwrap()
-                                })
-                                .collect_vec(),
-                        )
-                    })
-                    .collect(),
-            }),
+            ProstMutation::Add(adds) => Some(
+                Mutation::AddOutput(AddOutput {
+                    map: adds
+                        .mutations
+                        .iter()
+                        .map(|mutation| {
+                            (
+                                (mutation.actor_id, mutation.dispatcher_id),
+                                mutation.get_info().clone(),
+                            )
+                        })
+                        .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
+                    splits: adds
+                        .splits
+                        .iter()
+                        .map(|split| {
+                            (
+                                split.actor_id,
+                                split
+                                    .source_splits
+                                    .iter()
+                                    .map(|s| SplitImpl::restore_from_bytes(s).unwrap())
+                                    .collect_vec(),
+                            )
+                        })
+                        .collect(),
+                })
+                    .into(), ),
             ProstMutation::Splits(s) => {
                 let mut change_splits: Vec<(ActorId, ConnectorState)> =
                     Vec::with_capacity(s.mutations.len());
@@ -402,12 +398,7 @@ impl Mutation {
                         let split_impl = change_split
                             .source_splits
                             .iter()
-                            .map(|split| {
-                                SplitImpl::restore_from_bytes(
-                                    change_split.split_type.clone(),
-                                    split,
-                                )
-                            })
+                            .map(|split| SplitImpl::restore_from_bytes(split))
                             .collect::<anyhow::Result<Vec<SplitImpl>>>()
                             .to_rw_result()?;
                         change_splits.push((change_split.actor_id, Some(split_impl)));
@@ -559,7 +550,7 @@ pub async fn expect_first_barrier(
 
 /// `StreamConsumer` is the last step in an actor.
 pub trait StreamConsumer: Send + 'static {
-    type BarrierStream: Stream<Item = Result<Barrier>> + Send;
+    type BarrierStream: Stream<Item=Result<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream;
 }

@@ -174,7 +174,7 @@ message MetaLeaseInfo {
 }
 
 message ConnectorSplit {
-  string type = 1;
+  string split_type = 1;
   bytes split = 2;
 }
 
