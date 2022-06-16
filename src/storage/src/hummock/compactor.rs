@@ -156,18 +156,16 @@ impl Compactor {
         for uncommitted_list in payload {
             let mut next_inner = HashSet::new();
             for uncommitted in uncommitted_list {
-                let batch = match &uncommitted {
-                    UncommittedData::Sst(_) => {
-                        panic!("expect UncommittedData::Batch")
-                    }
-                    UncommittedData::Batch(batch) => batch,
+                let compaction_group_id = match &uncommitted {
+                    UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
+                    UncommittedData::Batch(batch) => batch.compaction_group_id(),
                 };
                 let group = grouped_payload
-                    .entry(batch.compaction_group_id())
+                    .entry(compaction_group_id)
                     .or_insert_with(std::vec::Vec::new);
-                if !next_inner.contains(&batch.compaction_group_id()) {
+                if !next_inner.contains(&compaction_group_id) {
                     group.push(vec![]);
-                    next_inner.insert(batch.compaction_group_id());
+                    next_inner.insert(compaction_group_id);
                 }
                 group.last_mut().unwrap().push(uncommitted);
             }

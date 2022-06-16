@@ -21,7 +21,7 @@ use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockSSTableId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
@@ -41,10 +41,9 @@ use risingwave_pb::hummock::{
     GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot, HummockVersion,
     PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
     ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
-    ReportVacuumTaskResponse, SstableInfo, SubscribeCompactTasksRequest,
-    SubscribeCompactTasksResponse, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse,
-    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
-    VacuumTask,
+    ReportVacuumTaskResponse, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse,
+    UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse, UnpinSnapshotRequest,
+    UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse, VacuumTask,
 };
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -433,7 +432,7 @@ impl HummockMetaClient for MetaClient {
     async fn commit_epoch(
         &self,
         _epoch: HummockEpoch,
-        _sstables: Vec<(CompactionGroupId, SstableInfo)>,
+        _sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
         unimplemented!("Only meta service can commit_epoch in production.")
     }

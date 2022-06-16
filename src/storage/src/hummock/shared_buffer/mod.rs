@@ -24,7 +24,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_hummock_sdk::{is_remote_sst_id, CompactionGroupId};
+use risingwave_hummock_sdk::{is_remote_sst_id, LocalSstableInfo};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use self::shared_buffer_batch::SharedBufferBatch;
@@ -39,7 +39,7 @@ use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UncommittedData {
-    Sst((CompactionGroupId, SstableInfo)),
+    Sst(LocalSstableInfo),
     Batch(SharedBufferBatch),
 }
 
@@ -351,8 +351,8 @@ impl SharedBuffer {
     pub fn succeed_upload_task(
         &mut self,
         order_index: OrderIndex,
-        new_sst: Vec<(CompactionGroupId, SstableInfo)>,
-    ) -> Vec<(CompactionGroupId, SstableInfo)> {
+        new_sst: Vec<LocalSstableInfo>,
+    ) -> Vec<LocalSstableInfo> {
         let payload = self
             .uploading_tasks
             .remove(&order_index)
@@ -390,7 +390,7 @@ impl SharedBuffer {
         previous_sst
     }
 
-    pub fn get_ssts_to_commit(&self) -> Vec<(CompactionGroupId, SstableInfo)> {
+    pub fn get_ssts_to_commit(&self) -> Vec<LocalSstableInfo> {
         assert!(
             self.uploading_tasks.is_empty(),
             "when committing sst there should not be uploading task"

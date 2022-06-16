@@ -18,7 +18,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockSSTableId};
+use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, LocalSstableInfo};
 use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
@@ -30,7 +30,7 @@ use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
-pub fn to_grouped_sstable_info(ssts: &[SstableInfo]) -> Vec<(CompactionGroupId, SstableInfo)> {
+pub fn to_grouped_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
     ssts.iter()
         .map(|sst| (StaticCompactionGroupId::StateDefault.into(), sst.clone()))
         .collect_vec()

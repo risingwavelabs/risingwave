@@ -23,8 +23,8 @@ use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_pb::hummock::HummockVersion;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -387,10 +387,7 @@ impl LocalVersionManager {
         self.local_version.read().pinned_version().clone()
     }
 
-    pub fn get_uncommitted_ssts(
-        &self,
-        epoch: HummockEpoch,
-    ) -> Vec<(CompactionGroupId, SstableInfo)> {
+    pub fn get_uncommitted_ssts(&self, epoch: HummockEpoch) -> Vec<LocalSstableInfo> {
         self.local_version
             .read()
             .get_shared_buffer(epoch)

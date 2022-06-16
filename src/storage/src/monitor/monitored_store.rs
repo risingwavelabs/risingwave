@@ -18,8 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_common::consistent_hash::VNodeBitmap;
-use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -254,7 +253,7 @@ where
         }
     }
 
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<(CompactionGroupId, SstableInfo)> {
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.inner.get_uncommitted_ssts(epoch)
     }
 }

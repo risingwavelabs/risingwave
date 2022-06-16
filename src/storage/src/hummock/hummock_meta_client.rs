@@ -16,10 +16,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
-    VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
@@ -96,7 +95,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn commit_epoch(
         &self,
         _epoch: HummockEpoch,
-        _sstables: Vec<(CompactionGroupId, SstableInfo)>,
+        _sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
         Err(ErrorCode::NotImplemented("commit_epoch unsupported".to_string(), None.into()).into())
     }

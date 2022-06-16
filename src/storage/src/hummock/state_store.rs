@@ -21,8 +21,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
@@ -446,7 +445,7 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<(CompactionGroupId, SstableInfo)> {
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.local_version_manager.get_uncommitted_ssts(epoch)
     }
 }

@@ -22,11 +22,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
 use smallvec::SmallVec;
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -323,7 +322,7 @@ where
                     // We must ensure all epochs are committed in ascending order, because
                     // the storage engine will query from new to old in the order in which
                     // the L0 layer files are generated. see https://github.com/singularity-data/risingwave/issues/1251
-                    let synced_ssts: Vec<(CompactionGroupId, SstableInfo)> = resps
+                    let synced_ssts: Vec<LocalSstableInfo> = resps
                         .iter()
                         .flat_map(|resp| resp.sycned_sstables.clone())
                         .map(|grouped| {

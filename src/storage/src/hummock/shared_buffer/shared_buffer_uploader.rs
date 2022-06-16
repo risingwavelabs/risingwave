@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use futures::{FutureExt, StreamExt};
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::{get_local_sst_id, CompactionGroupId, HummockEpoch};
+use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::{mpsc, oneshot};
@@ -34,7 +34,7 @@ use crate::monitor::StateStoreMetrics;
 
 pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
 pub(crate) type UploadTaskResult =
-    BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<(CompactionGroupId, SstableInfo)>>>;
+    BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<LocalSstableInfo>>>;
 
 #[derive(Debug)]
 pub struct UploadTask {
@@ -169,7 +169,7 @@ impl SharedBufferUploader {
         _epoch: HummockEpoch,
         is_local: bool,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
+    ) -> HummockResult<Vec<LocalSstableInfo>> {
         if payload.is_empty() {
             return Ok(vec![]);
         }

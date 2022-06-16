@@ -17,8 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::consistent_hash::VNodeBitmap;
-use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::LocalSstableInfo;
 
 use crate::error::StorageResult;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
@@ -181,7 +180,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     }
 
     /// Gets `epoch`'s uncommitted `SSTables`.
-    fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<(CompactionGroupId, SstableInfo)> {
+    fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<LocalSstableInfo> {
         todo!()
     }
 }
