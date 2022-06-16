@@ -31,8 +31,6 @@ use super::cell_based_table::CellBasedTableExtended;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use super::mem_table::{MemTable, RowOp};
 use crate::cell_based_row_deserializer::{make_column_desc_index, ColumnDescMapping};
-use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::cell_serializer::CellSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 

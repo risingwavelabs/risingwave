@@ -416,7 +416,7 @@ impl<S: StateStore> LookupExecutor<S> {
         let mut all_rows = vec![];
 
         let prefix_datums = lookup_row.0.clone();
-        let prefix_mapping = vec![0];
+        let prefix_mapping = self.arrangement.key_indices.clone();
 
         for (pk_with_cell_id, cell) in all_cells {
             tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}", pk_with_cell_id, cell);
