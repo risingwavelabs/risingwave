@@ -5,9 +5,4 @@ statement ok
 SET QUERY_MODE TO distributed;
 
 
-include ./basic/boolean.slt.part
-include ./basic/const.slt.part
-include ./basic/query.slt.part
-include ./basic/join.slt.part
-include ./basic/range_scan.slt.part
-include ./basic/order_by.slt.part
+include ./basic/*.slt.part

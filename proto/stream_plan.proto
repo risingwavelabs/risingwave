@@ -96,18 +96,19 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
-  repeated uint32 distribution_keys = 5;
   // Whether to use delta join for this hash join node. When enabled, arrangement will be created
   // on-the-fly within the plan.
   // TODO: remove this in the future when we have a separate DeltaHashJoin node.
-  bool is_delta_join = 6;
+  bool is_delta_join = 5;
   // Used for internal table states. Id of the left table.
-  uint32 left_table_id = 7;
+  uint32 left_table_id = 6;
   // Used for internal table states. Id of the right table.
-  uint32 right_table_id = 8;
+  uint32 right_table_id = 7;
+  repeated uint32 dist_key_l = 8;
+  repeated uint32 dist_key_r = 9;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 9;
+  bool is_append_only = 10;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
