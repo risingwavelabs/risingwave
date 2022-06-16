@@ -18,15 +18,16 @@
 In RisingWave, all streaming executors store their data into a state store. As the state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. And the cell-based relational table provides the interface accessing relational data in KV. Therefore, relational table can be regared as the bridge between state-ful executors and state store.
 ## Architecture
 
-### API
-The cell-based relational table provides the table operations by 4 APIs: `get_row`, `insert_row`, `delete_row` and `update_row`.
-### Write Path
-### Read Path
-## Architecture
-
 Reading this document requires prior knowledge of LSM-Tree-based KV storage engines, like RocksDB, LevelDB, etc.
 
-![Overview of Architecture](images/state-store-overview/state-store-overview-01.svg)
+![Overview of Architecture](images/relational-table-layer/relational-table-01.svg)
+Relational table consists of State Table, Mem Table and Cell-based Table. The State Table provides the table operations by these APIs: `get_row`, `insert_row`, `delete_row` and `update_row`, the Mem Table
+is a buffer for modify operations without encoding, and the Cell-based Table is responsible for performing serialization and deserialization between cell-based encoding and KV encoding.
+
+
+### Write Path
+### Read Path
+
 
 Hummock consists of manager service on meta node, clients on worker nodes (including compute nodes, frontend nodes, and compactor nodes), and a shared storage to store files (SSTs). Every time a new write batch is produced, Hummock client will upload those files to shared storage, and notify the Hummock manager of the new data. With compaction going on, new files will be added and unused files will be vacuumed. The Hummock manager will take care of the lifecycle of a file — is a file is being used? can we delete a file? etc.
 
