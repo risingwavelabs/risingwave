@@ -67,13 +67,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_cache_manager() {
-        let tempdir = {
-            let ci_volume = PathBuf::from("/risingwave");
-            if ci_volume.exists() {
-                tempfile::Builder::new().tempdir_in(ci_volume).unwrap()
-            } else {
-                tempfile::tempdir().unwrap()
-            }
+        let ci: bool = std::env::var("RISINGWAVE_CI")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse()
+            .expect("env $RISINGWAVE_CI must be 'true' or 'false'");
+
+        let tempdir = if ci {
+            tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
+        } else {
+            tempfile::tempdir().unwrap()
         };
 
         let options = FileCacheManagerOptions {
