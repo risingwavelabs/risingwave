@@ -54,7 +54,7 @@ impl ManagedValueState {
             // View the state table as single-value table, and get the value via empty primary key
             // or group key.
             let raw_data = state_table
-                .get_row(pk.unwrap_or(&Row(vec![])), epoch)
+                .get_row(pk.unwrap_or(Row::empty()), epoch)
                 .await?;
 
             // According to row layout, the last field of the row is value and we sure the row is
@@ -116,7 +116,7 @@ impl ManagedValueState {
         // front of value). In this case, the pk is just group key.
 
         let mut v = vec![];
-        v.extend_from_slice(&self.pk.as_ref().unwrap_or(&Row(vec![])).0);
+        v.extend_from_slice(&self.pk.as_ref().unwrap_or(Row::empty()).0);
         v.push(self.state.get_output()?);
 
         state_table.insert(Row::new(v))?;

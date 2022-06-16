@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::marker::PhantomData;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use log::trace;
@@ -91,12 +93,7 @@ impl<S: StateStore> CellBasedTable<S> {
         ordered_row_serializer: Option<OrderedRowSerializer>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        let schema = Schema::new(
-            column_descs
-                .iter()
-                .map(|cd| Field::with_name(cd.data_type.clone(), cd.name.clone()))
-                .collect_vec(),
-        );
+        let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         let column_ids = generate_column_id(&column_descs);
 
         Self {
@@ -122,6 +119,10 @@ impl<S: StateStore> CellBasedTable<S> {
             Some(OrderedRowSerializer::new(order_types)),
             None,
         )
+    }
+
+    pub fn schema(&self) -> &Schema {
+        &self.schema
     }
 
     /// Get a single row by point get
@@ -306,28 +307,70 @@ impl<S: StateStore> CellBasedTable<S> {
     ) -> StorageResult<()> {
         self.batch_write_rows_inner::<false>(buffer, epoch).await
     }
+}
 
+pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
+pub type StreamingIter<S: StateStore> = impl PkAndRowStream;
+pub type BatchIter<S: StateStore> = impl PkAndRowStream;
+
+impl<S: StateStore> CellBasedTable<S> {
+    pub async fn streaming_iter_with_encoded_key_range<R, B>(
+        &self,
+        encoded_key_range: R,
+        epoch: u64,
+    ) -> StorageResult<StreamingIter<S>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        Ok(CellBasedIter::<_, STREAMING_ITER_TYPE>::new(
+            &self.keyspace,
+            self.mapping.clone(),
+            encoded_key_range,
+            epoch,
+        )
+        .await?
+        .into_stream())
+    }
+
+    pub async fn batch_iter_with_encoded_key_range<R, B>(
+        &self,
+        encoded_key_range: R,
+        epoch: u64,
+    ) -> StorageResult<BatchIter<S>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        Ok(CellBasedIter::<_, BATCH_ITER_TYPE>::new(
+            &self.keyspace,
+            self.mapping.clone(),
+            encoded_key_range,
+            epoch,
+        )
+        .await?
+        .into_stream())
+    }
+}
+
+/// Iterator functions.
+impl<S: StateStore> CellBasedTable<S> {
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    pub async fn iter(&self, epoch: u64) -> StorageResult<CellBasedTableRowIter<S>> {
-        CellBasedTableRowIter::new(&self.keyspace, self.mapping.clone(), epoch).await
+    pub async fn iter(&self, epoch: u64) -> StorageResult<BatchIter<S>> {
+        self.batch_iter_with_encoded_key_range::<_, &[u8]>(.., epoch)
+            .await
     }
 
     /// `dedup_pk_iter` should be used when pk is not persisted as value in storage.
     /// It will attempt to decode pk from key instead of cell value.
     /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/588>
-    pub async fn dedup_pk_iter(
+    pub async fn batch_dedup_pk_iter(
         &self,
         epoch: u64,
         // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
         pk_descs: &[OrderedColumnDesc],
-    ) -> StorageResult<DedupPkCellBasedTableRowIter<S>> {
-        DedupPkCellBasedTableRowIter::new(
-            self.keyspace.clone(),
-            self.mapping.clone(),
-            epoch,
-            pk_descs,
-        )
-        .await
+    ) -> StorageResult<()> {
+        todo!()
     }
 
     fn serialize_pk_bound(
@@ -377,12 +420,12 @@ impl<S: StateStore> CellBasedTable<S> {
         }
     }
 
-    pub async fn iter_with_pk_bounds(
+    pub async fn batch_iter_with_pk_bounds(
         &self,
         epoch: u64,
         pk_prefix: Row,
         next_col_bounds: impl RangeBounds<Datum>,
-    ) -> StorageResult<CellBasedTableRowIter<S>> {
+    ) -> StorageResult<BatchIter<S>> {
         let start_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.start_bound(), true);
         let end_key = self.serialize_pk_bound(&pk_prefix, next_col_bounds.end_bound(), false);
 
@@ -392,20 +435,15 @@ impl<S: StateStore> CellBasedTable<S> {
             end_key
         );
 
-        CellBasedTableRowIter::new_with_bounds(
-            &self.keyspace,
-            self.mapping.clone(),
-            (start_key, end_key),
-            epoch,
-        )
-        .await
+        self.batch_iter_with_encoded_key_range((start_key, end_key), epoch)
+            .await
     }
 
-    pub async fn iter_with_pk_prefix(
+    pub async fn batch_iter_with_pk_prefix(
         &self,
         epoch: u64,
         pk_prefix: Row,
-    ) -> StorageResult<CellBasedTableRowIter<S>> {
+    ) -> StorageResult<BatchIter<S>> {
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let prefix_serializer = pk_serializer.prefix(pk_prefix.size());
         let serialized_pk_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
@@ -417,102 +455,14 @@ impl<S: StateStore> CellBasedTable<S> {
             (key_range.start_bound(), key_range.end_bound())
         );
 
-        CellBasedTableRowIter::new_with_bounds(
-            &self.keyspace,
-            self.mapping.clone(),
-            key_range,
-            epoch,
-        )
-        .await
-    }
-
-    pub fn schema(&self) -> &Schema {
-        &self.schema
+        self.batch_iter_with_encoded_key_range(key_range, epoch)
+            .await
     }
 }
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
 }
-
-// (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
-// "RowTableIter" is reserved now
-pub struct CellBasedTableRowIter<S: StateStore> {
-    /// An iterator that returns raw bytes from storage.
-    iter: StripPrefixIterator<S::Iter>,
-
-    cell_based_row_deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
-}
-
-impl<S: StateStore> CellBasedTableRowIter<S> {
-    pub(super) async fn new(
-        keyspace: &Keyspace<S>,
-        table_descs: Arc<ColumnDescMapping>,
-        epoch: u64,
-    ) -> StorageResult<Self> {
-        Self::new_with_bounds::<_, &[u8]>(keyspace, table_descs, .., epoch).await
-    }
-
-    async fn new_with_bounds<R, B>(
-        keyspace: &Keyspace<S>,
-        table_descs: Arc<ColumnDescMapping>,
-        serialized_pk_bounds: R,
-        epoch: u64,
-    ) -> StorageResult<Self>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        keyspace.state_store().wait_epoch(epoch).await?;
-
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
-
-        let iter = keyspace
-            .iter_with_range(serialized_pk_bounds, epoch)
-            .await?;
-        let iter = Self {
-            iter,
-            cell_based_row_deserializer,
-        };
-        Ok(iter)
-    }
-
-    async fn next_pk_and_row(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
-        loop {
-            match self.iter.next().await? {
-                None => return Ok(self.cell_based_row_deserializer.take()),
-                Some((key, value)) => {
-                    tracing::trace!(
-                        target: "events::storage::CellBasedTable::scan",
-                        "CellBasedTable scanned key = {:?}, value = {:?}",
-                        key,
-                        value
-                    );
-                    let pk_and_row = self
-                        .cell_based_row_deserializer
-                        .deserialize(&key, &value)
-                        .map_err(err)?;
-                    match pk_and_row {
-                        Some(_) => return Ok(pk_and_row),
-                        None => {}
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
-    async fn next(&mut self) -> StorageResult<Option<Row>> {
-        self.next_pk_and_row()
-            .await
-            .map(|r| r.map(|(_pk, row)| row))
-    }
-}
-
-#[async_trait::async_trait]
-impl<S: StateStore> CellTableChunkIter for CellBasedTableRowIter<S> {}
 
 // Provides a layer on top of CellBasedTableRowIter
 // for decoding pk into its constituent datums in a row
@@ -522,8 +472,8 @@ impl<S: StateStore> CellTableChunkIter for CellBasedTableRowIter<S> {}
 // we can decode pk -> user_id, name,
 // and retrieve the row: |_| age |_|,
 // then fill in empty spots with datum decoded from pk: | user_id | age | name |
-pub struct DedupPkCellBasedTableRowIter<S: StateStore> {
-    inner: CellBasedTableRowIter<S>,
+pub struct DedupPkCellBasedTableRowIter<I> {
+    inner: I,
     pk_decoder: OrderedRowDeserializer,
 
     // Maps pk fields with:
@@ -532,15 +482,13 @@ pub struct DedupPkCellBasedTableRowIter<S: StateStore> {
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
-impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
+impl<I> DedupPkCellBasedTableRowIter<I> {
     pub async fn new(
-        keyspace: Keyspace<S>,
+        inner: I,
         table_descs: Arc<ColumnDescMapping>,
         epoch: u64,
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<Self> {
-        let inner = CellBasedTableRowIter::new(&keyspace, table_descs.clone(), epoch).await?;
-
         let (data_types, order_types) = pk_descs
             .iter()
             .map(|ordered_desc| {
@@ -579,9 +527,11 @@ impl<S: StateStore> DedupPkCellBasedTableRowIter<S> {
 }
 
 #[async_trait::async_trait]
-impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
-    async fn next(&mut self) -> StorageResult<Option<Row>> {
-        if let Some((pk_vec, Row(mut row_inner))) = self.inner.next_pk_and_row().await? {
+impl<I: PkAndRowStream + Unpin> TableIter for DedupPkCellBasedTableRowIter<I> {
+    async fn next_row(&mut self) -> StorageResult<Option<Row>> {
+        if let Some((pk_vec, Row(mut row_inner))) =
+            StreamExt::next(&mut self.inner).await.transpose()?
+        {
             let pk_decoded = self.pk_decoder.deserialize(&pk_vec).map_err(err)?;
             for (pk_idx, datum) in pk_decoded.into_vec().into_iter().enumerate() {
                 if let Some(row_idx) = self.pk_to_row_mapping[pk_idx] {
@@ -595,82 +545,35 @@ impl<S: StateStore> TableIter for DedupPkCellBasedTableRowIter<S> {
     }
 }
 
-#[async_trait::async_trait]
-impl<S: StateStore> CellTableChunkIter for DedupPkCellBasedTableRowIter<S> {}
-
-#[async_trait::async_trait]
-pub trait CellTableChunkIter: TableIter {
-    async fn collect_data_chunk(
-        &mut self,
-        schema: &Schema,
-        chunk_size: Option<usize>,
-    ) -> StorageResult<Option<DataChunk>> {
-        let mut builders = schema
-            .create_array_builders(chunk_size.unwrap_or(0))
-            .map_err(err)?;
-
-        let mut row_count = 0;
-        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
-            match self.next().await? {
-                Some(row) => {
-                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&datum).map_err(err)?;
-                    }
-                    row_count += 1;
-                }
-                None => break,
-            }
-        }
-
-        let chunk = {
-            let columns: Vec<Column> = builders
-                .into_iter()
-                .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
-                .try_collect()
-                .map_err(err)?;
-            DataChunk::new(columns, row_count)
-        };
-
-        if chunk.cardinality() == 0 {
-            Ok(None)
-        } else {
-            Ok(Some(chunk))
-        }
-    }
-}
+const STREAMING_ITER_TYPE: bool = true;
+const BATCH_ITER_TYPE: bool = false;
 
 /// [`CellBasedTableStreamingIter`] is used for streaming executor, and will not wait for epoch.
-pub struct CellBasedTableStreamingIter<S: StateStore> {
+struct CellBasedIter<S: StateStore, const ITER_TYPE: bool> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
-impl<S: StateStore> CellBasedTableStreamingIter<S> {
-    pub async fn new(
+impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
+    async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
-        epoch: u64,
-    ) -> StorageResult<Self> {
-        Self::new_with_bounds::<_, &[u8]>(keyspace, table_descs, .., epoch).await
-    }
-
-    pub async fn new_with_bounds<R, B>(
-        keyspace: &Keyspace<S>,
-        table_descs: Arc<ColumnDescMapping>,
-        serialized_pk_bounds: R,
+        encoded_key_range: R,
         epoch: u64,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
+        if ITER_TYPE == BATCH_ITER_TYPE {
+            keyspace.state_store().wait_epoch(epoch).await?;
+        }
+
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
-        let iter = keyspace
-            .iter_with_range(serialized_pk_bounds, epoch)
-            .await?;
+        let iter = keyspace.iter_with_range(encoded_key_range, epoch).await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,
@@ -682,13 +585,6 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     pub async fn into_stream(mut self) {
         while let Some((key, value)) = self.iter.next().await? {
-            tracing::trace!(
-                target: "events::storage::CellBasedTable::scan",
-                "CellBasedTable scanned key = {:?}, value = {:?}",
-                key,
-                value
-            );
-
             if let Some(pk_and_row) = self
                 .cell_based_row_deserializer
                 .deserialize(&key, &value)
@@ -701,5 +597,15 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         if let Some(pk_and_row) = self.cell_based_row_deserializer.take() {
             yield pk_and_row;
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl<S: PkAndRowStream + Unpin> TableIter for S {
+    async fn next_row(&mut self) -> StorageResult<Option<Row>> {
+        StreamExt::next(self)
+            .await
+            .transpose()
+            .map(|r| r.map(|(_pk, row)| row))
     }
 }
