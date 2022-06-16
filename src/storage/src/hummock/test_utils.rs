@@ -141,8 +141,23 @@ pub async fn gen_test_sstable_inner(
     policy: CachePolicy,
 ) -> Sstable {
     let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
-    let sst = Sstable { id: sst_id, meta };
-    sstable_store.put(sst.clone(), data, policy).await.unwrap();
+    let sst = Sstable {
+        id: sst_id,
+        meta: meta.clone(),
+        blocks: vec![],
+    };
+    sstable_store
+        .put(
+            Sstable {
+                id: sst_id,
+                meta,
+                blocks: vec![],
+            },
+            data,
+            policy,
+        )
+        .await
+        .unwrap();
     sst
 }
 

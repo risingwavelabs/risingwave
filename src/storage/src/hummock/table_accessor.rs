@@ -19,7 +19,7 @@ use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 #[async_trait::async_trait]
-pub trait TableAcessor: Clone + Sync + Send {
+pub trait TableAccessor: Clone + Sync + Send {
     async fn sstable(
         &self,
         sst_id: HummockSSTableId,
@@ -39,7 +39,7 @@ impl StorageTableAcessor {
 }
 
 #[async_trait::async_trait]
-impl TableAcessor for StorageTableAcessor {
+impl TableAccessor for StorageTableAcessor {
     async fn sstable(
         &self,
         sst_id: HummockSSTableId,

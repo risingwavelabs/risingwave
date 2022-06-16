@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
-use crate::hummock::table_acessor::TableAcessor;
+use crate::hummock::table_accessor::TableAccessor;
 use crate::hummock::{
     BlockHolder, BlockMeta, CachableEntry, HummockError, HummockResult, LruCache,
 };
@@ -286,7 +286,7 @@ impl SstableStore {
 pub type SstableStoreRef = Arc<SstableStore>;
 
 #[async_trait::async_trait]
-impl TableAcessor for SstableStoreRef {
+impl TableAccessor for SstableStoreRef {
     async fn sstable(
         &self,
         sst_id: HummockSSTableId,

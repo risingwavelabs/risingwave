@@ -27,6 +27,8 @@ use crate::hummock::iterator::{
     BoxedBackwardHummockIterator, BoxedForwardHummockIterator, ConcatIterator, Forward,
     HummockIterator, MergeIterator, ReadOptions, UserIterator,
 };
+#[cfg(feature = "failpoints")]
+use crate::hummock::table_accessor::TableAccessor;
 use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::{BackwardSSTableIterator, SSTableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};

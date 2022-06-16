@@ -18,7 +18,7 @@ use risingwave_hummock_sdk::VersionedComparator;
 
 use crate::hummock::iterator::{ConcatIteratorInner, Forward, HummockIterator, ReadOptions};
 use crate::hummock::sstable_store::TableHolder;
-use crate::hummock::table_acessor::StorageTableAcessor;
+use crate::hummock::table_accessor::StorageTableAcessor;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, HummockResult, SSTableIteratorType};
 use crate::monitor::StoreLocalStatistic;

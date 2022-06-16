@@ -22,7 +22,7 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::hummock::iterator::{
     DirectionEnum, HummockIterator, HummockIteratorDirection, ReadOptions,
 };
-use crate::hummock::table_acessor::TableAcessor;
+use crate::hummock::table_accessor::TableAccessor;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableIteratorType};
 use crate::monitor::StoreLocalStatistic;

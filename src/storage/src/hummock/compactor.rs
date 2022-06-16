@@ -46,7 +46,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
-use crate::hummock::table_acessor::{StorageTableAcessor, TableAcessor};
+use crate::hummock::table_accessor::{StorageTableAcessor, TableAccessor};
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{CachePolicy, HummockError};

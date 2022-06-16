@@ -39,8 +39,8 @@ pub struct BlockHolder {
 }
 
 impl BlockHolder {
-    pub fn from_ref_block(block: &Box<Block>) -> Self {
-        let ptr = block.as_ref() as *const _;
+    pub fn from_ref_block(block: &Block) -> Self {
+        let ptr = block as *const _;
         Self {
             _handle: BlockEntry::RefEntry,
             block: ptr,

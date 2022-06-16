@@ -38,7 +38,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
 };
-use crate::hummock::table_acessor::TableAcessor;
+use crate::hummock::table_accessor::TableAccessor;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
