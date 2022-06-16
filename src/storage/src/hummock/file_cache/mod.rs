@@ -32,7 +32,9 @@ where
 ///
 /// Can be determined using `ioctl(2)` `BLKSSZGET` operation or from the sheel using the command:
 ///
-///     `blockdev --getss`.
+/// ```bash
+///     blockdev --getss
+/// ```
 ///
 /// For more details, see man open(2) NOTES section.
 const LOGICAL_BLOCK_SIZE: usize = 512;
