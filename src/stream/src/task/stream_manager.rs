@@ -714,8 +714,7 @@ impl LocalStreamManagerCore {
     fn drop_actor(&mut self, actor_id: ActorId) {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
-        self.actor_monitor_tasks.get(&actor_id).unwrap().abort();
-        self.actor_monitor_tasks.remove(&actor_id);
+        self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
@@ -727,8 +726,7 @@ impl LocalStreamManagerCore {
     fn drop_all_actors(&mut self) {
         for (actor_id, handle) in self.handles.drain() {
             self.context.retain(|&(up_id, _)| up_id != actor_id);
-            self.actor_monitor_tasks.get(&actor_id).unwrap().abort();
-            self.actor_monitor_tasks.remove(&actor_id);
+            self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
             self.actors.remove(&actor_id);
             // Task should have already stopped when this method is invoked.
             handle.abort();
