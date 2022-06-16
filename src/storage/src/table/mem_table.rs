@@ -96,12 +96,38 @@ impl MemTable {
                         old_value
                     );
                 }
-                x @ RowOp::Update(_) => {
-                    if let RowOp::Update(ref mut value) = x {
-                        let (original_old_value, original_new_value) = std::mem::take(value);
-                        debug_assert_eq!(original_new_value, old_value);
-                        e.insert(RowOp::Delete(original_old_value));
-                    }
+                RowOp::Update(value) => {
+                    let (original_old_value, original_new_value) = std::mem::take(value);
+                    debug_assert_eq!(original_new_value, old_value);
+                    e.insert(RowOp::Delete(original_old_value));
+                }
+            },
+        }
+        Ok(())
+    }
+
+    pub fn update(&mut self, pk: Vec<u8>, old_value: Row, new_value: Row) -> StorageResult<()> {
+        let entry = self.buffer.entry(pk);
+        match entry {
+            Entry::Vacant(e) => {
+                e.insert(RowOp::Update((old_value, new_value)));
+            }
+            Entry::Occupied(mut e) => match e.get_mut() {
+                RowOp::Insert(original_value) => {
+                    debug_assert_eq!(original_value, &old_value);
+                    e.insert(RowOp::Update((old_value, new_value)));
+                }
+                RowOp::Delete(_) => {
+                    panic!(
+                        "invalid flush status: double delete {:?} -> {:?}",
+                        e.key(),
+                        old_value
+                    );
+                }
+                RowOp::Update(value) => {
+                    let (original_old_value, original_new_value) = std::mem::take(value);
+                    debug_assert_eq!(original_new_value, old_value);
+                    e.insert(RowOp::Update((original_old_value, new_value)));
                 }
             },
         }

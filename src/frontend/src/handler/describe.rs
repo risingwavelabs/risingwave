@@ -25,10 +25,7 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
-pub async fn handle_describe(
-    context: OptimizerContext,
-    table_name: ObjectName,
-) -> Result<PgResponse> {
+pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<PgResponse> {
     let session = context.session_ctx;
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
