@@ -1450,6 +1450,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "doc-comment"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2822,6 +2828,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ntapi"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c28774a7fd2fbb4f0babd8237ce554b73af68021b5f695a3cebd6c59bac0980f"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3949,6 +3964,7 @@ dependencies = [
  "memcomparable",
  "more-asserts",
  "num-traits",
+ "num_cpus",
  "paste",
  "prometheus",
  "prost",
@@ -3958,6 +3974,7 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.3",
+ "sysinfo",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -5120,6 +5137,22 @@ dependencies = [
  "quote",
  "syn",
  "unicode-xid",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.16.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "567e910ef0207be81a4e1bb0491e9a8d9866cf45b20fe1a52c03d347da9ea51b"
+dependencies = [
+ "cfg-if 1.0.0",
+ "core-foundation-sys",
+ "doc-comment",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "rayon",
+ "winapi",
 ]
 
 [[package]]

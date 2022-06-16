@@ -23,6 +23,7 @@ lru = { git = "https://github.com/singularity-data/lru-rs.git", rev = "e0e9ddaf8
 madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.3"
+num_cpus = "1"
 num-traits = "0.2"
 paste = "1"
 prometheus = { version = "0.13" }
@@ -32,6 +33,7 @@ rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 spin = "0.9"
+sysinfo = "0.16"
 thiserror = "1"
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"
