@@ -50,6 +50,7 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<Dat
 /// Infer the return type name without parameters like length or precision.
 fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Result<DataTypeName> {
     FUNC_SIG_MAP
+        .0
         .get(&FuncSign::new(func_type, inputs_type.clone()))
         .cloned()
         .ok_or_else(|| {
@@ -72,21 +73,21 @@ impl FuncSign {
     }
 }
 
-fn build_binary_cmp_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
-    exprs: &[ExprType],
-    args: &[DataTypeName],
-) {
+#[derive(Default)]
+struct FuncSigMap(HashMap<FuncSign, DataTypeName>);
+impl FuncSigMap {
+    fn insert(&mut self, func_sig: FuncSign, ret: DataTypeName) {
+        self.0.insert(func_sig, ret);
+    }
+}
+
+fn build_binary_cmp_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
     for (e, lt, rt) in iproduct!(exprs, args, args) {
         map.insert(FuncSign::new(*e, vec![*lt, *rt]), DataTypeName::Boolean);
     }
 }
 
-fn build_binary_atm_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
-    exprs: &[ExprType],
-    args: &[DataTypeName],
-) {
+fn build_binary_atm_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
     for e in exprs {
         for (li, lt) in args.iter().enumerate() {
             for (ri, rt) in args.iter().enumerate() {
@@ -97,18 +98,14 @@ fn build_binary_atm_funcs(
     }
 }
 
-fn build_unary_atm_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
-    exprs: &[ExprType],
-    args: &[DataTypeName],
-) {
+fn build_unary_atm_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
     for (e, arg) in iproduct!(exprs, args) {
         map.insert(FuncSign::new(*e, vec![*arg]), *arg);
     }
 }
 
 fn build_commutative_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
+    map: &mut FuncSigMap,
     expr: ExprType,
     arg0: DataTypeName,
     arg1: DataTypeName,
@@ -118,7 +115,7 @@ fn build_commutative_funcs(
     map.insert(FuncSign::new(expr, vec![arg1, arg0]), ret);
 }
 
-fn build_round_funcs(map: &mut HashMap<FuncSign, DataTypeName>, expr: ExprType) {
+fn build_round_funcs(map: &mut FuncSigMap, expr: ExprType) {
     map.insert(
         FuncSign::new(expr, vec![DataTypeName::Float64]),
         DataTypeName::Float64,
@@ -134,9 +131,9 @@ fn build_round_funcs(map: &mut HashMap<FuncSign, DataTypeName>, expr: ExprType) 
 /// compatible with more than one type.
 /// Type signatures and arities of variadic functions are checked
 /// [elsewhere](crate::expr::FunctionCall::new).
-fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
+fn build_type_derive_map() -> FuncSigMap {
     use {DataTypeName as T, ExprType as E};
-    let mut map = HashMap::new();
+    let mut map = FuncSigMap::default();
     let all_types = [
         T::Boolean,
         T::Int16,
@@ -322,7 +319,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
 }
 
 lazy_static::lazy_static! {
-    static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
+    static ref FUNC_SIG_MAP: FuncSigMap = {
         build_type_derive_map()
     };
 }
