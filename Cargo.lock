@@ -4594,6 +4594,7 @@ dependencies = [
  "static_assertions",
  "stats_alloc",
  "thiserror",
+ "tokio-metrics",
  "tokio-stream",
  "tower",
  "tracing",
@@ -5351,6 +5352,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-metrics"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcb585a0069b53171684e22d5255984ec30d1c7304fd0a4a9a603ffd8c765cdd"
+dependencies = [
+ "futures-util",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-native-tls"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6004,10 +6016,7 @@ dependencies = [
  "bytes",
  "cc",
  "chrono",
- "crossbeam-channel",
  "crossbeam-deque",
- "crossbeam-utils 0.7.2",
- "crossbeam-utils 0.8.8",
  "digest",
  "either",
  "fail",
@@ -6046,7 +6055,6 @@ dependencies = [
  "smallvec",
  "socket2",
  "syn",
- "time 0.3.9",
  "tokio",
  "tokio-stream",
  "tokio-util",

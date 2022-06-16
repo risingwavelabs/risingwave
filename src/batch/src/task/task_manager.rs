@@ -98,7 +98,6 @@ impl BatchManager {
 
     pub fn take_output(&self, output_id: &ProstTaskOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
-        debug!("Trying to take output of: {:?}", output_id);
         self.tasks
             .lock()
             .get(&task_id)

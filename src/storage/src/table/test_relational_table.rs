@@ -1716,11 +1716,7 @@ async fn test_state_table_iter_with_prefix() {
         .unwrap();
     let epoch = u64::MAX;
     let pk_prefix = Row(vec![Some(1_i32.into())]);
-    let prefix_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
-    let iter = state
-        .iter_with_pk_prefix(&pk_prefix, prefix_serializer, epoch)
-        .await
-        .unwrap();
+    let iter = state.iter_with_pk_prefix(&pk_prefix, epoch).await.unwrap();
     pin_mut!(iter);
 
     // this row exists in both mem_table and cell_based_table
