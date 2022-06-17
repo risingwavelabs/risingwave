@@ -4486,6 +4486,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_sqlsmith"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "lazy_static",
+ "madsim",
+ "madsim-tokio",
+ "rand 0.8.5",
+ "risingwave_frontend",
+ "risingwave_pb",
+ "risingwave_sqlparser",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_storage"
 version = "0.1.9"
 dependencies = [

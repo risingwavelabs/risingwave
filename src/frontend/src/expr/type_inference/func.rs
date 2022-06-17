@@ -18,7 +18,7 @@ use itertools::iproduct;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{name_of, DataTypeName};
+use super::DataTypeName;
 use crate::expr::ExprType;
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -26,7 +26,7 @@ use crate::expr::ExprType;
 pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
-    let input_type_names = inputs_type.iter().map(name_of).collect();
+    let input_type_names = inputs_type.iter().map(DataTypeName::from).collect();
     infer_type_name(func_type, input_type_names).map(|type_name| match type_name {
         DataTypeName::Boolean => DataType::Boolean,
         DataTypeName::Int16 => DataType::Int16,
@@ -58,10 +58,10 @@ fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Resul
         })
 }
 
-#[derive(PartialEq, Hash)]
-struct FuncSign {
-    func: ExprType,
-    inputs_type: Vec<DataTypeName>,
+#[derive(PartialEq, Hash, Clone)]
+pub struct FuncSign {
+    pub func: ExprType,
+    pub inputs_type: Vec<DataTypeName>,
 }
 
 impl Eq for FuncSign {}
@@ -325,6 +325,11 @@ lazy_static::lazy_static! {
     static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
         build_type_derive_map()
     };
+}
+
+/// The table of function signatures.
+pub fn func_sig_map() -> &'static HashMap<FuncSign, DataTypeName> {
+    &*FUNC_SIG_MAP
 }
 
 #[cfg(test)]

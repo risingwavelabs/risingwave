@@ -1,0 +1,24 @@
+[package]
+name = "risingwave_sqlsmith"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { version = "1", features = ["backtrace"] }
+lazy_static = "1"
+rand = "0.8"
+risingwave_frontend = { path = "../../frontend" }
+risingwave_pb = { path = "../../prost" }
+risingwave_sqlparser = { path = "../../sqlparser" }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+madsim = "=0.2.0-alpha.3"
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+] }
+chrono = "0.4"
