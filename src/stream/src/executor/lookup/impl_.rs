@@ -20,7 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::dedup_pk_cell_based_row_deserializer::make_cell_based_row_deserializer;
+use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -168,7 +168,7 @@ impl<S: StateStore> LookupExecutor<S> {
         let arrangement_order_types = arrangement_order_rules
             .iter()
             .map(|x| x.order_type)
-            .collect_vec();
+            .collect();
 
         // check whether join keys are of the same length.
         assert_eq!(
@@ -216,16 +216,11 @@ impl<S: StateStore> LookupExecutor<S> {
                 col_types: stream_datatypes,
             },
             arrangement: ArrangeJoinSide {
-                pk_indices: arrangement_pk_indices.clone(),
-                col_types: arrangement_datatypes.clone(),
+                pk_indices: arrangement_pk_indices,
+                col_types: arrangement_datatypes,
                 // special thing about this pair of serializer and deserializer: the serializer only
                 // serializes join key, while the deserializer will take join key + pk into account.
-                deserializer: make_cell_based_row_deserializer(
-                    arrangement_col_descs.clone(),
-                    arrangement_order_types.clone(),
-                    arrangement_datatypes,
-                    arrangement_pk_indices,
-                ),
+                deserializer: make_cell_based_row_deserializer(arrangement_col_descs.clone()),
                 serializer: OrderedRowSerializer::new(arrangement_order_types),
                 col_descs: arrangement_col_descs,
                 order_rules: arrangement_order_rules,
@@ -413,27 +408,18 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let mut all_rows = vec![];
 
-        let prefix_datums = lookup_row.0.clone();
-        let prefix_mapping = self.arrangement.key_indices.clone();
-
         for (pk_with_cell_id, cell) in all_cells {
             tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}", pk_with_cell_id, cell);
-            if let Some((_, mut row)) = self
+            if let Some((_, row)) = self
                 .arrangement
                 .deserializer
                 .deserialize(&pk_with_cell_id, &cell)?
             {
-                for (i, d) in prefix_mapping.iter().zip_eq(prefix_datums.iter()) {
-                    row.0[*i] = d.clone();
-                }
                 all_rows.push(row);
             }
         }
 
-        if let Some((_, mut last_row)) = self.arrangement.deserializer.take() {
-            for (i, d) in prefix_mapping.iter().zip_eq(prefix_datums.iter()) {
-                last_row.0[*i] = d.clone();
-            }
+        if let Some((_, last_row)) = self.arrangement.deserializer.take() {
             all_rows.push(last_row);
         }
 

@@ -23,7 +23,7 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::dedup_pk_cell_based_row_deserializer::{
+use risingwave_storage::cell_based_row_deserializer::{
     CellBasedRowDeserializer, ColumnDescMapping,
 };
 use risingwave_storage::{Keyspace, StateStore};

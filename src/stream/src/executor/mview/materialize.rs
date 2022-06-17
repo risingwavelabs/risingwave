@@ -21,7 +21,7 @@ use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::dedup_pk_state_table::DedupPkStateTable;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::error::StreamExecutorError;
@@ -33,7 +33,7 @@ use crate::executor::{
 pub struct MaterializeExecutor<S: StateStore> {
     input: BoxedExecutor,
 
-    state_table: DedupPkStateTable<S>,
+    state_table: StateTable<S>,
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
@@ -75,7 +75,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             .collect_vec();
         Self {
             input,
-            state_table: DedupPkStateTable::new_dedup_pk_state_table(
+            state_table: StateTable::new(
                 keyspace,
                 column_descs,
                 arrange_order_types,
