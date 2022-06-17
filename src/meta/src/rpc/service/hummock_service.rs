@@ -244,6 +244,7 @@ where
             ..Default::default()
         };
 
+        // rewrite the key_range
         match request.key_range {
             Some(key_range) => {
                 option.key_range = key_range;
@@ -266,6 +267,12 @@ where
         {
             option.internal_table_id = HashSet::from_iter(table_frgament.internal_table_ids());
         }
+
+        tracing::info!(
+            "Try trigger_manual_compaction compaction_group_id {} option {:?}",
+            compaction_group_id,
+            &option
+        );
 
         let result_state = match self
             .hummock_manager
