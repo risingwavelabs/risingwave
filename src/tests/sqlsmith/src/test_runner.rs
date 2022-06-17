@@ -14,8 +14,9 @@
 
 #[cfg(test)]
 mod tests {
-    use risingwave_frontend::handler::query::handle_query;
-    use risingwave_frontend::session::OptimizerContext;
+    use risingwave_frontend::binder::Binder;
+    use risingwave_frontend::planner::Planner;
+    use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
     use risingwave_frontend::test_utils::LocalFrontend;
     use risingwave_frontend::FrontendOpts;
     use risingwave_sqlparser::ast::Statement;
@@ -30,17 +31,30 @@ mod tests {
 
         let mut sql_gen = SqlGenerator::new(vec![]);
 
-        for _ in 0..1000 {
+        for _ in 0..5000 {
             let sql = sql_gen.gen();
 
             // The generated SQL must be parsable.
             let statements =
                 Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
             let stmt = statements[0].clone();
-            let context = OptimizerContext::new(session.clone());
+            let context: OptimizerContextRef = OptimizerContext::new(session.clone()).into();
             match stmt.clone() {
                 Statement::Query(_) => {
-                    let _ = handle_query(context, stmt).await;
+                    let mut binder = Binder::new(
+                        session.env().catalog_reader().read_guard(),
+                        session.database().to_string(),
+                    );
+                    let bound = match binder.bind(stmt.clone()) {
+                        Ok(bound) => bound,
+                        Err(_) => continue,
+                    };
+                    let mut planner = Planner::new(context.clone());
+                    let logical_plan = match planner.plan(bound) {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    let _ = logical_plan.gen_batch_query_plan();
                 }
                 _ => unreachable!(),
             }

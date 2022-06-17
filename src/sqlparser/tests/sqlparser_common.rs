@@ -505,6 +505,8 @@ fn parse_compound_expr_1() {
     use self::BinaryOperator::*;
     use self::Expr::*;
     let sql = "a + b * c";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("a + (b * c)", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(Identifier(Ident::new("a"))),
@@ -515,7 +517,7 @@ fn parse_compound_expr_1() {
                 right: Box::new(Identifier(Ident::new("c")))
             })
         },
-        verified_expr(sql)
+        ast
     );
 }
 
@@ -524,6 +526,8 @@ fn parse_compound_expr_2() {
     use self::BinaryOperator::*;
     use self::Expr::*;
     let sql = "a * b + c";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("(a * b) + c", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(BinaryOp {
@@ -534,7 +538,7 @@ fn parse_compound_expr_2() {
             op: Plus,
             right: Box::new(Identifier(Ident::new("c")))
         },
-        verified_expr(sql)
+        ast
     );
 }
 

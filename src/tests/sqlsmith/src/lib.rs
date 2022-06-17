@@ -111,7 +111,7 @@ impl SqlGenerator {
         ]
         .choose(&mut self.rng)
         .unwrap();
-        let items_num = self.rng.gen_range(1..=5);
+        let items_num = self.rng.gen_range(1..=1);
         (0..items_num)
             .map(|i| SelectItem::ExprWithAlias {
                 expr: self.gen_expr(ret_type),

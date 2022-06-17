@@ -20,7 +20,10 @@ use rand::distributions::Alphanumeric;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::{func_sig_map, DataTypeName, ExprType, FuncSign};
-use risingwave_sqlparser::ast::{BinaryOperator, DataType, Expr, Value};
+use risingwave_sqlparser::ast::{
+    BinaryOperator, DataType, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
+    TrimWhereField, Value,
+};
 
 use crate::SqlGenerator;
 
@@ -41,7 +44,9 @@ fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
 impl SqlGenerator {
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName) -> Expr {
         match self.rng.gen_range(0..=99) {
-            0..=49 => self.gen_func(typ),
+            0..=49 => self
+                .gen_func(typ)
+                .unwrap_or_else(|| self.gen_simple_scalar(typ)),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
             50..=99 => self.gen_simple_scalar(typ),
@@ -49,35 +54,47 @@ impl SqlGenerator {
         }
     }
 
-    fn gen_func(&mut self, ret: DataTypeName) -> Expr {
+    fn gen_func(&mut self, ret: DataTypeName) -> Option<Expr> {
         let funcs = match FUNC_TABLE.get(&ret) {
-            None => return sql_null(),
+            None => return None,
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
         let exprs: Vec<Expr> = func.inputs_type.iter().map(|t| self.gen_expr(*t)).collect();
         if exprs.len() == 2 {
-            make_bin_op(func.func, exprs)
+            make_bin_expr(func.func, exprs)
         } else {
-            Expr::Value(Value::Null)
+            // Temporary hack to use scalar value for a function.
+            Some(self.gen_simple_scalar(ret))
         }
     }
 
     fn gen_simple_scalar(&mut self, typ: DataTypeName) -> Expr {
         use DataTypeName as T;
         match typ {
-            T::Int32 | T::Int16 | T::Int64 => {
-                Expr::Value(Value::Number(self.rng.gen_range(0..100).to_string(), false))
-            }
+            T::Int64 => Expr::Value(Value::Number(self.rng.gen_range(0..100).to_string(), false)),
+            T::Int32 => Expr::TypedString {
+                data_type: DataType::Int(None),
+                value: self.gen_int(),
+            },
+            T::Int16 => Expr::TypedString {
+                data_type: DataType::SmallInt(None),
+                value: self.gen_int(),
+            },
             T::Varchar => Expr::Value(Value::SingleQuotedString(
                 (0..10)
                     .map(|_| self.rng.sample(Alphanumeric) as char)
                     .collect(),
             )),
-            T::Decimal | T::Float64 | T::Float32 => Expr::Value(Value::Number(
-                self.rng.gen_range(0.0..99.9).to_string(),
-                false,
-            )),
+            T::Decimal => Expr::Value(Value::Number(self.gen_float(), false)),
+            T::Float64 => Expr::TypedString {
+                data_type: DataType::Float(None),
+                value: self.gen_float(),
+            },
+            T::Float32 => Expr::TypedString {
+                data_type: DataType::Real,
+                value: self.gen_float(),
+            },
             T::Boolean => Expr::Value(Value::Boolean(self.rng.gen_bool(0.5))),
             T::Date => Expr::TypedString {
                 data_type: DataType::Date,
@@ -95,8 +112,16 @@ impl SqlGenerator {
                 data_type: DataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             },
-            _ => Expr::Value(Value::Null),
+            _ => sql_null(),
         }
+    }
+
+    fn gen_int(&mut self) -> String {
+        self.rng.gen_range(0..100).to_string()
+    }
+
+    fn gen_float(&mut self) -> String {
+        self.rng.gen_range(0.0..100.0).to_string()
     }
 
     fn gen_temporal_scalar(&mut self, typ: DataTypeName) -> String {
@@ -114,7 +139,46 @@ impl SqlGenerator {
     }
 }
 
-fn make_bin_op(func: ExprType, exprs: Vec<Expr>) -> Expr {
+fn make_bin_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
+    use ExprType as E;
+
+    let expr = match func {
+        E::Trim => Some(Expr::Trim {
+            expr: Box::new(exprs[0].clone()),
+            trim_where: Some((TrimWhereField::Both, Box::new(exprs[1].clone()))),
+        }),
+        E::Ltrim => Some(Expr::Trim {
+            expr: Box::new(exprs[0].clone()),
+            trim_where: Some((TrimWhereField::Leading, Box::new(exprs[1].clone()))),
+        }),
+        E::Rtrim => Some(Expr::Trim {
+            expr: Box::new(exprs[0].clone()),
+            trim_where: Some((TrimWhereField::Trailing, Box::new(exprs[1].clone()))),
+        }),
+        E::Position => Some(Expr::Function(make_func("position", exprs.clone()))),
+        E::RoundDigit => Some(Expr::Function(make_func("round", exprs.clone()))),
+        _ => None,
+    };
+    match expr {
+        Some(expr) => Some(expr),
+        None => make_bin_op(func, exprs),
+    }
+}
+
+fn make_func(func_name: &str, exprs: Vec<Expr>) -> Function {
+    let args = exprs
+        .iter()
+        .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
+        .collect();
+    Function {
+        name: ObjectName(vec![Ident::new(func_name)]),
+        args,
+        over: None,
+        distinct: false,
+    }
+}
+
+fn make_bin_op(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
     use {BinaryOperator as B, ExprType as E};
     let bin_op = match func {
         E::Add => B::Plus,
@@ -136,15 +200,13 @@ fn make_bin_op(func: ExprType, exprs: Vec<Expr>) -> Expr {
         E::BitwiseXor => B::PGBitwiseXor,
         E::BitwiseShiftLeft => B::PGBitwiseShiftLeft,
         E::BitwiseShiftRight => B::PGBitwiseShiftRight,
-        _ => {
-            return Expr::Value(Value::Null);
-        }
+        _ => return None,
     };
-    Expr::BinaryOp {
+    Some(Expr::BinaryOp {
         left: Box::new(exprs[0].clone()),
         op: bin_op,
         right: Box::new(exprs[1].clone()),
-    }
+    })
 }
 
 fn sql_null() -> Expr {
