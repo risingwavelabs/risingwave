@@ -45,7 +45,7 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         && inputs.len() == 1
         && inputs[0].is_null()
     {
-        return Ok((inputs, DataType::Boolean));
+        // return Ok((inputs, DataType::Boolean));
     }
 
     let candidates = FUNC_SIG_MAP
@@ -67,7 +67,9 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
             (false, false) => None,
         };
         if let Some(t) = t {
-            let exact = candidates.iter().find(|(ps, _ret)| ps[0] == t && ps[1] == t);
+            let exact = candidates
+                .iter()
+                .find(|(ps, _ret)| ps[0] == t && ps[1] == t);
             if let Some((_ps, ret)) = exact {
                 return Ok((inputs, ret.clone()));
             }
@@ -123,8 +125,9 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
             best_candidate.push((param_types, ret));
         }
     }
-    match &best_candidate[..] {
-        [] => Err(ErrorCode::NotImplemented(
+
+    if best_candidate.is_empty() {
+        return Err(ErrorCode::NotImplemented(
             format!(
                 "{:?}{:?}",
                 func_type,
@@ -132,7 +135,72 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
             ),
             112.into(),
         )
-        .into()),
+        .into());
+    }
+
+    let mut ets = Vec::new();
+    for (i, arg) in inputs.iter().enumerate() {
+        if !arg.is_null() {
+            continue;
+        }
+        let mut t = Some(&best_candidate[0].0[i]);
+        for (ps, _ret) in &best_candidate[1..] {
+            let tc = &ps[i];
+            if tc == &DataType::Varchar {
+                t = Some(&DataType::Varchar);
+            } else if let Some(tt) = t {
+                if tt == &DataType::Varchar {
+                } else if tt == tc {
+                } else if cast_ok(tt, tc, &CastContext::Implicit) {
+                    t = Some(tc);
+                } else if cast_ok(tc, tt, &CastContext::Implicit) {
+                } else {
+                    t = None;
+                }
+            }
+        }
+        if let Some(t) = t {
+            ets.push(t);
+        } else {
+            break;
+        }
+    }
+    let cands_temp = best_candidate
+        .iter()
+        .filter(|(ps, _ret)| {
+            let mut ets_iter = ets.iter();
+            for (i, p) in ps.iter().enumerate() {
+                if !inputs[i].is_null() {
+                    continue;
+                }
+                let Some(t) = ets_iter.next() else {return false};
+                if matches!(
+                    t,
+                    DataType::Boolean
+                        | DataType::Float64
+                        | DataType::Varchar
+                        | DataType::Timestampz
+                        | DataType::Interval
+                ) {
+                    if p != *t {
+                        return false;
+                    }
+                } else {
+                    if !cast_ok(p, t, &CastContext::Implicit) {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect_vec();
+    if !cands_temp.is_empty() {
+        best_candidate = cands_temp;
+    }
+
+    match &best_candidate[..] {
+        [] => unreachable!(),
         [(_ps, ret)] => Ok((inputs, (*ret).clone())),
         _ => Err(ErrorCode::BindError(format!(
             "multi func match: {:?} {:?}",
