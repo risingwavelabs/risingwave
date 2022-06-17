@@ -78,8 +78,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
         let mut pairs = vec![];
-        // existing_table_ids include the table_ref_id (materialized_view) +
-        // internal_table_id (stateful executor)
+        // materialized_view or materialized_source
         pairs.push((
             Prefix::from(table_fragments.table_id().table_id),
             // TODO: before compaction group write path is finished, all SSTs belongs to
