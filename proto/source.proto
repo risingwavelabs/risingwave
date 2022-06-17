@@ -13,4 +13,7 @@ message ConnectorSplits {
     repeated ConnectorSplit splits = 1;
 }
 
-
+message SourceActorInfo {
+    uint32 actor_id = 1;
+    ConnectorSplits splits = 2;
+}

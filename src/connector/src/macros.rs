@@ -44,14 +44,14 @@ macro_rules! impl_split {
             }
         }
 
-        impl TryInto<SplitImpl> for ConnectorSplit {
+        impl TryFrom<&ConnectorSplit> for SplitImpl {
             type Error = anyhow::Error;
 
-            fn try_into(self) -> std::result::Result<SplitImpl, Self::Error> {
-                match self.split_type.to_lowercase().as_str(){
-                    $( $connector_name => <$split>::restore_from_bytes(self.encoded_split.as_ref()).map(SplitImpl::$variant_name), )*
-                    other => {
-                        Err(anyhow!("connector '{}' is not supported", other))
+            fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
+                match split.split_type.to_lowercase().as_str() {
+                    $( $connector_name => <$split>::restore_from_bytes(split.encoded_split.as_ref()).map(SplitImpl::$variant_name), )*
+                        other => {
+                    Err(anyhow!("connector '{}' is not supported", other))
                     }
                 }
             }
@@ -69,7 +69,7 @@ macro_rules! impl_split {
             }
 
             fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
-                ConnectorSplit::decode(bytes)?.try_into()
+                SplitImpl::try_from(&ConnectorSplit::decode(bytes)?)
             }
         }
 
