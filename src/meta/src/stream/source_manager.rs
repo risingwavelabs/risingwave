@@ -576,6 +576,7 @@ where
 
     /// Broadcast the create source request to all compute nodes.
     pub async fn create_source(&self, source: &Source) -> Result<()> {
+        // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
         self.compaction_group_manager
             .register_source(source.id)
             .await?;
@@ -652,6 +653,7 @@ where
             );
         }
 
+        // Unregister afterwards and is safeguarded by CompactionGroupManager::purge_stale_members.
         if let Err(e) = self
             .compaction_group_manager
             .unregister_source(source_id)

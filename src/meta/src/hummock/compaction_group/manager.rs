@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::io::Read;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -25,19 +24,18 @@ use tokio::sync::RwLock;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
-use crate::manager::{CatalogManager, MetaSrvEnv, SourceId};
+use crate::manager::{MetaSrvEnv, SourceId};
 use crate::model::{MetadataModel, TableFragments, ValTransaction, VarTransaction};
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::FragmentManager;
 
 pub type CompactionGroupManagerRef<S> = Arc<CompactionGroupManager<S>>;
 
 /// `CompactionGroupManager` manages `CompactionGroup`'s members.
 ///
 /// Note that all hummock state store user should register to `CompactionGroupManager`. It includes:
-/// - Materialized View via register_table_fragments.
-/// - Materialized Source via register_table_fragments.
-/// - Source via register_source.
+/// - Materialized View via `register_table_fragments`.
+/// - Materialized Source via `register_table_fragments`.
+/// - Source via `register_source`.
 pub struct CompactionGroupManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     inner: RwLock<CompactionGroupManagerInner>,
