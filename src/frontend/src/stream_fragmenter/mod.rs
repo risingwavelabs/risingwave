@@ -445,12 +445,12 @@ mod tests {
                 expect_table_id += 1;
                 assert_eq!(
                     expect_table_id,
-                    hash_join_node.left_table.clone().unwrap().id
+                    hash_join_node.left_table.as_ref().unwrap().id
                 );
                 expect_table_id += 1;
                 assert_eq!(
                     expect_table_id,
-                    hash_join_node.right_table.clone().unwrap().id
+                    hash_join_node.right_table.as_ref().unwrap().id
                 );
             }
         }

@@ -436,13 +436,13 @@ impl StreamFragmenter {
             state,
             &exchange_i0a0,
             hash_join_node.left_key.clone(),
-            hash_join_node.left_table.clone().unwrap().id,
+            hash_join_node.left_table.as_ref().unwrap().id,
         );
         let (arrange_1_info, arrange_1) = self.build_arrange_for_delta_join(
             state,
             &exchange_i1a1,
             hash_join_node.right_key.clone(),
-            hash_join_node.right_table.clone().unwrap().id,
+            hash_join_node.right_table.as_ref().unwrap().id,
         );
 
         let arrange_0_frag = self.build_and_add_fragment(state, arrange_0)?;
@@ -465,8 +465,8 @@ impl StreamFragmenter {
                 join_type: hash_join_node.join_type,
                 left_key: hash_join_node.left_key.clone(),
                 right_key: hash_join_node.right_key.clone(),
-                left_table_id: hash_join_node.left_table.clone().unwrap().id,
-                right_table_id: hash_join_node.right_table.clone().unwrap().id,
+                left_table_id: hash_join_node.left_table.as_ref().unwrap().id,
+                right_table_id: hash_join_node.right_table.as_ref().unwrap().id,
                 condition: hash_join_node.condition.clone(),
                 left_info: Some(arrange_0_info),
                 right_info: Some(arrange_1_info),

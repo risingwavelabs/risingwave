@@ -126,7 +126,7 @@ pub struct LogicalAgg {
 impl LogicalAgg {
     pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, HashMap<usize, i32>) {
         let mut table_catalogs = vec![];
-        let mut column_index2columb_id = HashMap::new();
+        let mut column_index2column_id = HashMap::new();
         let base = self.input.plan_base();
         let schema = &base.schema;
         let fields = schema.fields();
@@ -137,7 +137,7 @@ impl LogicalAgg {
             for &idx in &self.group_keys {
                 let column_id = columns.len() as i32;
                 internal_pk_indices.push(column_id as usize); // Currently our column index is same as column id
-                column_index2columb_id.insert(idx, column_id);
+                column_index2column_id.insert(idx, column_id);
                 let column_desc = ColumnDesc::from_field_with_column_id(&fields[idx], column_id);
                 columns.push(ColumnCatalog {
                     column_desc: column_desc.clone(),
@@ -152,7 +152,7 @@ impl LogicalAgg {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg => {
                     for input in &agg_call.inputs {
                         let column_id = columns.len() as i32;
-                        column_index2columb_id.insert(input.index, column_id);
+                        column_index2column_id.insert(input.index, column_id);
                         columns.push(ColumnCatalog {
                             column_desc: ColumnDesc::from_field_with_column_id(
                                 &fields[input.index],
@@ -190,7 +190,7 @@ impl LogicalAgg {
                 owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             });
         }
-        (table_catalogs, column_index2columb_id)
+        (table_catalogs, column_index2column_id)
     }
 }
 

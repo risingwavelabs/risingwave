@@ -99,8 +99,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
 
-        let left_table_id = TableId::from(node.left_table.clone().unwrap().id);
-        let right_table_id = TableId::from(node.right_table.clone().unwrap().id);
+        let left_table_id = TableId::from(node.left_table.as_ref().unwrap().id);
+        let right_table_id = TableId::from(node.right_table.as_ref().unwrap().id);
 
         let args = HashJoinExecutorDispatcherArgs {
             source_l,
