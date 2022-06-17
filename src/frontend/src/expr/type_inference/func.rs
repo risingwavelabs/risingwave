@@ -199,6 +199,37 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         best_candidate = cands_temp;
     }
 
+    if best_candidate.len() > 1 {
+        let mut t = None;
+        for e in &inputs {
+            if e.is_null() {
+                continue;
+            }
+            let tc = e.return_type();
+            match &t {
+                None => {
+                    t = Some(tc);
+                }
+                Some(tt) => {
+                    if *tt != tc {
+                        t = None;
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(t) = t {
+            let cand_temp = best_candidate
+                .iter()
+                .filter(|(ps, _ret)| ps.iter().all(|p| cast_ok(&t, p, &CastContext::Implicit)))
+                .cloned()
+                .collect_vec();
+            if !cand_temp.is_empty() {
+                best_candidate = cand_temp;
+            }
+        }
+    }
+
     match &best_candidate[..] {
         [] => unreachable!(),
         [(_ps, ret)] => Ok((inputs, (*ret).clone())),
