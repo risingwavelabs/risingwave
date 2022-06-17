@@ -17,8 +17,8 @@ use std::iter;
 use std::mem::size_of;
 
 use itertools::Itertools;
-use risingwave_pb::common::Buffer;
 use risingwave_pb::common::buffer::CompressionType;
+use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL_FOR_HASH};

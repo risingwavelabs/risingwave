@@ -179,7 +179,6 @@ impl HashMappingManagerCore {
             owner_mapping,
             load_balancer,
         };
-        dbg!(fragment_id, parallel_units, &mapping_info);
 
         self.hash_mapping_infos.insert(fragment_id, mapping_info);
 
