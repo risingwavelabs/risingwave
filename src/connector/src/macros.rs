@@ -36,10 +36,10 @@ macro_rules! impl_split_enumerator {
 #[macro_export]
 macro_rules! impl_split {
     ([], $({ $variant_name:ident, $connector_name:ident, $split:ty} ),*) => {
-        impl From<SplitImpl> for ConnectorSplit {
-            fn from(split: SplitImpl) -> Self {
+        impl From<&SplitImpl> for ConnectorSplit {
+            fn from(split: &SplitImpl) -> Self {
                 match split {
-                    $( SplitImpl::$variant_name(inner) => ConnectorSplit { split_type: String::from($connector_name), split: inner.encode_to_bytes().to_vec() }, )*
+                    $( SplitImpl::$variant_name(inner) => ConnectorSplit { split_type: String::from($connector_name), encoded_split: inner.encode_to_bytes().to_vec() }, )*
                 }
             }
         }
@@ -49,7 +49,7 @@ macro_rules! impl_split {
 
             fn try_into(self) -> std::result::Result<SplitImpl, Self::Error> {
                 match self.split_type.to_lowercase().as_str(){
-                    $( $connector_name => <$split>::restore_from_bytes(self.split.as_ref()).map(SplitImpl::$variant_name), )*
+                    $( $connector_name => <$split>::restore_from_bytes(self.encoded_split.as_ref()).map(SplitImpl::$variant_name), )*
                     other => {
                         Err(anyhow!("connector '{}' is not supported", other))
                     }
@@ -65,22 +65,13 @@ macro_rules! impl_split {
             }
 
             fn encode_to_bytes(&self) -> Bytes {
-                let split = match self {
-                   $( Self::$variant_name(inner) => ConnectorSplit { split_type: String::from($connector_name), split: inner.encode_to_bytes().to_vec() },)*
-                };
-                Bytes::from(split.encode_to_vec())
+                Bytes::from(ConnectorSplit::from(self).encode_to_vec())
             }
 
             fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
-                let split = ConnectorSplit::decode(bytes)?;
-
-                match split.split_type.to_lowercase().as_str() {
-                    $( $connector_name => <$split>::restore_from_bytes(&split.split).map(Self::$variant_name), )*
-                    other => Err(anyhow!("split type {} not supported", other)),
-                }
+                ConnectorSplit::decode(bytes)?.try_into()
             }
         }
-
 
         impl SplitImpl {
              pub fn get_type(&self) -> String {
