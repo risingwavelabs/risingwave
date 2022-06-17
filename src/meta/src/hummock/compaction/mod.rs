@@ -13,12 +13,12 @@
 // limitations under the License.
 
 pub mod compaction_config;
-mod compaction_picker;
 mod level_selector;
+mod manual_compaction_picker;
+mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
 mod tier_compaction_picker;
-
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -29,8 +29,8 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, Hummock
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, HummockVersion, KeyRange, Level};
 
-use crate::hummock::compaction::compaction_picker::{CompactionPicker, ManualCompactionPicker};
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
+use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
 use crate::hummock::compaction::overlap_strategy::{
     HashStrategy, OverlapStrategy, RangeOverlapStrategy,
 };
@@ -292,4 +292,12 @@ impl Default for ManualCompactionOption {
             level: 1,
         }
     }
+}
+
+pub trait CompactionPicker {
+    fn pick_compaction(
+        &self,
+        levels: &[Level],
+        level_handlers: &mut [LevelHandler],
+    ) -> Option<SearchResult>;
 }

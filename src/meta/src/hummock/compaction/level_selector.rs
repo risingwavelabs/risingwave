@@ -23,12 +23,12 @@ use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::{CompactionConfig, Level};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction::compaction_picker::{CompactionPicker, MinOverlappingPicker};
+use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::tier_compaction_picker::{
     LevelCompactionPicker, TierCompactionPicker,
 };
-use crate::hummock::compaction::{create_overlap_strategy, SearchResult};
+use crate::hummock::compaction::{create_overlap_strategy, CompactionPicker, SearchResult};
 use crate::hummock::level_handler::LevelHandler;
 
 const SCORE_BASE: u64 = 100;
