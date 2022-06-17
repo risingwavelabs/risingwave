@@ -40,16 +40,17 @@ use super::iterator::{BoxedForwardHummockIterator, MergeIterator};
 use super::{HummockResult, SSTableBuilder, SSTableIteratorType, Sstable};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::group_builder::KeyValueGrouping;
-use crate::hummock::iterator::{BackwardMemoryConcatIterator, InMemoryTableIterator, ReadOptions};
+use crate::hummock::iterator::{ForwardMemoryConcatIterator, ReadOptions};
 use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
+use crate::hummock::sstable::InMemoryTableIterator;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::table_accessor::{StorageTableAcessor, TableAccessor};
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::{CachePolicy, HummockError};
+use crate::hummock::{CachePolicy, HummockError, SSTableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
@@ -629,6 +630,16 @@ impl Compactor {
         let read_options = Arc::new(ReadOptions { prefetch: true });
 
         // TODO: check memory limit
+        let total_file_size = self
+            .compact_task
+            .input_ssts
+            .iter()
+            .map(|level| level.total_file_size)
+            .sum::<u64>();
+        let mut can_load_whole_object = true;
+        if total_file_size > self.context.options.meta_cache_capacity_mb as u64 / 2 * 1024 * 1024 {
+            can_load_whole_object = false;
+        }
         let accessor = StorageTableAcessor::new(self.context.sstable_store.clone());
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -647,17 +658,30 @@ impl Compactor {
             // }
 
             if can_concat(&level.get_table_infos().iter().collect_vec()) {
-                table_iters.push(Box::new(BackwardMemoryConcatIterator::new(
+                table_iters.push(Box::new(ForwardMemoryConcatIterator::new(
                     level.table_infos.clone(),
                     accessor.clone(),
                     read_options.clone(),
                 )) as BoxedForwardHummockIterator);
-            } else {
+            } else if can_load_whole_object {
                 for table_info in &level.table_infos {
                     let table = accessor.sstable(table_info.id, &mut stats).await?;
                     table_iters.push(Box::new(InMemoryTableIterator::create(
                         table,
                         accessor.clone(),
+                        read_options.clone(),
+                    )));
+                }
+            } else {
+                for table_info in &level.table_infos {
+                    let table = self
+                        .context
+                        .sstable_store
+                        .sstable(table_info.id, &mut stats)
+                        .await?;
+                    table_iters.push(Box::new(SSTableIterator::create(
+                        table,
+                        self.context.sstable_store.clone(),
                         read_options.clone(),
                     )));
                 }

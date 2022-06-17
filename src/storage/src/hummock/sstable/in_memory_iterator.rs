@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::VersionedComparator;
 
-use crate::hummock::iterator::{ConcatIteratorInner, Forward, HummockIterator, ReadOptions};
+use crate::hummock::iterator::{Forward, HummockIterator, ReadOptions};
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::table_accessor::StorageTableAcessor;
 use crate::hummock::value::HummockValue;
@@ -143,5 +143,3 @@ impl SSTableIteratorType for InMemoryTableIterator {
         InMemoryTableIterator::new(table)
     }
 }
-
-pub type BackwardMemoryConcatIterator = ConcatIteratorInner<InMemoryTableIterator>;

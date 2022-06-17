@@ -24,7 +24,6 @@ use risingwave_hummock_sdk::HummockSSTableId;
 use super::{Block, HummockResult};
 use crate::hummock::HummockError;
 
-const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
 
 enum BlockEntry {
@@ -81,15 +80,14 @@ pub struct BlockCache {
 }
 
 impl BlockCache {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, mut max_shard_bits: usize) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
         }
-        let mut shard_bits = MAX_CACHE_SHARD_BITS;
-        while (capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
-            shard_bits -= 1;
+        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
+            max_shard_bits -= 1;
         }
-        let cache = LruCache::new(shard_bits, capacity);
+        let cache = LruCache::new(max_shard_bits, capacity);
         Self {
             inner: Arc::new(cache),
         }

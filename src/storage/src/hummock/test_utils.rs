@@ -31,7 +31,7 @@ use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_ssta
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
+    Block, CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
     SSTableBuilderOptions, Sstable, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;
@@ -141,10 +141,16 @@ pub async fn gen_test_sstable_inner(
     policy: CachePolicy,
 ) -> Sstable {
     let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
+    let mut blocks = vec![];
+    for b in &meta.block_metas {
+        let start = b.offset as usize;
+        let end = start + b.len as usize;
+        blocks.push(Box::new(Block::decode(data.slice(start..end)).unwrap()));
+    }
     let sst = Sstable {
         id: sst_id,
         meta: meta.clone(),
-        blocks: vec![],
+        blocks,
     };
     sstable_store
         .put(

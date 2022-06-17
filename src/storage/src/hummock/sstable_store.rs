@@ -28,6 +28,7 @@ use crate::hummock::{
 use crate::monitor::StoreLocalStatistic;
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
+const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 64 * 1024 * 1024; // 64MB
 
 pub type TableHolder = CachableEntry<HummockSSTableId, Box<Sstable>>;
@@ -65,7 +66,24 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity),
+            block_cache: BlockCache::new(block_cache_capacity, MAX_CACHE_SHARD_BITS),
+            meta_cache,
+        }
+    }
+
+    /// For compactor, we do not need a high concurrency load for cache. Instead, we need the cache
+    ///  can be evict more effective.
+    pub fn for_compactor(
+        store: ObjectStoreRef,
+        path: String,
+        block_cache_capacity: usize,
+        meta_cache_capacity: usize,
+    ) -> Self {
+        let meta_cache = Arc::new(LruCache::new(0, meta_cache_capacity));
+        Self {
+            path,
+            store,
+            block_cache: BlockCache::new(block_cache_capacity, 2),
             meta_cache,
         }
     }
@@ -136,13 +154,11 @@ impl SstableStore {
             .read(&data_path, None)
             .await
             .map_err(HummockError::object_io_error)?;
-        let mut offset = 0;
         let mut blocks = vec![];
         for block_meta in metas {
-            let end_offset = offset + block_meta.len as usize;
-            let block = Block::decode(block_data.slice(offset..end_offset))?;
+            let end_offset = (block_meta.offset + block_meta.len) as usize;
+            let block = Block::decode(block_data.slice(block_meta.offset as usize..end_offset))?;
             blocks.push(Box::new(block));
-            offset = end_offset;
         }
         Ok(blocks)
     }

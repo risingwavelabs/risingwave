@@ -37,6 +37,8 @@ use risingwave_hummock_sdk::HummockSSTableId;
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+mod in_memory_iterator;
+pub use in_memory_iterator::InMemoryTableIterator;
 pub mod group_builder;
 mod utils;
 

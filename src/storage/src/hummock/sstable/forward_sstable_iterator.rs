@@ -184,11 +184,36 @@ mod tests {
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::table_accessor::StorageTableAcessor;
     use crate::hummock::test_utils::{
         create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
         gen_test_sstable_data, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
-    use crate::hummock::{CachePolicy, Sstable};
+    use crate::hummock::{CachePolicy, InMemoryTableIterator, Sstable};
+
+    async fn inner_test_forward_iterator<TI: SSTableIteratorType<Direction = Forward>>(
+        sstable_store: TI::Accessor,
+        handle: TableHolder,
+    ) {
+        // We should have at least 10 blocks, so that table iterator test could cover more code
+        // path.
+        assert!(handle.value().meta.block_metas.len() > 10);
+
+        let mut sstable_iter = TI::create(handle, sstable_store, Arc::new(ReadOptions::default()));
+        let mut cnt = 0;
+        sstable_iter.rewind().await.unwrap();
+
+        while sstable_iter.is_valid() {
+            let key = sstable_iter.key();
+            let value = sstable_iter.value();
+            assert_bytes_eq!(key, test_key_of(cnt));
+            assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
+            cnt += 1;
+            sstable_iter.next().await.unwrap();
+        }
+
+        assert_eq!(cnt, TEST_KEYS_COUNT);
+    }
 
     #[tokio::test]
     async fn test_table_iterator() {
@@ -203,22 +228,13 @@ mod tests {
 
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(table));
-
-        let mut sstable_iter =
-            SSTableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
-        let mut cnt = 0;
-        sstable_iter.rewind().await.unwrap();
-
-        while sstable_iter.is_valid() {
-            let key = sstable_iter.key();
-            let value = sstable_iter.value();
-            assert_bytes_eq!(key, test_key_of(cnt));
-            assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
-            cnt += 1;
-            sstable_iter.next().await.unwrap();
-        }
-
-        assert_eq!(cnt, TEST_KEYS_COUNT);
+        inner_test_forward_iterator::<SSTableIterator>(sstable_store.clone(), handle).await;
+        let handle = cache.lookup(0, &0).unwrap();
+        inner_test_forward_iterator::<InMemoryTableIterator>(
+            StorageTableAcessor::new(sstable_store),
+            handle,
+        )
+        .await;
     }
 
     #[tokio::test]
