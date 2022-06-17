@@ -30,8 +30,10 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{SourceChangeSplit, SourceChangeSplitMutation};
-use risingwave_pb::meta::{ConnectorSplit, SourceActorInfo as ProstSourceActorInfo};
+use risingwave_pb::data::SourceChangeSplitMutation;
+use risingwave_pb::source::{
+    ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
+};
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
     DropSourceRequest as ComputeNodeDropSourceRequest,
@@ -95,12 +97,9 @@ impl MetadataModel for SourceActorInfo {
     fn to_protobuf(&self) -> Self::ProstType {
         Self::ProstType {
             actor_id: self.actor_id,
-            splits: self
-                .splits
-                .iter()
-                .cloned()
-                .map(ConnectorSplit::from)
-                .collect(),
+            splits: Some(ConnectorSplits {
+                splits: self.splits.iter().map(ConnectorSplit::from).collect(),
+            }),
         }
     }
 
@@ -109,8 +108,10 @@ impl MetadataModel for SourceActorInfo {
             actor_id: prost.actor_id,
             splits: prost
                 .splits
+                .unwrap_or_default()
+                .splits
                 .into_iter()
-                .map(|split| split.try_into().unwrap())
+                .map(|split| SplitImpl::try_from(&split).unwrap())
                 .collect(),
         }
     }
@@ -656,16 +657,15 @@ where
 
         if !diff.is_empty() {
             let command = Command::Plain(Some(Mutation::Splits(SourceChangeSplitMutation {
-                mutations: diff
+                actor_splits: diff
                     .iter()
-                    .filter(|(_, splits)| !splits.is_empty())
-                    .map(|(actor_id, splits)| SourceChangeSplit {
-                        actor_id: *actor_id,
-                        split_type: splits.first().unwrap().get_type(),
-                        source_splits: splits
-                            .iter()
-                            .map(|split| split.encode_to_bytes().to_vec())
-                            .collect(),
+                    .map(|(&actor_id, splits)| {
+                        (
+                            actor_id,
+                            ConnectorSplits {
+                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        )
                     })
                     .collect(),
             })));
