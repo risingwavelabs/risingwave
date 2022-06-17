@@ -18,87 +18,19 @@
 In RisingWave, all streaming executors store their data into a state store. As the state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. And the cell-based relational table provides the interface accessing relational data in KV. Therefore, relational table can be regared as the bridge between state-ful executors and state store.
 ## Architecture
 
-Reading this document requires prior knowledge of LSM-Tree-based KV storage engines, like RocksDB, LevelDB, etc.
 
 ![Overview of Architecture](images/relational-table-layer/relational-table-01.svg)
+
 Relational table consists of State Table, Mem Table and Cell-based Table. The State Table provides the table operations by these APIs: `get_row`, `insert_row`, `delete_row` and `update_row`, the Mem Table
 is a buffer for modify operations without encoding, and the Cell-based Table is responsible for performing serialization and deserialization between cell-based encoding and KV encoding.
 
 
 ### Write Path
+Operations on relational table will first be cached in Mem Table, which is a BTreeMap data structure. Once executor wants to write these operations to state store, cell-based table will covert these operations into kv pairs and write to state store with specific epoch. 
+
 ### Read Path
 
 
-Hummock consists of manager service on meta node, clients on worker nodes (including compute nodes, frontend nodes, and compactor nodes), and a shared storage to store files (SSTs). Every time a new write batch is produced, Hummock client will upload those files to shared storage, and notify the Hummock manager of the new data. With compaction going on, new files will be added and unused files will be vacuumed. The Hummock manager will take care of the lifecycle of a file — is a file is being used? can we delete a file? etc.
-
-Streaming state store has distinguished workload characteristics.
-
-* Every streaming executor will only ***read and write its own portion of data***, which are multiple consecutive non-overlapping ranges of keys (we call it ***key space***).
-* Data (generally) ***won’t be shared across nodes***, so every worker node will only read and write its own data. Therefore, every Hummock API, like `get` or `scan`, only guarantees writes on one node can be immediately read from the same node. In some cases, if we want to read data written from other nodes, we will need to ***wait for the epoch***.
-* Streaming data are ***committed in serial***. Based on the [barrier-based checkpoint algorithm](https://en.wikipedia.org/wiki/Chandy%E2%80%93Lamport_algorithm), the states are persisted epoch by epoch. We can tailor the write path specifically for the epoch-based checkpoint workload.
-
-This leads to the design of Hummock, the cloud-native KV-based streaming state store. We’ll explain concepts like “epoch”, “key space” and “barrier” in the following chapters.
-
-## The Hummock User API
-
-[source code](https://github.com/singularity-data/risingwave/blob/main/src/storage/src/hummock/mod.rs)
-
-In this part, we will introduce how users can use Hummock as a KV store.
-
-The Hummock itself provides 3 simple APIs: `ingest_batch`, `get`, and `scan`. Hummock provides MVCC write and read on KV pairs. Every key stored in Hummock has an *epoch* (aka. timestamp). Developers should specify an epoch when calling Hummock APIs.
-
-Hummock doesn’t support writing a single key. To write data into Hummock, users should provide a ***sorted, unique*** list of ***keys*** and the corresponding ***operations*** (put value, delete), with an ***epoch***, and call the `ingest_batch` API. Therefore, within one epoch, users can only have one operation for a key. For example,
-
-```
-[a => put 1, b => put 2] epoch = 1 is a valid write batch
-[a => put 1, a => delete, b => put 2] epoch = 1 is an invalid write batch
-[b => put 1, a => put 2] epoch = 1 is an invalid write batch
-```
-
-For reads, we can call `scan` and `get` API on Hummock client. Developers need to specify a read epoch for read APIs. Hummock only guarantees writes on one node can be immediately read from the same node. Let’s take a look at the following example:
-
-```
-Node 1: write a => 1, b => 2 at epoch 1
-Node 1: write a => 3, b => 4 at epoch 2
-Node 2: write c => 5, d => 6 at epoch 2
-```
-
-After all operations have been done,
-
-```
-Read at epoch 2 on Node 1: a => 3, b => 4, (c => 5, d => 6 may be read)
-Read at epoch 1 on Node 1: a => 1, b => 2
-Read at epoch 2 on Node 2 with `wait_epoch 2`: a => 3, b => 4, c => 5, d => 6
-```
-
-
-## Hummock Internals
-
-In this part, we will discuss how data are stored and organized in Hummock internally. If you will develop Hummock, you should learn some basic concepts, like SST, key encoding, read / write path, consistency, from the following sections.
-
-### Storage Format
-
-[SST encoding source code](https://github.com/singularity-data/risingwave/tree/main/src/storage/src/hummock/sstable)
-
-All key-value pairs are stored in block-based SSTables. Each user key is associated with an epoch. In SSTs, key-value pairs are sorted first by user key (lexicographical order), and then by epoch (largest to smallest).
-
-For example, if users write two batches in consequence:
-
-```
-write a => 1, b => 2 at epoch 1
-write a => delete, b => 3 at epoch 2
-```
-
-After compaction (w/ min watermark = 0), there will eventually be an SST with the following content:
-
-```
-(a, 2) => delete
-(a, 1) => 1
-(b, 2) => 3
-(b, 1) => 2
-```
-
-The final written key (aka. full key) is encoded by appending the 8-byte epoch after the user key. When doing full key comparison in Hummock, we should always compare full keys using the `VersionedComparator` to get the correct result.
 
 ### Write Path
 
