@@ -19,13 +19,15 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
-use risingwave_common::consistent_hashing::build_vnode_mapping;
+use itertools::Itertools;
+use risingwave_common::consistent_hashing::vnode_mapping_to_ranges;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
-use risingwave_pb::common::{HostAddress, VNodeRanges};
+use risingwave_pb::common::{HostAddress, VNodeRanges, WorkerNode};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -292,23 +294,40 @@ impl StageRunner {
     async fn schedule_tasks(&self) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        // FIXME: use proper vnode_ranges
-        let parallel_units: &[u32] = todo!();
-        let (_, _, vnode_ranges_mapping) = build_vnode_mapping(&parallel_units);
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() {
+            let vnode_ranges_mapping = vnode_mapping_to_ranges(&table_scan_info.vnode_mapping);
 
-        for id in 0..self.stage.parallelism {
-            let task_id = TaskIdProst {
-                query_id: self.stage.query_id.id.clone(),
-                stage_id: self.stage.id,
-                task_id: id,
-            };
-            let plan_fragment = self.create_plan_fragment(id);
-            let parallel_unit_id = parallel_units[id as usize];
-            let vnode_ranges = vnode_ranges_mapping[&parallel_unit_id].clone();
-            futures.push(async {
-                self.schedule_task(task_id, plan_fragment, vnode_ranges)
-                    .await
-            });
+            let parallel_unit_ids = vnode_ranges_mapping.keys().cloned().collect_vec();
+            let workers = self
+                .worker_node_manager
+                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+
+            for (i, (parallel_unit_id, worker)) in workers.into_iter().enumerate() {
+                let task_id = TaskIdProst {
+                    query_id: self.stage.query_id.id.clone(),
+                    stage_id: self.stage.id,
+                    task_id: i as u32,
+                };
+                let plan_fragment = self.create_plan_fragment(i as u32);
+                let vnode_ranges = vnode_ranges_mapping[&parallel_unit_id].clone();
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    vnode_ranges,
+                    Some(worker),
+                ));
+            }
+        } else {
+            for id in 0..self.stage.parallelism {
+                let task_id = TaskIdProst {
+                    query_id: self.stage.query_id.id.clone(),
+                    stage_id: self.stage.id,
+                    task_id: id,
+                };
+                let plan_fragment = self.create_plan_fragment(id);
+                // FIXME: remove vnode_ranges, or make it Option, or put it inside ScanNode?
+                futures.push(self.schedule_task(task_id, plan_fragment, Default::default(), None));
+            }
         }
         let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
         while let Some(result) = buffered.next().await {
@@ -322,8 +341,12 @@ impl StageRunner {
         task_id: TaskIdProst,
         plan_fragment: PlanFragment,
         vnode_ranges: VNodeRanges,
+        worker: Option<WorkerNode>,
     ) -> SchedulerResult<()> {
-        let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
+        let worker_node_addr = worker
+            .unwrap_or(self.worker_node_manager.next_random()?)
+            .host
+            .unwrap();
 
         let compute_client = self
             .compute_client_pool

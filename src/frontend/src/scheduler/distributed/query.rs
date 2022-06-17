@@ -419,6 +419,7 @@ mod tests {
                 ],
                 distribution_keys: vec![],
                 appendonly: false,
+                vnode_mapping: None,
             }),
             vec![],
             ctx,

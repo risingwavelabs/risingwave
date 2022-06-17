@@ -15,9 +15,7 @@ use std::collections::HashMap;
 
 use risingwave_pb::common::VNodeRanges;
 
-use crate::types::{VirtualNode, VIRTUAL_NODE_COUNT};
-
-pub type ParallelUnitId = u32;
+use crate::types::{ParallelUnitId, VirtualNode, VIRTUAL_NODE_COUNT};
 
 pub fn full_vnode_range() -> VNodeRanges {
     VNodeRanges {
@@ -32,11 +30,9 @@ pub fn build_vnode_mapping(
 ) -> (
     Vec<ParallelUnitId>,
     HashMap<ParallelUnitId, Vec<VirtualNode>>,
-    HashMap<ParallelUnitId, VNodeRanges>,
 ) {
     let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
     let mut owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
-    let mut owner_mapping_ranges: HashMap<ParallelUnitId, VNodeRanges> = HashMap::new();
 
     let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
     let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
@@ -54,12 +50,92 @@ pub fn build_vnode_mapping(
         let vnode_range = init_bound - vnode_count..init_bound;
         let vnodes = vnode_range.clone().map(|id| id as VirtualNode).collect();
         owner_mapping.insert(parallel_unit_id, vnodes);
-        let ranges = owner_mapping_ranges.entry(parallel_unit_id).or_default();
-        ranges.starts.push(vnode_range.start as u64);
-        ranges.ends.push((vnode_range.end - 1) as u64);
 
         init_bound += hash_shard_size;
     });
 
-    (vnode_mapping, owner_mapping, owner_mapping_ranges)
+    (vnode_mapping, owner_mapping)
+}
+
+pub fn vnode_mapping_to_ranges(
+    vnode_mapping: &[ParallelUnitId],
+) -> HashMap<ParallelUnitId, VNodeRanges> {
+    let mut ranges_mapping: HashMap<ParallelUnitId, VNodeRanges> = HashMap::new();
+
+    let mut start: usize = 0;
+
+    for i in 1..vnode_mapping.len() {
+        if vnode_mapping[i - 1] != vnode_mapping[i] {
+            let ranges = ranges_mapping.entry(vnode_mapping[i - 1]).or_default();
+            ranges.starts.push(start as u64);
+            ranges.ends.push(i as u64 - 1);
+            start = i;
+        }
+    }
+
+    if let Some(&last) = vnode_mapping.last() {
+        let ranges = ranges_mapping.entry(last).or_default();
+        ranges.starts.push(start as u64);
+        ranges.ends.push(vnode_mapping.len() as u64 - 1);
+    }
+
+    ranges_mapping
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_ranges() {
+        // Simple
+        {
+            let vnode_mapping = [3, 3, 3, 3, 3, 4, 4, 5, 5, 6, 7, 8, 8, 8, 9];
+            let ranges_mapping = vnode_mapping_to_ranges(&vnode_mapping);
+            assert_eq!(ranges_mapping.len(), 7);
+            assert_eq!(ranges_mapping[&3].starts, vec![0]);
+            assert_eq!(ranges_mapping[&3].ends, vec![4]);
+            assert_eq!(ranges_mapping[&4].starts, vec![5]);
+            assert_eq!(ranges_mapping[&4].ends, vec![6]);
+            assert_eq!(ranges_mapping[&5].starts, vec![7]);
+            assert_eq!(ranges_mapping[&5].ends, vec![8]);
+            assert_eq!(ranges_mapping[&6].starts, vec![9]);
+            assert_eq!(ranges_mapping[&6].ends, vec![9]);
+            assert_eq!(ranges_mapping[&7].starts, vec![10]);
+            assert_eq!(ranges_mapping[&7].ends, vec![10]);
+            assert_eq!(ranges_mapping[&8].starts, vec![11]);
+            assert_eq!(ranges_mapping[&8].ends, vec![13]);
+            assert_eq!(ranges_mapping[&9].starts, vec![14]);
+            assert_eq!(ranges_mapping[&9].ends, vec![14]);
+        }
+
+        // Complex
+        {
+            let mut vnode_mapping = Vec::new();
+            vnode_mapping.resize(512, 1);
+            vnode_mapping.resize(1024, 2);
+            vnode_mapping.resize(1536, 3);
+            vnode_mapping.resize(2048, 4);
+            vnode_mapping[0] = 5;
+            vnode_mapping[2046] = 5;
+            let ranges_mapping = vnode_mapping_to_ranges(&vnode_mapping);
+            assert_eq!(ranges_mapping.len(), 5);
+            assert_eq!(ranges_mapping[&1].starts, vec![1]);
+            assert_eq!(ranges_mapping[&1].ends, vec![511]);
+            assert_eq!(ranges_mapping[&2].starts, vec![512]);
+            assert_eq!(ranges_mapping[&2].ends, vec![1023]);
+            assert_eq!(ranges_mapping[&3].starts, vec![1024]);
+            assert_eq!(ranges_mapping[&3].ends, vec![1535]);
+            assert_eq!(ranges_mapping[&4].starts, vec![1536, 2047]);
+            assert_eq!(ranges_mapping[&4].ends, vec![2045, 2047]);
+            assert_eq!(ranges_mapping[&5].starts, vec![0, 2046]);
+            assert_eq!(ranges_mapping[&5].ends, vec![0, 2046]);
+        }
+
+        // Empty
+        {
+            let ranges_mapping = vnode_mapping_to_ranges(&[]);
+            assert_eq!(ranges_mapping.len(), 0);
+        }
+    }
 }

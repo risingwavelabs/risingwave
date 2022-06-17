@@ -145,7 +145,7 @@ impl HashMappingManagerCore {
         fragment_id: FragmentId,
         parallel_units: &[ParallelUnit],
     ) -> Vec<ParallelUnitId> {
-        let (vnode_mapping, owner_mapping, _) =
+        let (vnode_mapping, owner_mapping) =
             build_vnode_mapping(&parallel_units.iter().map(|pu| pu.id).collect_vec());
 
         let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();

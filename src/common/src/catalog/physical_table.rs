@@ -36,6 +36,10 @@ pub struct TableDesc {
 
     /// Whether the table source is append-only
     pub appendonly: bool,
+
+    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
+    /// table.
+    pub vnode_mapping: Option<Vec<u32>>,
 }
 
 impl TableDesc {

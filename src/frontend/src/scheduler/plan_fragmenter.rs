@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeInfo;
 use risingwave_pb::plan_common::Field as FieldProst;
@@ -149,7 +150,7 @@ impl Query {
             .stages
             .iter()
             .filter_map(|(stage_id, stage_query)| {
-                if stage_query.has_table_scan {
+                if stage_query.has_table_scan() {
                     Some(*stage_id)
                 } else {
                     None
@@ -159,6 +160,12 @@ impl Query {
     }
 }
 
+pub struct TableScanInfo {
+    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
+    /// table.
+    pub vnode_mapping: Vec<ParallelUnitId>,
+}
+
 /// Fragment part of `Query`.
 pub struct QueryStage {
     pub query_id: QueryId,
@@ -166,10 +173,17 @@ pub struct QueryStage {
     pub root: Arc<ExecutionPlanNode>,
     pub exchange_info: ExchangeInfo,
     pub parallelism: u32,
-    /// This is a flag to indicate whether this stage contains some executor that creates
+    /// Indicates whether this stage contains a table scan node and the table's information if so.
+    pub table_scan_info: Option<TableScanInfo>,
+}
+
+impl QueryStage {
+    /// If true, this stage contains table scan executor that creates
     /// Hummock iterators to read data from table. The iterator is initialized during
     /// the executor building process on the batch execution engine.
-    pub has_table_scan: bool,
+    pub fn has_table_scan(&self) -> bool {
+        self.table_scan_info.is_some()
+    }
 }
 
 impl Debug for QueryStage {
@@ -178,7 +192,7 @@ impl Debug for QueryStage {
             .field("id", &self.id)
             .field("parallelism", &self.parallelism)
             .field("exchange_info", &self.exchange_info)
-            .field("has_table_scan", &self.has_table_scan)
+            .field("has_table_scan", &self.has_table_scan())
             .finish()
     }
 }
@@ -193,7 +207,8 @@ struct QueryStageBuilder {
     exchange_info: ExchangeInfo,
 
     children_stages: Vec<QueryStageRef>,
-    has_table_scan: bool,
+
+    table_scan_info: Option<TableScanInfo>,
 }
 
 impl QueryStageBuilder {
@@ -205,7 +220,7 @@ impl QueryStageBuilder {
             parallelism,
             exchange_info,
             children_stages: vec![],
-            has_table_scan: false,
+            table_scan_info: None,
         }
     }
 
@@ -216,7 +231,7 @@ impl QueryStageBuilder {
             root: self.root.unwrap(),
             exchange_info: self.exchange_info,
             parallelism: self.parallelism,
-            has_table_scan: self.has_table_scan,
+            table_scan_info: self.table_scan_info,
         });
 
         stage_graph_builder.add_node(stage.clone());
@@ -365,7 +380,16 @@ impl BatchPlanFragmenter {
                     builder.root = Some(Arc::new(execution_plan_node));
                 }
                 // Check out the comments for `has_table_scan` in `QueryStage`.
-                builder.has_table_scan |= node.node_type() == PlanNodeType::BatchSeqScan;
+                if let Some(scan_node) = node.as_batch_seq_scan() {
+                    let table_desc = scan_node.logical().table_desc();
+                    assert!(
+                        builder.table_scan_info.is_none(),
+                        "multiple table scan inside a stage"
+                    );
+                    builder.table_scan_info = Some(TableScanInfo {
+                        vnode_mapping: table_desc.vnode_mapping.clone().unwrap(),
+                    });
+                }
             }
         }
     }
@@ -453,6 +477,7 @@ mod tests {
                 ],
                 distribution_keys: vec![],
                 appendonly: false,
+                vnode_mapping: None,
             }),
             vec![],
             ctx,
@@ -595,7 +620,7 @@ mod tests {
         assert_eq!(root_exchange.root.source_stage_id, Some(1));
         assert!(matches!(root_exchange.root.node, NodeBody::Exchange(_)));
         assert_eq!(root_exchange.parallelism, 1);
-        assert!(!root_exchange.has_table_scan);
+        assert!(!root_exchange.has_table_scan());
 
         let join_node = query.stage_graph.stages.get(&1).unwrap();
         assert_eq!(join_node.root.node_type(), PlanNodeType::BatchHashJoin);
@@ -618,19 +643,19 @@ mod tests {
         ));
         assert_eq!(join_node.root.children[1].source_stage_id, Some(3));
         assert_eq!(0, join_node.root.children[1].children.len());
-        assert!(!join_node.has_table_scan);
+        assert!(!join_node.has_table_scan());
 
         let scan_node1 = query.stage_graph.stages.get(&2).unwrap();
         assert_eq!(scan_node1.root.node_type(), PlanNodeType::BatchSeqScan);
         assert_eq!(scan_node1.root.source_stage_id, None);
         assert_eq!(0, scan_node1.root.children.len());
-        assert!(scan_node1.has_table_scan);
+        assert!(scan_node1.has_table_scan());
 
         let scan_node2 = query.stage_graph.stages.get(&3).unwrap();
         assert_eq!(scan_node2.root.node_type(), PlanNodeType::BatchFilter);
         assert_eq!(scan_node2.root.source_stage_id, None);
         assert_eq!(1, scan_node2.root.children.len());
-        assert!(scan_node2.has_table_scan);
+        assert!(scan_node2.has_table_scan());
     }
 
     fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {
