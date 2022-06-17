@@ -14,33 +14,109 @@
 
 use std::collections::HashMap;
 
-use itertools::iproduct;
+use itertools::{iproduct, Itertools as _};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{name_of, DataTypeName};
+use super::{cast_ok, CastContext, DataTypeName};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
 pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
-    // With our current simplified type system, where all types are nullable and not parameterized
-    // by things like length or precision, the inference can be done with a map lookup.
-    let input_type_names = inputs.iter().map(|e| name_of(&e.return_type())).collect();
-    let ret = infer_type_name(func_type, input_type_names)?.into();
-    Ok((inputs, ret))
-}
+    if matches!(
+        func_type,
+        ExprType::Equal
+            | ExprType::NotEqual
+            | ExprType::LessThan
+            | ExprType::LessThanOrEqual
+            | ExprType::GreaterThan
+            | ExprType::GreaterThanOrEqual
+    ) && inputs.len() == 2
+        && matches!(
+            (inputs[0].return_type(), inputs[1].return_type()),
+            (DataType::Struct { .. }, DataType::Struct { .. })
+                | (DataType::List { .. }, DataType::List { .. })
+        )
+    {
+        return Ok((inputs, DataType::Boolean));
+    }
+    if matches!(func_type, ExprType::IsNull | ExprType::IsNotNull)
+        && inputs.len() == 1
+        && inputs[0].is_null()
+    {
+        return Ok((inputs, DataType::Boolean));
+    }
 
-/// Infer the return type name without parameters like length or precision.
-fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Result<DataTypeName> {
-    FUNC_SIG_MAP
+    let candidates = FUNC_SIG_MAP
         .0
-        .get(&FuncSign::new(func_type, inputs_type.clone()))
-        .cloned()
-        .ok_or_else(|| {
-            ErrorCode::NotImplemented(format!("{:?}{:?}", func_type, inputs_type), 112.into())
-                .into()
-        })
+        .get(&(func_type, inputs.len()))
+        .map(std::ops::Deref::deref)
+        .unwrap_or_default();
+
+    let _has_unknown = inputs.iter().any(|e| e.is_null());
+    // Binary operators have a special unknown rule for exact match.
+    // But it is just speed up and does not affect correctness.
+    // if has_unknown && inputs.len() == 2
+
+    let mut best_exact = 0;
+    let mut best_preferred = 0;
+    let mut best_candidate = Vec::new();
+
+    for (param_types, ret) in candidates {
+        let mut n_exact = 0;
+        let mut n_preferred = 0;
+        let mut castable = true;
+        for (a, p) in inputs.iter().zip_eq(param_types) {
+            if !a.is_null() {
+                if a.return_type() == *p {
+                    n_exact += 1;
+                } else if !cast_ok(&a.return_type(), p, &CastContext::Implicit) {
+                    castable = false;
+                    break;
+                }
+            }
+            if matches!(
+                p,
+                DataType::Float64
+                    | DataType::Boolean
+                    | DataType::Varchar
+                    | DataType::Timestampz
+                    | DataType::Interval
+            ) {
+                n_preferred += 1;
+            }
+        }
+        if !castable {
+            continue;
+        }
+        if n_exact > best_exact || n_exact == best_exact && n_preferred > best_preferred {
+            best_exact = n_exact;
+            best_preferred = n_preferred;
+            best_candidate.clear();
+        }
+        if n_exact == best_exact && n_preferred == best_preferred {
+            best_candidate.push((param_types, ret));
+        }
+    }
+    match &best_candidate[..] {
+        [] => Err(ErrorCode::NotImplemented(
+            format!(
+                "{:?}{:?}",
+                func_type,
+                inputs.iter().map(|e| e.return_type()).collect_vec()
+            ),
+            112.into(),
+        )
+        .into()),
+        [(_ps, ret)] => Ok((inputs, (*ret).clone())),
+        _ => Err(ErrorCode::BindError(format!(
+            "multi func match: {:?} {:?}",
+            func_type,
+            inputs.iter().map(|e| e.return_type()).collect_vec(),
+        ))
+        .into()),
+    }
 }
 
 #[derive(PartialEq, Hash)]
@@ -57,11 +133,19 @@ impl FuncSign {
     }
 }
 
+#[allow(clippy::type_complexity)]
 #[derive(Default)]
-struct FuncSigMap(HashMap<FuncSign, DataTypeName>);
+struct FuncSigMap(HashMap<(ExprType, usize), Vec<(Vec<DataType>, DataType)>>);
 impl FuncSigMap {
     fn insert(&mut self, func_sig: FuncSign, ret: DataTypeName) {
-        self.0.insert(func_sig, ret);
+        let FuncSign { func, inputs_type } = func_sig;
+        let inputs_type = inputs_type.into_iter().map(Into::into).collect_vec();
+        let ret = ret.into();
+
+        self.0
+            .entry((func, inputs_type.len()))
+            .or_default()
+            .push((inputs_type, ret))
     }
 }
 
@@ -167,7 +251,7 @@ fn build_type_derive_map() -> FuncSigMap {
         E::IsDistinctFrom,
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct, T::List]);
+    // build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct, T::List]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
     for e in cmp_exprs {
@@ -310,13 +394,30 @@ lazy_static::lazy_static! {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::Decimal;
+
     use super::*;
     use crate::expr::Literal;
 
     fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
         let inputs = inputs_type
             .into_iter()
-            .map(|t| Literal::new(None, t).into())
+            .map(|t| {
+                Literal::new(
+                    Some(match t {
+                        DataType::Boolean => true.into(),
+                        DataType::Int16 => 1i16.into(),
+                        DataType::Int32 => 1i32.into(),
+                        DataType::Int64 => 1i64.into(),
+                        DataType::Float32 => 1f32.into(),
+                        DataType::Float64 => 1f64.into(),
+                        DataType::Decimal => Decimal::NaN.into(),
+                        _ => unimplemented!(),
+                    }),
+                    t,
+                )
+                .into()
+            })
             .collect();
         let (_, ret) = infer_type(func_type, inputs)?;
         Ok(ret)
