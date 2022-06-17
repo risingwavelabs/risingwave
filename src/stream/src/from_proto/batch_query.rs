@@ -48,7 +48,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|key| *key as usize)
             .collect_vec();
 
-        let hash_filter = params.vnode_bitmap;
+        let hash_filter = params.vnode_bitmap.expect("no vnode bitmap");
 
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(

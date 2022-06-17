@@ -119,7 +119,7 @@ pub struct ExecutorParams {
     pub actor_context: ActorContextRef,
 
     // Vnodes owned by this executor. Represented in bitmap.
-    pub vnode_bitmap: Bitmap,
+    pub vnode_bitmap: Option<Bitmap>,
 }
 
 impl Debug for ExecutorParams {
@@ -464,7 +464,7 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Bitmap,
+        vnode_bitmap: Option<Bitmap>,
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -530,7 +530,7 @@ impl LocalStreamManagerCore {
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Bitmap,
+        vnode_bitmap: Option<Bitmap>,
     ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
@@ -628,6 +628,11 @@ impl LocalStreamManagerCore {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
             let actor_context = Arc::new(Mutex::new(ActorContext::default()));
+            let vnode_bitmap = actor
+                .get_vnode_bitmap()
+                .ok()
+                .map(|b| b.try_into())
+                .transpose()?;
 
             let executor = self.create_nodes(
                 actor.fragment_id,
@@ -635,7 +640,7 @@ impl LocalStreamManagerCore {
                 actor.get_nodes()?,
                 env.clone(),
                 &actor_context,
-                actor.get_vnode_bitmap()?.try_into()?,
+                vnode_bitmap,
             )?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
