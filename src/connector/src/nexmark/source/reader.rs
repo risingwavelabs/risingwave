@@ -21,7 +21,7 @@ use crate::nexmark::config::NexmarkConfig;
 use crate::nexmark::source::event::EventType;
 use crate::nexmark::source::generator::NexmarkEventGenerator;
 use crate::nexmark::{NexmarkProperties, NexmarkSplit};
-use crate::{Column, ConnectorState, SourceMessage, SplitImpl, SplitReader};
+use crate::{Column, ConnectorState, SourceMessage, SplitImpl, SplitMetaData, SplitReader};
 
 #[derive(Clone, Debug)]
 pub struct NexmarkSplitReader {
