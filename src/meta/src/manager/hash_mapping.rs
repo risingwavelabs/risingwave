@@ -16,11 +16,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use risingwave_common::hash::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{ParallelUnitId, VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::ParallelUnit;
 
 use super::TableId;
-use crate::cluster::ParallelUnitId;
 use crate::model::FragmentId;
 
 pub type HashMappingManagerRef = Arc<HashMappingManager>;
@@ -222,7 +221,7 @@ impl HashMappingManagerCore {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ParallelUnit, ParallelUnitType};
 
     use super::{HashMappingInfo, HashMappingManager};
