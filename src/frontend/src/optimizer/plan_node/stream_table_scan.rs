@@ -77,12 +77,8 @@ impl fmt::Display for StreamTableScan {
                 "columns",
                 &format_args!("[{}]", self.logical.column_names().join(", ")),
             )
-            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices));
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
-        builder.finish()
+            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices))
+            .finish()
     }
 }
 

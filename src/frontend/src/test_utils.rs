@@ -28,6 +28,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
+use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
@@ -131,20 +132,27 @@ pub struct MockCatalogWriter {
 
 #[async_trait::async_trait]
 impl CatalogWriter for MockCatalogWriter {
-    async fn create_database(&self, db_name: &str) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
         self.catalog.write().create_database(ProstDatabase {
             name: db_name.to_string(),
             id: self.gen_id(),
+            owner,
         });
         Ok(())
     }
 
-    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+    async fn create_schema(
+        &self,
+        db_id: DatabaseId,
+        schema_name: &str,
+        owner: String,
+    ) -> Result<()> {
         let id = self.gen_id();
         self.catalog.write().create_schema(ProstSchema {
             id,
             name: schema_name.to_string(),
             database_id: db_id,
+            owner,
         });
         self.add_schema_id(id, db_id);
         Ok(())
@@ -156,6 +164,11 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
         table.id = self.gen_id();
+        table.mapping = Some(ParallelUnitMapping {
+            table_id: table.id,
+            original_indices: [0, 10, 20].to_vec(),
+            data: [1, 2, 3].to_vec(),
+        });
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
         Ok(())
@@ -223,11 +236,13 @@ impl MockCatalogWriter {
         catalog.write().create_database(ProstDatabase {
             name: DEFAULT_DATABASE_NAME.to_string(),
             id: 0,
+            owner: DEFAULT_SUPPER_USER.to_string(),
         });
         catalog.write().create_schema(ProstSchema {
             id: 0,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
+            owner: DEFAULT_SUPPER_USER.to_string(),
         });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(0_u32, 0_u32);

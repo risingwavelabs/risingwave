@@ -142,8 +142,8 @@ impl FunctionCall {
                     .map(|(i, input)| match i {
                         // 0-th arg must be string
                         0 => input.cast_implicit(DataType::Varchar),
-                        // subsequent can be any type
-                        _ => input.cast_explicit(DataType::Varchar),
+                        // subsequent can be any type, using the output format
+                        _ => input.cast_output(),
                     })
                     .try_collect()?;
                 Ok(DataType::Varchar)

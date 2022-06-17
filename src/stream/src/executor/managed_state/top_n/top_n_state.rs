@@ -100,7 +100,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     }
 
     pub fn is_dirty(&self) -> bool {
-        !self.state_table.get_mem_table().buffer.is_empty()
+        self.state_table.is_dirty()
     }
 
     pub fn retain_top_n(&mut self) {
@@ -191,11 +191,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // we cannot insert `key` into cache. Instead, we have to flush it onto the storage.
         // This is because other keys may be more qualified to stay in cache.
         // TODO: This needs to be changed when transaction on Hummock is implemented.
-        match TOP_N_TYPE {
-            TOP_N_MIN => self.state_table.insert(value.clone())?,
-            TOP_N_MAX => self.state_table.insert(value.clone())?,
-            _ => unreachable!(),
-        }
+        self.state_table.insert(value.clone())?;
         if !need_to_flush {
             self.top_n.insert(key, value);
         }
@@ -240,11 +236,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         epoch: u64,
     ) -> StreamExecutorResult<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
-        match TOP_N_TYPE {
-            TOP_N_MIN => self.state_table.delete(value)?,
-            TOP_N_MAX => self.state_table.delete(value)?,
-            _ => unreachable!(),
-        }
+        self.state_table.delete(value)?;
 
         self.total_count -= 1;
         // If we have nothing in the cache, we have to scan from the storage.

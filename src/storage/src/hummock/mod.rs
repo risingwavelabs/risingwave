@@ -53,6 +53,9 @@ mod utils;
 mod vacuum;
 pub mod value;
 
+#[cfg(target_os = "linux")]
+pub mod file_cache;
+
 pub use error::*;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use value::*;

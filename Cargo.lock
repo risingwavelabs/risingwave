@@ -2806,6 +2806,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f17df307904acd05aa8e32e97bb20f2a0df1728bbc2d771ae8f9a90463441e9"
+dependencies = [
+ "bitflags",
+ "cfg-if 1.0.0",
+ "libc",
+ "memoffset 0.6.5",
+]
+
+[[package]]
 name = "nom"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3949,6 +3961,7 @@ dependencies = [
  "memcomparable",
  "more-asserts",
  "num-traits",
+ "parking_lot",
  "paste",
  "prometheus",
  "prost",
@@ -4515,6 +4528,7 @@ dependencies = [
  "madsim-tonic",
  "memcomparable",
  "moka",
+ "nix",
  "num-integer",
  "num-traits",
  "parking_lot",
@@ -4536,6 +4550,7 @@ dependencies = [
  "spin 0.9.3",
  "tempfile",
  "thiserror",
+ "tokio-metrics",
  "tokio-retry",
  "tokio-stream",
  "tracing",
@@ -4594,6 +4609,7 @@ dependencies = [
  "static_assertions",
  "stats_alloc",
  "thiserror",
+ "tokio-metrics",
  "tokio-stream",
  "tower",
  "tracing",
@@ -5351,6 +5367,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-metrics"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcb585a0069b53171684e22d5255984ec30d1c7304fd0a4a9a603ffd8c765cdd"
+dependencies = [
+ "futures-util",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-native-tls"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6004,10 +6031,7 @@ dependencies = [
  "bytes",
  "cc",
  "chrono",
- "crossbeam-channel",
  "crossbeam-deque",
- "crossbeam-utils 0.7.2",
- "crossbeam-utils 0.8.8",
  "digest",
  "either",
  "fail",
@@ -6046,7 +6070,6 @@ dependencies = [
  "smallvec",
  "socket2",
  "syn",
- "time 0.3.9",
  "tokio",
  "tokio-stream",
  "tokio-util",

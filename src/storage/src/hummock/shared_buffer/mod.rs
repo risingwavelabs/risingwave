@@ -431,7 +431,6 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use futures::executor::block_on;
     use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 
     use super::*;
@@ -440,7 +439,7 @@ mod tests {
     use crate::hummock::test_utils::gen_dummy_sst_info;
     use crate::hummock::HummockValue;
 
-    async fn generate_and_write_batch(
+    fn generate_and_write_batch(
         put_keys: &[Vec<u8>],
         delete_keys: &[Vec<u8>],
         epoch: u64,
@@ -494,13 +493,11 @@ mod tests {
             &mut idx,
             &mut shared_buffer,
             false,
-        )
-        .await;
+        );
 
         // Write to replicate buffer
         let shared_buffer_batch2 =
-            generate_and_write_batch(&keys[0..3], &[], epoch1, &mut idx, &mut shared_buffer, true)
-                .await;
+            generate_and_write_batch(&keys[0..3], &[], epoch1, &mut idx, &mut shared_buffer, true);
 
         // Get overlap batches and verify
         for key in &keys[0..3] {
@@ -534,7 +531,7 @@ mod tests {
 
         // Non-existent key range forward
         let (replicate_batches, overlap_data) =
-            shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key.clone()));
+            shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key));
         assert!(replicate_batches.is_empty());
         assert!(overlap_data.is_empty());
     }
@@ -544,14 +541,14 @@ mod tests {
         let shared_buffer = RefCell::new(SharedBuffer::default());
         let mut idx = 0;
         let mut generate_test_data = |key: &str| {
-            block_on(generate_and_write_batch(
+            generate_and_write_batch(
                 &[key.as_bytes().to_vec()],
                 &[],
                 1,
                 &mut idx,
                 shared_buffer.borrow_mut().deref_mut(),
                 false,
-            ))
+            )
         };
 
         let batch1 = generate_test_data("aa");
