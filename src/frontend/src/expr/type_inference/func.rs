@@ -56,8 +56,23 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
 
     let _has_unknown = inputs.iter().any(|e| e.is_null());
     // Binary operators have a special unknown rule for exact match.
-    // But it is just speed up and does not affect correctness.
-    // if has_unknown && inputs.len() == 2
+    // ~~But it is just speed up and does not affect correctness.~~
+    // Exact match has to be prioritized here over rule `f`, which allows casting
+    // and resolves `int < unknown` to {`int < float8`, `int < int`, etc}
+    if inputs.len() == 2 {
+        let t = match (inputs[0].is_null(), inputs[1].is_null()) {
+            (true, true) => None,
+            (true, false) => Some(inputs[1].return_type()),
+            (false, true) => Some(inputs[0].return_type()),
+            (false, false) => None,
+        };
+        if let Some(t) = t {
+            let exact = candidates.iter().find(|(ps, _ret)| ps[0] == t && ps[1] == t);
+            if let Some((_ps, ret)) = exact {
+                return Ok((inputs, ret.clone()));
+            }
+        }
+    }
 
     let mut best_exact = 0;
     let mut best_preferred = 0;
@@ -75,16 +90,25 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
                     castable = false;
                     break;
                 }
-            }
-            if matches!(
-                p,
-                DataType::Float64
-                    | DataType::Boolean
-                    | DataType::Varchar
-                    | DataType::Timestampz
-                    | DataType::Interval
-            ) {
-                n_preferred += 1;
+                // Only count non-nulls. Example:
+                // ```
+                // create function xxx(text, int, int) returns text language sql return 1;
+                // create function xxx(int, text, int) returns text language sql return 2;
+                // create function xxx(int, int, int) returns text language sql return 3;
+                // select xxx(null, null, null);
+                // select xxx(null, null, 1::smallint);  -- 3
+                // ```
+                // If we count null positions, the first 2 wins because text is preferred.
+                if matches!(
+                    p,
+                    DataType::Float64
+                        | DataType::Boolean
+                        | DataType::Varchar
+                        | DataType::Timestampz
+                        | DataType::Interval
+                ) {
+                    n_preferred += 1;
+                }
             }
         }
         if !castable {
