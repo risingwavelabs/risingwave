@@ -164,6 +164,7 @@ impl StreamMaterialize {
             distribution_keys: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            vnode_mapping: None,
         };
 
         Ok(Self { base, input, table })

@@ -15,10 +15,11 @@
 use std::collections::HashSet;
 
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::error::{tonic_err, Result as RwResult};
+use risingwave_common::error::{tonic_err, ErrorCode, Result as RwResult};
+use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
-use risingwave_pb::common::ParallelUnitType;
+use risingwave_pb::common::{ParallelUnitMapping, ParallelUnitType};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::plan_common::TableRefId;
@@ -294,6 +295,28 @@ where
                 .await
                 .map_err(tonic_err)?;
             return Err(e.into());
+        } else {
+            // Fill in vnode mapping in order to inform frontend of data distribution.
+            let vnode_mapping = self
+                .env
+                .hash_mapping_manager_ref()
+                .get_table_hash_mapping(&id);
+            match vnode_mapping {
+                Some(vnode_mapping) => {
+                    let (original_indices, data) = compress_data(&vnode_mapping);
+                    mview.mapping = Some(ParallelUnitMapping {
+                        table_id: id,
+                        original_indices,
+                        data,
+                    });
+                }
+                None => {
+                    return Err(ErrorCode::InternalError(
+                        "no data distribution found for materialized view".to_string(),
+                    ))
+                    .map_err(tonic_err);
+                }
+            }
         }
 
         // 4. Finally, update the catalog.
