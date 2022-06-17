@@ -83,6 +83,11 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=0,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
+    def timeseries_actor_latency_small(self, title, targets):
+        gridPos = self.layout.next_one_third_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=0,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
     def timeseries_bytes_per_sec(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="Bps", fillOpacity=10,
@@ -110,6 +115,11 @@ class Panels:
 
     def timeseries_actor_ops(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ops", fillOpacity=0,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
+    def timeseries_actor_ops_small(self, title, targets):
+        gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ops", fillOpacity=0,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
@@ -368,54 +378,79 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_latency("Tokio: Actor Fast Poll Time", [
+            panels.timeseries_actor_latency_small("Tokio: Actor Fast Poll Time", [
                 panels.target(
                     "rate(stream_actor_fast_poll_duration[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_ops("Tokio: Actor Fast Poll Count", [
+            panels.timeseries_actor_ops_small("Tokio: Actor Fast Poll Count", [
                 panels.target(
                     "rate(stream_actor_fast_poll_cnt[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_latency("Tokio: Actor Slow Poll Time", [
+            panels.timeseries_actor_latency_small("Tokio: Actor Fast Poll Avg Time", [
+                panels.target(
+                    "rate(stream_actor_fast_poll_duration[1m]) / rate(stream_actor_fast_poll_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency_small("Tokio: Actor Slow Poll Total Time", [
                 panels.target(
                     "rate(stream_actor_slow_poll_duration[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_ops("Tokio: Actor Slow Poll Count", [
+            panels.timeseries_actor_ops_small("Tokio: Actor Slow Poll Count", [
                 panels.target(
                     "rate(stream_actor_slow_poll_cnt[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_latency("Tokio: Actor Poll Time", [
+            panels.timeseries_actor_latency_small("Tokio: Actor Slow Poll Avg Time", [
+                panels.target(
+                    "rate(stream_actor_slow_poll_duration[1m]) / rate(stream_actor_slow_poll_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency_small("Tokio: Actor Poll Total Time", [
                 panels.target(
                     "rate(stream_actor_poll_duration[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_ops("Tokio: Actor Poll Count", [
+            panels.timeseries_actor_ops_small("Tokio: Actor Poll Count", [
                 panels.target(
                     "rate(stream_actor_poll_cnt[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_latency("Tokio: Actor Idle Time", [
+            panels.timeseries_actor_latency_small("Tokio: Actor Poll Avg Time", [
+                panels.target(
+                    "rate(stream_actor_poll_duration[1m]) / rate(stream_actor_poll_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency_small("Tokio: Actor Idle Total Time", [
                 panels.target(
                     "rate(stream_actor_idle_duration[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_ops("Tokio: Actor Idle Count", [
+            panels.timeseries_actor_ops_small("Tokio: Actor Idle Count", [
                 panels.target(
                     "rate(stream_actor_idle_cnt[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_latency("Tokio: Actor Scheduled Time", [
+            panels.timeseries_actor_latency_small("Tokio: Actor Idle Avg Time", [
+                panels.target(
+                    "rate(stream_actor_idle_duration[1m]) / rate(stream_actor_idle_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency_small("Tokio: Actor Scheduled Total Time", [
                 panels.target(
                     "rate(stream_actor_scheduled_duration[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_ops("Tokio: Actor Scheduled Count", [
+            panels.timeseries_actor_ops_small("Tokio: Actor Scheduled Count", [
                 panels.target(
                     "rate(stream_actor_scheduled_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency_small("Tokio: Actor Scheduled Avg Time", [
+                panels.target(
+                    "rate(stream_actor_scheduled_duration[1m]) / rate(stream_actor_scheduled_cnt[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_actor_ops("Join Executor Cache", [
@@ -424,6 +459,16 @@ def section_streaming_actors(outer_panels):
                 ),
                 panels.target(
                     "rate(stream_join_lookup_total_count[1m])", "total lookups {{actor_id}} {{side}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency("Join Executor Barrier Align", [
+                *quantile(lambda quantile, legend:
+                          panels.target(
+                              f"histogram_quantile({quantile}, sum(rate(stream_join_barrier_align_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                          ),
+                          [90, 99, 999, "max"]),
+                panels.target(
+                    "sum by(le, job, instance)(rate(stream_join_barrier_align_duration_sum[1m])) / sum by(le, job,instance) (rate(stream_join_barrier_align_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
                 ),
             ]),
         ])

@@ -14,8 +14,9 @@
 
 use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
-    register_gauge_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, Registry,
+    exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
+    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, HistogramVec, Registry,
 };
 
 pub struct StreamingMetrics {
@@ -38,6 +39,7 @@ pub struct StreamingMetrics {
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub join_barrier_align_duration: HistogramVec,
 }
 
 impl StreamingMetrics {
@@ -186,6 +188,15 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "stream_join_barrier_align_duration",
+            "Total time of backward scan that have been issued to state store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let join_barrier_align_duration =
+            register_histogram_vec_with_registry!(opts, &["actor_id", "wait_side"], registry)
+                .unwrap();
+
         Self {
             registry,
             executor_row_count,
@@ -206,6 +217,7 @@ impl StreamingMetrics {
             exchange_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
+            join_barrier_align_duration,
         }
     }
 

@@ -192,6 +192,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
 
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
+
+    actor_id: u64,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -452,7 +455,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     col_r_datatypes.clone(),
                     ks_r,
                     Some(params_r.dist_keys.clone()),
-                    metrics,
+                    metrics.clone(),
                     actor_id,
                     "right",
                 ), // TODO: decide the target cap
@@ -467,6 +470,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             op_info,
             epoch: 0,
             append_only_optimize,
+            actor_id,
+            metrics,
         }
     }
 
@@ -474,7 +479,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     async fn into_stream(mut self) {
         let input_l = self.input_l.take().unwrap();
         let input_r = self.input_r.take().unwrap();
-        let aligned_stream = barrier_align(input_l.execute(), input_r.execute());
+        let aligned_stream = barrier_align(
+            input_l.execute(),
+            input_r.execute(),
+            self.actor_id,
+            self.metrics.clone(),
+        );
         #[for_await]
         for msg in aligned_stream {
             match msg? {
