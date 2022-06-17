@@ -142,17 +142,20 @@
     create materialized view mv as select * from t;
     delete from mv;
   binder_error: 'Invalid input syntax: cannot change materialized view mv'
-# - sql:  |
-#     create table t;
-#     create source t with ( 'connector' = 'datagen' ) row format json;
-# - sql:  |
-#     create source t with ( 'connector' = 'datagen' ) row format json;
-#     create table t;
-# - sql:  |
-#     create materialized source t (v1 int) with ( 'connector' = 'datagen' )  row format json;
-#     create source t with ( 'connector' = 'datagen' ) row format json;
-# - sql:
-#     create table s;
-#     create materialized view mv as select * from s;
-#     drop source mv;
-
+- sql: |
+    create table t;
+    create source t with ( 'connector' = 'datagen' ) row format json;
+  catalog_error: 'Catalog error: table with name t exists'
+- sql: |
+    create source t with ( 'connector' = 'datagen' ) row format json;
+    create table t;
+  catalog_error: 'Catalog error: source with name t exists'
+- sql: |
+    create source t with ( 'connector' = 'datagen' ) row format json;
+    create materialized source t (v1 int) with ( 'connector' = 'datagen' )  row format json;
+  catalog_error: 'Catalog error: source with name t exists'
+- sql: |
+    create table s;
+    create materialized view mv as select * from s;
+    drop source mv;
+  catalog_error: 'Invalid input syntax: Use `DROP MATERIALIZED VIEW` to drop a materialized view.'
