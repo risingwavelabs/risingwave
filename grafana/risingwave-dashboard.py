@@ -70,21 +70,28 @@ class Panels:
 
     def timeseries_count(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10, legendDisplayMode="table",
-                          legendPlacement="right")
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
     def timeseries_latency(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
+    def timeseries_actor_latency(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=0,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
     def timeseries_bytes_per_sec(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="Bps", fillOpacity=10)
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="Bps", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
     def timeseries_bytes(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="decbytes", fillOpacity=10)
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="decbytes", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
     def timeseries_kilobytes(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
@@ -93,15 +100,28 @@ class Panels:
 
     def timeseries_dollar(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="$", fillOpacity=10)
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="$", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
     def timeseries_ops(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ops", fillOpacity=10)
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ops", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
+    def timeseries_actor_ops(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ops", fillOpacity=0,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
     def timeseries_rowsps(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="rows/s", fillOpacity=10)
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="rows/s", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
+    def timeseries_actor_rowsps(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="rows/s", fillOpacity=0,
+                          legendDisplayMode="table", legendPlacement="right", )
 
     def timeseries_memory(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
@@ -321,24 +341,82 @@ def section_streaming_actors(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed("Streaming Actors", [
-            panels.timeseries_rowsps("Executor Throughput", [
+            panels.timeseries_actor_rowsps("Executor Throughput", [
                 panels.target(
                     "rate(stream_executor_row_count[15s]) > 0", "{{actor_id}}->{{executor_id}}"
                 ),
             ]),
-            panels.timeseries_latency("Actor Barrier Latency", [
+            panels.timeseries_actor_latency("Actor Barrier Latency", [
                 panels.target(
                     "rate(stream_actor_barrier_time[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_latency("Actor Processing Time", [
+            panels.timeseries_actor_latency("Actor Processing Time", [
                 panels.target(
                     "rate(stream_actor_processing_time[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_latency("Actor Execution Time", [
+            panels.timeseries_actor_latency("Actor Execution Time", [
                 panels.target(
                     "rate(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency("Tokio: Actor Fast Poll Time", [
+                panels.target(
+                    "rate(stream_actor_fast_poll_duration[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_ops("Tokio: Actor Fast Poll Count", [
+                panels.target(
+                    "rate(stream_actor_fast_poll_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency("Tokio: Actor Slow Poll Time", [
+                panels.target(
+                    "rate(stream_actor_slow_poll_duration[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_ops("Tokio: Actor Slow Poll Count", [
+                panels.target(
+                    "rate(stream_actor_slow_poll_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency("Tokio: Actor Poll Time", [
+                panels.target(
+                    "rate(stream_actor_poll_duration[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_ops("Tokio: Actor Poll Count", [
+                panels.target(
+                    "rate(stream_actor_poll_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency("Tokio: Actor Idle Time", [
+                panels.target(
+                    "rate(stream_actor_idle_duration[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_ops("Tokio: Actor Idle Count", [
+                panels.target(
+                    "rate(stream_actor_idle_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency("Tokio: Actor Scheduled Time", [
+                panels.target(
+                    "rate(stream_actor_scheduled_duration[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_ops("Tokio: Actor Scheduled Count", [
+                panels.target(
+                    "rate(stream_actor_scheduled_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_ops("Join Executor Cache", [
+                panels.target(
+                    "rate(stream_join_lookup_miss_count[1m])", "{{actor_id}} {{side}}"
+                ),
+                panels.target(
+                    "rate(stream_join_lookup_total_count[1m])", "{{actor_id}} {{side}}"
                 ),
             ]),
         ])
@@ -372,6 +450,9 @@ def section_hummock(panels):
                 "sum(rate(state_store_get_duration_count[1m])) by (job,instance)", "get - {{job}} @ {{instance}}"
             ),
             panels.target(
+                "sum(rate(state_store_iter_duration_count[1m])) by (job,instance)", "iter - {{job}} @ {{instance}}"
+            ),
+            panels.target(
                 "sum(rate(state_store_range_scan_duration_count[1m])) by (job,instance)", "range_scan - {{job}} @ {{instance}}"
             ),
             panels.target(
@@ -383,44 +464,54 @@ def section_hummock(panels):
         ]),
         panels.timeseries_latency("Read Duration - Get", [
             panels.target(
-                "histogram_quantile(0.50, sum(rate(state_store_get_duration_bucket[1m])) by (le, job, instance))", "get p50 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.50, sum(rate(state_store_get_duration_bucket[1m])) by (le, job, instance))", "p50 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.90, sum(rate(state_store_get_duration_bucket[1m])) by (le, job, instance))", "get p90 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.90, sum(rate(state_store_get_duration_bucket[1m])) by (le, job, instance))", "p90 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(state_store_get_duration_bucket[1m])) by (le, job, instance))", "get p99 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.99, sum(rate(state_store_get_duration_bucket[1m])) by (le, job, instance))", "p99 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "sum by(le, job, instance)(rate(state_store_get_duration_sum[1m])) / sum by(le, job, instance) (rate(state_store_get_duration_count[1m]))", "get avg - {{job}} @ {{instance}}"
+                "sum by(le, job, instance)(rate(state_store_get_duration_sum[1m])) / sum by(le, job, instance) (rate(state_store_get_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_latency("Read Duration - Scan", [
             panels.target(
-                "histogram_quantile(0.50, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, job, instance))", "range_scan p50 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.50, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, job, instance))", "p50 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.90, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le,job, instance))", "range_scan p90 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.90, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le,job, instance))", "p90 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, job, instance))", "range_scan p99 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.99, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, job, instance))", "p99 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "sum by(le, job, instance)(rate(state_store_range_scan_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_range_scan_duration_count[1m]))", "range_scan avg - {{job}} @ {{instance}}"
+                "sum by(le, job, instance)(rate(state_store_range_scan_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_range_scan_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_latency("Read Duration - Reverse Scan", [
             panels.target(
-                "histogram_quantile(0.50, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, job, instance))", "reverse_range_scan p50 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.50, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, job, instance))", "p50 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.90, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, job, instance))", "reverse_range_scan p90 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.90, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, job, instance))", "p90 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, job, instance))", "reverse_range_scan p99 - {{job}} @ {{instance}}"
+                "histogram_quantile(0.99, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, job, instance))", "p99 - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "sum by(le, job, instance)(rate(state_store_range_reverse_scan_duration_sum[1m])) / sum by(le, job, instance) (rate(state_store_range_reverse_scan_duration_count[1m]))", "reverse_range_scan avg - {{job}} @ {{instance}}"
+                "sum by(le, job, instance)(rate(state_store_range_reverse_scan_duration_sum[1m])) / sum by(le, job, instance) (rate(state_store_range_reverse_scan_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
+            ),
+        ]),
+        panels.timeseries_latency("Read Duration - Iter", [
+            *quantile(lambda quantile, legend:
+                      panels.target(
+                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                      ),
+                      [50, 90, 99]),
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_iter_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_iter_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_ops("Block Ops", [
@@ -444,7 +535,7 @@ def section_hummock(panels):
                 "sum(rate(state_store_shared_buffer_to_l0_duration_count[1m])) by (job,instance)", "l0 - {{job}} @ {{instance}} "
             ),
         ]),
-        panels.timeseries_latency("write duration", [
+        panels.timeseries_latency("Write Duration", [
             panels.target(
                 "histogram_quantile(0.5, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, job, instance))", "shared_buffer p50 - {{job}} @ {{instance}}"
             ),
@@ -487,22 +578,38 @@ def section_hummock(panels):
                 "sum by(le, job, instance)(rate(state_store_iter_merge_sstable_counts_sum[1m]))  / sum by(le, job, instance)(rate(state_store_iter_merge_sstable_counts_count[1m]))", "# merged ssts avg  - {{job}} @ {{instance}}"
             ),
         ]),
-        panels.timeseries_bytes_per_sec("read throughput", [
-            panels.target(
-                "sum by(job,instance)(rate(state_store_get_key_size_sum[1m])+rate(state_store_get_value_size_sum[1m]))/sum by(job,instance)(rate(state_store_get_key_size_count[1m]))", "get  - {{job}} @ {{instance}}"
-            ),
-            panels.target(
-                "sum by(job,instance)(rate(state_store_get_key_size_sum[1m]))/sum by(job,instance)(rate(state_store_get_key_size_count[1m]))", "get key  - {{job}} @ {{instance}}"
-            ),
-            panels.target(
-                "sum by(job,instance)(rate(state_store_get_value_size_sum[1m]))/sum by(job,instance)(rate(state_store_get_value_size_count[1m]))", "get value  - {{job}} @ {{instance}}"
-            ),
-            panels.target(
-                "sum by(job,instance)(rate(state_store_range_scan_size_sum[1m]))/sum by(job,instance)(rate(state_store_range_scan_size_count[1m]))", "range_scan  - {{job}} @ {{instance}}"
-            ),
-            panels.target(
-                "sum by(job,instance)(rate(state_store_range_reverse_scan_size_sum[1m]))/sum by(job,instance)(rate(state_store_range_reverse_scan_size_count[1m]))", "reverse_range_scan  - {{job}} @ {{instance}}"
-            ),
+        panels.timeseries_bytes("Read Item Size - Get", [
+            *quantile(lambda quantile, legend:
+                      panels.target(
+                          f"histogram_quantile({quantile}, sum(rate(state_store_get_key_size_bucket[1m])) by (le, job, instance)) + histogram_quantile({quantile}, sum(rate(state_store_get_value_size_bucket[1m])) by (le, job, instance))", f"{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                      ),
+                      [50, 90, 99]),
+        ]),
+        panels.timeseries_bytes("Read Item Size - Scan", [
+            *quantile(lambda quantile, legend:
+                      panels.target(
+                          f"histogram_quantile({quantile}, sum(rate(state_store_range_scan_size_bucket[1m])) by (le, job, instance))", f"scan p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                      ),
+                      [50, 90, 99]),
+            *quantile(lambda quantile, legend:
+                      panels.target(
+                          f"histogram_quantile({quantile}, sum(rate(state_store_range_reverse_scan_size_bucket[1m])) by (le, job, instance))", f"reverse scan p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                      ),
+                      [50, 90, 99]),
+        ]),
+        panels.timeseries_bytes("Read Item Size - Iter", [
+            *quantile(lambda quantile, legend:
+                      panels.target(
+                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_size_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                      ),
+                      [50, 90, 99]),
+        ]),
+        panels.timeseries_count("Read Item Count - Iter", [
+            *quantile(lambda quantile, legend:
+                      panels.target(
+                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_item_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                      ),
+                      [50, 90, 99]),
         ]),
         panels.timeseries_ops("write kv pair counts", [
             panels.target(
