@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
@@ -26,6 +27,7 @@ pub struct ManualCompactionPicker {
     compact_task_id: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
     option: ManualCompactionOption,
+    target_level: usize,
 }
 
 impl ManualCompactionPicker {
@@ -33,11 +35,13 @@ impl ManualCompactionPicker {
         compact_task_id: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
         option: ManualCompactionOption,
+        target_level: usize,
     ) -> Self {
         Self {
             compact_task_id,
             overlap_strategy,
             option,
+            target_level,
         }
     }
 }
@@ -49,7 +53,7 @@ impl CompactionPicker for ManualCompactionPicker {
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {
         let level = self.option.level;
-        let target_level = level + 1;
+        let target_level = self.target_level;
 
         let mut select_input_ssts = vec![];
         let mut tmp_sst_info = SstableInfo::default();
@@ -90,17 +94,14 @@ impl CompactionPicker for ManualCompactionPicker {
                 continue;
             }
 
-            let mut pending_campct = false;
             let overlap_files = self
                 .overlap_strategy
                 .check_base_level_overlap(&[table.clone()], &levels[target_level].table_infos);
-            for other in overlap_files {
-                if level_handlers[target_level].is_pending_compact(&other.id) {
-                    pending_campct = true;
-                    break;
-                }
-            }
-            if pending_campct {
+
+            if overlap_files
+                .iter()
+                .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
+            {
                 continue;
             }
 
@@ -113,7 +114,10 @@ impl CompactionPicker for ManualCompactionPicker {
 
         let target_input_ssts = self
             .overlap_strategy
-            .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos);
+            .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos)
+            .into_iter()
+            .filter(|table| !level_handlers[level].is_pending_compact(&table.id))
+            .collect_vec();
 
         level_handlers[level].add_pending_task(self.compact_task_id, &select_input_ssts);
         if !target_input_ssts.is_empty() {
@@ -205,8 +209,14 @@ pub mod tests {
                 },
                 ..Default::default()
             };
-            let picker =
-                ManualCompactionPicker::new(0, Arc::new(RangeOverlapStrategy::default()), option);
+
+            let target_level = option.level + 1;
+            let picker = ManualCompactionPicker::new(
+                0,
+                Arc::new(RangeOverlapStrategy::default()),
+                option,
+                target_level,
+            );
             let result = picker
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
@@ -221,8 +231,13 @@ pub mod tests {
 
             // test all key range
             let option = ManualCompactionOption::default();
-            let picker =
-                ManualCompactionPicker::new(0, Arc::new(RangeOverlapStrategy::default()), option);
+            let target_level = option.level + 1;
+            let picker = ManualCompactionPicker::new(
+                0,
+                Arc::new(RangeOverlapStrategy::default()),
+                option,
+                target_level,
+            );
             let result = picker
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
@@ -248,8 +263,13 @@ pub mod tests {
                 ..Default::default()
             };
 
-            let picker =
-                ManualCompactionPicker::new(0, Arc::new(RangeOverlapStrategy::default()), option);
+            let target_level = option.level + 1;
+            let picker = ManualCompactionPicker::new(
+                0,
+                Arc::new(RangeOverlapStrategy::default()),
+                option,
+                target_level,
+            );
 
             let result = picker
                 .pick_compaction(&levels, &mut levels_handler)
@@ -282,8 +302,13 @@ pub mod tests {
                 internal_table_id: HashSet::from([2]),
             };
 
-            let picker =
-                ManualCompactionPicker::new(0, Arc::new(RangeOverlapStrategy::default()), option);
+            let target_level = option.level + 1;
+            let picker = ManualCompactionPicker::new(
+                0,
+                Arc::new(RangeOverlapStrategy::default()),
+                option,
+                target_level,
+            );
 
             let result = picker
                 .pick_compaction(&levels, &mut levels_handler)
