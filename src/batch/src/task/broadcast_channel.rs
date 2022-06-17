@@ -22,10 +22,11 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
+use crate::task::BOUNDED_BUFFER_SIZE;
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
 pub struct BroadcastSender {
-    senders: Vec<mpsc::UnboundedSender<Option<DataChunk>>>,
+    senders: Vec<mpsc::Sender<Option<DataChunk>>>,
     broadcast_info: BroadcastInfo,
 }
 
@@ -34,18 +35,21 @@ impl ChanSender for BroadcastSender {
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
-            self.senders.iter().try_for_each(|sender| {
+            for sender in &self.senders {
                 sender
                     .send(chunk.clone())
-                    .to_rw_result_with(|| "BroadcastSender::send".into())
-            })
+                    .await
+                    .to_rw_result_with(|| "BroadcastSender::send".into())?;
+            }
+
+            Ok(())
         }
     }
 }
 
 /// One or more `BroadcastReceiver`s corresponds to a single `BroadcastReceiver`
 pub struct BroadcastReceiver {
-    receiver: mpsc::UnboundedReceiver<Option<DataChunk>>,
+    receiver: mpsc::Receiver<Option<DataChunk>>,
 }
 
 impl ChanReceiver for BroadcastReceiver {
@@ -72,7 +76,7 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (ChanSenderImpl, Vec<Cha
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
     for _ in 0..output_count {
-        let (s, r) = mpsc::unbounded_channel();
+        let (s, r) = mpsc::channel(BOUNDED_BUFFER_SIZE);
         senders.push(s);
         receivers.push(r);
     }

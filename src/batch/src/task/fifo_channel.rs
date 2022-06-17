@@ -20,13 +20,14 @@ use risingwave_common::error::{Result, ToRwResult};
 use tokio::sync::mpsc;
 
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
+use crate::task::BOUNDED_BUFFER_SIZE;
 
 pub struct FifoSender {
-    sender: mpsc::UnboundedSender<Option<DataChunk>>,
+    sender: mpsc::Sender<Option<DataChunk>>,
 }
 
 pub struct FifoReceiver {
-    receiver: mpsc::UnboundedReceiver<Option<DataChunk>>,
+    receiver: mpsc::Receiver<Option<DataChunk>>,
 }
 
 impl ChanSender for FifoSender {
@@ -36,6 +37,7 @@ impl ChanSender for FifoSender {
         async move {
             self.sender
                 .send(chunk)
+                .await
                 .to_rw_result_with(|| "FifoSender::send".into())
         }
     }
@@ -56,7 +58,7 @@ impl ChanReceiver for FifoReceiver {
 }
 
 pub fn new_fifo_channel() -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
-    let (s, r) = mpsc::unbounded_channel();
+    let (s, r) = mpsc::channel(BOUNDED_BUFFER_SIZE);
     (
         ChanSenderImpl::Fifo(FifoSender { sender: s }),
         vec![ChanReceiverImpl::Fifo(FifoReceiver { receiver: r })],

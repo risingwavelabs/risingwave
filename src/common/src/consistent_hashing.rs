@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use risingwave_pb::common::VNodeRanges;
 
-use crate::hash::{VirtualNode, VIRTUAL_NODE_COUNT};
+use crate::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 
 pub type ParallelUnitId = u32;
 

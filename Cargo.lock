@@ -2806,6 +2806,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f17df307904acd05aa8e32e97bb20f2a0df1728bbc2d771ae8f9a90463441e9"
+dependencies = [
+ "bitflags",
+ "cfg-if 1.0.0",
+ "libc",
+ "memoffset 0.6.5",
+]
+
+[[package]]
 name = "nom"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3949,6 +3961,7 @@ dependencies = [
  "memcomparable",
  "more-asserts",
  "num-traits",
+ "parking_lot",
  "paste",
  "prometheus",
  "prost",
@@ -4515,6 +4528,7 @@ dependencies = [
  "madsim-tonic",
  "memcomparable",
  "moka",
+ "nix",
  "num-integer",
  "num-traits",
  "parking_lot",
@@ -4536,6 +4550,7 @@ dependencies = [
  "spin 0.9.3",
  "tempfile",
  "thiserror",
+ "tokio-metrics",
  "tokio-retry",
  "tokio-stream",
  "tracing",

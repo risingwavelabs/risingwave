@@ -16,6 +16,7 @@ mod join_entry_state;
 use std::alloc::Global;
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut, Index};
+use std::sync::Arc;
 
 use futures::pin_mut;
 use futures_async_stream::for_await;
@@ -31,6 +32,8 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
+
+use crate::executor::monitor::StreamingMetrics;
 
 type DegreeType = u64;
 /// This is a row with a match degree
@@ -113,6 +116,42 @@ pub type HashValueType = JoinEntryState;
 type JoinHashMapInner<K> =
     EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
+pub struct JoinHashMapMetrics {
+    /// Metrics used by join executor
+    metrics: Arc<StreamingMetrics>,
+    /// Basic information
+    actor_id: String,
+    side: &'static str,
+    /// How many times have we hit the cache of join executor
+    lookup_miss_count: usize,
+    total_lookup_count: usize,
+}
+
+impl JoinHashMapMetrics {
+    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: u64, side: &'static str) -> Self {
+        Self {
+            metrics,
+            actor_id: actor_id.to_string(),
+            side,
+            lookup_miss_count: 0,
+            total_lookup_count: 0,
+        }
+    }
+
+    pub fn flush(&mut self) {
+        self.metrics
+            .join_lookup_miss_count
+            .with_label_values(&[&self.actor_id, self.side])
+            .inc_by(self.lookup_miss_count as u64);
+        self.metrics
+            .join_total_lookup_count
+            .with_label_values(&[&self.actor_id, self.side])
+            .inc_by(self.total_lookup_count as u64);
+        self.total_lookup_count = 0;
+        self.lookup_miss_count = 0;
+    }
+}
+
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Allocator
     alloc: SharedStatsAlloc<Global>,
@@ -128,10 +167,13 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     current_epoch: u64,
     /// State table
     state_table: StateTable<S>,
+    /// Metrics of the hash map
+    metrics: JoinHashMapMetrics,
 }
 
 impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         target_cap: usize,
         pk_indices: Vec<usize>,
@@ -139,6 +181,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         mut data_types: Vec<DataType>,
         keyspace: Keyspace<S>,
         dist_key_indices: Option<Vec<usize>>,
+        metrics: Arc<StreamingMetrics>,
+        actor_id: u64,
+        side: &'static str,
     ) -> Self {
         let join_key_data_types = join_key_indices
             .iter()
@@ -178,6 +223,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             current_epoch: 0,
             state_table,
             alloc,
+            metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
     }
 
@@ -195,8 +241,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
+    #[expect(dead_code)]
     #[cfg(any())]
     pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType> {
+        // TODO: add metrics for get
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -212,8 +260,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
+    #[expect(dead_code)]
     #[cfg(any())]
     pub async fn get_mut<'a>(&'a mut self, key: &'a K) -> Option<&'a mut HashValueType> {
+        // TODO: add metrics for get_mut
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -233,9 +283,13 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// WARNING: This will NOT remove anything from remote storage.
     pub async fn remove_state<'a>(&mut self, key: &K) -> Option<HashValueType> {
         let state = self.inner.pop(key);
+        self.metrics.total_lookup_count += 1;
         match state {
             Some(_) => state,
-            None => Some(self.fetch_cached_state(key).await.unwrap()),
+            None => {
+                self.metrics.lookup_miss_count += 1;
+                Some(self.fetch_cached_state(key).await.unwrap())
+            }
         }
     }
 
@@ -262,6 +316,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     pub async fn flush(&mut self) -> RwResult<()> {
+        self.metrics.flush();
         self.state_table
             .commit_with_value_meta(self.current_epoch)
             .await
