@@ -23,6 +23,10 @@ use crate::{Keyspace, StateStore};
 /// rows to have dedup pk cell encoding.
 pub type DedupPkStateTable<S> = StateTableExtended<S, DedupPkCellBasedRowSerializer>;
 
+/// Constructor for `DedupPkStateTable`.
+/// We instantiate `DedupPkCellBasedRowSerializer` with `pk_indices`
+/// and `column_descs` here. These are used to determine which
+/// pk datums to filter out.
 impl<S: StateStore> DedupPkStateTable<S> {
     pub fn new_dedup_pk_state_table(
         keyspace: Keyspace<S>,

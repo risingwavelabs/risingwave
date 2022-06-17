@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::iter::Iterator;
 
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
@@ -49,33 +50,30 @@ impl DedupPkCellBasedRowSerializer {
         }
     }
 
-    fn remove_dup_pk_datums_by_ref(&self, row: &Row) -> Row {
-        Row(row
-            .0
-            .iter()
-            .enumerate()
+    fn filter_by_dedup_datum_indices<'a, I>(
+        &'a self,
+        iter: impl Iterator<Item = I> + 'a,
+    ) -> impl Iterator<Item = I> + 'a {
+        iter.enumerate()
             .filter(|(i, _)| self.dedup_datum_indices.contains(i))
             .map(|(_, d)| d)
+    }
+
+    fn remove_dup_pk_datums_by_ref(&self, row: &Row) -> Row {
+        Row(self
+            .filter_by_dedup_datum_indices(row.0.iter())
             .cloned()
             .collect())
     }
 
     fn remove_dup_pk_datums(&self, row: Row) -> Row {
-        Row(row
-            .0
-            .into_iter()
-            .enumerate()
-            .filter(|(i, _)| self.dedup_datum_indices.contains(i))
-            .map(|(_, d)| d)
+        Row(self
+            .filter_by_dedup_datum_indices(row.0.into_iter())
             .collect())
     }
 
     fn remove_dup_pk_column_ids(&self, column_ids: &[ColumnId]) -> Vec<ColumnId> {
-        column_ids
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| self.dedup_datum_indices.contains(i))
-            .map(|(_, id)| id)
+        self.filter_by_dedup_datum_indices(column_ids.iter())
             .cloned()
             .collect()
     }
