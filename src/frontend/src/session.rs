@@ -571,7 +571,7 @@ impl Session for SessionImpl {
             return Ok(vec![]);
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = infer(self, stmt).await.map_err(|e| {
+        let rsp = infer(self, stmt).map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
@@ -583,8 +583,8 @@ impl Session for SessionImpl {
     }
 }
 
-async fn infer(session: Arc<SessionImpl>, stmt: Statement) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session.clone());
+fn infer(session: Arc<SessionImpl>, stmt: Statement) -> Result<Vec<PgFieldDescriptor>> {
+    let context = OptimizerContext::new(session);
     let session = context.session_ctx.clone();
 
     let bound = {
