@@ -174,7 +174,7 @@ impl StreamingMetrics {
 
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
-            "Join executor miss",
+            "Join executor lookup miss duration",
             &["actor_id", "side"],
             registry
         )
@@ -182,7 +182,7 @@ impl StreamingMetrics {
 
         let join_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_join_total_lookup_count",
-            "Join executor lookup",
+            "Join executor lookup total operation",
             &["actor_id", "side"],
             registry
         )
@@ -190,7 +190,7 @@ impl StreamingMetrics {
 
         let opts = histogram_opts!(
             "stream_join_barrier_align_duration",
-            "Total time of backward scan that have been issued to state store",
+            "Duration of join align barrier",
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let join_barrier_align_duration =

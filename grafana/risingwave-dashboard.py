@@ -328,7 +328,7 @@ def quantile(f, percentiles):
         "50": ["0.5", "50"],
         "90": ["0.9", "90"],
         "99": ["0.99", "99"],
-        "999": ["0.99", "999"],
+        "999": ["0.999", "999"],
         "max": ["1.0", "max"],
     }
     return list(map(lambda p: f(quantile_map[str(p)][0], quantile_map[str(p)][1]), percentiles))
@@ -464,11 +464,11 @@ def section_streaming_actors(outer_panels):
             panels.timeseries_actor_latency("Join Executor Barrier Align", [
                 *quantile(lambda quantile, legend:
                           panels.target(
-                              f"histogram_quantile({quantile}, sum(rate(stream_join_barrier_align_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                              f"histogram_quantile({quantile}, sum(rate(stream_join_barrier_align_duration_bucket[1m])) by (le, actor_id, wait_side, job, instance))", f"p{legend} {{{{actor_id}}}}.{{{{wait_side}}}} - {{{{job}}}} @ {{{{instance}}}}"
                           ),
                           [90, 99, 999, "max"]),
                 panels.target(
-                    "sum by(le, job, instance)(rate(stream_join_barrier_align_duration_sum[1m])) / sum by(le, job,instance) (rate(stream_join_barrier_align_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
+                    "sum by(le, actor_id, wait_side, job, instance)(rate(stream_join_barrier_align_duration_sum[1m])) / sum by(le,actor_id,wait_side,job,instance) (rate(stream_join_barrier_align_duration_count[1m]))", "avg {{actor_id}}.{{wait_side}} - {{job}} @ {{instance}}"
                 ),
             ]),
         ])
