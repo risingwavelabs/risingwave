@@ -40,6 +40,7 @@ use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::{StorageValue, ValueMeta};
+use crate::store::WriteOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
@@ -204,7 +205,10 @@ impl<S: StateStore> CellBasedTable<S> {
         epoch: u64,
     ) -> StorageResult<()> {
         // stateful executors need to compute vnode.
-        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            epoch,
+            table_id: self.keyspace.table_id(),
+        });
         let mut local = batch.prefixify(&self.keyspace);
         let hash_builder = CRC32FastBuilder {};
         for (pk, row_op) in buffer {
@@ -284,7 +288,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 }
             }
         }
-        batch.ingest(epoch).await?;
+        batch.ingest().await?;
         Ok(())
     }
 

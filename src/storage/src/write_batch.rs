@@ -17,6 +17,7 @@ use bytes::Bytes;
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::storage_value::{StorageValue, ValueMeta};
+use crate::store::WriteOptions;
 use crate::{Keyspace, StateStore};
 
 /// [`WriteBatch`] wraps a list of key-value pairs and an associated [`StateStore`].
@@ -24,6 +25,8 @@ pub struct WriteBatch<S: StateStore> {
     store: S,
 
     batch: Vec<(Bytes, StorageValue)>,
+
+    write_options: WriteOptions,
 }
 
 impl<S> WriteBatch<S>
@@ -31,18 +34,20 @@ where
     S: StateStore,
 {
     /// Constructs a new, empty [`WriteBatch`] with the given `store`.
-    pub fn new(store: S) -> Self {
+    pub fn new(store: S, write_options: WriteOptions) -> Self {
         Self {
             store,
             batch: Vec::new(),
+            write_options,
         }
     }
 
     /// Constructs a new, empty [`WriteBatch`] with the given `store` and specified capacity.
-    pub fn with_capacity(store: S, capacity: usize) -> Self {
+    pub fn with_capacity(store: S, capacity: usize, write_options: WriteOptions) -> Self {
         Self {
             store,
             batch: Vec::with_capacity(capacity),
+            write_options,
         }
     }
 
@@ -80,16 +85,20 @@ where
     }
 
     /// Ingests this batch into the associated state store.
-    pub async fn ingest(mut self, epoch: u64) -> StorageResult<()> {
+    pub async fn ingest(mut self) -> StorageResult<()> {
         self.preprocess()?;
-        self.store.ingest_batch(self.batch, epoch).await?;
+        self.store
+            .ingest_batch(self.batch, self.write_options)
+            .await?;
         Ok(())
     }
 
     /// Ingests this batch into the associated state store, without being persisted.
-    pub async fn replicate_remote(mut self, epoch: u64) -> StorageResult<()> {
+    pub async fn replicate_remote(mut self) -> StorageResult<()> {
         self.preprocess()?;
-        self.store.replicate_batch(self.batch, epoch).await?;
+        self.store
+            .replicate_batch(self.batch, self.write_options)
+            .await?;
         Ok(())
     }
 

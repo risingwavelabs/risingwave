@@ -109,11 +109,11 @@ impl StateStore for MemoryStateStore {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
             let range_bounds = key.to_vec()..=key.to_vec();
             // We do not really care about vnodes here, so we just use the default value.
-            let res = self.scan(range_bounds, Some(1), epoch).await?;
+            let res = self.scan(range_bounds, Some(1), read_options).await?;
 
             Ok(match res.as_slice() {
                 [] => None,
@@ -127,13 +127,14 @@ impl StateStore for MemoryStateStore {
         &self,
         key_range: R,
         limit: Option<usize>,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
+            let epoch = read_options.epoch;
             let mut data = vec![];
             if limit == Some(0) {
                 return Ok(vec![]);
@@ -163,7 +164,7 @@ impl StateStore for MemoryStateStore {
         &self,
         _key_range: R,
         _limit: Option<usize>,
-        _epoch: u64,
+        _read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -175,9 +176,10 @@ impl StateStore for MemoryStateStore {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            let epoch = write_options.epoch;
             let mut inner = self.inner.write();
             let mut size: usize = 0;
             for (key, value) in kv_pairs {
@@ -191,24 +193,31 @@ impl StateStore for MemoryStateStore {
     fn replicate_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _epoch: u64,
+        _write_options: WriteOptions,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { unimplemented!() }
     }
 
-    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
             Ok(MemoryStateStoreIter::new(
-                self.scan(key_range, None, epoch).await.unwrap().into_iter(),
+                self.scan(key_range, None, read_options)
+                    .await
+                    .unwrap()
+                    .into_iter(),
             ))
         }
     }
 
-    fn backward_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(
+        &self,
+        _key_range: R,
+        _read_options: ReadOptions,
+    ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,

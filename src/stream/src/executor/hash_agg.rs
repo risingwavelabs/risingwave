@@ -28,6 +28,7 @@ use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_storage::store::WriteOptions;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -326,11 +327,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     ) {
         // The state store of each keyspace is the same so just need the first.
         let store = keyspace[0].state_store();
+        let table_id = keyspace[0].table_id();
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been
         // fully flushed.
         let (write_batch, dirty_cnt) = {
-            let mut write_batch = store.start_write_batch();
+            let mut write_batch = store.start_write_batch(WriteOptions { epoch, table_id });
             let mut dirty_cnt = 0;
 
             for states in state_map.values_mut() {
@@ -361,7 +363,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             assert!(write_batch.is_empty());
             return Ok(());
         } else {
-            write_batch.ingest(epoch).await?;
+            write_batch.ingest().await?;
 
             // --- Produce the stream chunk ---
             let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
