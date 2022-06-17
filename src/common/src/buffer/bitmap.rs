@@ -37,8 +37,8 @@ use std::ops::{BitAnd, BitOr};
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::Buffer as ProstBuffer;
+use risingwave_pb::common::buffer::CompressionType;
+use risingwave_pb::common::Buffer as ProstBuffer;
 
 use crate::array::error::ArrayError;
 use crate::array::{Array, ArrayResult, BoolArray};
