@@ -23,6 +23,7 @@ use risingwave_sqlparser::ast::{
 };
 
 mod expr;
+mod scalar;
 mod test_runner;
 
 #[allow(dead_code)]

@@ -13,15 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
 
-use chrono::{DateTime, Utc};
-use rand::distributions::Alphanumeric;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::{func_sig_map, DataTypeName, ExprType, FuncSign};
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
+    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, Value,
 };
 
@@ -66,75 +63,6 @@ impl SqlGenerator {
         } else {
             // Temporary hack to use scalar value for a function.
             Some(self.gen_simple_scalar(ret))
-        }
-    }
-
-    fn gen_simple_scalar(&mut self, typ: DataTypeName) -> Expr {
-        use DataTypeName as T;
-        match typ {
-            T::Int64 => Expr::Value(Value::Number(self.rng.gen_range(0..100).to_string(), false)),
-            T::Int32 => Expr::TypedString {
-                data_type: DataType::Int(None),
-                value: self.gen_int(),
-            },
-            T::Int16 => Expr::TypedString {
-                data_type: DataType::SmallInt(None),
-                value: self.gen_int(),
-            },
-            T::Varchar => Expr::Value(Value::SingleQuotedString(
-                (0..10)
-                    .map(|_| self.rng.sample(Alphanumeric) as char)
-                    .collect(),
-            )),
-            T::Decimal => Expr::Value(Value::Number(self.gen_float(), false)),
-            T::Float64 => Expr::TypedString {
-                data_type: DataType::Float(None),
-                value: self.gen_float(),
-            },
-            T::Float32 => Expr::TypedString {
-                data_type: DataType::Real,
-                value: self.gen_float(),
-            },
-            T::Boolean => Expr::Value(Value::Boolean(self.rng.gen_bool(0.5))),
-            T::Date => Expr::TypedString {
-                data_type: DataType::Date,
-                value: self.gen_temporal_scalar(typ),
-            },
-            T::Time => Expr::TypedString {
-                data_type: DataType::Time(false),
-                value: self.gen_temporal_scalar(typ),
-            },
-            T::Timestamp | T::Timestampz => Expr::TypedString {
-                data_type: DataType::Timestamp(false),
-                value: self.gen_temporal_scalar(typ),
-            },
-            T::Interval => Expr::TypedString {
-                data_type: DataType::Interval,
-                value: self.gen_temporal_scalar(typ),
-            },
-            _ => sql_null(),
-        }
-    }
-
-    fn gen_int(&mut self) -> String {
-        self.rng.gen_range(0..100).to_string()
-    }
-
-    fn gen_float(&mut self) -> String {
-        self.rng.gen_range(0.0..100.0).to_string()
-    }
-
-    fn gen_temporal_scalar(&mut self, typ: DataTypeName) -> String {
-        use DataTypeName as T;
-
-        let secs = self.rng.gen_range(0..1000000) as u64;
-        let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(secs));
-        match typ {
-            T::Date => tm.format("%F").to_string(),
-            T::Timestamp | T::Timestampz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
-            T::Time => tm.format("%T").to_string(),
-            T::Interval => secs.to_string(),
-            _ => unreachable!(),
         }
     }
 }
@@ -209,6 +137,6 @@ fn make_bin_op(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
     })
 }
 
-fn sql_null() -> Expr {
+pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
 }
