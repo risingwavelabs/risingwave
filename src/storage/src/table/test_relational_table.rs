@@ -1854,4 +1854,6 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
     let actual_1 = iter.next_row().await.unwrap();
     assert!(actual_1.is_some());
     assert_eq!(actual_1.unwrap(), expected_1);
+let actual_3 = iter.next_row().await.unwrap();
+assert!(actual_3.is_none())
 }
