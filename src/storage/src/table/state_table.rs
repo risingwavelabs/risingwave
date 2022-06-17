@@ -32,6 +32,7 @@ use crate::cell_serializer::CellSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 pub type StateTable<S> = StateTableExtended<S, CellBasedRowSerializer>;
 
 impl<S: StateStore> StateTable<S> {
@@ -53,7 +54,8 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
+/// `StateTableExtended` is the interface accessing relational data in KV(`StateStore`) with encoding,
+/// using `CellSerializer` for row to cell serializing.
 #[derive(Clone)]
 pub struct StateTableExtended<S: StateStore, SER: CellSerializer> {
     /// buffer key/values
