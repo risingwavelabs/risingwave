@@ -26,6 +26,7 @@ use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
 
 const MIN_COMPACTION_BYTES: u64 = 2 * 1024 * 1024; // 2MB
+const L0_MAX_AVG_COMPACTION_BYTES: u64 = 32 * 1024 * 1024; // 2MB
 
 pub struct TierCompactionPicker {
     compact_task_id: u64,
@@ -49,16 +50,16 @@ impl TierCompactionPicker {
 impl TierCompactionPicker {
     fn pick_by_unit<F>(
         &self,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
+        select_level: &Level,
+        level_handler: &mut LevelHandler,
         check_unit: F,
     ) -> Option<Level>
     where
         F: Fn(u64) -> bool,
     {
         let mut idx = 0;
-        while idx < levels[0].table_infos.len() {
-            let table = &levels[0].table_infos[idx];
+        while idx < select_level.table_infos.len() {
+            let table = &select_level.table_infos[idx];
             if check_unit(table.unit_id) {
                 idx += 1;
                 continue;
@@ -69,7 +70,7 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            if level_handlers[0].is_pending_compact(&table.id) {
+            if level_handler.is_pending_compact(&table.id) {
                 idx += 1;
                 continue;
             }
@@ -83,17 +84,17 @@ impl TierCompactionPicker {
                 self.config.max_bytes_for_level_base,
             );
 
-            for other in &levels[0].table_infos[idx + 1..] {
+            for other in &select_level.table_infos[idx + 1..] {
                 if compaction_bytes >= max_compaction_bytes {
                     break;
                 }
 
-                if level_handlers[0].is_pending_compact(&other.id) {
+                if level_handler.is_pending_compact(&other.id) {
                     no_selected_files.push(other);
                     continue;
                 }
 
-                if other.unit_id != table.unit_id {
+                if !self.overlap_strategy.check_overlap(table, other) || table.file_size > self.config.min_compaction_bytes {
                     no_selected_files.push(other);
                     continue;
                 }
@@ -124,12 +125,13 @@ impl TierCompactionPicker {
                 }
             }
 
-            if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize {
+            if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize
+                || compaction_bytes < select_level_inputs.len() as u64 * L0_MAX_AVG_COMPACTION_BYTES {
                 idx += 1;
                 continue;
             }
 
-            level_handlers[0].add_pending_task(self.compact_task_id, &select_level_inputs);
+            level_handler.add_pending_task(self.compact_task_id, &select_level_inputs);
 
             return Some(Level {
                 level_idx: 0,
@@ -149,11 +151,11 @@ impl CompactionPicker for TierCompactionPicker {
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {
         let select_level = if let Some(level) =
-            self.pick_by_unit(levels, level_handlers, |unit_id| unit_id != u64::MAX)
+            self.pick_by_unit(&levels[0], &mut level_handlers[0], |unit_id| unit_id != u64::MAX)
         {
             level
         } else {
-            self.pick_by_unit(levels, level_handlers, |unit_id| unit_id == u64::MAX)?
+            self.pick_by_unit(&levels[0], &mut level_handlers[0], |unit_id| unit_id == u64::MAX)?
         };
         Some(SearchResult {
             select_level,
@@ -365,15 +367,8 @@ impl LevelCompactionPicker {
         let mut info = self.overlap_strategy.create_overlap_info();
         for idx in 0..select_level.table_infos.len() {
             let select_table = &select_level.table_infos[idx];
-            let select_unit = select_table.unit_id;
-
-            if select_unit == u64::MAX || select_level_handler.is_pending_compact(&select_table.id)
+            if select_level_handler.is_pending_compact(&select_table.id) || info.check_overlap(select_table)
             {
-                info.update(select_table);
-                continue;
-            }
-
-            if info.check_overlap(select_table) {
                 info.update(select_table);
                 continue;
             }
@@ -398,12 +393,12 @@ impl LevelCompactionPicker {
 
             // try expand more L0 files if the currenct compaction job is too small.
             for other in &select_level.table_infos[idx + 1..] {
-                if select_level_handler.is_pending_compact(&other.id) {
+                if select_level_handler.is_pending_compact(&other.id) || info.check_overlap(other) {
                     no_selected_files.push(other);
                     continue;
                 }
 
-                if select_unit != other.unit_id {
+                if !select_info.check_overlap(other) {
                     no_selected_files.push(other);
                     continue;
                 }
@@ -412,17 +407,13 @@ impl LevelCompactionPicker {
                     .iter()
                     .any(|t| self.overlap_strategy.check_overlap(*t, other))
                 {
-                    break;
+                    no_selected_files.push(other);
+                    continue;
                 }
 
                 if select_compaction_bytes >= self.config.max_compaction_bytes {
                     break;
                 }
-
-                if info.check_overlap(other) {
-                    break;
-                }
-
                 select_level_ssts.push(other.clone());
                 select_info.update(other);
                 if select_level.table_infos[0..idx]
@@ -551,7 +542,7 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
-        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[0].get_pending_file_count(), 1);
         assert_eq!(levels_handler[1].get_pending_file_count(), 2);
         assert_eq!(ret.target_level.table_infos[0].id, 2);
         assert_eq!(ret.target_level.table_infos[1].id, 1);
