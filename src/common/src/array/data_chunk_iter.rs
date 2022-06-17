@@ -219,6 +219,11 @@ impl Row {
         Self(values)
     }
 
+    pub fn empty<'a>() -> &'a Self {
+        static EMPTY_ROW: Row = Row(Vec::new());
+        &EMPTY_ROW
+    }
+
     /// Serialize the row into a memcomparable bytes.
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
@@ -314,6 +319,13 @@ impl Row {
             }
         }
         Ok(HashCode(hasher.finish()))
+    }
+
+    /// Get an owned `Row` by the given `indices` from current row.
+    ///
+    /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
+    pub fn by_indices(&self, indices: &[usize]) -> Row {
+        Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
     }
 }
 
