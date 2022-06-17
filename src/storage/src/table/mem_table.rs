@@ -13,10 +13,9 @@
 // limitations under the License.
 use std::collections::btree_map::{self, Entry};
 use std::collections::BTreeMap;
+use std::ops::RangeBounds;
 
 use risingwave_common::array::Row;
-
-use crate::error::StorageResult;
 
 #[derive(Clone)]
 pub enum RowOp {
@@ -24,12 +23,14 @@ pub enum RowOp {
     Delete(Row),
     Update((Row, Row)),
 }
+
 /// `MemTable` is a buffer for modify operations without encoding
 #[derive(Clone)]
 pub struct MemTable {
-    pub buffer: BTreeMap<Vec<u8>, RowOp>,
+    buffer: BTreeMap<Vec<u8>, RowOp>,
 }
-type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
+
+pub type MemTableIter<'a> = btree_map::Range<'a, Vec<u8>, RowOp>;
 
 impl Default for MemTable {
     fn default() -> Self {
@@ -44,13 +45,17 @@ impl MemTable {
         }
     }
 
+    pub fn is_dirty(&self) -> bool {
+        !self.buffer.is_empty()
+    }
+
     /// read methods
-    pub fn get_row(&self, pk: &[u8]) -> StorageResult<Option<&RowOp>> {
-        Ok(self.buffer.get(pk))
+    pub fn get_row_op(&self, pk: &[u8]) -> Option<&RowOp> {
+        self.buffer.get(pk)
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: Vec<u8>, value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, pk: Vec<u8>, value: Row) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -75,10 +80,9 @@ impl MemTable {
                 }
             },
         }
-        Ok(())
     }
 
-    pub fn delete(&mut self, pk: Vec<u8>, old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, pk: Vec<u8>, old_value: Row) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -103,10 +107,9 @@ impl MemTable {
                 }
             },
         }
-        Ok(())
     }
 
-    pub fn update(&mut self, pk: Vec<u8>, old_value: Row, new_value: Row) -> StorageResult<()> {
+    pub fn update(&mut self, pk: Vec<u8>, old_value: Row, new_value: Row) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -131,14 +134,16 @@ impl MemTable {
                 }
             },
         }
-        Ok(())
     }
 
     pub fn into_parts(self) -> BTreeMap<Vec<u8>, RowOp> {
         self.buffer
     }
 
-    pub async fn iter(&self, _pk: Row) -> StorageResult<MemTableIter<'_>> {
-        todo!();
+    pub fn iter<'a, R>(&'a self, key_range: R) -> MemTableIter<'a>
+    where
+        R: RangeBounds<Vec<u8>> + 'a,
+    {
+        self.buffer.range(key_range)
     }
 }
