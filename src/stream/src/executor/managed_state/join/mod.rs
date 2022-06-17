@@ -242,6 +242,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
     #[expect(dead_code)]
+    #[cfg(any())]
     pub async fn get<'a>(&'a mut self, key: &K) -> Option<&'a HashValueType> {
         // TODO: add metrics for get
         let state = self.inner.get(key);
@@ -260,6 +261,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
     #[expect(dead_code)]
+    #[cfg(any())]
     pub async fn get_mut<'a>(&'a mut self, key: &'a K) -> Option<&'a mut HashValueType> {
         // TODO: add metrics for get_mut
         let state = self.inner.get(key);
