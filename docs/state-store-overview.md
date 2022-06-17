@@ -2,6 +2,7 @@
 
 - [An Overview of RisingWave State Store](#an-overview-of-risingwave-state-store)
   - [Overview](#overview)
+  - [Cell-based Relational Table](#Relational-table)
   - [Architecture](#architecture)
   - [The Hummock User API](#the-hummock-user-api)
   - [Hummock Internals](#hummock-internals)
@@ -16,7 +17,21 @@
 
 ## Overview
 
-In RisingWave, all streaming executors store their data into a state store. This state store is backed by a service called Hummock, a cloud-native LSM-Tree-based storage engine. Hummock provides key-value API, and stores all data on S3-compatible service. However, it is not a KV store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
+In RisingWave, all streaming executors store their data into a state store. As the state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. So we add a cell-based relational table as the bridge between state-ful executors and state store. And the cell-based relational table provides the interface accessing relational data in KV. This KV state store is backed by a service called Hummock, a cloud-native LSM-Tree-based storage engine. Hummock provides key-value API, and stores all data on S3-compatible service. However, it is not a KV store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
+
+## Cell-based Relational Table
+
+
+Relational table consists of State Table, Mem Table and Cell-based Table. The State Table provides the table operations by these APIs: `get_row`, `insert_row`, `delete_row` and `update_row`, the Mem Table
+is a buffer for modify operations without encoding, and the Cell-based Table is responsible for performing serialization and deserialization between cell-based encoding and KV encoding.
+
+![Overview of Relational Table](images/relational-table-layer/relational-table-01.svg)
+
+### Relational Table Write Path
+Operations on relational table will first be cached in Mem Table, which is a BTreeMap data structure in memory. Once executor wants to write these operations to state store, cell-based table will covert these operations into kv pairs and write to state store with specific epoch. 
+
+### Relational Table Read Path
+Executors should be able to read the just written data, which means every written data including uncommited is visiable. The data in mem_table(memory) is fresher than that in shared storage(state store). State table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table.
 
 ## Architecture
 
