@@ -94,7 +94,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     }
 
     pub fn is_dirty(&self) -> bool {
-        !self.state_table.get_mem_table().buffer.is_empty()
+        self.state_table.is_dirty()
     }
 
     // May have weird cache policy in the future, reserve an `n`.
