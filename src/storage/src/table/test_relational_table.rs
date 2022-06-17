@@ -1824,7 +1824,8 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
         ]))
         .unwrap();
 
-    state.commit(0).await.unwrap();
+    let epoch: u64 = 0;
+    state.commit(epoch).await.unwrap();
 
     // ---------- Init reader
     let table = CellBasedTable::new_for_test(keyspace.clone(), actual_column_descs, order_types);
