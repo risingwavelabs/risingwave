@@ -314,7 +314,14 @@ def section_object_storage(panels):
 
 
 def quantile(f, percentiles):
-    return list(map(lambda p: f(p / 100.0, str(p)), percentiles))
+    quantile_map = {
+        "50": ["0.5", "50"],
+        "90": ["0.9", "90"],
+        "99": ["0.99", "99"],
+        "999": ["0.99", "999"],
+        "max": ["1.0", "max"],
+    }
+    return list(map(lambda p: f(quantile_map[str(p)][0], quantile_map[str(p)][1]), percentiles))
 
 
 def section_streaming(panels):
@@ -324,7 +331,7 @@ def section_streaming(panels):
             "Barrier Latency",
             quantile(lambda quantile, legend: panels.target(
                 f"histogram_quantile({quantile}, sum(rate(meta_barrier_duration_seconds_bucket[1m])) by (le))", f"barrier_latency_p{legend}"
-            ), [50, 90, 99]) + [
+            ), [50, 90, 99, 999, "max"]) + [
                 panels.target(
                     "rate(meta_barrier_duration_seconds_sum[1m]) / rate(meta_barrier_duration_seconds_count[1m])", "barrier_latency_avg"
                 ),
@@ -413,10 +420,10 @@ def section_streaming_actors(outer_panels):
             ]),
             panels.timeseries_actor_ops("Join Executor Cache", [
                 panels.target(
-                    "rate(stream_join_lookup_miss_count[1m])", "{{actor_id}} {{side}}"
+                    "rate(stream_join_lookup_miss_count[1m])", "cache miss {{actor_id}} {{side}}"
                 ),
                 panels.target(
-                    "rate(stream_join_lookup_total_count[1m])", "{{actor_id}} {{side}}"
+                    "rate(stream_join_lookup_total_count[1m])", "total lookups {{actor_id}} {{side}}"
                 ),
             ]),
         ])
@@ -509,7 +516,7 @@ def section_hummock(panels):
                       panels.target(
                           f"histogram_quantile({quantile}, sum(rate(state_store_iter_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
                       ),
-                      [50, 90, 99]),
+                      [90, 99, 999, "max"]),
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_iter_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_iter_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
             ),
@@ -581,35 +588,35 @@ def section_hummock(panels):
         panels.timeseries_bytes("Read Item Size - Get", [
             *quantile(lambda quantile, legend:
                       panels.target(
-                          f"histogram_quantile({quantile}, sum(rate(state_store_get_key_size_bucket[1m])) by (le, job, instance)) + histogram_quantile({quantile}, sum(rate(state_store_get_value_size_bucket[1m])) by (le, job, instance))", f"{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                          f"histogram_quantile({quantile}, sum(rate(state_store_get_key_size_bucket[1m])) by (le, job, instance)) + histogram_quantile({quantile}, sum(rate(state_store_get_value_size_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
                       ),
-                      [50, 90, 99]),
+                      [90, 99, 999]),
         ]),
         panels.timeseries_bytes("Read Item Size - Scan", [
             *quantile(lambda quantile, legend:
                       panels.target(
                           f"histogram_quantile({quantile}, sum(rate(state_store_range_scan_size_bucket[1m])) by (le, job, instance))", f"scan p{legend} - {{{{job}}}} @ {{{{instance}}}}"
                       ),
-                      [50, 90, 99]),
+                      [90, 99, 999]),
             *quantile(lambda quantile, legend:
                       panels.target(
                           f"histogram_quantile({quantile}, sum(rate(state_store_range_reverse_scan_size_bucket[1m])) by (le, job, instance))", f"reverse scan p{legend} - {{{{job}}}} @ {{{{instance}}}}"
                       ),
-                      [50, 90, 99]),
+                      [90, 99, 999]),
         ]),
         panels.timeseries_bytes("Read Item Size - Iter", [
             *quantile(lambda quantile, legend:
                       panels.target(
                           f"histogram_quantile({quantile}, sum(rate(state_store_iter_size_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
                       ),
-                      [50, 90, 99]),
+                      [90, 99, 999]),
         ]),
         panels.timeseries_count("Read Item Count - Iter", [
             *quantile(lambda quantile, legend:
                       panels.target(
                           f"histogram_quantile({quantile}, sum(rate(state_store_iter_item_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
                       ),
-                      [50, 90, 99]),
+                      [90, 99, 999]),
         ]),
         panels.timeseries_ops("write kv pair counts", [
             panels.target(
