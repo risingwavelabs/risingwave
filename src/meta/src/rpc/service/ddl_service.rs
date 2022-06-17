@@ -296,27 +296,7 @@ where
                 .map_err(tonic_err)?;
             return Err(e.into());
         } else {
-            // Fill in vnode mapping in order to inform frontend of data distribution.
-            let vnode_mapping = self
-                .env
-                .hash_mapping_manager_ref()
-                .get_table_hash_mapping(&id);
-            match vnode_mapping {
-                Some(vnode_mapping) => {
-                    let (original_indices, data) = compress_data(&vnode_mapping);
-                    mview.mapping = Some(ParallelUnitMapping {
-                        table_id: id,
-                        original_indices,
-                        data,
-                    });
-                }
-                None => {
-                    return Err(ErrorCode::InternalError(
-                        "no data distribution found for materialized view".to_string(),
-                    ))
-                    .map_err(tonic_err);
-                }
-            }
+            self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
         }
 
         // 4. Finally, update the catalog.
@@ -547,6 +527,8 @@ where
             // drop previously created source
             self.source_manager.drop_source(source_id).await?;
             return Err(e);
+        } else {
+            self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
         }
 
         // Finally, update the catalog.
@@ -579,5 +561,28 @@ where
             .await?;
 
         Ok(version)
+    }
+
+    /// Fill in mview's vnode mapping so that frontend will know the data distribution.
+    fn set_mview_mapping(&self, mview: &mut Table) -> RwResult<()> {
+        let vnode_mapping = self
+            .env
+            .hash_mapping_manager_ref()
+            .get_table_hash_mapping(&mview.id);
+        match vnode_mapping {
+            Some(vnode_mapping) => {
+                let (original_indices, data) = compress_data(&vnode_mapping);
+                mview.mapping = Some(ParallelUnitMapping {
+                    table_id: mview.id,
+                    original_indices,
+                    data,
+                });
+                Ok(())
+            }
+            None => Err(ErrorCode::InternalError(
+                "no data distribution found for materialized view".to_string(),
+            )
+            .into()),
+        }
     }
 }
