@@ -34,6 +34,8 @@
 #![feature(let_chains)]
 #![feature(lint_reasons)]
 
+extern crate core;
+
 pub mod base;
 mod datagen;
 mod filesystem;

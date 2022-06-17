@@ -18,7 +18,7 @@ use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::SplitImpl;
+use risingwave_connector::{SplitImpl, SplitMetaData};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{AddMutation, DispatcherMutation, SourceChangeSplit, StopMutation};
@@ -157,7 +157,7 @@ where
                             split_type,
                             source_splits: splits
                                 .iter()
-                                .map(|split| split.to_json_bytes().to_vec())
+                                .map(|split| split.encode_to_bytes().to_vec())
                                 .collect(),
                         }
                     })

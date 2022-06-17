@@ -21,7 +21,9 @@ use super::field_generator::FieldGeneratorImpl;
 use super::generator::DatagenEventGenerator;
 use crate::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::datagen::{DatagenProperties, DatagenSplit};
-use crate::{Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitReader};
+use crate::{
+    Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitMetaData, SplitReader,
+};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
