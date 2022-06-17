@@ -18,8 +18,8 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 
-use crate::cell_serializer::{CellSerializer, KeyBytes, ValueBytes};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::cell_serializer::{CellSerializer, KeyBytes, ValueBytes};
 
 /// `DedupPkCellBasedRowSerializer` is identical to `CellBasedRowSerializer`.
 /// Difference is that before serializing a row, pk datums are filtered out.
@@ -49,8 +49,9 @@ impl DedupPkCellBasedRowSerializer {
         }
     }
 
-    fn remove_dup_pk_datums_by_ref<'a>(&self, row: &Row) -> Row {
-        Row(row.0
+    fn remove_dup_pk_datums_by_ref(&self, row: &Row) -> Row {
+        Row(row
+            .0
             .iter()
             .enumerate()
             .filter(|(i, _)| self.dedup_datum_indices.contains(i))
