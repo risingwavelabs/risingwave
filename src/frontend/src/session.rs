@@ -583,6 +583,7 @@ impl Session for SessionImpl {
     }
 }
 
+/// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement) -> Result<Vec<PgFieldDescriptor>> {
     let context = OptimizerContext::new(session);
     let session = context.session_ctx.clone();
