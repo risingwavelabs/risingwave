@@ -35,17 +35,21 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
+use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
+use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::test_utils::MockUserInfoWriter;
@@ -567,16 +571,40 @@ impl Session for SessionImpl {
             return Ok(vec![]);
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt).await.map_err(|e| {
+        let rsp = infer(self, stmt).await.map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
-        Ok(rsp.get_row_desc())
+        Ok(rsp)
     }
 
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
     }
+}
+
+async fn infer(session: Arc<SessionImpl>, stmt: Statement) -> Result<Vec<PgFieldDescriptor>> {
+    let context = OptimizerContext::new(session.clone());
+    let session = context.session_ctx.clone();
+
+    let bound = {
+        let mut binder = Binder::new(
+            session.env().catalog_reader().read_guard(),
+            session.database().to_string(),
+        );
+        binder.bind(stmt)?
+    };
+
+    let root = Planner::new(context.into()).plan(bound)?;
+
+    let pg_descs = root
+        .schema()
+        .fields()
+        .iter()
+        .map(to_pg_field)
+        .collect::<Vec<PgFieldDescriptor>>();
+
+    Ok(pg_descs)
 }
 
 #[cfg(test)]
