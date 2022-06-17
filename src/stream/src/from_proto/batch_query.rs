@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
-use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -46,11 +43,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new_adhoc(
-            keyspace,
-            column_descs,
-            Arc::new(StateStoreMetrics::unused()),
-        );
+        let table = CellBasedTable::new(keyspace, column_descs, None, None);
         let key_indices = node
             .get_distribution_keys()
             .iter()

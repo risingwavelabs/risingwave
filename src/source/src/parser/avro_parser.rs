@@ -54,7 +54,7 @@ impl AvroParser {
             match url_schema {
                 "file" => {
                     load_schema_async(
-                        |path, _props| async move { read_schema_from_local(path).await },
+                        |path, _props| async move { read_schema_from_local(path) },
                         schema_path.to_string(),
                         None,
                     )
@@ -282,7 +282,7 @@ pub async fn read_schema_from_s3(
 }
 
 /// Read avro schema file from local file.For on-premise or testing.
-pub async fn read_schema_from_local(path: String) -> Result<String> {
+pub fn read_schema_from_local(path: String) -> Result<String> {
     let content_rs = std::fs::read_to_string(path.as_str());
     if let Ok(content) = content_rs {
         Ok(content)
@@ -366,7 +366,7 @@ mod test {
     #[tokio::test]
     async fn test_read_schema_from_local() {
         let schema_path = test_data_path("complex-schema.avsc");
-        let content_rs = read_schema_from_local(schema_path).await;
+        let content_rs = read_schema_from_local(schema_path);
         assert!(content_rs.is_ok());
     }
 
@@ -390,7 +390,7 @@ mod test {
     async fn test_load_schema_from_local() {
         let schema_location = test_data_path("complex-schema.avsc");
         let schema_rs = load_schema_async(
-            |path, _props| read_schema_from_local(path),
+            |path, _props| async move { read_schema_from_local(path) },
             schema_location,
             None,
         )

@@ -14,10 +14,9 @@
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::StreamExecutorResult;
@@ -132,14 +131,6 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         let higher_sub_keyspace = keyspace.append_u8(b'h');
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
-        let table_column_descs = row_data_types
-            .iter()
-            .enumerate()
-            .map(|(id, data_type)| {
-                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
-            })
-            .collect::<Vec<_>>();
-        let cell_based_row_deserializer = make_cell_based_row_deserializer(table_column_descs);
         Ok(Self {
             info: ExecutorInfo {
                 schema: input_info.schema,
@@ -155,7 +146,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
                 lower_sub_keyspace,
                 row_data_types.clone(),
                 ordered_row_deserializer.clone(),
-                cell_based_row_deserializer.clone(),
+                internal_key_indices.clone(),
             ),
             managed_higher_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
@@ -163,7 +154,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
                 higher_sub_keyspace,
                 row_data_types,
                 ordered_row_deserializer,
-                cell_based_row_deserializer,
+                internal_key_indices.clone(),
             ),
             pk_indices,
             internal_key_indices,

@@ -139,6 +139,10 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
         todo!()
     }
+
+    async fn trigger_manual_compaction(&self, _compaction_group_id: u64) -> Result<()> {
+        todo!()
+    }
 }
 
 impl MockHummockMetaClient {

@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use rand::Rng;
 use risingwave_common::error::{ErrorCode, Result, ToErrorStr};
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
@@ -102,6 +103,17 @@ impl CompactorManager {
         let compactor_index = guard.next_compactor % guard.compactors.len();
         let compactor = guard.compactors[compactor_index].clone();
         guard.next_compactor += 1;
+        Some(compactor)
+    }
+
+    pub fn random_compactor(&self) -> Option<Arc<Compactor>> {
+        let guard = self.inner.read();
+        if guard.compactors.is_empty() {
+            return None;
+        }
+
+        let compactor_index = rand::thread_rng().gen::<usize>() % guard.compactors.len();
+        let compactor = guard.compactors[compactor_index].clone();
         Some(compactor)
     }
 

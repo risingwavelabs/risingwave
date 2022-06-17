@@ -660,7 +660,7 @@ mod tests {
     use crate::barrier::GlobalBarrierManager;
     use crate::cluster::ClusterManager;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
-    use crate::hummock::HummockManager;
+    use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::{CatalogManager, MetaSrvEnv};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
@@ -740,6 +740,13 @@ mod tests {
             Ok(Response::new(InjectBarrierResponse::default()))
         }
 
+        async fn barrier_complete(
+            &self,
+            _request: Request<BarrierCompleteRequest>,
+        ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
+            Ok(Response::new(BarrierCompleteResponse::default()))
+        }
+
         async fn create_source(
             &self,
             _request: Request<CreateSourceRequest>,
@@ -785,6 +792,7 @@ mod tests {
                 actor_ids: Mutex::new(HashSet::new()),
                 actor_infos: Mutex::new(HashMap::new()),
             });
+
             let fake_service = FakeStreamService {
                 inner: state.clone(),
             };
@@ -798,6 +806,7 @@ mod tests {
                     .await
                     .unwrap();
             });
+
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
@@ -820,15 +829,19 @@ mod tests {
             let meta_metrics = Arc::new(MetaMetrics::new());
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
+            let compactor_manager = Arc::new(CompactorManager::new());
+
             let hummock_manager = Arc::new(
                 HummockManager::new(
                     env.clone(),
                     cluster_manager.clone(),
                     meta_metrics.clone(),
                     compaction_group_manager.clone(),
+                    compactor_manager.clone(),
                 )
                 .await?,
             );
+
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
