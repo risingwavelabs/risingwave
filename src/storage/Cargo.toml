@@ -59,6 +59,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+tokio-metrics = "0.1.0"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
