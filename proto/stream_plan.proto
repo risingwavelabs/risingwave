@@ -92,14 +92,12 @@ message HashJoinNode {
   // on-the-fly within the plan.
   // TODO: remove this in the future when we have a separate DeltaHashJoin node.
   bool is_delta_join = 5;
-  // Used for internal table states. Id of the left table.
-  uint32 left_table_id = 6;
-  // Used for internal table states. Id of the right table.
-  uint32 right_table_id = 7;
+  // Used for internal table states.
+  catalog.Table left_table = 6;
+  // Used for internal table states.
+  catalog.Table right_table = 7;
   repeated uint32 dist_key_l = 8;
   repeated uint32 dist_key_r = 9;
-  catalog.Table left_table = 10;
-  catalog.Table right_table = 11;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 12;
