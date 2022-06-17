@@ -21,7 +21,7 @@ mod tests {
 
             // The generated SQL must be parsable.
             let statements =
-                Parser::parse_sql(&sql).expect(&format!("Failed to parse SQL: {}", sql));
+                Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
             let stmt = statements[0].clone();
             let context = OptimizerContext::new(session.clone());
             match stmt.clone() {
