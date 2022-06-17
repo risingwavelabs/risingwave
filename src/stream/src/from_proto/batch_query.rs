@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 

@@ -40,6 +40,10 @@ pub mod hummock;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/user.rs")]
 pub mod user;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/source.rs")]
+pub mod source;
+
 
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]
@@ -80,6 +84,9 @@ pub mod hummock_serde;
 #[rustfmt::skip]
 #[path = "user.serde.rs"]
 pub mod user_serde;
+#[rustfmt::skip]
+#[path = "source.serde.rs"]
+pub mod source_serde;
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]

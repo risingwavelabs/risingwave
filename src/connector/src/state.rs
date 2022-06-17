@@ -104,11 +104,10 @@ impl<S: StateStore> SourceStateHandler<S> {
         stream_source_split: &SplitImpl,
         epoch: u64,
     ) -> RwResult<Option<SplitImpl>> {
-        let connector_type = stream_source_split.get_type();
+        // let connector_type = stream_source_split.get_type();
         match self.restore_states(stream_source_split.id(), epoch).await {
             Ok(Some(s)) => Ok(Some(
-                SplitImpl::restore_from_bytes(connector_type, &s)
-                    .map_err(|e| internal_error(e.to_string()))?,
+                SplitImpl::restore_from_bytes(&s).map_err(|e| internal_error(e.to_string()))?,
             )),
             Ok(None) => Ok(None),
             Err(e) => Err(internal_error(e.to_string())),

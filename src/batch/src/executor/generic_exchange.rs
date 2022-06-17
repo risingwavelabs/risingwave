@@ -36,9 +36,6 @@ pub struct GenericExchangeExecutor<CS, C> {
     sources: Vec<ProstExchangeSource>,
     context: C,
 
-    source_idx: usize,
-    current_source: Option<Box<dyn ExchangeSource>>,
-
     // Mock-able CreateSource.
     source_creators: Vec<CS>,
     schema: Schema,
@@ -119,8 +116,6 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
                 sources,
                 context: source.context().clone(),
                 source_creators,
-                source_idx: 0,
-                current_source: None,
                 schema: Schema { fields },
                 task_id: source.task_id.clone(),
                 identity: source.plan_node().get_identity().clone(),
@@ -215,8 +210,6 @@ mod tests {
         let executor = Box::new(
             GenericExchangeExecutor::<FakeCreateSource, ComputeNodeContext> {
                 sources,
-                source_idx: 0,
-                current_source: None,
                 source_creators,
                 context: ComputeNodeContext::new_for_test(),
                 schema: Schema {

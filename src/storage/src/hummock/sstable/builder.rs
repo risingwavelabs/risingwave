@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::config::StorageConfig;
-use risingwave_common::hash::{VNODE_BITMAP_LEN, VNODE_BITS};
+use risingwave_common::types::{VNODE_BITMAP_LEN, VNODE_BITS};
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
 use risingwave_pb::common::VNodeBitmap;
 
