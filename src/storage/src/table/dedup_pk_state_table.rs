@@ -19,6 +19,8 @@ use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::table::state_table::StateTableExtended;
 use crate::{Keyspace, StateStore};
 
+/// Identical to `StateTable`. Used when we want to
+/// rows to have dedup pk cell encoding.
 pub type DedupPkStateTable<S> = StateTableExtended<S, DedupPkCellBasedRowSerializer>;
 
 impl<S: StateStore> DedupPkStateTable<S> {
