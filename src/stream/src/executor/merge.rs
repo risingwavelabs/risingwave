@@ -18,7 +18,7 @@ use std::task::{Context, Poll};
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::{SinkExt, Stream, StreamExt};
-use futures_async_stream::for_await;
+use futures_async_stream::{for_await, stream};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
@@ -129,6 +129,17 @@ impl MergeExecutor {
     }
 }
 
+/// Every time a stream receives an item, we yield the item and put this stream off CPU with
+/// `tokio::task::yield_now()`.
+#[stream(item = T)]
+pub async fn cooperative_scheduling<T>(stream: impl Stream<Item = T>) {
+    #[for_await]
+    for item in stream {
+        yield item;
+        tokio::task::yield_now().await;
+    }
+}
+
 #[async_trait]
 impl Executor for MergeExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
@@ -137,7 +148,7 @@ impl Executor for MergeExecutor {
         let status = self.status;
         let select_all = SelectReceivers::new(self.actor_id, status, upstreams);
         // Channels that're blocked by the barrier to align.
-        select_all.boxed()
+        cooperative_scheduling(select_all).boxed()
     }
 
     fn schema(&self) -> &Schema {

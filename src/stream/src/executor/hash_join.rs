@@ -489,7 +489,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.append_only_optimize,
                     ) {
                         yield chunk.map_err(StreamExecutorError::hash_join_error)?;
-                        tokio::task::yield_now().await;
                     }
                 }
                 AlignedMessage::Right(chunk) => {
@@ -503,7 +502,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.append_only_optimize,
                     ) {
                         yield chunk.map_err(StreamExecutorError::hash_join_error)?;
-                        tokio::task::yield_now().await;
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {
