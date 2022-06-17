@@ -14,13 +14,13 @@
 
 use core::time::Duration;
 use std::fmt::Debug;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use parking_lot::Mutex;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
@@ -119,7 +119,7 @@ pub struct ExecutorParams {
     pub actor_context: ActorContextRef,
 
     // Vnodes owned by this executor. Represented in bitmap.
-    pub vnode_bitmap: Rc<Vec<u8>>,
+    pub vnode_bitmap: Bitmap,
 }
 
 impl Debug for ExecutorParams {
@@ -464,7 +464,7 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Rc<Vec<u8>>,
+        vnode_bitmap: Bitmap,
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -482,7 +482,7 @@ impl LocalStreamManagerCore {
                     env.clone(),
                     store.clone(),
                     actor_context,
-                    Rc::clone(&vnode_bitmap),
+                    vnode_bitmap.clone(),
                 )
             })
             .try_collect()?;
@@ -530,7 +530,7 @@ impl LocalStreamManagerCore {
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Rc<Vec<u8>>,
+        vnode_bitmap: Bitmap,
     ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
@@ -635,7 +635,7 @@ impl LocalStreamManagerCore {
                 actor.get_nodes()?,
                 env.clone(),
                 &actor_context,
-                Rc::new(actor.get_vnode_bitmap().to_owned()),
+                actor.get_vnode_bitmap()?.try_into()?,
             )?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;

@@ -15,9 +15,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::types::VNODE_BITMAP_LEN;
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -215,6 +216,7 @@ where
                 .hash_mapping_manager
                 .get_fragment_hash_mapping(&fragment.fragment_id)
                 .unwrap();
+
             let mut vnode_bitmaps = HashMap::new();
             vnode_mapping
                 .iter()
@@ -222,24 +224,31 @@ where
                 .for_each(|(vnode, parallel_unit)| {
                     vnode_bitmaps
                         .entry(*parallel_unit)
-                        .or_insert([0; VNODE_BITMAP_LEN])[(vnode >> 3) as usize] |=
-                        1 << (vnode & 0b111);
+                        .or_insert_with(|| BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT))
+                        .set(vnode, true);
                 });
+            let vnode_bitmaps = vnode_bitmaps
+                .into_iter()
+                .map(|(u, b)| (u, b.finish()))
+                .collect::<HashMap<_, _>>();
 
             // Record actor locations and set vnodes into the actors.
             for (idx, actor) in fragment.actors.iter_mut().enumerate() {
                 if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
                     let parallel_unit =
                         locations.schedule_colocate_with(&actor.upstream_actor_id)?;
-                    actor.vnode_bitmap = vnode_bitmaps.get(&parallel_unit.id).unwrap().to_vec();
+                    actor.vnode_bitmap =
+                        Some(vnode_bitmaps.get(&parallel_unit.id).unwrap().to_protobuf());
                     locations
                         .actor_locations
                         .insert(actor.actor_id, parallel_unit);
                 } else {
-                    actor.vnode_bitmap = vnode_bitmaps
-                        .get(&parallel_units[idx % parallel_units.len()].id)
-                        .unwrap()
-                        .to_vec();
+                    actor.vnode_bitmap = Some(
+                        vnode_bitmaps
+                            .get(&parallel_units[idx % parallel_units.len()].id)
+                            .unwrap()
+                            .to_protobuf(),
+                    );
                     locations.actor_locations.insert(
                         actor.actor_id,
                         parallel_units[idx % parallel_units.len()].clone(),
@@ -288,6 +297,7 @@ mod test {
     use std::time::Duration;
 
     use itertools::Itertools;
+    use risingwave_common::buffer::Bitmap;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -339,7 +349,7 @@ mod test {
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
-                        vnode_bitmap: vec![],
+                        vnode_bitmap: None,
                     }],
                     vnode_mapping: None,
                 };
@@ -368,7 +378,7 @@ mod test {
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
-                        vnode_bitmap: vec![],
+                        vnode_bitmap: None,
                     })
                     .collect_vec();
                 actor_id += node_count * 7;
@@ -404,7 +414,7 @@ mod test {
                 None
             );
             for actor in fragment.actors {
-                assert!(actor.vnode_bitmap.is_empty());
+                assert!(actor.vnode_bitmap.is_none());
             }
         }
 
@@ -440,10 +450,7 @@ mod test {
             );
             let mut vnode_sum = 0;
             for actor in fragment.actors {
-                assert!(!actor.vnode_bitmap.is_empty());
-                for byte in actor.vnode_bitmap {
-                    vnode_sum += byte.count_ones();
-                }
+                vnode_sum += Bitmap::try_from(actor.get_vnode_bitmap()?)?.num_high_bits();
             }
             assert_eq!(vnode_sum as usize, VIRTUAL_NODE_COUNT);
         }

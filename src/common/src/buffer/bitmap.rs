@@ -64,6 +64,33 @@ impl BitmapBuilder {
         }
     }
 
+    pub fn zeroed(len: usize) -> BitmapBuilder {
+        BitmapBuilder {
+            len,
+            data: vec![0; len / 8],
+            num_high_bits: 0,
+            head: 0,
+        }
+    }
+
+    pub fn set(&mut self, n: usize, val: bool) {
+        assert!(n < self.len);
+
+        let byte = self.data.get_mut(n / 8).unwrap_or(&mut self.head);
+        let mask = 1 << (n % 8);
+        match (*byte & mask > 0, val) {
+            (true, false) => {
+                *byte &= !mask;
+                self.num_high_bits -= 1;
+            }
+            (false, true) => {
+                *byte |= mask;
+                self.num_high_bits += 1;
+            }
+            _ => {}
+        }
+    }
+
     pub fn append(&mut self, bit_set: bool) -> &mut Self {
         self.head |= (bit_set as u8) << (self.len % 8);
         self.num_high_bits += bit_set as usize;
@@ -536,5 +563,28 @@ mod tests {
         let bm1 = Bitmap::new(1).unwrap();
         let bm2 = (vec![false]).try_into().unwrap();
         assert_eq!(bm1, bm2);
+    }
+
+    #[test]
+    fn test_bitmap_set() {
+        let mut b = BitmapBuilder::zeroed(10);
+        assert_eq!(b.num_high_bits, 0);
+
+        b.set(0, true);
+        b.set(7, true);
+        b.set(8, true);
+        b.set(9, true);
+        assert_eq!(b.num_high_bits, 4);
+
+        b.set(7, false);
+        b.set(8, false);
+        assert_eq!(b.num_high_bits, 2);
+
+        b.append(true);
+        assert_eq!(b.len, 11);
+        assert_eq!(b.num_high_bits, 3);
+
+        let b = b.finish();
+        assert_eq!(b.bits.to_vec(), &[0b0000_0001, 0b0000_0110]);
     }
 }

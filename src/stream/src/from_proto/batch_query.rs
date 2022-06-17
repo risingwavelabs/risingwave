@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -50,8 +48,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|key| *key as usize)
             .collect_vec();
 
-        let mapping = (*params.vnode_bitmap).clone();
-        let hash_filter = Bitmap::from_bytes_with_num_bits(mapping.into(), VIRTUAL_NODE_COUNT);
+        let hash_filter = params.vnode_bitmap;
 
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(

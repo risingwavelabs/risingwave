@@ -336,7 +336,7 @@ impl StreamActorBuilder {
                         },
                     )| *same_worker_node,
                 ),
-            vnode_bitmap: vec![],
+            vnode_bitmap: None,
         }
     }
 }
