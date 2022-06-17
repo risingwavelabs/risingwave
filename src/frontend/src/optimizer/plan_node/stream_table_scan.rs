@@ -77,12 +77,8 @@ impl fmt::Display for StreamTableScan {
                 "columns",
                 &format_args!("[{}]", self.logical.column_names().join(", ")),
             )
-            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices));
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
-        builder.finish()
+            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices))
+            .finish()
     }
 }
 
@@ -129,9 +125,6 @@ impl StreamTableScan {
                 .iter()
                 .map(|k| *k as u32)
                 .collect_vec(),
-            // Will fill when resolving chain node.
-            hash_mapping: None,
-            parallel_unit_id: 0,
         };
 
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();

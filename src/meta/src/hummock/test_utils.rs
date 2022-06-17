@@ -25,7 +25,7 @@ use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
-use crate::hummock::{HummockManager, HummockManagerRef};
+use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
@@ -168,12 +168,17 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
+
+
+    let compactor_manager = Arc::new(CompactorManager::new());
+
     let hummock_manager = Arc::new(
         HummockManager::new(
             env.clone(),
             cluster_manager.clone(),
             Arc::new(MetaMetrics::new()),
             compaction_group_manager,
+            compactor_manager,
         )
         .await
         .unwrap(),

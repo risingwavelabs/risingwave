@@ -22,7 +22,7 @@
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -33,6 +33,8 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(let_chains)]
 #![feature(lint_reasons)]
+
+extern crate core;
 
 pub mod base;
 mod datagen;
@@ -47,6 +49,7 @@ pub use base::*;
 pub mod aws_utils;
 pub mod dummy_connector;
 mod macros;
+pub mod sink;
 pub mod state;
 
 pub use base::ConnectorState;

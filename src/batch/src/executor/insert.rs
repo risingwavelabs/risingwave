@@ -298,9 +298,7 @@ mod tests {
         // Data will be materialized in associated streaming task.
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
-        let store_content = store
-            .scan(full_range, None, epoch, Default::default())
-            .await?;
+        let store_content = store.scan(full_range, None, epoch).await?;
         assert!(store_content.is_empty());
 
         handle.await.unwrap();

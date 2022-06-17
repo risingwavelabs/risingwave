@@ -18,6 +18,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -26,6 +27,7 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(result_option_inspect)]
 
 mod meta_client;
 pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
@@ -37,3 +39,5 @@ mod hummock_meta_client;
 pub use hummock_meta_client::HummockMetaClient;
 mod stream_client_pool;
 pub use stream_client_pool::{StreamClient, StreamClientPool, StreamClientPoolRef};
+
+pub mod error;

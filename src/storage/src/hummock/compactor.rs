@@ -98,7 +98,7 @@ trait CompactionFilter {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone, Default)]
 pub struct DummyCompactionFilter;
 impl CompactionFilter for DummyCompactionFilter {}
 
@@ -108,7 +108,7 @@ pub struct StateCleanUpCompactionFilter {
 }
 
 impl StateCleanUpCompactionFilter {
-    #[expect(unused)]
+    #[expect(dead_code)]
     fn new(table_id_set: HashSet<u32>) -> Self {
         StateCleanUpCompactionFilter {
             existing_table_ids: table_id_set,
@@ -392,11 +392,11 @@ impl Compactor {
             );
         }
 
-        // TODO: Temporarily disable StateCleanUpCompactionFilter, because meta is not providing the
-        // correct `existing_table_ids` in 9a34de40.
+        // TODO #2065: re-enable it after all states are registered correctly.
         let compaction_filter = DummyCompactionFilter::default();
         // let compaction_filter =
-        // StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
+        //     StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.
+        // existing_table_ids));
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();

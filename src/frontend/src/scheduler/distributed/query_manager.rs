@@ -14,11 +14,11 @@
 
 use std::fmt::{Debug, Formatter};
 
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use log::debug;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -27,7 +27,9 @@ use uuid::Uuid;
 use super::QueryExecution;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef};
+use crate::scheduler::{
+    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult,
+};
 
 pub struct QueryResultFetcher {
     // TODO: Remove these after implemented worker node level snapshot pinnning
@@ -67,7 +69,7 @@ impl QueryManager {
         &self,
         _context: ExecutionContextRef,
         plan: BatchPlanProst,
-    ) -> Result<impl Stream<Item = Result<DataChunk>>> {
+    ) -> SchedulerResult<impl DataChunkStream> {
         let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
         let compute_client = self
             .compute_client_pool
@@ -117,9 +119,8 @@ impl QueryManager {
         &self,
         _context: ExecutionContextRef,
         query: Query,
-    ) -> Result<impl DataChunkStream> {
+    ) -> SchedulerResult<impl DataChunkStream> {
         let query_id = query.query_id().clone();
-        // Cheat compiler to resolve type
         let epoch = self
             .hummock_snapshot_manager
             .get_epoch(query_id.clone())
@@ -176,7 +177,7 @@ impl QueryResultFetcher {
             .await?;
         let mut stream = compute_client.get_data(self.task_output_id.clone()).await?;
         while let Some(response) = stream.next().await {
-            yield DataChunk::from_protobuf(response.to_rw_result()?.get_record_batch()?)?
+            yield DataChunk::from_protobuf(response?.get_record_batch()?)?;
         }
     }
 }
