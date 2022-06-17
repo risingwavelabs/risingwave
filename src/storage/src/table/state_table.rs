@@ -54,8 +54,8 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-/// `StateTableExtended` is the interface accessing relational data in KV(`StateStore`) with encoding,
-/// using `CellSerializer` for row to cell serializing.
+/// `StateTableExtended` is the interface accessing relational data in KV(`StateStore`) with
+/// encoding, using `CellSerializer` for row to cell serializing.
 #[derive(Clone)]
 pub struct StateTableExtended<S: StateStore, SER: CellSerializer> {
     /// buffer key/values
