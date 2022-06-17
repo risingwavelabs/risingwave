@@ -151,9 +151,9 @@
     create table t;
   catalog_error: 'Catalog error: source with name t exists'
 - sql: |
-    create source t with ( 'connector' = 'datagen' ) row format json;
     create materialized source t (v1 int) with ( 'connector' = 'datagen' )  row format json;
-  catalog_error: 'Catalog error: source with name t exists'
+    create source t with ( 'connector' = 'datagen' ) row format json;
+  catalog_error: 'Catalog error: materialized source with name t exists'
 - sql: |
     create table s;
     create materialized view mv as select * from s;
