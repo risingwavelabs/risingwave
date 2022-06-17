@@ -16,3 +16,5 @@ mod list_version;
 pub use list_version::*;
 mod list_kv;
 pub use list_kv::*;
+mod sst_dump;
+pub use sst_dump::*;

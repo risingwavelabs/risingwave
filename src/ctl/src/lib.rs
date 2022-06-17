@@ -45,6 +45,7 @@ enum HummockCommands {
         #[clap(short, long = "table-id", default_value_t = u32::MAX)]
         tableid: u32,
     },
+    SstDump,
 }
 
 pub async fn start(opts: CliOpts) {
@@ -55,5 +56,6 @@ pub async fn start(opts: CliOpts) {
         Commands::Hummock(HummockCommands::ListKv { epoch, tableid }) => {
             cmd_impl::hummock::list_kv(*epoch, *tableid).await.unwrap()
         }
+        Commands::Hummock(HummockCommands::SstDump) => cmd_impl::hummock::sst_dump().await.unwrap(),
     }
 }
