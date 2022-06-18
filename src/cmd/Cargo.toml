@@ -7,6 +7,7 @@ edition = "2021"
 static-link = ["workspace-static-link"]
 
 [dependencies]
+anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
 madsim = "=0.2.0-alpha.3"

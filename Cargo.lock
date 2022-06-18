@@ -3897,6 +3897,7 @@ dependencies = [
 name = "risingwave_cmd"
 version = "0.1.9"
 dependencies = [
+ "anyhow",
  "clap 3.1.18",
  "log",
  "madsim",
