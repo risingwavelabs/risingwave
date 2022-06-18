@@ -100,7 +100,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     }
 
     pub fn is_dirty(&self) -> bool {
-        !self.state_table.get_mem_table().buffer.is_empty()
+        self.state_table.is_dirty()
     }
 
     pub fn retain_top_n(&mut self) {

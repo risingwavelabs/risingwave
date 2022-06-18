@@ -50,7 +50,6 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     /// Mock-able CreateSource.
     source_creators: Vec<CS>,
     schema: Schema,
-    first_execution: bool,
     task_id: TaskId,
     identity: String,
 }
@@ -109,24 +108,19 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> Executor
 impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        // If this is the first time execution, we first get one chunk from each source
-        // and put one row of each chunk into the heap
-        if self.first_execution {
-            for source_idx in 0..self.proto_sources.len() {
-                let new_source = self.source_creators[source_idx]
-                    .create_source(self.context.clone(), &self.proto_sources[source_idx])
-                    .await?;
-                self.sources.push(new_source);
-                self.get_source_chunk(source_idx).await?;
-                if let Some(chunk) = &self.source_inputs[source_idx] {
-                    // We assume that we would always get a non-empty chunk from the upstream of
-                    // exchange, therefore we are sure that there is at least
-                    // one visible row.
-                    let next_row_idx = chunk.next_visible_row_idx(0);
-                    self.push_row_into_heap(source_idx, next_row_idx.unwrap());
-                }
+        for source_idx in 0..self.proto_sources.len() {
+            let new_source = self.source_creators[source_idx]
+                .create_source(self.context.clone(), &self.proto_sources[source_idx])
+                .await?;
+            self.sources.push(new_source);
+            self.get_source_chunk(source_idx).await?;
+            if let Some(chunk) = &self.source_inputs[source_idx] {
+                // We assume that we would always get a non-empty chunk from the upstream of
+                // exchange, therefore we are sure that there is at least
+                // one visible row.
+                let next_row_idx = chunk.next_visible_row_idx(0);
+                self.push_row_into_heap(source_idx, next_row_idx.unwrap());
             }
-            self.first_execution = false;
         }
 
         // If there is no rows in the heap,
@@ -230,7 +224,6 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             sources: vec![],
             source_creators,
             schema: Schema { fields },
-            first_execution: true,
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
         }))
@@ -288,7 +281,6 @@ mod tests {
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int32)],
             },
-            first_execution: true,
             task_id: TaskId::default(),
             identity: "MergeSortExchangeExecutor2".to_string(),
         });

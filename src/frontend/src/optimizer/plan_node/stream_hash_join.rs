@@ -43,6 +43,8 @@ pub struct StreamHashJoin {
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
 
+    dist_key_l: Distribution,
+    dist_key_r: Distribution,
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
     is_append_only: bool,
@@ -56,6 +58,7 @@ impl StreamHashJoin {
             JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
             _ => false,
         };
+
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
@@ -63,6 +66,9 @@ impl StreamHashJoin {
                 .l2i_col_mapping()
                 .composite(&logical.i2o_col_mapping()),
         );
+
+        let dist_l = logical.left().distribution().clone();
+        let dist_r = logical.right().distribution().clone();
 
         let force_delta = if let Some(config) = ctx.inner().session_ctx.get_config(DELTA_JOIN) {
             config.is_set(false)
@@ -84,6 +90,8 @@ impl StreamHashJoin {
             logical,
             eq_join_predicate,
             is_delta: force_delta,
+            dist_key_l: dist_l,
+            dist_key_r: dist_r,
             is_append_only: append_only,
         }
     }
@@ -101,12 +109,12 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        l2o_mapping: &ColIndexMapping,
+        side2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
+                side2o_mapping.rewrite_provided_distribution(left)
             }
             (_, _) => panic!(),
         }
@@ -174,9 +182,14 @@ impl ToStreamProst for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            distribution_keys: self
-                .base
-                .dist
+            dist_key_l: self
+                .dist_key_l
+                .dist_column_indices()
+                .iter()
+                .map(|idx| *idx as u32)
+                .collect_vec(),
+            dist_key_r: self
+                .dist_key_r
                 .dist_column_indices()
                 .iter()
                 .map(|idx| *idx as u32)

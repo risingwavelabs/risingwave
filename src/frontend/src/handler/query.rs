@@ -51,7 +51,7 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
     debug!("query_mode:{:?}", query_mode);
 
     let (data_stream, pg_descs) = match query_mode {
-        QueryMode::Local => local_execute(context, bound).await?,
+        QueryMode::Local => local_execute(context, bound)?,
         QueryMode::Distributed => distribute_execute(context, bound).await?,
     };
 
@@ -115,7 +115,7 @@ async fn distribute_execute(
     ))
 }
 
-async fn local_execute(
+fn local_execute(
     context: OptimizerContext,
     stmt: BoundStatement,
 ) -> Result<(BoxedDataChunkStream, Vec<PgFieldDescriptor>)> {
