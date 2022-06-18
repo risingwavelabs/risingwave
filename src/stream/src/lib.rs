@@ -32,6 +32,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(generic_associated_types)]
 #![feature(more_qualified_paths)]
+#![feature(lint_reasons)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(map_first_last)]
 #![feature(let_chains)]

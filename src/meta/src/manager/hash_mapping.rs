@@ -16,11 +16,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use risingwave_common::hash::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{ParallelUnitId, VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::ParallelUnit;
 
 use super::TableId;
-use crate::cluster::ParallelUnitId;
 use crate::model::FragmentId;
 
 pub type HashMappingManagerRef = Arc<HashMappingManager>;
@@ -148,27 +147,24 @@ impl HashMappingManagerCore {
         let mut owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
         let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
         let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
-        let mut init_bound = hash_shard_size;
+        let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
+        let mut init_bound = 0;
 
         parallel_units.iter().for_each(|parallel_unit| {
+            let vnode_count = if one_more_count > 0 {
+                one_more_count -= 1;
+                hash_shard_size + 1
+            } else {
+                hash_shard_size
+            };
             let parallel_unit_id = parallel_unit.id;
+            init_bound += vnode_count;
             vnode_mapping.resize(init_bound, parallel_unit_id);
-            let vnodes = (init_bound - hash_shard_size..init_bound)
+            let vnodes = (init_bound - vnode_count..init_bound)
                 .map(|id| id as VirtualNode)
                 .collect();
             owner_mapping.insert(parallel_unit_id, vnodes);
-            init_bound += hash_shard_size;
         });
-
-        let mut parallel_unit_iter = parallel_units.iter().cycle();
-        for vnode in init_bound - hash_shard_size..VIRTUAL_NODE_COUNT {
-            let id = parallel_unit_iter.next().unwrap().id;
-            vnode_mapping.push(id);
-            owner_mapping
-                .entry(id)
-                .or_default()
-                .push(vnode as VirtualNode);
-        }
 
         owner_mapping.iter().for_each(|(parallel_unit_id, vnodes)| {
             let vnode_count = vnodes.len();
@@ -225,7 +221,7 @@ impl HashMappingManagerCore {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ParallelUnit, ParallelUnitType};
 
     use super::{HashMappingInfo, HashMappingManager};
