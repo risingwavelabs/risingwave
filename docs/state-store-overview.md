@@ -13,7 +13,9 @@
     - [State Store Read Path](#read-path)
     - [Compaction](#compaction)
     - [Transaction Management with Hummock Manager](#transaction-management-with-hummock-manager)
-    - [Checkpointing in Streaming] (#checkpointing-in-streaming)
+     - [Checkpointing in Streaming](#checkpointing-in-streaming)
+
+    
 
 <!-- Created by https://github.com/ekalinin/github-markdown-toc -->
 
