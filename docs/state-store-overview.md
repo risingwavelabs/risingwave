@@ -3,14 +3,14 @@
 - [An Overview of RisingWave State Store](#an-overview-of-risingwave-state-store)
   - [Overview](#overview)
   - [Cell-based Relational Table](#Relational-table)
-    - [Relational Table Write Path](#relational-table-write-path)
-    - [Relational Table Read Path](#relational-table-read-path)
+    - [Write Path](#relational-table-write-path)
+    - [Read Path](#relational-table-read-path)
   - [State Store Architecture](#architecture)
   - [The Hummock User API](#the-hummock-user-api)
   - [Hummock Internals](#hummock-internals)
     - [Storage Format](#storage-format)
-    - [State Store Write Path](#write-path)
-    - [State Store Read Path](#read-path)
+    - [Write Path](#write-path)
+    - [Read Path](#read-path)
     - [Compaction](#compaction)
     - [Transaction Management with Hummock Manager](#transaction-management-with-hummock-manager)
      - [Checkpointing in Streaming](#checkpointing-in-streaming)
@@ -52,10 +52,10 @@ is an in-memory buffer for caching table operations during one epoch, and the Ce
 
 ![Overview of Relational Table](images/relational-table-layer/relational-table-01.svg)
 
-### Relational Table Write Path
+### Write Path
 Executors perform operations on relational table, and these operations will first be cached in Mem Table. Once an executor wants to write these operations to state store, cell-based table will covert these operations into kv pairs and write to state store with specific epoch. 
 
-### Relational Table Read Path
+### Read Path
 Executors should be able to read the just written data, which means uncommited data is visiable. The data in Mem Table(memory) is fresher than that in shared storage(state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table. For example, let's assume that the first column is the pk of relational table, and the following operations are performed.
 ```
 insert [1, 11, 111]
