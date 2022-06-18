@@ -33,7 +33,7 @@ const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-b
 
 // Approximation for bias correction for 16384 registers. See "HyperLogLog: the analysis of a
 // near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
-const BIAS_CORRECTION: f64 = 0.72125;
+const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
 pub(crate) const DENSE_BITS_DEFAULT: usize = 16; // number of bits in the dense repr of the `RegisterBucket`
 
@@ -107,14 +107,14 @@ impl SparseCount {
 #[derive(Clone, Debug)]
 struct RegisterBucket<const DENSE_BITS: usize> {
     dense_counts: [u64; DENSE_BITS],
-    sparse_counts: Option<SparseCount>,
+    sparse_counts: SparseCount,
 }
 
 impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
     pub fn new() -> Self {
         Self {
             dense_counts: [0u64; DENSE_BITS],
-            sparse_counts: None,
+            sparse_counts: SparseCount::new(),
         }
     }
 
@@ -124,14 +124,10 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
         }
 
         if index > DENSE_BITS {
-            if let Some(counts) = &self.sparse_counts {
-                return Ok(counts.get(index as u8));
-            } else {
-                return Ok(0);
-            }
+            Ok(self.sparse_counts.get(index as u8))
+        } else {
+            Ok(self.dense_counts[index - 1])
         }
-
-        Ok(self.dense_counts[index - 1])
     }
 
     /// Increments or decrements the bucket at `index` depending on the state of `is_insert`.
@@ -145,13 +141,7 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
 
         if is_insert {
             if index > DENSE_BITS {
-                if let Some(counts) = &mut self.sparse_counts {
-                    counts.add(index as u8);
-                } else {
-                    let mut counts = SparseCount::new();
-                    counts.add(index as u8);
-                    self.sparse_counts = Some(counts);
-                }
+                self.sparse_counts.add(index as u8);
             } else if index >= 1 {
                 if count == u64::MAX {
                     bail!(
@@ -166,14 +156,7 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
             // We don't have to worry about the user deleting nonexistent elements, so the counts
             // can never go below 0.
             if index > DENSE_BITS {
-                if let Some(counts) = &mut self.sparse_counts {
-                    counts.subtract(index as u8);
-                    if counts.is_empty() {
-                        self.sparse_counts = None;
-                    }
-                } else {
-                    bail!("HyperLogLog: Deletion of non-existent count");
-                }
+                self.sparse_counts.subtract(index as u8);
             } else if index >= 1 {
                 self.dense_counts[index - 1] = count - 1;
             }
@@ -184,8 +167,8 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
 
     /// Gets the number of the maximum bucket which has a count greater than zero.
     fn get_max(&self) -> StreamExecutorResult<u8> {
-        if let Some(counts) = &self.sparse_counts && !counts.is_empty() {
-            return Ok(counts.last_key());
+        if !self.sparse_counts.is_empty() {
+            return Ok(self.sparse_counts.last_key());
         }
         for i in (0..DENSE_BITS).rev() {
             if self.dense_counts[i] > 0 {
@@ -201,11 +184,11 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
 /// have x trailing zeroes for all x from 1-64. This allows the algorithm to support insertion and
 /// deletion, but uses up more memory and limits the number of rows that can be counted.
 ///
-/// `StreamingApproxCountDistinct` can count up to a total of 2^64 rows.
+/// `StreamingApproxCountDistinct` can count up to a total of 2^64 unduplicated rows.
 ///
 /// The estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^16 registers this
 /// is ~1/256, or about 0.4%. The memory usage for the default choice of parameters is about
-/// 1024 bits * 2^16 buckets, which is about 8.4 MB.
+/// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
 #[derive(Clone, Debug)]
 pub struct StreamingApproxCountDistinct<const DENSE_BITS: usize> {
     registers: Vec<RegisterBucket<DENSE_BITS>>,
@@ -357,8 +340,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_streaming_approx_count_distinct_insert_and_delete_dense() {
-        let mut agg = StreamingApproxCountDistinct::<4>::new();
+    fn test_streaming_approx_count_distinct_insert_and_delete() {
+        // sparse case
+        test_streaming_approx_count_distinct_insert_and_delete_inner::<0>();
+        // dense case
+        test_streaming_approx_count_distinct_insert_and_delete_inner::<4>();
+    }
+
+    fn test_streaming_approx_count_distinct_insert_and_delete_inner<const DENSE_BITS: usize>() {
+        let mut agg = StreamingApproxCountDistinct::<DENSE_BITS>::new();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
 
         agg.apply_batch(
@@ -387,56 +377,15 @@ mod tests {
     }
 
     #[test]
-    fn test_streaming_approx_count_distinct_insert_and_delete_sparse() {
-        let mut agg = StreamingApproxCountDistinct::<0>::new();
-        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
-
-        agg.apply_batch(
-            &[Op::Insert, Op::Insert, Op::Insert],
-            None,
-            &[&array_nonnull!(I64Array, [1, 2, 3]).into()],
-        )
-        .unwrap();
-        assert_matches!(agg.get_output().unwrap(), Some(_));
-
-        agg.apply_batch(
-            &[Op::Insert, Op::Delete, Op::Insert],
-            Some(&(vec![true, false, false]).try_into().unwrap()),
-            &[&array_nonnull!(I64Array, [3, 3, 1]).into()],
-        )
-        .unwrap();
-        assert_matches!(agg.get_output().unwrap(), Some(_));
-
-        agg.apply_batch(
-            &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
-            Some(&(vec![true, true, true, true]).try_into().unwrap()),
-            &[&array_nonnull!(I64Array, [3, 3, 1, 2]).into()],
-        )
-        .unwrap();
-        assert_eq!(agg.get_output().unwrap().unwrap().into_int64(), 0);
+    fn test_register_bucket_get_and_update() {
+        // sparse case
+        test_register_bucket_get_and_update_inner::<0>();
+        // dense case
+        test_register_bucket_get_and_update_inner::<4>();
     }
 
-    #[test]
-    fn test_register_bucket_get_and_update_dense() {
-        let mut rb = RegisterBucket::<4>::new();
-
-        for i in 0..20 {
-            rb.update_bucket(i % 2 + 1, true).unwrap();
-        }
-        assert_eq!(rb.get_bucket(1).unwrap(), 10);
-        assert_eq!(rb.get_bucket(2).unwrap(), 10);
-
-        rb.update_bucket(1, false).unwrap();
-        assert_eq!(rb.get_bucket(1).unwrap(), 9);
-        assert_eq!(rb.get_bucket(2).unwrap(), 10);
-
-        rb.update_bucket(64, true).unwrap();
-        assert_eq!(rb.get_bucket(64).unwrap(), 1);
-    }
-
-    #[test]
-    fn test_register_bucket_get_and_update_sparse() {
-        let mut rb = RegisterBucket::<0>::new();
+    fn test_register_bucket_get_and_update_inner<const DENSE_BITS: usize>() {
+        let mut rb = RegisterBucket::<DENSE_BITS>::new();
 
         for i in 0..20 {
             rb.update_bucket(i % 2 + 1, true).unwrap();
