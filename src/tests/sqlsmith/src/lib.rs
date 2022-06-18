@@ -19,7 +19,7 @@ use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
     ColumnDef, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement,
-    TableWithJoins, With,
+    TableWithJoins, Value, With,
 };
 
 mod expr;
@@ -92,8 +92,15 @@ impl<'a> SqlGenerator<'a> {
         order_by
     }
 
-    fn gen_limit(&self) -> Option<Expr> {
-        None
+    fn gen_limit(&mut self) -> Option<Expr> {
+        if self.rng.gen_bool(0.2) {
+            Some(Expr::Value(Value::Number(
+                self.rng.gen_range(0..=100).to_string(),
+                false,
+            )))
+        } else {
+            None
+        }
     }
 
     fn gen_select_stmt(&mut self) -> Select {
