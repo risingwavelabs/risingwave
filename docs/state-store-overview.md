@@ -23,7 +23,7 @@
 
 In RisingWave, all streaming executors store their data into a state store. This KV state store is backed by a service called Hummock, a cloud-native LSM-Tree-based storage engine. Hummock provides key-value API, and stores all data on S3-compatible service. However, it is not a KV store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
 
-As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. We implement a cell-based relational table layer as the bridge between state-ful executors and KV state store, which provides the interface accessing relational data in KV.
+As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. We implement a cell-based relational table layer as the bridge between state-ful executors and KV state store, which provides the interfaces accessing KV data in relational semantic.
 
 
 ## Architecture
@@ -68,7 +68,7 @@ commit
 insert [3, 3333, 3333]
 ```
 
-After commit, a new record is inserted. The read results with corresponding pk are
+After commit, a new record is inserted. The read results with corresponding pk are:
 ```
 Read pk = 1: [1, 11, 111]
 Read pk = 2:  None
