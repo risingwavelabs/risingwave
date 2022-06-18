@@ -52,10 +52,13 @@ async fn create_tables(opt: &Opt, client: &tokio_postgres::Client) -> Vec<Table>
     log::info!("Preparing tables...");
 
     let sql = std::fs::read_to_string(format!("{}/tpch.sql", opt.testdata)).unwrap();
-    client.execute(&sql, &[]).await.unwrap();
 
     let statements =
         Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+    for stmt in statements.iter() {
+        let create_sql = format!("{}", stmt);
+        client.execute(&create_sql, &[]).await.unwrap();
+    }
     statements
         .into_iter()
         .map(|s| match s {
