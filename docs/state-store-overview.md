@@ -39,16 +39,17 @@ Streaming state store has distinguished workload characteristics.
 This leads to the design of Hummock, the cloud-native KV-based streaming state store. We’ll explain concepts like “epoch”, “key space” and “barrier” in the following chapters.
 
 ## Cell-based Relational Table
+[source code](https://github.com/singularity-data/risingwave/blob/main/src/storage/src/table/state_table.rs)
 
 Relational table consists of State Table, Mem Table and Cell-based Table. The State Table provides the table operations by these APIs: `get_row`, `scan`, `insert_row`, `delete_row` and `update_row`, the Mem Table
 is an in-memory buffer for modifying operations without encoding, and the Cell-based Table is responsible for performing serialization and deserialization between cell-based encoding and KV encoding.
 
 ![Overview of Relational Table](images/relational-table-layer/relational-table-01.svg)
 
-### Relational Table Write Path
+### Relational Table Write
 Executors perform operations on relational table, and these operations will first be cached in Mem Table. Once executor wants to write these operations to state store, cell-based table will covert these operations into kv pairs and write to state store with specific epoch. 
 
-### Relational Table Read Path
+### Relational Table Read
 Executors should be able to read the just written data, which means every written data including uncommited is visiable. The data in Mem Table(memory) is fresher than that in shared storage(state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table.
 ## The Hummock User API
 
