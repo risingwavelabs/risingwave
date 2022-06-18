@@ -31,6 +31,9 @@ enum Commands {
     /// Commands for Hummock
     #[clap(subcommand)]
     Hummock(HummockCommands),
+    /// Commands for Benchmarks
+    #[clap(subcommand)]
+    Table(TableCommands),
 }
 
 #[derive(Subcommand)]
@@ -42,8 +45,8 @@ enum HummockCommands {
         #[clap(short, long = "epoch", default_value_t = u64::MAX)]
         epoch: u64,
 
-        #[clap(short, long = "table-id", default_value_t = u32::MAX)]
-        tableid: u32,
+        #[clap(short, long = "table-id")]
+        table_id: Option<u32>,
     },
     TriggerManualCompaction {
         #[clap(short, long = "compaction-group-id", default_value_t = 2)]
@@ -51,18 +54,43 @@ enum HummockCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum TableCommands {
+    /// benchmark state table
+    Scan {
+        /// name of the materialized view to operate on
+        #[clap()]
+        mv_name: String,
+    },
+}
+
 pub async fn start(opts: CliOpts) {
-    match &opts.command {
+    match opts.command {
         Commands::Hummock(HummockCommands::ListVersion) => {
-            cmd_impl::hummock::list_version().await.unwrap()
+            tokio::spawn(cmd_impl::hummock::list_version())
+                .await
+                .unwrap()
+                .unwrap()
         }
-        Commands::Hummock(HummockCommands::ListKv { epoch, tableid }) => {
-            cmd_impl::hummock::list_kv(*epoch, *tableid).await.unwrap()
+        Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
+            tokio::spawn(cmd_impl::hummock::list_kv(epoch, table_id))
+                .await
+                .unwrap()
+                .unwrap()
         }
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
-        }) => cmd_impl::hummock::trigger_manual_compaction(*compaction_group_id)
-            .await
-            .unwrap(),
+        }) => tokio::spawn(cmd_impl::hummock::trigger_manual_compaction(
+            compaction_group_id,
+        ))
+        .await
+        .unwrap()
+        .unwrap(),
+        Commands::Table(TableCommands::Scan { mv_name }) => {
+            tokio::spawn(cmd_impl::table::scan(mv_name))
+                .await
+                .unwrap()
+                .unwrap()
+        }
     }
 }

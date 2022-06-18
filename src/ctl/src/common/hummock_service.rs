@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use risingwave_common::config::StorageConfig;
+use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::{
@@ -54,7 +55,9 @@ impl HummockServiceOpts {
         })
     }
 
-    pub async fn create_hummock_store(&self) -> Result<MonitoredStateStore<HummockStorage>> {
+    pub async fn create_hummock_store(
+        &self,
+    ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
         let meta_client = self.meta_opts.create_meta_client().await?;
 
         // FIXME: allow specify custom config
@@ -66,7 +69,7 @@ impl HummockServiceOpts {
             &self.hummock_url,
             Arc::new(config),
             Arc::new(MonitoredHummockMetaClient::new(
-                meta_client,
+                meta_client.clone(),
                 Arc::new(HummockMetrics::unused()),
             )),
             Arc::new(StateStoreMetrics::unused()),
@@ -75,7 +78,7 @@ impl HummockServiceOpts {
         .await?;
 
         if let StateStoreImpl::HummockStateStore(hummock_state_store) = state_store_impl {
-            Ok(hummock_state_store)
+            Ok((meta_client, hummock_state_store))
         } else {
             Err(anyhow!("only Hummock state store is supported in risectl"))
         }
