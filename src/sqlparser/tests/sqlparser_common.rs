@@ -438,14 +438,6 @@ fn parse_collate() {
 }
 
 #[test]
-fn parse_select_string_predicate() {
-    let sql = "SELECT id, fname, lname FROM customer \
-               WHERE salary <> 'Not Provided' AND salary <> ''";
-    let _ast = verified_only_select(sql);
-    // TODO: add assertions
-}
-
-#[test]
 fn parse_projection_nested_type() {
     let sql = "SELECT customer.address.state FROM foo";
     let _ast = verified_only_select(sql);
@@ -921,15 +913,15 @@ fn parse_between_with_expr() {
         select.selection.unwrap()
     );
 
-    let sql = "SELECT * FROM t WHERE 1 = 1 AND 1 + x BETWEEN 1 AND 2";
+    let sql = "SELECT * FROM t WHERE (1 = 1) AND 1 + x BETWEEN 1 AND 2";
     let select = verified_only_select(sql);
     assert_eq!(
         Expr::BinaryOp {
-            left: Box::new(Expr::BinaryOp {
+            left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Value(number("1"))),
                 op: BinaryOperator::Eq,
                 right: Box::new(Expr::Value(number("1"))),
-            }),
+            }))),
             op: BinaryOperator::And,
             right: Box::new(Expr::Between {
                 expr: Box::new(Expr::BinaryOp {
@@ -1562,7 +1554,7 @@ fn parse_alter_table_constraints() {
     check_one("PRIMARY KEY (foo, bar)");
     check_one("UNIQUE (id)");
     check_one("FOREIGN KEY (foo, bar) REFERENCES AnotherTable(foo, bar)");
-    check_one("CHECK (end_date > start_date OR end_date IS NULL)");
+    check_one("CHECK ((end_date > start_date) OR end_date IS NULL)");
 
     fn check_one(constraint_text: &str) {
         match verified_stmt(&format!("ALTER TABLE tab ADD {}", constraint_text)) {

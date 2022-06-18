@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use rand::seq::SliceRandom;
 use rand::Rng;
+use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::{func_sig_map, DataTypeName, ExprType, FuncSign};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
@@ -38,7 +39,7 @@ fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     funcs
 }
 
-impl SqlGenerator {
+impl<'a> SqlGenerator<'a> {
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName) -> Expr {
         match self.rng.gen_range(0..=99) {
             0..=49 => self
@@ -46,8 +47,27 @@ impl SqlGenerator {
                 .unwrap_or_else(|| self.gen_simple_scalar(typ)),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
-            50..=99 => self.gen_simple_scalar(typ),
+            50..=79 => self.gen_col(typ),
+            80..=99 => self.gen_simple_scalar(typ),
             _ => unreachable!(),
+        }
+    }
+
+    fn gen_col(&mut self, typ: DataTypeName) -> Expr {
+        if self.bound_relations.is_empty() {
+            return self.gen_simple_scalar(typ);
+        }
+        let rel = self.bound_relations.choose(&mut self.rng).unwrap();
+        let matched_cols = rel
+            .columns
+            .iter()
+            .filter(|col| DataTypeName::from(bind_data_type(&col.data_type).unwrap()) == typ)
+            .collect::<Vec<_>>();
+        if matched_cols.is_empty() {
+            self.gen_simple_scalar(typ)
+        } else {
+            let col_def = matched_cols.choose(&mut self.rng).unwrap();
+            Expr::Identifier(Ident::new(format!("{}.{}", rel.name, col_def.name)))
         }
     }
 

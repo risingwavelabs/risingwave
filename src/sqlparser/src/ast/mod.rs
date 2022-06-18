@@ -496,6 +496,13 @@ fn fmt_expr_with_paren(e: &Expr) -> String {
             | B::Multiply
             | B::Modulo
             | B::Minus
+            | B::LtEq
+            | B::GtEq
+            | B::Eq
+            | B::Gt
+            | B::Lt
+            | B::Xor
+            | B::NotEq
             | B::Divide
             | B::BitwiseAnd
             | B::BitwiseOr

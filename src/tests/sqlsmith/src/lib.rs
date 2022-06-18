@@ -23,31 +23,33 @@ use risingwave_sqlparser::ast::{
 };
 
 mod expr;
+mod relation;
 mod scalar;
-mod test_runner;
 
-#[allow(dead_code)]
+#[derive(Clone)]
 pub struct Table {
-    columns: Vec<ColumnDef>,
+    pub name: String,
+
+    pub columns: Vec<ColumnDef>,
 }
 
-pub struct SqlGenerator {
-    #[allow(dead_code)]
+struct SqlGenerator<'a> {
     tables: Vec<Table>,
-    rng: ThreadRng,
+    rng: &'a mut ThreadRng,
+
+    bound_relations: Vec<Table>,
 }
 
-impl SqlGenerator {
-    pub fn new(tables: Vec<Table>) -> Self {
-        let rng = rand::thread_rng();
-        SqlGenerator { tables, rng }
+impl<'a> SqlGenerator<'a> {
+    fn new(rng: &'a mut ThreadRng, tables: Vec<Table>) -> Self {
+        SqlGenerator {
+            tables,
+            rng,
+            bound_relations: vec![],
+        }
     }
 
-    pub fn gen(&mut self) -> String {
-        format!("{}", self.gen_stmt())
-    }
-
-    pub fn gen_stmt(&mut self) -> Statement {
+    fn gen_stmt(&mut self) -> Statement {
         Statement::Query(Box::new(self.gen_query()))
     }
 
@@ -82,10 +84,12 @@ impl SqlGenerator {
     }
 
     fn gen_select_stmt(&mut self) -> Select {
+        // Generate random tables/relations first so that select items can refer to them.
+        let from = self.gen_from();
         Select {
             distinct: false,
             projection: self.gen_select_list(),
-            from: self.gen_from(),
+            from,
             lateral_views: vec![],
             selection: self.gen_where(),
             group_by: self.gen_group_by(),
@@ -104,15 +108,15 @@ impl SqlGenerator {
             T::Float32,
             T::Float64,
             T::Varchar,
-            // T::Date,
-            // T::Timestamp,
-            // T::Timestampz,
-            // T::Time,
-            // T::Interval,
+            T::Date,
+            T::Timestamp,
+            T::Timestampz,
+            T::Time,
+            T::Interval,
         ]
         .choose(&mut self.rng)
         .unwrap();
-        let items_num = self.rng.gen_range(1..=1);
+        let items_num = self.rng.gen_range(1..=4);
         (0..items_num)
             .map(|i| SelectItem::ExprWithAlias {
                 expr: self.gen_expr(ret_type),
@@ -121,8 +125,16 @@ impl SqlGenerator {
             .collect()
     }
 
-    fn gen_from(&self) -> Vec<TableWithJoins> {
-        vec![]
+    fn gen_from(&mut self) -> Vec<TableWithJoins> {
+        (0..self.tables.len())
+            .filter_map(|_| {
+                if self.flip_coin() {
+                    Some(self.gen_from_relation())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     fn gen_where(&self) -> Option<Expr> {
@@ -136,4 +148,15 @@ impl SqlGenerator {
     fn gen_having(&self) -> Option<Expr> {
         None
     }
+
+    /// 50/50 chance to be true/false.
+    fn flip_coin(&mut self) -> bool {
+        self.rng.gen_bool(0.5)
+    }
+}
+
+/// Generate a random SQL string.
+pub fn sql_gen(rng: &mut ThreadRng, tables: Vec<Table>) -> String {
+    let mut gen = SqlGenerator::new(rng, tables);
+    format!("{}", gen.gen_stmt())
 }

@@ -23,7 +23,7 @@ use risingwave_sqlparser::ast::{DataType, Expr, Value};
 use crate::expr::sql_null;
 use crate::SqlGenerator;
 
-impl SqlGenerator {
+impl<'a> SqlGenerator<'a> {
     pub(crate) fn gen_simple_scalar(&mut self, typ: DataTypeName) -> Expr {
         use DataTypeName as T;
         match typ {
