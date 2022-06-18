@@ -3,15 +3,17 @@
 - [An Overview of RisingWave State Store](#an-overview-of-risingwave-state-store)
   - [Overview](#overview)
   - [Cell-based Relational Table](#Relational-table)
-  - [Architecture](#architecture)
+    - [Relational Table Write Path](#relational-table-write-path)
+    - [Relational Table Read Path](#relational-table-read-path)
+  - [State Store Architecture](#architecture)
   - [The Hummock User API](#the-hummock-user-api)
   - [Hummock Internals](#hummock-internals)
     - [Storage Format](#storage-format)
-    - [Write Path](#write-path)
-    - [Read Path](#read-path)
+    - [State Store Write Path](#write-path)
+    - [State Store Read Path](#read-path)
     - [Compaction](#compaction)
     - [Transaction Management with Hummock Manager](#transaction-management-with-hummock-manager)
-    - [Checkpointing in Streaming](#checkpointing-in-streaming)
+    - [Checkpointing in Streaming] (#checkpointing-in-streaming)
 
 <!-- Created by https://github.com/ekalinin/github-markdown-toc -->
 
@@ -19,7 +21,7 @@
 
 In RisingWave, all streaming executors store their data into a state store. This KV state store is backed by a service called Hummock, a cloud-native LSM-Tree-based storage engine. Hummock provides key-value API, and stores all data on S3-compatible service. However, it is not a KV store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
 
-As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. We implement a cell-based relational table as the bridge between state-ful executors and KV state store, which provides the interface accessing relational data in KV.
+As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. We implement a cell-based relational table layer as the bridge between state-ful executors and KV state store, which provides the interface accessing relational data in KV.
 
 
 ## Architecture
@@ -41,16 +43,35 @@ This leads to the design of Hummock, the cloud-native KV-based streaming state s
 ## Cell-based Relational Table
 [source code](https://github.com/singularity-data/risingwave/blob/main/src/storage/src/table/state_table.rs)
 
-Relational table consists of State Table, Mem Table and Cell-based Table. The State Table provides the table operations by these APIs: `get_row`, `scan`, `insert_row`, `delete_row` and `update_row`, the Mem Table
-is an in-memory buffer for modifying operations without encoding, and the Cell-based Table is responsible for performing serialization and deserialization between cell-based encoding and KV encoding.
+In this part, we will introduce how state-ful executors interact with KV state store through the relational table layer.
+
+Relational table layer consists of State Table, Mem Table and Cell-based Table. The State Table provides the table operations by these APIs: `get_row`, `scan`, `insert_row`, `delete_row` and `update_row`, which are the read and write  interfaces for executors. The Mem Table
+is an in-memory buffer for caching table operations during one epoch, and the Cell-based Table is responsible for performing serialization and deserialization between cell-based encoding and KV encoding.
 
 ![Overview of Relational Table](images/relational-table-layer/relational-table-01.svg)
 
-### Relational Table Write
-Executors perform operations on relational table, and these operations will first be cached in Mem Table. Once executor wants to write these operations to state store, cell-based table will covert these operations into kv pairs and write to state store with specific epoch. 
+### Relational Table Write Path
+Executors perform operations on relational table, and these operations will first be cached in Mem Table. Once an executor wants to write these operations to state store, cell-based table will covert these operations into kv pairs and write to state store with specific epoch. 
 
-### Relational Table Read
-Executors should be able to read the just written data, which means every written data including uncommited is visiable. The data in Mem Table(memory) is fresher than that in shared storage(state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table.
+### Relational Table Read Path
+Executors should be able to read the just written data, which means uncommited data is visiable. The data in Mem Table(memory) is fresher than that in shared storage(state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table. For example, let's assume that the first column is the pk of relational table, and the following operations are performed.
+```
+insert [1, 11, 111]
+insert [2, 22, 222]
+delete [2, 22, 222]
+insert [3, 33, 333]
+
+commit
+
+insert [3, 3333, 3333]
+```
+
+After commit, a new record is inserted. The read results with corresponding pk are
+```
+Read pk = 1: [1, 11, 111]
+Read pk = 2:  None
+Read pk = 3: [3, 3333, 3333]
+```
 ## The Hummock User API
 
 [source code](https://github.com/singularity-data/risingwave/blob/main/src/storage/src/hummock/mod.rs)
@@ -59,7 +80,7 @@ In this part, we will introduce how users can use Hummock as a KV store.
 
 The Hummock itself provides 3 simple APIs: `ingest_batch`, `get`, and `scan`. Hummock provides MVCC write and read on KV pairs. Every key stored in Hummock has an *epoch* (aka. timestamp). Developers should specify an epoch when calling Hummock APIs.
 
-Hummock doesn’t support writing a single key. To write data into Hummock, users should provide a ***sorted, unique*** list of ***keys*** and the corresponding ***operations*** (put value, delete), with an ***epoch***, and call the `ingest_batch` API. Therefore, within one epoch, users can only have one operation for a key. For example,
+Hummock doesn’t support writing a single key. To write data into Hummock, users should provide a ***sorted, unique*** list of ***keys*** and the corresponding ***operations*** (put value, delete), with an ***epoch***, and call the `ingest_batch` API. Therefore, within one epoch, users can only have one operation for a key.
 
 ```
 [a => put 1, b => put 2] epoch = 1 is a valid write batch
