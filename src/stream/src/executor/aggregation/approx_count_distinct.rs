@@ -63,7 +63,7 @@ impl SparseCount {
 
     fn add(&mut self, k: u8) -> bool {
         let mut last = 0;
-        for (key, count) in self.inner.iter_mut() {
+        for (key, count) in &mut self.inner {
             if *key == k {
                 *count += 1;
                 return true;
@@ -123,7 +123,7 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
             bail!("HyperLogLog: Invalid bucket index");
         }
 
-        if index >= 17 {
+        if index > DENSE_BITS {
             if let Some(counts) = &self.sparse_counts {
                 return Ok(counts.get(index as u8));
             } else {
@@ -144,7 +144,7 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
         let count = self.get_bucket(index)?;
 
         if is_insert {
-            if index >= 17 {
+            if index > DENSE_BITS {
                 if let Some(counts) = &mut self.sparse_counts {
                     counts.add(index as u8);
                 } else {
@@ -165,7 +165,7 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
         } else {
             // We don't have to worry about the user deleting nonexistent elements, so the counts
             // can never go below 0.
-            if index >= 17 {
+            if index > DENSE_BITS {
                 if let Some(counts) = &mut self.sparse_counts {
                     counts.subtract(index as u8);
                     if counts.is_empty() {
