@@ -1,0 +1,41 @@
+statement ok
+create materialized source github_event (created_at timestamp , id varchar, name varchar, type varchar)
+with ( 'connector' = 'kafka', 'kafka.topic' = 'github_event_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest' ) row format json;
+
+statement ok
+CREATE MATERIALIZED VIEW time_view1 as
+SELECT count(name) as event_count, name, window_start
+FROM tumble(github_event, created_at, interval '10' minute)
+WHERE type = 'WatchEvent'
+group by name,window_start;
+
+statement ok
+CREATE MATERIALIZED VIEW topK_star_incr_view as
+SELECT * FROM time_view1
+WHERE window_start = (select max(window_start) from time_view1)
+order by event_count desc limit 5;
+
+statement ok
+CREATE MATERIALIZED VIEW time_view2 as
+SELECT count(name) as event_count, name, window_start
+FROM tumble(github_event, created_at, interval '10' minute)
+WHERE type = 'CreateEvent' or type = 'DeleteEvent' or type = 'IssuesEvent' or type = 'PullRequestEvent' or type = 'PushEvent' or type = 'ReleaseEvent'
+group by name,window_start;
+
+statement ok
+CREATE MATERIALIZED VIEW topK_repo_active_view as
+SELECT * FROM time_view2
+WHERE window_start = (select max(window_start) from time_view2)
+order by event_count desc limit 5;
+
+query TTT
+SELECT * from topK_star_incr_view limit 1;
+----
+1 AcademySoftwareFoundation/MaterialX 2022-06-17 11:30:00
+
+query TTT
+SELECT * from topK_repo_active_view limit 1;
+----
+65 wangbax/plugins 2022-06-17 11:30:00
+
+
