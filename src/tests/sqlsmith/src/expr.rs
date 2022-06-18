@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::{func_sig_map, DataTypeName, ExprType, FuncSign};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
@@ -61,7 +60,7 @@ impl<'a> SqlGenerator<'a> {
         let matched_cols = rel
             .columns
             .iter()
-            .filter(|col| DataTypeName::from(bind_data_type(&col.data_type).unwrap()) == typ)
+            .filter(|col| col.data_type == typ)
             .collect::<Vec<_>>();
         if matched_cols.is_empty() {
             self.gen_simple_scalar(typ)

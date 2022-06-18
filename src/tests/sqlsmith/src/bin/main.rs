@@ -64,7 +64,7 @@ async fn create_tables(opt: &Opt, client: &tokio_postgres::Client) -> Vec<Table>
         .map(|s| match s {
             Statement::CreateTable { name, columns, .. } => Table {
                 name: name.0[0].value.clone(),
-                columns,
+                columns: columns.iter().map(|c| c.clone().into()).collect(),
             },
             _ => panic!("Unexpected statement: {}", s),
         })

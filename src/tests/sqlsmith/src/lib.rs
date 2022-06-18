@@ -16,6 +16,7 @@ use std::vec;
 
 use rand::prelude::{SliceRandom, ThreadRng};
 use rand::Rng;
+use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
     ColumnDef, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement,
@@ -29,8 +30,22 @@ mod scalar;
 #[derive(Clone)]
 pub struct Table {
     pub name: String,
+    pub columns: Vec<Column>,
+}
 
-    pub columns: Vec<ColumnDef>,
+#[derive(Clone)]
+pub struct Column {
+    name: String,
+    data_type: DataTypeName,
+}
+
+impl From<ColumnDef> for Column {
+    fn from(c: ColumnDef) -> Self {
+        Self {
+            name: c.name.value.clone(),
+            data_type: bind_data_type(&c.data_type).unwrap().into(),
+        }
+    }
 }
 
 struct SqlGenerator<'a> {
@@ -50,27 +65,36 @@ impl<'a> SqlGenerator<'a> {
     }
 
     fn gen_stmt(&mut self) -> Statement {
-        Statement::Query(Box::new(self.gen_query()))
+        let (query, _) = self.gen_query();
+        Statement::Query(Box::new(query))
     }
 
-    fn gen_query(&mut self) -> Query {
-        Query {
-            with: self.gen_with(),
-            body: self.gen_set_expr(),
-            order_by: self.gen_order_by(),
-            limit: self.gen_limit(),
-            offset: None,
-            fetch: None,
-        }
+    fn gen_query(&mut self) -> (Query, Vec<Column>) {
+        let with = self.gen_with();
+        let (query, schema) = self.gen_set_expr();
+        (
+            Query {
+                with,
+                body: query,
+                order_by: self.gen_order_by(),
+                limit: self.gen_limit(),
+                offset: None,
+                fetch: None,
+            },
+            schema,
+        )
     }
 
     fn gen_with(&mut self) -> Option<With> {
         None
     }
 
-    fn gen_set_expr(&mut self) -> SetExpr {
+    fn gen_set_expr(&mut self) -> (SetExpr, Vec<Column>) {
         match self.rng.gen_range(0..=9) {
-            0..=9 => SetExpr::Select(Box::new(self.gen_select_stmt())),
+            0..=9 => {
+                let (select, schema) = self.gen_select_stmt();
+                (SetExpr::Select(Box::new(select)), schema)
+            }
             _ => unreachable!(),
         }
     }
@@ -103,21 +127,34 @@ impl<'a> SqlGenerator<'a> {
         }
     }
 
-    fn gen_select_stmt(&mut self) -> Select {
+    fn gen_select_stmt(&mut self) -> (Select, Vec<Column>) {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from();
-        Select {
+        let rel_num = from.len();
+        let (select_list, schema) = self.gen_select_list();
+        let select = Select {
             distinct: false,
-            projection: self.gen_select_list(),
+            projection: select_list,
             from,
             lateral_views: vec![],
             selection: self.gen_where(),
             group_by: self.gen_group_by(),
             having: self.gen_having(),
-        }
+        };
+        // The relations used in the inner query can not be used in the outer query.
+        (0..rel_num).for_each(|_| {
+            let rel = self.bound_relations.pop();
+            assert!(rel.is_some());
+        });
+        (select, schema)
     }
 
-    fn gen_select_list(&mut self) -> Vec<SelectItem> {
+    fn gen_select_list(&mut self) -> (Vec<SelectItem>, Vec<Column>) {
+        let items_num = self.rng.gen_range(1..=4);
+        (0..items_num).map(|i| self.gen_select_item(i)).unzip()
+    }
+
+    fn gen_select_item(&mut self, i: i32) -> (SelectItem, Column) {
         use DataTypeName as T;
         let ret_type = *[
             T::Boolean,
@@ -136,13 +173,17 @@ impl<'a> SqlGenerator<'a> {
         ]
         .choose(&mut self.rng)
         .unwrap();
-        let items_num = self.rng.gen_range(1..=4);
-        (0..items_num)
-            .map(|i| SelectItem::ExprWithAlias {
+        let alias = format!("col_{}", i);
+        (
+            SelectItem::ExprWithAlias {
                 expr: self.gen_expr(ret_type),
-                alias: Ident::new(format!("col_{}", i)),
-            })
-            .collect()
+                alias: Ident::new(alias.clone()),
+            },
+            Column {
+                name: alias,
+                data_type: ret_type,
+            },
+        )
     }
 
     fn gen_from(&mut self) -> Vec<TableWithJoins> {

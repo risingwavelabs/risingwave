@@ -14,6 +14,7 @@
 
 #[cfg(test)]
 mod tests {
+    use std::panic;
     use std::sync::Arc;
 
     use risingwave_frontend::binder::Binder;
@@ -52,7 +53,7 @@ mod tests {
                     .unwrap();
                     tables.push(Table {
                         name: name.0[0].value.clone(),
-                        columns,
+                        columns: columns.iter().map(|c| c.clone().into()).collect(),
                     })
                 }
                 _ => panic!("Unexpected statement: {}", s),
@@ -70,6 +71,11 @@ mod tests {
 
         for _ in 0..5000 {
             let sql = sql_gen(&mut rng, tables.clone());
+
+            let sql_copy = sql.clone();
+            panic::set_hook(Box::new(move |e| {
+                println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e,);
+            }));
 
             // The generated SQL must be parsable.
             let statements =
