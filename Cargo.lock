@@ -4504,13 +4504,17 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "clap 3.1.18",
+ "env_logger",
  "lazy_static",
+ "log",
  "madsim",
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_frontend",
  "risingwave_pb",
  "risingwave_sqlparser",
+ "tokio-postgres",
  "workspace-hack",
 ]
 
@@ -6047,6 +6051,7 @@ dependencies = [
  "bytes",
  "cc",
  "chrono",
+ "clap 3.1.18",
  "crossbeam-deque",
  "digest",
  "either",
