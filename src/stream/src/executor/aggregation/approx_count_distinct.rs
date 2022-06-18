@@ -357,7 +357,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_insert_and_delete_dense() {
+    fn test_streaming_approx_count_distinct_insert_and_delete_dense() {
         let mut agg = StreamingApproxCountDistinct::<4>::new();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
 
@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_and_delete_sparse() {
+    fn test_streaming_approx_count_distinct_insert_and_delete_sparse() {
         let mut agg = StreamingApproxCountDistinct::<0>::new();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
 
