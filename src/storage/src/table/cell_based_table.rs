@@ -130,34 +130,24 @@ impl<S: StateStore> CellBasedTable<S> {
         // let vnode = self.compute_vnode_by_row(pk);
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let serialized_pk = serialize_pk(pk, pk_serializer);
+
         let sentinel_key =
             serialize_pk_and_column_id(&serialized_pk, &SENTINEL_CELL_ID).map_err(err)?;
-        let mut get_res = Vec::new();
-
-        let sentinel_cell = self.keyspace.get(&sentinel_key, epoch).await?;
-
-        if sentinel_cell.is_none() {
+        if self.keyspace.get(&sentinel_key, epoch).await?.is_none() {
             // if sentinel cell is none, this row doesn't exist
             return Ok(None);
-        } else {
-            get_res.push((sentinel_key, sentinel_cell.unwrap()));
-        }
+        };
+
+        let mut row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
         for column_id in &self.column_ids {
             let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
-
-            let state_store_get_res = self.keyspace.get(&key, epoch).await?;
-            if let Some(state_store_get_res) = state_store_get_res {
-                get_res.push((key, state_store_get_res));
+            if let Some(value) = self.keyspace.get(&key, epoch).await? {
+                let deserialize_res = row_deserializer.deserialize(&key, &value).map_err(err)?;
+                assert!(deserialize_res.is_none());
             }
         }
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
-        for (key, value) in get_res {
-            let deserialize_res = cell_based_row_deserializer
-                .deserialize(&Bytes::from(key), &value)
-                .map_err(err)?;
-            assert!(deserialize_res.is_none());
-        }
-        let pk_and_row = cell_based_row_deserializer.take();
+
+        let pk_and_row = row_deserializer.take();
         Ok(pk_and_row.map(|(_pk, row)| row))
     }
 
@@ -181,21 +171,18 @@ impl<S: StateStore> CellBasedTable<S> {
         let start_key = serialize_pk(pk, pk_serializer);
         let key_range = range_of_prefix(&start_key);
 
-        let state_store_range_scan_res = self
+        let kv_pairs = self
             .keyspace
             .scan_with_range(key_range, None, epoch)
             .await?;
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
-        for (key, value) in state_store_range_scan_res {
-            cell_based_row_deserializer
-                .deserialize(&key, &value)
-                .map_err(err)?;
+
+        let mut deserializer = CellBasedRowDeserializer::new(&*self.mapping);
+        for (key, value) in kv_pairs {
+            deserializer.deserialize(&key, &value).map_err(err)?;
         }
-        let pk_and_row = cell_based_row_deserializer.take();
-        match pk_and_row {
-            Some(_) => Ok(pk_and_row.map(|(_pk, row)| row)),
-            None => Ok(None),
-        }
+
+        let pk_and_row = deserializer.take();
+        Ok(pk_and_row.map(|(_pk, row)| row))
     }
 
     async fn batch_write_rows_inner<const WITH_VALUE_META: bool>(
