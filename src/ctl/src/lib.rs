@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 mod cmd_impl;
 pub(crate) mod common;
@@ -69,33 +70,25 @@ enum TableCommands {
     },
 }
 
-pub async fn start(opts: CliOpts) {
+pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
         Commands::Hummock(HummockCommands::ListVersion) => {
-            tokio::spawn(cmd_impl::hummock::list_version())
-                .await
-                .unwrap()
-                .unwrap()
+            tokio::spawn(cmd_impl::hummock::list_version()).await??;
         }
         Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
-            tokio::spawn(cmd_impl::hummock::list_kv(epoch, table_id))
-                .await
-                .unwrap()
-                .unwrap()
+            tokio::spawn(cmd_impl::hummock::list_kv(epoch, table_id)).await??;
         }
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
-        }) => tokio::spawn(cmd_impl::hummock::trigger_manual_compaction(
-            compaction_group_id,
-        ))
-        .await
-        .unwrap()
-        .unwrap(),
+        }) => {
+            tokio::spawn(cmd_impl::hummock::trigger_manual_compaction(
+                compaction_group_id,
+            ))
+            .await??
+        }
         Commands::Table(TableCommands::Scan { mv_name }) => {
-            tokio::spawn(cmd_impl::table::scan(mv_name))
-                .await
-                .unwrap()
-                .unwrap()
+            tokio::spawn(cmd_impl::table::scan(mv_name)).await??
         }
     }
+    Ok(())
 }

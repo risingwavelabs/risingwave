@@ -15,7 +15,7 @@
 use std::env;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::StorageConfig;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -40,15 +40,16 @@ impl HummockServiceOpts {
     /// * `RW_HUMMOCK_URL`: meta service address
     pub fn from_env() -> Result<Self> {
         let meta_opts = MetaServiceOpts::from_env()?;
-        let hummock_url = env::var("RW_HUMMOCK_URL").unwrap_or_else(|_| {
-            const DEFAULT_ADDR: &str =
-                "hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001";
-            tracing::warn!(
-                "`RW_HUMMOCK_URL` not found, using default hummock URL {}",
-                DEFAULT_ADDR
-            );
-            DEFAULT_ADDR.to_string()
-        });
+
+        let hummock_url = match env::var("RW_HUMMOCK_URL") {
+            Ok(url) => {
+                tracing::info!("using Hummock URL from `RW_HUMMOCK_URL`: {}", url);
+                url
+            }
+            Err(_) => {
+                bail!("env variable `RW_HUMMOCK_URL` not found, please do one of the following:\n* use `./risedev ctl` to start risectl.\n* `source .risingwave/config/risectl-env` or `source ~/risingwave-deploy/risectl-env` before running risectl.\n* manually set `RW_HUMMOCK_URL` in env variable.\nPlease also remember to add `use: minio` to risedev config.");
+            }
+        };
         Ok(Self {
             meta_opts,
             hummock_url,
