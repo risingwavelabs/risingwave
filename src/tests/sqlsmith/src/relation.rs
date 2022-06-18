@@ -13,32 +13,36 @@
 // limitations under the License.
 
 use rand::prelude::SliceRandom;
+use rand::Rng;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
 
-use crate::{SqlGenerator, Table};
+use crate::SqlGenerator;
 
 impl<'a> SqlGenerator<'a> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
-        let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
         let alias = format!("t{}", self.bound_relations.len());
-        let relation = make_table_relation(&table, alias.clone());
-        table.name = alias; // Rename the table.
-        self.bound_relations.push(table);
-        relation
+        match self.rng.gen_range(0..=9) {
+            0..=9 => self.gen_simple_table(alias),
+            _ => unreachable!(),
+        }
     }
-}
 
-fn make_table_relation(table: &Table, alias: String) -> TableWithJoins {
-    TableWithJoins {
-        relation: TableFactor::Table {
-            name: ObjectName(vec![Ident::new(table.name.clone())]),
-            alias: Some(TableAlias {
-                name: Ident::new(alias),
-                columns: vec![],
-            }),
-            args: vec![],
-        },
-        joins: vec![],
+    fn gen_simple_table(&mut self, alias: String) -> TableWithJoins {
+        let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
+        let relation = TableWithJoins {
+            relation: TableFactor::Table {
+                name: ObjectName(vec![Ident::new(table.name.clone())]),
+                alias: Some(TableAlias {
+                    name: Ident::new(alias.clone()),
+                    columns: vec![],
+                }),
+                args: vec![],
+            },
+            joins: vec![],
+        };
+        table.name = alias; // Rename the table.
+        self.bound_relations.push(table.clone());
+        relation
     }
 }

@@ -157,8 +157,12 @@ impl<'a> SqlGenerator<'a> {
             .collect()
     }
 
-    fn gen_where(&self) -> Option<Expr> {
-        None
+    fn gen_where(&mut self) -> Option<Expr> {
+        if self.flip_coin() {
+            Some(self.gen_expr(DataTypeName::Boolean))
+        } else {
+            None
+        }
     }
 
     fn gen_group_by(&self) -> Vec<Expr> {
