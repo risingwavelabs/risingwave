@@ -106,14 +106,15 @@ impl SplitReader for DatagenSplitReader {
             {
                 Some(seed) => {
                     match seed.parse::<u64>() {
-                        // we use given seed xor split_index to make sure every split has different seed
+                        // we use given seed xor split_index to make sure every split has different
+                        // seed
                         Ok(seed) => seed ^ split_index,
                         Err(e) => {
                             log::warn!("cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed", seed, e, split_index);
                             split_index
                         }
                     }
-                },
+                }
                 None => split_index,
             };
             match column.data_type {
