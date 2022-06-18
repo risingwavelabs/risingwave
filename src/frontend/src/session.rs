@@ -63,7 +63,7 @@ pub struct OptimizerContext {
     // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
-    pub raw_sql: Arc<String>,
+    pub sql: Arc<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -95,11 +95,11 @@ impl OptimizerContextRef {
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>, raw_sql: Arc<String>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<String>) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
-            raw_sql,
+            sql,
         }
     }
 
@@ -109,7 +109,7 @@ impl OptimizerContext {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
-            raw_sql: Arc::new("".to_string()),
+            sql: Arc::new("".to_string()),
         }
         .into()
     }
@@ -535,11 +535,11 @@ impl SessionManagerImpl {
 impl Session for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
-        raw_sql: &str,
+        sql: &str,
     ) -> std::result::Result<PgResponse, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(raw_sql).map_err(|e| {
-            tracing::error!("failed to parse sql:\n{}:\n{}", raw_sql, e);
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
+            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
         // With pgwire, there would be at most 1 statement in the vec.
@@ -553,8 +553,8 @@ impl Session for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, raw_sql).await.map_err(|e| {
-            tracing::error!("failed to handle sql:\n{}:\n{}", raw_sql, e);
+        let rsp = handle(self, stmt, sql).await.map_err(|e| {
+            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
         Ok(rsp)
@@ -562,11 +562,11 @@ impl Session for SessionImpl {
 
     async fn infer_return_type(
         self: Arc<Self>,
-        raw_sql: &str,
+        sql: &str,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(raw_sql).map_err(|e| {
-            tracing::error!("failed to parse sql:\n{}:\n{}", raw_sql, e);
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
+            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
         // With pgwire, there would be at most 1 statement in the vec.
@@ -575,8 +575,8 @@ impl Session for SessionImpl {
             return Ok(vec![]);
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = infer(self, stmt, raw_sql).map_err(|e| {
-            tracing::error!("failed to handle sql:\n{}:\n{}", raw_sql, e);
+        let rsp = infer(self, stmt, sql).map_err(|e| {
+            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
         Ok(rsp)
@@ -588,12 +588,8 @@ impl Session for SessionImpl {
 }
 
 /// Returns row description of the statement
-fn infer(
-    session: Arc<SessionImpl>,
-    stmt: Statement,
-    raw_sql: &str,
-) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session, Arc::new(String::from(raw_sql)));
+fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
+    let context = OptimizerContext::new(session, Arc::new(String::from(sql)));
     let session = context.session_ctx.clone();
 
     let bound = {
