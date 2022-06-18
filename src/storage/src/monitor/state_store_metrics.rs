@@ -45,6 +45,10 @@ macro_rules! for_all_metrics {
             range_backward_scan_size: Histogram,
             range_backward_scan_duration: Histogram,
 
+            iter_size: Histogram,
+            iter_item: Histogram,
+            iter_duration: Histogram,
+
             write_batch_tuple_counts: GenericCounter<AtomicU64>,
             write_batch_duration: Histogram,
             write_batch_size: Histogram,
@@ -173,6 +177,27 @@ impl StateStoreMetrics {
         );
         let range_backward_scan_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_size",
+            "Total bytes gotten from state store scan(), for calculating read throughput",
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+        );
+        let iter_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_item",
+            "Total bytes gotten from state store scan(), for calculating read throughput",
+            exponential_buckets(1.0, 2.0, 20).unwrap() // max 2^20 items
+        );
+        let iter_item = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_duration",
+            "Total time of scan that have been issued to state store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let iter_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         // ----- write_batch -----
         let write_batch_tuple_counts = register_int_counter_with_registry!(
@@ -351,6 +376,9 @@ impl StateStoreMetrics {
             range_scan_duration,
             range_backward_scan_size,
             range_backward_scan_duration,
+            iter_size,
+            iter_item,
+            iter_duration,
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,

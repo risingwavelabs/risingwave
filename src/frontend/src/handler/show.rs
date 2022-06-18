@@ -55,10 +55,7 @@ fn schema_or_default(schema: &Option<Ident>) -> &str {
         .map_or_else(|| DEFAULT_SCHEMA_NAME, |s| &s.value)
 }
 
-pub async fn handle_show_object(
-    context: OptimizerContext,
-    command: ShowObject,
-) -> Result<PgResponse> {
+pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader().read_guard();
 
