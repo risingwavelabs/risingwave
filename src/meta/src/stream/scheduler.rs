@@ -202,10 +202,13 @@ where
             // Normal fragment
 
             // Find out all the hash parallel units in the cluster.
-            let parallel_units = self
+            let mut parallel_units = self
                 .cluster_manager
                 .list_parallel_units(Some(ParallelUnitType::Hash))
                 .await;
+            // FIXME(Kexiang): select appropriate parallel_units, currently only support
+            // `parallel_degree < parallel_units.size()`
+            parallel_units.truncate(fragment.actors.len());
 
             // Build vnode mapping according to the parallel units.
             self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
