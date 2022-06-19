@@ -37,7 +37,6 @@ impl GrpcExchangeSource {
         let task_id = task_output_id.get_task_id()?.clone();
         let client = ComputeClient::new(addr).await?;
         let local_execute_plan = exchange_source.local_execute_plan;
-        let vnode_ranges = todo!();
         let stream = match local_execute_plan {
             // When in the local execution mode, `GrpcExchangeSource` would send out
             // `ExecuteRequest` and get the data chunks back in a single RPC.
@@ -47,7 +46,7 @@ impl GrpcExchangeSource {
                     task_id: Some(task_id),
                     plan: plan.plan,
                     epoch: plan.epoch,
-                    vnode_ranges,
+                    vnode_ranges: plan.vnode_ranges,
                 };
                 client.execute(execute_request).await?
             }

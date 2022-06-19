@@ -35,6 +35,9 @@ message CreateTaskRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   uint64 epoch = 3;
+  // The partition to read for scan tasks.
+  //
+  // For tasks without a scan node, this field is ignored.
   repeated common.RangeInclusive vnode_ranges = 4;
 }
 
@@ -81,6 +84,9 @@ message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   uint64 epoch = 3;
+  // The partition to read for scan tasks.
+  //
+  // For tasks without a scan node, this field is ignored.
   repeated common.RangeInclusive vnode_ranges = 4;
 }
 

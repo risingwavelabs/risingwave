@@ -158,6 +158,7 @@ message TaskOutputId {
 message LocalExecutePlan {
   batch_plan.PlanFragment plan = 1;
   uint64 epoch = 2;
+  repeated common.RangeInclusive vnode_ranges = 3;
 }
 
 // ExchangeSource describes where to read results from children operators

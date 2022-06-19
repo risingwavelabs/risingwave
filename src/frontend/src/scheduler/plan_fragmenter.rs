@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use risingwave_common::consistent_hashing::{vnode_mapping_to_ranges, VNodeRanges};
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeInfo;
@@ -160,10 +161,10 @@ impl Query {
     }
 }
 
+#[derive(Clone)]
 pub struct TableScanInfo {
-    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
-    /// table.
-    pub vnode_mapping: Vec<ParallelUnitId>,
+    /// Indicates data distribution and partition of the table.
+    pub vnode_ranges_mapping: HashMap<ParallelUnitId, VNodeRanges>,
 }
 
 /// Fragment part of `Query`.
@@ -387,7 +388,9 @@ impl BatchPlanFragmenter {
                         "multiple table scan inside a stage"
                     );
                     builder.table_scan_info = Some(TableScanInfo {
-                        vnode_mapping: table_desc.vnode_mapping.clone().unwrap(),
+                        vnode_ranges_mapping: vnode_mapping_to_ranges(
+                            &table_desc.vnode_mapping.clone().unwrap(),
+                        ),
                     });
                 }
             }

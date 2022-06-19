@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::consistent_hashing::{vnode_mapping_to_ranges, VNodeRanges};
+use risingwave_common::consistent_hashing::VNodeRanges;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
@@ -294,7 +294,7 @@ impl StageRunner {
         let mut futures = vec![];
 
         if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() {
-            let vnode_ranges_mapping = vnode_mapping_to_ranges(&table_scan_info.vnode_mapping);
+            let vnode_ranges_mapping = &table_scan_info.vnode_ranges_mapping;
 
             let parallel_unit_ids = vnode_ranges_mapping.keys().cloned().collect_vec();
             let workers = self
@@ -324,8 +324,7 @@ impl StageRunner {
                     task_id: id,
                 };
                 let plan_fragment = self.create_plan_fragment(id);
-                // FIXME: remove vnode_ranges, or make it Option, or put it inside ScanNode?
-                futures.push(self.schedule_task(task_id, plan_fragment, Default::default(), None));
+                futures.push(self.schedule_task(task_id, plan_fragment, vec![], None));
             }
         }
         let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);

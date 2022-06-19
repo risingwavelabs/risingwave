@@ -18,7 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::consistent_hashing::build_vnode_mapping;
-use risingwave_common::types::{ParallelUnitId, VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{ParallelUnitId, VirtualNode};
 use risingwave_pb::common::ParallelUnit;
 
 use super::TableId;

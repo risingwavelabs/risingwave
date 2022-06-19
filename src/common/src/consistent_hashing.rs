@@ -26,7 +26,6 @@ pub fn full_vnode_range() -> VNodeRanges {
     }]
 }
 
-#[expect(clippy::type_complexity)]
 pub fn build_vnode_mapping(
     parallel_units: &[u32],
 ) -> (
@@ -49,8 +48,9 @@ pub fn build_vnode_mapping(
         };
         init_bound += vnode_count;
         vnode_mapping.resize(init_bound, parallel_unit_id);
-        let vnode_range = init_bound - vnode_count..init_bound;
-        let vnodes = vnode_range.clone().map(|id| id as VirtualNode).collect();
+        let vnodes = (init_bound - vnode_count..init_bound)
+            .map(|id| id as VirtualNode)
+            .collect();
         owner_mapping.insert(parallel_unit_id, vnodes);
 
         init_bound += hash_shard_size;
