@@ -260,6 +260,8 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     use risingwave_frontend::stream_fragmenter::StreamFragmenter;
 
+    use crate::model::FragmentId;
+
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let compaction_group_manager = Arc::new(CompactionGroupManager::new(env.clone()).await?);
@@ -268,14 +270,31 @@ async fn test_fragmenter() -> Result<()> {
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = StreamFragmenter::build_graph(stream_node);
-    let graph = ActorGraphBuilder::generate_graph(
-        env.id_gen_manager_ref(),
-        fragment_manager,
-        parallel_degree,
-        &graph,
-        &mut ctx,
-    )
-    .await?;
+
+    let mut actor_graph_builder =
+        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, &mut ctx).await?;
+
+    let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
+        .list_fragment_ids()
+        .into_iter()
+        .map(|(fragment_id, is_singleton)| {
+            if is_singleton {
+                (fragment_id, 1)
+            } else {
+                (fragment_id, parallel_degree as u32)
+            }
+        })
+        .collect();
+
+    let graph = actor_graph_builder
+        .generate_graph(
+            env.id_gen_manager_ref(),
+            fragment_manager,
+            parallelisms.clone(),
+            &mut ctx,
+        )
+        .await?;
+
     let table_fragments =
         TableFragments::new(TableId::default(), graph, ctx.internal_table_id_set.clone());
     let actors = table_fragments.actors();
