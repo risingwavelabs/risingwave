@@ -74,6 +74,7 @@ pub struct SearchResult {
     select_level: Level,
     target_level: Level,
     split_ranges: Vec<KeyRange>,
+    target_file_size: u64,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -139,6 +140,7 @@ impl CompactStatus {
             vnode_mappings: vec![],
             compaction_group_id,
             existing_table_ids: vec![],
+            target_file_size: ret.target_file_size,
         };
         Some(compact_task)
     }
@@ -239,5 +241,9 @@ impl CompactStatus {
 
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
+    }
+
+    pub fn get_config(&self) -> &CompactionConfig {
+        &self.compaction_config
     }
 }

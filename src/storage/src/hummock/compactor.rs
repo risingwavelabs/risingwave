@@ -48,7 +48,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::HummockError;
+use crate::hummock::{HummockError, SSTableBuilderOptions};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
@@ -195,6 +195,7 @@ impl Compactor {
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
+            target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -519,6 +520,10 @@ impl Compactor {
         };
 
         let get_id_time = Arc::new(AtomicU64::new(0));
+        let target_file_size = std::cmp::min(
+            self.compact_task.target_file_size as usize,
+            self.context.options.sstable_size_mb as usize * (1 << 20),
+        );
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = GroupedSstableBuilder::new(
@@ -526,7 +531,9 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let builder = SSTableBuilder::new(table_id, self.context.options.as_ref().into());
+                let mut options: SSTableBuilderOptions = self.context.options.as_ref().into();
+                options.capacity = target_file_size;
+                let builder = SSTableBuilder::new(table_id, options);
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
                 Ok(builder)
             },

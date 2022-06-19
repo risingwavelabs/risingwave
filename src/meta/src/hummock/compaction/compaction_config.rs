@@ -21,6 +21,7 @@ const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
 const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 16;
+const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
 const MAX_LEVEL: u64 = 6;
 
 pub struct CompactionConfigBuilder {
@@ -38,6 +39,7 @@ impl CompactionConfigBuilder {
                 min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
                 level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
                 level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
+                target_file_size_base: DEFAULT_TARGET_FILE_SIZE_BASE,
                 compaction_mode: CompactionMode::ConsistentHash as i32,
             },
         }

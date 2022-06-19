@@ -232,7 +232,16 @@ impl LevelSelector for DynamicLevelSelector {
                 return None;
             }
             let picker = self.create_compaction_picker(select_level, target_level, task_id);
-            if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
+            if let Some(mut ret) = picker.pick_compaction(levels, level_handlers) {
+                if select_level == 0 && target_level == 0 {
+                    // TODO: reduce `target_file_size` after we implement sub-level.
+                    ret.target_file_size = self.config.min_compaction_bytes * 2;
+                } else if select_level == 0 {
+                    ret.target_file_size = self.config.target_file_size_base;
+                } else {
+                    ret.target_file_size =
+                        self.config.target_file_size_base << (target_level - ctx.base_level);
+                }
                 return Some(ret);
             }
         }
