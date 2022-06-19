@@ -14,6 +14,8 @@
 
 use std::fmt;
 
+use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
@@ -35,6 +37,14 @@ pub struct LogicalMultiJoin {
     pub base: PlanBase,
     inputs: Vec<PlanRef>,
     on: Condition,
+    output_indices: Vec<usize>,
+    inner2output: ColIndexMapping,
+    /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
+    /// not consider output_indices**
+    inner_o2i_mapping: Vec<(usize, usize)>,
+    /// the mapping ColIndexMapping<input_idx->output_idx> of each inputs, **"output_col_idx" is
+    /// internal, not consider output_indices**
+    inner_i2o_mappings: Vec<ColIndexMapping>,
 }
 
 impl fmt::Display for LogicalMultiJoin {
@@ -44,8 +54,74 @@ impl fmt::Display for LogicalMultiJoin {
 }
 
 impl LogicalMultiJoin {
-    pub(crate) fn new(base: PlanBase, inputs: Vec<PlanRef>, on: Condition) -> Self {
-        Self { base, inputs, on }
+    pub(crate) fn new(inputs: Vec<PlanRef>, on: Condition, output_indices: Vec<usize>) -> Self {
+        let input_schemas = inputs
+            .iter()
+            .map(|input| input.schema().clone())
+            .collect_vec();
+
+        let (inner_o2i_mapping, tot_col_num) = {
+            let mut inner_o2i_mapping = vec![];
+            let mut tot_col_num = 0;
+            for (input_idx, input_schema) in input_schemas.iter().enumerate() {
+                tot_col_num += input_schema.len();
+                for (col_idx, field) in input_schema.fields().iter().enumerate() {
+                    inner_o2i_mapping.push((input_idx, col_idx));
+                }
+            }
+            (inner_o2i_mapping, tot_col_num)
+        };
+        let inner2output = ColIndexMapping::with_remaining_columns(&output_indices, tot_col_num);
+
+        let schema = Schema {
+            fields: output_indices
+                .iter()
+                .map(|idx| inner_o2i_mapping[*idx])
+                .map(|(input_idx, col_idx)| input_schemas[input_idx].fields()[col_idx])
+                .collect(),
+        };
+
+        let inner_i2o_mappings = {
+            let mut i2o_maps = vec![];
+            for input_schma in &input_schemas {
+                let map = vec![None; input_schma.len()];
+                i2o_maps.push(map);
+            }
+            for (out_idx, (input_idx, in_idx)) in inner_o2i_mapping.iter().enumerate() {
+                i2o_maps[*input_idx][*in_idx] = Some(out_idx);
+            }
+
+            i2o_maps
+                .into_iter()
+                .map(|map| ColIndexMapping::with_target_size(map, tot_col_num))
+                .collect_vec()
+        };
+
+        let pk_indices = {
+            let mut pk_indices = vec![];
+            for (input_idx, input_pks) in inputs.iter().map(|input| input.pk_indices()).enumerate()
+            {
+                for input_pk in input_pks {
+                    pk_indices.push(inner_i2o_mappings[input_idx].map(*input_pk));
+                }
+            }
+            pk_indices
+                .into_iter()
+                .map(|col_idx| inner2output.try_map(col_idx))
+                .collect::<Option<Vec<_>>>()
+                .unwrap_or_default()
+        };
+        let base = PlanBase::new_logical(inputs[0].ctx(), schema, pk_indices);
+
+        Self {
+            base,
+            inputs,
+            on,
+            output_indices,
+            inner2output,
+            inner_o2i_mapping,
+            inner_i2o_mappings,
+        }
     }
 
     pub(crate) fn from_join(join: &PlanRef) -> Option<Self> {
@@ -107,7 +183,7 @@ impl LogicalMultiJoin {
 
     /// Clone with new `on` condition
     pub fn clone_with_cond(&self, cond: Condition) -> Self {
-        Self::new(self.base.clone(), self.inputs.clone(), cond)
+        Self::new(self.inputs.clone(), cond, self.output_indices.clone())
     }
 }
 
@@ -118,14 +194,12 @@ impl PlanTreeNode for LogicalMultiJoin {
         vec
     }
 
-    fn clone_with_inputs(
-        &self,
-        _inputs: &[crate::optimizer::PlanRef],
-    ) -> crate::optimizer::PlanRef {
-        panic!(
-            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
-             a temporary lifetime. It only facilitates join reordering during logical planning."
-        )
+    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> crate::optimizer::PlanRef {
+        Self::new(
+            inputs.to_vec(),
+            self.on().clone(),
+            self.output_indices.clone(),
+        );
     }
 }
 
