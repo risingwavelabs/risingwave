@@ -31,8 +31,8 @@ use super::{
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::RequiredDist;
+use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject, StreamExchange};
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Aggregation Call
@@ -701,21 +701,60 @@ impl ToBatch for LogicalAgg {
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self) -> Result<PlanRef> {
+        let input = self.input();
+        // simple-agg
         if self.group_keys().is_empty() {
-            Ok(StreamSimpleAgg::new(
-                self.clone_with_input(
-                    self.input()
-                        .to_stream_with_dist_required(&RequiredDist::single())?,
-                ),
-            )
-            .into())
+            let input_distribution = input.distribution();
+            let mut has_min_or_max_agg_calls = false;
+            for c in &self.agg_calls {
+                match c.agg_kind {
+                    AggKind::Min | AggKind::Max => {
+                        has_min_or_max_agg_calls = true;
+                        break;
+                    }
+                    _ => continue,
+                }
+            }
+
+            // simple 2-phase-agg
+            if input_distribution.satisfies(&RequiredDist::AnyShard)
+                && !(self.append_only() && has_min_or_max_agg_calls)
+            {
+                // partial agg
+                let partial_agg_plan = input.to_stream()?;
+
+                // insert exchange
+                let exchange = StreamExchange::new(partial_agg_plan, Distribution::Single).into();
+
+                // insert total agg
+                let total_agg_types = self
+                    .agg_calls()
+                    .iter()
+                    .enumerate()
+                    .map(|(partial_output_idx, agg_call)| {
+                        agg_call.partial_to_total_agg_call(partial_output_idx)
+                    })
+                    .collect();
+                let total_agg_logical =
+                    LogicalAgg::new(total_agg_types, self.group_keys().to_vec(), exchange);
+                Ok(StreamSimpleAgg::new(total_agg_logical).into())
+
+            // simple total-agg
+            } else {
+                Ok(StreamSimpleAgg::new(self.clone_with_input(
+                    input.to_stream_with_dist_required(&RequiredDist::single())?,
+                ))
+                .into())
+            }
+
+        // hash-agg
         } else {
-            Ok(StreamHashAgg::new(
-                self.clone_with_input(self.input().to_stream_with_dist_required(
-                    &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
-                )?),
+            Ok(
+                StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
+                    &RequiredDist::shard_by_key(input.schema().len(), self.group_keys()),
+                )?))
+                .into(),
             )
-            .into())
         }
     }
 
