@@ -22,6 +22,7 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
     - [Dashboard v1](#dashboard-v1)
     - [Dashboard v2](#dashboard-v2)
   - [Observability components](#observability-components)
+    - [Cluster Control](#cluster-control)
     - [Monitoring](#monitoring)
     - [Tracing](#tracing)
     - [Dashboard](#dashboard)
@@ -198,6 +199,22 @@ The development instructions for dashboard v2 are available [here](../dashboard/
 ## Observability components
 
 RiseDev supports several observability components.
+
+### Cluster Control
+
+`risectl` is the tool for providing internal access to the RisingWave cluster. See
+
+```
+cargo run --bin risectl -- --help
+```
+
+... or
+
+```
+./risingwave risectl --help
+```
+
+for more information.
 
 ### Monitoring
 

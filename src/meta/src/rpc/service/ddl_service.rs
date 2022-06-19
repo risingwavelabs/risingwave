@@ -379,6 +379,17 @@ where
             version,
         }))
     }
+
+    async fn list_materialized_view(
+        &self,
+        _request: Request<ListMaterializedViewRequest>,
+    ) -> Result<Response<ListMaterializedViewResponse>, Status> {
+        use crate::model::MetadataModel;
+        let tables = Table::list(self.env.meta_store())
+            .await
+            .map_err(tonic_err)?;
+        Ok(Response::new(ListMaterializedViewResponse { tables }))
+    }
 }
 
 impl<S> DdlServiceImpl<S>

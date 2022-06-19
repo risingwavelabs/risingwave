@@ -32,3 +32,23 @@ query TTTTT
 SELECT interval '6 second';
 ----
 00:00:06
+
+query T
+SELECT interval '1' month = interval '30' day;
+----
+t
+
+query T
+SELECT interval '1' day = interval '24' hour;
+----
+t
+
+query T
+SELECT interval '1' day = interval '86400' second;
+----
+t
+
+query T
+SELECT interval '1' day - interval '12' hour = interval '12' hour;
+----
+t
