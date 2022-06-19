@@ -16,10 +16,10 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use risingwave_common::array::DataChunk;
+use risingwave_common::consistent_hashing::VNodeRanges;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
-use risingwave_pb::common::VNodeRanges;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -108,7 +108,7 @@ impl ComputeClient {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch,
-                vnode_ranges: Some(vnode_ranges),
+                vnode_ranges,
             })
             .await?;
         Ok(())
@@ -126,7 +126,7 @@ impl ComputeClient {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch,
-                vnode_ranges: Some(vnode_ranges),
+                vnode_ranges,
             })
             .await?;
         Ok(())

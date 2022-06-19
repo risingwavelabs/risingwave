@@ -16,6 +16,7 @@ use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::ColumnOrder;
 
 use super::{ColumnDesc, OrderedColumnDesc, TableId};
+use crate::types::ParallelUnitId;
 
 /// the table descriptor of table with cell based encoding in state store and include all
 /// information for compute node to access data of the table.
@@ -39,7 +40,7 @@ pub struct TableDesc {
 
     /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
     /// table.
-    pub vnode_mapping: Option<Vec<u32>>,
+    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 }
 
 impl TableDesc {

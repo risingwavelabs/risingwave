@@ -35,7 +35,7 @@ message CreateTaskRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   uint64 epoch = 3;
-  common.VNodeRanges vnode_ranges = 4;
+  repeated common.RangeInclusive vnode_ranges = 4;
 }
 
 message CreateTaskResponse {
@@ -81,7 +81,7 @@ message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   uint64 epoch = 3;
-  common.VNodeRanges vnode_ranges = 4;
+  repeated common.RangeInclusive vnode_ranges = 4;
 }
 
 service TaskService {

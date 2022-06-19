@@ -68,12 +68,12 @@ message ParallelUnitMapping {
   repeated uint32 data = 3;
 }
 
-// Records the vnodes owned by a parallel unit.
+// A range bounded inclusively below and above (`start..=end`).
 //
-// `starts`: [s1, s2, ...], `ends`: [e1, e2, ...] means ranges [s1, e1], [s2, e2], ... (both ends included)
-message VNodeRanges {
-  repeated uint64 starts = 1;
-  repeated uint64 ends = 2;
+// Corresponds to [`std::ops::RangeInclusive`].
+message RangeInclusive {
+  uint64 start = 1;
+  uint64 end = 2;
 }
 
 // Bitmap that records whether vnodes are present.

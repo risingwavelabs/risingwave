@@ -26,6 +26,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
+use risingwave_pb::common::RangeInclusive;
 use risingwave_storage::table::cell_based_table::{BatchDedupPkIter, BatchIter, CellBasedTable};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
@@ -157,10 +158,8 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
             let vnode_ranges = source.vnode_ranges;
             vnode_ranges
-                .starts
                 .iter()
-                .zip_eq(vnode_ranges.ends.iter())
-                .map(|(start, end)| {
+                .map(|RangeInclusive { start, end }| {
                     todo!("create vnode range iterators");
                 })
                 .collect_vec();

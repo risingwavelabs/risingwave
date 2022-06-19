@@ -20,14 +20,13 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::consistent_hashing::vnode_mapping_to_ranges;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::consistent_hashing::{vnode_mapping_to_ranges, VNodeRanges};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
-use risingwave_pb::common::{HostAddress, VNodeRanges, WorkerNode};
+use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
