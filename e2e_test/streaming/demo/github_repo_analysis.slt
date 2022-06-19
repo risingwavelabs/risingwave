@@ -1,0 +1,48 @@
+statement ok
+CREATE Table github_event (created_at timestamp , id varchar, name varchar, type varchar);
+
+statement ok
+INSERT INTO github_event VALUES
+('2022-06-17 11:29:16','22394913388','mongo','WatchEvent'),
+('2022-06-17 11:28:16','22394913387','mongo','WatchEvent'),
+('2022-06-17 11:27:16','22394913386','mongo','WatchEvent'),
+('2022-06-17 11:11:16','22394913385','mongo','WatchEvent'),
+('2022-06-17 11:10:16','22394913384','mongo','CreateEvent');
+
+statement ok
+CREATE MATERIALIZED VIEW time_view1 AS
+SELECT count(distinct id) as event_count, name, window_start
+FROM tumble(github_event, created_at, interval '10' minute)
+WHERE type = 'WatchEvent'
+GROUP BY name,window_start;
+
+statement ok
+CREATE MATERIALIZED VIEW topK_star_incr_view AS
+SELECT * FROM time_view1
+WHERE window_start = (select max(window_start) from time_view1)
+ORDER BY event_count desc limit 5;
+
+statement ok
+CREATE MATERIALIZED VIEW time_view2 AS
+SELECT count(distinct id) as event_count, name, window_start
+FROM tumble(github_event, created_at, interval '10' minute)
+WHERE type = 'CreateEvent' or type = 'DeleteEvent' or type = 'IssuesEvent' or type = 'PullRequestEvent' or type = 'PushEvent' or type = 'ReleaseEvent'
+GROUP BY name,window_start;
+
+statement ok
+CREATE MATERIALIZED VIEW topK_repo_active_view AS
+SELECT * FROM time_view2
+WHERE window_start = (select max(window_start) from time_view2)
+ORDER BY event_count desc limit 5;
+
+query TTT
+SELECT * from topK_star_incr_view limit 1;
+----
+3 mongo 2022-06-17 11:20:00
+
+query TTT
+SELECT * from topK_repo_active_view limit 1;
+----
+1 mongo 2022-06-17 11:10:00
+
+
