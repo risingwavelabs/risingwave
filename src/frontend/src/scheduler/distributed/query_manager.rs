@@ -26,10 +26,8 @@ use uuid::Uuid;
 
 use super::QueryExecution;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{
-    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult,
-};
+use crate::scheduler::{DataChunkStream, HummockSnapshotManagerRef, SchedulerResult};
+use crate::session::FrontendEnv;
 
 pub struct QueryResultFetcher {
     // TODO: Remove these after implemented worker node level snapshot pinnning
@@ -44,22 +42,12 @@ pub struct QueryResultFetcher {
 /// Manages execution of distributed batch queries.
 #[derive(Clone)]
 pub struct QueryManager {
-    worker_node_manager: WorkerNodeManagerRef,
-    hummock_snapshot_manager: HummockSnapshotManagerRef,
-    compute_client_pool: ComputeClientPoolRef,
+    env: FrontendEnv,
 }
 
 impl QueryManager {
-    pub fn new(
-        worker_node_manager: WorkerNodeManagerRef,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
-        compute_client_pool: ComputeClientPoolRef,
-    ) -> Self {
-        Self {
-            worker_node_manager,
-            hummock_snapshot_manager,
-            compute_client_pool,
-        }
+    pub fn new(env: FrontendEnv) -> Self {
+        Self { env }
     }
 
     /// Schedule query to single node.
@@ -67,12 +55,12 @@ impl QueryManager {
     /// This is kept for dml only.
     pub async fn schedule_single(
         &self,
-        _context: ExecutionContextRef,
         plan: BatchPlanProst,
     ) -> SchedulerResult<impl DataChunkStream> {
-        let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
+        let worker_node_addr = self.env.worker_node_manager().next_random()?.host.unwrap();
         let compute_client = self
-            .compute_client_pool
+            .env
+            .compute_client_pool()
             .get_client_for_addr((&worker_node_addr).into())
             .await?;
 
@@ -91,53 +79,47 @@ impl QueryManager {
             output_id: 0,
         };
 
-        let epoch = self
-            .hummock_snapshot_manager
-            .get_epoch(query_id.clone())
-            .await?;
+        let hummock_snapshot_manager = self.env.hummock_snapshot_manager_ref();
+
+        let epoch = hummock_snapshot_manager.get_epoch(query_id.clone()).await?;
 
         let creat_task_resp = compute_client
             .create_task(task_id.clone(), plan, epoch)
             .await;
-        self.hummock_snapshot_manager
+        hummock_snapshot_manager
             .unpin_snapshot(epoch, &query_id)
             .await?;
         creat_task_resp?;
 
         let query_result_fetcher = QueryResultFetcher::new(
             epoch,
-            self.hummock_snapshot_manager.clone(),
+            self.env.hummock_snapshot_manager_ref(),
             task_output_id,
             worker_node_addr,
-            self.compute_client_pool.clone(),
+            self.env.compute_client_pool_ref(),
         );
 
         Ok(query_result_fetcher.run())
     }
 
-    pub async fn schedule(
-        &self,
-        _context: ExecutionContextRef,
-        query: Query,
-    ) -> SchedulerResult<impl DataChunkStream> {
+    pub async fn schedule(&self, query: Query) -> SchedulerResult<impl DataChunkStream> {
         let query_id = query.query_id().clone();
-        let epoch = self
-            .hummock_snapshot_manager
-            .get_epoch(query_id.clone())
-            .await?;
+
+        let hummock_snapshot_manager = self.env.hummock_snapshot_manager_ref();
+        let epoch = hummock_snapshot_manager.get_epoch(query_id.clone()).await?;
 
         let query_execution = QueryExecution::new(
             query,
             epoch,
-            self.worker_node_manager.clone(),
-            self.hummock_snapshot_manager.clone(),
-            self.compute_client_pool.clone(),
+            self.env.worker_node_manager_ref(),
+            hummock_snapshot_manager.clone(),
+            self.env.compute_client_pool_ref(),
         );
 
         let query_result_fetcher = match query_execution.start().await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
-                self.hummock_snapshot_manager
+                hummock_snapshot_manager
                     .unpin_snapshot(epoch, &query_id)
                     .await?;
                 return Err(e);

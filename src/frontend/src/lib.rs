@@ -37,6 +37,7 @@
 #![feature(assert_matches)]
 #![feature(map_first_last)]
 #![feature(lint_reasons)]
+#![feature(once_cell)]
 
 #[macro_use]
 pub mod catalog;

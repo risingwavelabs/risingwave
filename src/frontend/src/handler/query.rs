@@ -26,9 +26,7 @@ use crate::binder::{Binder, BoundStatement};
 use crate::config::QueryMode;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
-use crate::scheduler::{
-    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
-};
+use crate::scheduler::{BatchPlanFragmenter, LocalQueryExecution};
 use crate::session::OptimizerContext;
 
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
@@ -107,12 +105,8 @@ async fn distribute_execute(
         (query, pg_descs)
     };
 
-    let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
-    let query_manager = execution_context.session().env().query_manager().clone();
-    Ok((
-        Box::pin(query_manager.schedule(execution_context, query).await?),
-        pg_descs,
-    ))
+    let query_manager = session.env().query_manager().await;
+    Ok((Box::pin(query_manager.schedule(query).await?), pg_descs))
 }
 
 fn local_execute(
@@ -145,9 +139,9 @@ fn local_execute(
         (query, pg_descs)
     };
 
-    let front_env = session.env();
+    let front_env = session.env().clone();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(query, front_env.clone(), "");
+    let execution = LocalQueryExecution::new(query, front_env, "");
     Ok((Box::pin(execution.run()), pg_descs))
 }

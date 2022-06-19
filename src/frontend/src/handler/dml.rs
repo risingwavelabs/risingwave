@@ -21,7 +21,6 @@ use risingwave_sqlparser::ast::Statement;
 use crate::binder::Binder;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
-use crate::scheduler::{ExecutionContext, ExecutionContextRef};
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
@@ -45,15 +44,11 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
         (plan.to_batch_prost(), pg_descs)
     };
 
-    let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
-    let query_manager = execution_context.session().env().query_manager().clone();
+    let query_manager = session.env().query_manager().await;
 
     let mut rows = vec![];
     #[for_await]
-    for chunk in query_manager
-        .schedule_single(execution_context, plan)
-        .await?
-    {
+    for chunk in query_manager.schedule_single(plan).await? {
         rows.extend(to_pg_rows(chunk?));
     }
 

@@ -34,11 +34,11 @@ use risingwave_common::session_config::{DELTA_JOIN, IMPLICIT_FLUSH, QUERY_MODE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::watch;
+use tokio::sync::{watch, OnceCell};
 use tokio::task::JoinHandle;
 
 use crate::binder::Binder;
@@ -145,9 +145,10 @@ pub struct FrontendEnv {
     user_info_writer: Arc<dyn UserInfoWriter>,
     user_info_reader: UserInfoReader,
     worker_node_manager: WorkerNodeManagerRef,
-    query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    query_manager: Arc<OnceCell<QueryManager>>,
     server_addr: HostAddr,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 impl FrontendEnv {
@@ -171,11 +172,6 @@ impl FrontendEnv {
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
-        let query_manager = QueryManager::new(
-            worker_node_manager.clone(),
-            hummock_snapshot_manager.clone(),
-            compute_client_pool,
-        );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         Self {
             meta_client,
@@ -184,9 +180,10 @@ impl FrontendEnv {
             user_info_writer,
             user_info_reader,
             worker_node_manager,
-            query_manager,
             hummock_snapshot_manager,
+            query_manager: Arc::new(OnceCell::new()),
             server_addr,
+            compute_client_pool,
         }
     }
 
@@ -227,11 +224,6 @@ impl FrontendEnv {
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
         let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
-        let query_manager = QueryManager::new(
-            worker_node_manager.clone(),
-            hummock_snapshot_manager.clone(),
-            compute_client_pool,
-        );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let (user_info_updated_tx, user_info_updated_rx) = watch::channel(0);
@@ -264,9 +256,10 @@ impl FrontendEnv {
                 user_info_writer,
                 worker_node_manager,
                 meta_client: frontend_meta_client,
-                query_manager,
                 hummock_snapshot_manager,
+                query_manager: Arc::new(OnceCell::new()),
                 server_addr: frontend_address,
+                compute_client_pool,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -310,16 +303,30 @@ impl FrontendEnv {
         self.meta_client.clone()
     }
 
-    pub fn query_manager(&self) -> &QueryManager {
-        &self.query_manager
+    pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManager {
+        &*self.hummock_snapshot_manager
     }
 
-    pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManagerRef {
-        &self.hummock_snapshot_manager
+    pub fn hummock_snapshot_manager_ref(&self) -> HummockSnapshotManagerRef {
+        self.hummock_snapshot_manager.clone()
     }
 
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
+    }
+
+    pub async fn query_manager(&self) -> &QueryManager {
+        self.query_manager
+            .get_or_init(|| async move { QueryManager::new(self.clone()) })
+            .await as _
+    }
+
+    pub fn compute_client_pool(&self) -> &ComputeClientPool {
+        &*self.compute_client_pool
+    }
+
+    pub fn compute_client_pool_ref(&self) -> ComputeClientPoolRef {
+        self.compute_client_pool.clone()
     }
 }
 
