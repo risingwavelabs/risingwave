@@ -50,7 +50,7 @@ pub(super) async fn handle(
     stmt: Statement,
     sql: &str,
 ) -> Result<PgResponse> {
-    let context = OptimizerContext::new(session.clone(), Arc::new(String::from(sql)));
+    let context = OptimizerContext::new(session.clone(), Arc::from(sql));
     match stmt {
         Statement::Explain {
             statement, verbose, ..

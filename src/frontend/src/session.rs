@@ -63,7 +63,7 @@ pub struct OptimizerContext {
     // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
-    pub sql: Arc<String>,
+    pub sql: Arc<str>,
 }
 
 #[derive(Clone, Debug)]
@@ -95,7 +95,7 @@ impl OptimizerContextRef {
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<String>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
@@ -109,7 +109,7 @@ impl OptimizerContext {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
-            sql: Arc::new("".to_string()),
+            sql: Arc::from(""),
         }
         .into()
     }
@@ -589,7 +589,7 @@ impl Session for SessionImpl {
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session, Arc::new(String::from(sql)));
+    let context = OptimizerContext::new(session, Arc::from(sql));
     let session = context.session_ctx.clone();
 
     let bound = {

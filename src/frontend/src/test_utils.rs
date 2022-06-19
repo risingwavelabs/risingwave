@@ -105,7 +105,7 @@ impl LocalFrontend {
                 );
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Planner::new(OptimizerContext::new(session, Arc::new(String::from(raw_sql))).into())
+            Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
                 .plan(bound)
                 .unwrap()
                 .gen_batch_query_plan()
