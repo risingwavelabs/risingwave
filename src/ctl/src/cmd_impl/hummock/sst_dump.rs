@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use bytes::Buf;
+use risingwave_object_store::object::BlockLocation;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::CompressionAlgorithm;
 use risingwave_storage::monitor::StoreLocalStatistic;
 
 use crate::common::HummockServiceOpts;
@@ -33,7 +36,8 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             let sstable_cache = sstable_store
                 .sstable(id, &mut StoreLocalStatistic::default())
                 .await?;
-            let sstable_meta = &sstable_cache.value().meta;
+            let sstable = sstable_cache.value().as_ref();
+            let sstable_meta = &sstable.meta;
 
             println!("SST id: {}", id);
             println!("-------------------------------------");
@@ -51,9 +55,23 @@ pub async fn sst_dump() -> anyhow::Result<()> {
 
             println!("Block Metadata:");
             for (i, block_meta) in sstable_meta.block_metas.iter().enumerate() {
+                // Retrieve encoded block data in bytes
+                let data_path = sstable_store.get_sst_data_path(sstable.id);
+                let store = sstable_store.store();
+                let block_loc = BlockLocation {
+                    offset: block_meta.offset as usize,
+                    size: block_meta.len as usize,
+                };
+                let block_data = store.read(&data_path, Some(block_loc)).await?;
+
+                // Retrieve checksum and compression algorithm used from the encoded block data
+                let len = block_data.len();
+                let checksum = (&block_data[len - 8..]).get_u64_le();
+                let compression = CompressionAlgorithm::decode(&mut &block_data[len - 9..len - 8])?;
+
                 println!(
-                    "\tBlock {}, Size: {}, Offset: {}",
-                    i, block_meta.len, block_meta.offset
+                    "\tBlock {}, Offset: {}, Size: {}, Checksum: {}, Compression Algorithm: {:?}",
+                    i, block_meta.offset, block_meta.len, checksum, compression
                 );
             }
 
@@ -61,6 +79,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
             println!("Key Count: {}", sstable_meta.key_count);
             println!("Version: {}", sstable_meta.version);
+            println!();
         }
     }
 
