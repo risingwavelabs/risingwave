@@ -117,7 +117,7 @@
 - sql: |
     values(round(42));
   batch_plan: |
-    BatchValues { rows: [[Round(42:Int32::Decimal)]] }
+    BatchValues { rows: [[Round(42:Int32::Float64)]] }
 - sql: |
     values(round(42, 2));
   batch_plan: |
