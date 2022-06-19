@@ -54,6 +54,7 @@ enum HummockCommands {
         #[clap(short, long = "table-id")]
         table_id: Option<u32>,
     },
+    SstDump,
     TriggerManualCompaction {
         #[clap(short, long = "compaction-group-id", default_value_t = 2)]
         compaction_group_id: u64,
@@ -78,6 +79,7 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
             tokio::spawn(cmd_impl::hummock::list_kv(epoch, table_id)).await??;
         }
+        Commands::Hummock(HummockCommands::SstDump) => cmd_impl::hummock::sst_dump().await.unwrap(),
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
         }) => {
