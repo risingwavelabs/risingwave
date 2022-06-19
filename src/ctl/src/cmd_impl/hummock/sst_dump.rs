@@ -15,18 +15,16 @@
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::monitor::StoreLocalStatistic;
 
-use crate::common::{HummockServiceOpts, MetaServiceOpts};
+use crate::common::HummockServiceOpts;
 
 pub async fn sst_dump() -> anyhow::Result<()> {
-    // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
-    let version = meta_client.pin_version(u64::MAX).await?;
-
     // Retrieves the SSTable store so we can access the SSTableMeta
     let hummock_opts = HummockServiceOpts::from_env()?;
-    let hummock = hummock_opts.create_hummock_store().await?;
+    let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
     let sstable_store = &*hummock.inner().sstable_store();
+
+    // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
+    let version = meta_client.pin_version(u64::MAX).await?;
 
     for level in version.levels {
         for sstable_info in level.table_infos {
@@ -49,23 +47,6 @@ pub async fn sst_dump() -> anyhow::Result<()> {
                 );
             } else {
                 println!("Key Range: None");
-            }
-
-            println!("VNodes:");
-            for vnode_bitmap in sstable_info.vnode_bitmaps {
-                let mut vnodes = vec![];
-                for (i, bitmap_part) in vnode_bitmap.bitmap.iter().enumerate() {
-                    for j in 0..8 {
-                        if (bitmap_part >> j) & 1 == 1 {
-                            vnodes.push(8 * i + j);
-                        }
-                    }
-                }
-
-                println!(
-                    "\tTable id: {}, VNodes: {:?}",
-                    vnode_bitmap.table_id, vnodes
-                );
             }
 
             println!("Block Metadata:");
