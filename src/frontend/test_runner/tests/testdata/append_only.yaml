@@ -32,6 +32,7 @@
     select max(v1) as max_v1 from t1;
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), max_v1], pk_columns: [] }
-      StreamAppendOnlySimpleAgg { aggs: [count, max($0)] }
+      StreamSimpleAgg { aggs: [sum($0), max($1)] }
         StreamExchange { dist: Single }
-          StreamTableScan { table: t1, columns: [v1, _row_id], pk_indices: [1] }
+          StreamAppendOnlySimpleAgg { aggs: [count, max($0)] }
+            StreamTableScan { table: t1, columns: [v1, _row_id], pk_indices: [1] }

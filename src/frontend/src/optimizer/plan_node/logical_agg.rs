@@ -704,7 +704,6 @@ impl ToStream for LogicalAgg {
         let input = self.input();
         // simple-agg
         if self.group_keys().is_empty() {
-            let input_distribution = input.distribution();
             let mut has_min_or_max_agg_calls = false;
             for c in &self.agg_calls {
                 match c.agg_kind {
@@ -715,13 +714,21 @@ impl ToStream for LogicalAgg {
                     _ => continue,
                 }
             }
+            let is_append_only = input.append_only();
+
+            let input_stream = input.to_stream()?;
+            let input_distribution = input_stream.distribution();
 
             // simple 2-phase-agg
             if input_distribution.satisfies(&RequiredDist::AnyShard)
-                && !(self.append_only() && has_min_or_max_agg_calls)
+                // TODO: non-append-only min/max is not supported yet,
+                // since min/max is a table rather than single value for local agg.
+                // see: https://github.com/singularity-data/risingwave/issues/2997#issuecomment-1156139576
+                && (is_append_only || !has_min_or_max_agg_calls)
             {
                 // partial agg
-                let partial_agg_plan = input.to_stream()?;
+                let partial_agg_plan =
+                    StreamSimpleAgg::new(self.clone_with_input(input_stream)).into();
 
                 // insert exchange
                 let exchange = StreamExchange::new(partial_agg_plan, Distribution::Single).into();
@@ -739,7 +746,7 @@ impl ToStream for LogicalAgg {
                     LogicalAgg::new(total_agg_types, self.group_keys().to_vec(), exchange);
                 Ok(StreamSimpleAgg::new(total_agg_logical).into())
 
-            // simple total-agg
+            // simple 1-phase-agg
             } else {
                 Ok(StreamSimpleAgg::new(self.clone_with_input(
                     input.to_stream_with_dist_required(&RequiredDist::single())?,
