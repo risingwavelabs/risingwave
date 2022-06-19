@@ -84,7 +84,7 @@ impl WorkerNodeManager {
     pub fn get_workers_by_parallel_unit_ids(
         &self,
         parallel_unit_ids: &[ParallelUnitId],
-    ) -> SchedulerResult<Vec<(ParallelUnitId, WorkerNode)>> {
+    ) -> SchedulerResult<Vec<WorkerNode>> {
         let current_nodes = self.worker_nodes.read().unwrap();
         let mut pu_to_worker: HashMap<ParallelUnitId, WorkerNode> = HashMap::new();
         for node in &*current_nodes {
@@ -98,7 +98,7 @@ impl WorkerNodeManager {
         let mut workers = Vec::with_capacity(parallel_unit_ids.len());
         for parallel_unit_id in parallel_unit_ids {
             match pu_to_worker.get(parallel_unit_id) {
-                Some(worker) => workers.push((*parallel_unit_id, worker.clone())),
+                Some(worker) => workers.push(worker.clone()),
                 None => bail!(
                     "No worker node found for parallel unit id: {}",
                     parallel_unit_id

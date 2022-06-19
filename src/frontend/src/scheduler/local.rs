@@ -16,7 +16,6 @@
 use std::collections::HashMap;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
@@ -195,25 +194,19 @@ impl LocalQueryExecution {
                     vnode_ranges: vec![],
                 };
 
-                let mut workers = self.front_env.worker_node_manager().list_worker_nodes();
+                let workers;
 
                 let mut vnode_ranges_mapping = vec![];
                 if let Some(table_scan_info) = &table_scan_info {
-                    vnode_ranges_mapping =
-                        table_scan_info.vnode_ranges_mapping.values().collect_vec();
-                    // has len(vnode_ranges_mapping) parallelism
-                    workers = if workers.len() < vnode_ranges_mapping.len() {
-                        workers
-                            .into_iter()
-                            .cycle()
-                            .take(vnode_ranges_mapping.len())
-                            .collect()
-                    } else {
-                        workers
-                            .into_iter()
-                            .take(vnode_ranges_mapping.len())
-                            .collect()
-                    };
+                    let parallel_unit_ids: Vec<_>;
+                    (parallel_unit_ids, vnode_ranges_mapping) =
+                        table_scan_info.vnode_ranges_mapping.iter().unzip();
+                    workers = self
+                        .front_env
+                        .worker_node_manager()
+                        .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                } else {
+                    workers = self.front_env.worker_node_manager().list_worker_nodes();
                 }
 
                 *sources = workers

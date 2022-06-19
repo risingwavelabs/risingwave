@@ -301,7 +301,11 @@ impl StageRunner {
                 .worker_node_manager
                 .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
-            for (i, (parallel_unit_id, worker)) in workers.into_iter().enumerate() {
+            for (i, (parallel_unit_id, worker)) in parallel_unit_ids
+                .into_iter()
+                .zip_eq(workers.into_iter())
+                .enumerate()
+            {
                 let task_id = TaskIdProst {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
