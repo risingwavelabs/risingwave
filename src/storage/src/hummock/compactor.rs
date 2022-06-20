@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
+use dyn_clone::DynClone;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
@@ -94,13 +95,17 @@ pub struct CompactorContext {
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
 }
 
-trait CompactionFilter {
+trait CompactionFilter: Send + DynClone {
     fn filter(&self, _: &[u8]) -> bool {
         true
     }
 }
 
+dyn_clone::clone_trait_object!(CompactionFilter);
+
+#[derive(Clone)]
 pub struct DummyCompactionFilter;
+
 impl CompactionFilter for DummyCompactionFilter {}
 
 #[derive(Clone)]
@@ -123,6 +128,55 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
             None => true,
             Some(table_id) => self.existing_table_ids.contains(&table_id),
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct TTLCompactionFilter {
+    table_id_to_ttl: BTreeMap<u32, u64>,
+    expire: u64,
+}
+
+impl CompactionFilter for TTLCompactionFilter {
+    fn filter(&self, key: &[u8]) -> bool {
+        let table_id = get_table_id(key);
+        match table_id {
+            Some(table_id) => {
+                let ttl = self.table_id_to_ttl[&table_id];
+                let epoch = get_epoch(key);
+
+                epoch + ttl > self.expire
+            }
+
+            None => true,
+        }
+    }
+}
+
+impl TTLCompactionFilter {
+    #![expect(dead_code)]
+    fn new(table_id_to_ttl: BTreeMap<u32, u64>, expire: u64) -> Self {
+        Self {
+            table_id_to_ttl,
+            expire,
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+struct MultiCompactionFilter {
+    filter_vec: Vec<Box<dyn CompactionFilter>>,
+}
+
+impl CompactionFilter for MultiCompactionFilter {
+    fn filter(&self, key: &[u8]) -> bool {
+        !self.filter_vec.iter().any(|filter| !filter.filter(key))
+    }
+}
+
+impl MultiCompactionFilter {
+    fn register(&mut self, filter: Box<dyn CompactionFilter>) {
+        self.filter_vec.push(filter);
     }
 }
 
@@ -441,14 +495,17 @@ impl Compactor {
             );
         }
 
-        let compaction_filter =
-            StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
+        let mut multi_filter = MultiCompactionFilter::default();
+        let state_clean_up_filter = Box::new(StateCleanUpCompactionFilter::new(
+            HashSet::from_iter(compact_task.existing_table_ids),
+        ));
+        multi_filter.register(state_clean_up_filter);
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let vnode2unit = vnode2unit.clone();
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
-            let filter = compaction_filter.clone();
+            let filter = multi_filter.clone();
             let split_task = async move {
                 let merge_iter = compactor.build_sst_iter().await?;
                 compactor
