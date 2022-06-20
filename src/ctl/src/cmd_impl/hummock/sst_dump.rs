@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::monitor::StoreLocalStatistic;
 
@@ -26,7 +28,11 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
     let version = meta_client.pin_version(u64::MAX).await?;
 
-    for level in version.levels {
+    // TODO #2065: iterate all compaction groups
+    for level in version
+        .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+        .clone()
+    {
         for sstable_info in level.table_infos {
             let id = sstable_info.id;
 
