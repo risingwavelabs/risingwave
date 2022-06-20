@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicF64, AtomicU64, GenericCounterVec, GenericGaugeVec};
+use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
-    register_gauge_vec_with_registry, register_int_counter_vec_with_registry, Registry,
+    exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
+    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, HistogramVec, Registry,
 };
 
 pub struct StreamingMetrics {
@@ -22,8 +24,22 @@ pub struct StreamingMetrics {
     pub executor_row_count: GenericCounterVec<AtomicU64>,
     pub actor_processing_time: GenericGaugeVec<AtomicF64>,
     pub actor_barrier_time: GenericGaugeVec<AtomicF64>,
+    pub actor_execution_time: GenericGaugeVec<AtomicF64>,
+    pub actor_scheduled_duration: GenericGaugeVec<AtomicF64>,
+    pub actor_scheduled_cnt: GenericGaugeVec<AtomicI64>,
+    pub actor_fast_poll_duration: GenericGaugeVec<AtomicF64>,
+    pub actor_fast_poll_cnt: GenericGaugeVec<AtomicI64>,
+    pub actor_slow_poll_duration: GenericGaugeVec<AtomicF64>,
+    pub actor_slow_poll_cnt: GenericGaugeVec<AtomicI64>,
+    pub actor_poll_duration: GenericGaugeVec<AtomicF64>,
+    pub actor_poll_cnt: GenericGaugeVec<AtomicI64>,
+    pub actor_idle_duration: GenericGaugeVec<AtomicF64>,
+    pub actor_idle_cnt: GenericGaugeVec<AtomicI64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
+    pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
+    pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub join_barrier_align_duration: HistogramVec,
 }
 
 impl StreamingMetrics {
@@ -60,6 +76,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let actor_execution_time = register_gauge_vec_with_registry!(
+            "stream_actor_actor_execution_time",
+            "Total execution time (s) of an actor",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
         let exchange_recv_size = register_int_counter_vec_with_registry!(
             "stream_exchange_recv_size",
             "Total size of messages that have been received from upstream Actor",
@@ -68,13 +92,132 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let actor_fast_poll_duration = register_gauge_vec_with_registry!(
+            "stream_actor_fast_poll_duration",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_fast_poll_cnt = register_int_gauge_vec_with_registry!(
+            "stream_actor_fast_poll_cnt",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_slow_poll_duration = register_gauge_vec_with_registry!(
+            "stream_actor_slow_poll_duration",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_slow_poll_cnt = register_int_gauge_vec_with_registry!(
+            "stream_actor_slow_poll_cnt",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_poll_duration = register_gauge_vec_with_registry!(
+            "stream_actor_poll_duration",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_poll_cnt = register_int_gauge_vec_with_registry!(
+            "stream_actor_poll_cnt",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_scheduled_duration = register_gauge_vec_with_registry!(
+            "stream_actor_scheduled_duration",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_scheduled_cnt = register_int_gauge_vec_with_registry!(
+            "stream_actor_scheduled_cnt",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_idle_duration = register_gauge_vec_with_registry!(
+            "stream_actor_idle_duration",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_idle_cnt = register_int_gauge_vec_with_registry!(
+            "stream_actor_idle_cnt",
+            "tokio's metrics",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let join_lookup_miss_count = register_int_counter_vec_with_registry!(
+            "stream_join_lookup_miss_count",
+            "Join executor lookup miss duration",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_total_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_join_total_lookup_count",
+            "Join executor lookup total operation",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "stream_join_barrier_align_duration",
+            "Duration of join align barrier",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let join_barrier_align_duration =
+            register_histogram_vec_with_registry!(opts, &["actor_id", "wait_side"], registry)
+                .unwrap();
+
         Self {
             registry,
             executor_row_count,
             actor_processing_time,
             actor_barrier_time,
+            actor_execution_time,
+            actor_scheduled_duration,
+            actor_scheduled_cnt,
+            actor_fast_poll_duration,
+            actor_fast_poll_cnt,
+            actor_slow_poll_duration,
+            actor_slow_poll_cnt,
+            actor_poll_duration,
+            actor_poll_cnt,
+            actor_idle_duration,
+            actor_idle_cnt,
             source_output_row_count,
             exchange_recv_size,
+            join_lookup_miss_count,
+            join_total_lookup_count,
+            join_barrier_align_duration,
         }
     }
 

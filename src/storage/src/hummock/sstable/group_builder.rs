@@ -176,7 +176,7 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
 
     use bytes::Buf;
-    use risingwave_common::consistent_hash::VirtualNode;
+    use risingwave_common::types::VirtualNode;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;

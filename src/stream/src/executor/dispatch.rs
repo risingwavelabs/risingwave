@@ -23,8 +23,8 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::error::{internal_error, Result};
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
@@ -779,7 +779,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;

@@ -19,6 +19,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -35,6 +36,8 @@
 #![feature(drain_filter)]
 #![feature(lint_reasons)]
 #![cfg_attr(coverage, feature(no_coverage))]
+
+extern crate core;
 
 mod barrier;
 pub mod cluster;
@@ -53,7 +56,7 @@ use clap::{ArgEnum, Parser};
 use risingwave_common::config::ComputeNodeConfig;
 
 use crate::manager::MetaOpts;
-use crate::rpc::server::{rpc_serve, MetaStoreBackend};
+use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Copy, Clone, Debug, ArgEnum)]
 enum Backend {
@@ -65,7 +68,10 @@ enum Backend {
 pub struct MetaNodeOpts {
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5690")]
-    host: String,
+    listen_addr: String,
+
+    #[clap(long)]
+    host: Option<String>,
 
     #[clap(long)]
     dashboard_host: Option<String>,
@@ -94,6 +100,9 @@ pub struct MetaNodeOpts {
     /// e2e tests.
     #[clap(long)]
     disable_recovery: bool,
+
+    #[clap(long, default_value = "10")]
+    meta_leader_lease_secs: u64,
 }
 
 fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
@@ -104,12 +113,14 @@ use std::future::Future;
 use std::pin::Pin;
 
 /// Start meta node
+
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
         let compute_config = load_config(&opts);
-        let addr = opts.host.parse().unwrap();
+        let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
+        let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
         let backend = match opts.backend {
@@ -126,14 +137,19 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let checkpoint_interval =
             Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
 
-        tracing::info!("Meta server listening at {}", addr);
-        let (join_handle, _shutdown_send) = rpc_serve(
-            addr,
+        tracing::info!("Meta server listening at {}", listen_addr);
+        let add_info = AddressInfo {
+            addr: meta_addr,
+            listen_addr,
             prometheus_addr,
             dashboard_addr,
+            ui_path: opts.dashboard_ui_path,
+        };
+        let (join_handle, _shutdown_send) = rpc_serve(
+            add_info,
             backend,
             max_heartbeat_interval,
-            opts.dashboard_ui_path,
+            opts.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
                 checkpoint_interval,

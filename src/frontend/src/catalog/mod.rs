@@ -25,6 +25,8 @@ pub(crate) mod schema_catalog;
 pub(crate) mod source_catalog;
 pub(crate) mod table_catalog;
 
+pub use table_catalog::TableCatalog;
+
 pub(crate) type SourceId = u32;
 
 pub(crate) type DatabaseId = u32;

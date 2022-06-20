@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
@@ -34,17 +35,21 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
+use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
+use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::test_utils::MockUserInfoWriter;
@@ -57,6 +62,8 @@ pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
+    /// For debugging purposes, store the SQL string in Context
+    pub sql: Arc<str>,
 }
 
 #[derive(Clone, Debug)]
@@ -88,10 +95,11 @@ impl OptimizerContextRef {
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
+            sql,
         }
     }
 
@@ -101,6 +109,7 @@ impl OptimizerContext {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
+            sql: Arc::from(""),
         }
         .into()
     }
@@ -544,7 +553,29 @@ impl Session for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt).await.map_err(|e| {
+        let rsp = handle(self, stmt, sql).await.map_err(|e| {
+            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        Ok(rsp)
+    }
+
+    async fn infer_return_type(
+        self: Arc<Self>,
+        sql: &str,
+    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
+        // Parse sql.
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
+            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        // With pgwire, there would be at most 1 statement in the vec.
+        assert!(stmts.len() <= 1);
+        if stmts.is_empty() {
+            return Ok(vec![]);
+        }
+        let stmt = stmts.swap_remove(0);
+        let rsp = infer(self, stmt, sql).map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
@@ -554,6 +585,31 @@ impl Session for SessionImpl {
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
     }
+}
+
+/// Returns row description of the statement
+fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
+    let context = OptimizerContext::new(session, Arc::from(sql));
+    let session = context.session_ctx.clone();
+
+    let bound = {
+        let mut binder = Binder::new(
+            session.env().catalog_reader().read_guard(),
+            session.database().to_string(),
+        );
+        binder.bind(stmt)?
+    };
+
+    let root = Planner::new(context.into()).plan(bound)?;
+
+    let pg_descs = root
+        .schema()
+        .fields()
+        .iter()
+        .map(to_pg_field)
+        .collect::<Vec<PgFieldDescriptor>>();
+
+    Ok(pg_descs)
 }
 
 #[cfg(test)]

@@ -51,6 +51,7 @@ pub(crate) fn make_prost_source(
         database_id,
         name,
         info: Some(source_info),
+        owner: session.user_name().to_string(),
     })
 }
 
@@ -113,7 +114,11 @@ pub async fn handle_create_source(
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {
         let (graph, table) = {
-            let (plan, table) = gen_materialized_source_plan(context.into(), source.clone())?;
+            let (plan, table) = gen_materialized_source_plan(
+                context.into(),
+                source.clone(),
+                session.user_name().to_string(),
+            )?;
             let plan = plan.to_stream_prost();
             let graph = StreamFragmenter::build_graph(plan);
 

@@ -21,7 +21,9 @@ use super::field_generator::FieldGeneratorImpl;
 use super::generator::DatagenEventGenerator;
 use crate::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::datagen::{DatagenProperties, DatagenSplit};
-use crate::{Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitReader};
+use crate::{
+    Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitMetaData, SplitReader,
+};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -52,7 +54,9 @@ impl SplitReader for DatagenSplitReader {
                 split_id = split.id();
                 if let SplitImpl::Datagen(n) = split {
                     if let Some(s) = n.start_offset {
-                        events_so_far = s;
+                        // start_offset in `SplitImpl` indicates the latest successfully generated
+                        // index, so here we use start_offset+1
+                        events_so_far = s + 1;
                     };
                     assigned_split = n;
                     break;
@@ -253,6 +257,45 @@ mod tests {
                 .as_ref()
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_random_deterministic() -> Result<()> {
+        let mock_datum = vec![
+            Column {
+                name: "_".to_string(),
+                data_type: DataType::Int64,
+            },
+            Column {
+                name: "random_int".to_string(),
+                data_type: DataType::Int32,
+            },
+        ];
+        let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
+            split_index: 0,
+            split_num: 1,
+            start_offset: None,
+        })]);
+        let properties = DatagenProperties {
+            split_num: None,
+            rows_per_second: "10".to_string(),
+            fields: HashMap::new(),
+        };
+        let mut reader =
+            DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone())).await?;
+        let _ = reader.next().await;
+        let v1 = reader.next().await?.unwrap();
+
+        let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
+            split_index: 0,
+            split_num: 1,
+            start_offset: Some(9),
+        })]);
+        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum)).await?;
+        let v2 = reader.next().await?.unwrap();
+
+        assert_eq!(v1, v2);
         Ok(())
     }
 }

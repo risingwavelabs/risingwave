@@ -14,11 +14,11 @@
 
 use std::ops::RangeBounds;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use futures::Future;
-use risingwave_common::consistent_hash::VNodeBitmap;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -60,7 +60,13 @@ where
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
-        let monitored = MonitoredStateStoreIter { inner: iter };
+        let monitored = MonitoredStateStoreIter {
+            inner: iter,
+            total_items: 0,
+            total_size: 0,
+            start_time: Instant::now(),
+            stats: self.stats.clone(),
+        };
         Ok(monitored)
     }
 
@@ -77,17 +83,12 @@ where
 
     define_state_store_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        vnode: Option<&'a VNodeBitmap>,
-    ) -> Self::GetFuture<'_> {
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
-                .get(key, epoch, vnode)
+                .get(key, epoch)
                 .await
                 .inspect_err(|e| error!("Failed in get: {:?}", e))?;
             timer.observe_duration();
@@ -106,7 +107,6 @@ where
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Option<VNodeBitmap>,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -116,7 +116,7 @@ where
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(key_range, limit, epoch, vnodes)
+                .scan(key_range, limit, epoch)
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();
@@ -134,7 +134,6 @@ where
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-        vnodes: Option<VNodeBitmap>,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -144,7 +143,7 @@ where
             let timer = self.stats.range_backward_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(key_range, limit, epoch, vnodes)
+                .scan(key_range, limit, epoch)
                 .await
                 .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
             timer.observe_duration();
@@ -183,34 +182,21 @@ where
         }
     }
 
-    fn iter<R, B>(
-        &self,
-        key_range: R,
-        epoch: u64,
-        vnodes: Option<VNodeBitmap>,
-    ) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move {
-            self.monitored_iter(self.inner.iter(key_range, epoch, vnodes))
-                .await
-        }
+        async move { self.monitored_iter(self.inner.iter(key_range, epoch)).await }
     }
 
-    fn backward_iter<R, B>(
-        &self,
-        key_range: R,
-        epoch: u64,
-        vnodes: Option<VNodeBitmap>,
-    ) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.monitored_iter(self.inner.backward_iter(key_range, epoch, vnodes))
+            self.monitored_iter(self.inner.backward_iter(key_range, epoch))
                 .await
         }
     }
@@ -253,7 +239,7 @@ where
         }
     }
 
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.inner.get_uncommitted_ssts(epoch)
     }
 }
@@ -261,6 +247,10 @@ where
 /// A state store iterator wrapper for monitoring metrics.
 pub struct MonitoredStateStoreIter<I> {
     inner: I,
+    total_items: usize,
+    total_size: usize,
+    start_time: Instant,
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
@@ -280,7 +270,23 @@ where
                 .await
                 .inspect_err(|e| error!("Failed in next: {:?}", e))?;
 
+            self.total_items += 1;
+            self.total_size += pair
+                .as_ref()
+                .map(|(k, v)| k.len() + v.len())
+                .unwrap_or_default();
+
             Ok(pair)
         }
+    }
+}
+
+impl<I> Drop for MonitoredStateStoreIter<I> {
+    fn drop(&mut self) {
+        self.stats
+            .iter_duration
+            .observe(self.start_time.elapsed().as_secs_f64());
+        self.stats.iter_item.observe(self.total_items as f64);
+        self.stats.iter_size.observe(self.total_size as f64);
     }
 }

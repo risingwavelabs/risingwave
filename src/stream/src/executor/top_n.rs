@@ -15,11 +15,10 @@
 use async_trait::async_trait;
 use madsim::collections::HashSet;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::StreamExecutorResult;
@@ -156,14 +155,6 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             .iter()
             .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
-        let table_column_descs = row_data_types
-            .iter()
-            .enumerate()
-            .map(|(id, data_type)| {
-                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
-            })
-            .collect::<Vec<_>>();
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
         let lower_sub_keyspace = keyspace.append_u8(b'l');
         let middle_sub_keyspace = keyspace.append_u8(b'm');
         let higher_sub_keyspace = keyspace.append_u8(b'h');
@@ -173,7 +164,7 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             lower_sub_keyspace,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
-            cell_based_row_deserializer.clone(),
+            internal_key_indices.clone(),
         );
         let managed_middle_state = ManagedTopNBottomNState::new(
             cache_size,
@@ -181,7 +172,7 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             middle_sub_keyspace,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
-            cell_based_row_deserializer.clone(),
+            internal_key_indices.clone(),
         );
         let managed_highest_state = ManagedTopNState::<S, TOP_N_MIN>::new(
             cache_size,
@@ -189,7 +180,7 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             higher_sub_keyspace,
             row_data_types,
             ordered_row_deserializer,
-            cell_based_row_deserializer,
+            internal_key_indices.clone(),
         );
         Ok(Self {
             info: ExecutorInfo {
@@ -347,7 +338,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     {
                         // The current element in in the range of `[offset+limit, +inf)`
                         self.managed_highest_state
-                            .delete(&ordered_pk_row, epoch)
+                            .delete(&ordered_pk_row, row.clone(), epoch)
                             .await?;
                     } else if self.managed_lowest_state.total_count() == self.offset
                         && (self.offset == 0
@@ -355,7 +346,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     {
                         // The current element in in the range of `[offset, offset+limit)`
                         self.managed_middle_state
-                            .delete(&ordered_pk_row, epoch)
+                            .delete(&ordered_pk_row, row.clone(), epoch)
                             .await?;
                         new_ops.push(Op::Delete);
                         new_rows.push(row.clone());
@@ -378,7 +369,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                     } else {
                         // The current element in in the range of `[0, offset)`
                         self.managed_lowest_state
-                            .delete(&ordered_pk_row, epoch)
+                            .delete(&ordered_pk_row, row.clone(), epoch)
                             .await?;
                         // We need to bring one, if any, from middle to lowest.
                         if self.managed_middle_state.total_count() > 0 {
@@ -800,7 +791,6 @@ mod tests {
             top_n_executor.next().await.unwrap().unwrap(),
             Message::Barrier(_)
         );
-
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),

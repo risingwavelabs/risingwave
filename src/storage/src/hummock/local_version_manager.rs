@@ -21,8 +21,10 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_pb::hummock::HummockVersion;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -234,9 +236,13 @@ impl LocalVersionManager {
         let batch_size = SharedBufferBatch::measure_batch_size(&sorted_items);
         while !self.buffer_tracker.can_write() {
             // TODO: may apply high-low memory threshold here to avoid always await here.
-            self.flush_shared_buffer().await?;
+            if !self.flush_shared_buffer().await? {
+                // The flush has no effect. yield to avoid occupying the execution endlessly.
+                tokio::task::yield_now().await;
+            }
         }
 
+        // TODO #2065: use correct compaction group id
         let batch = SharedBufferBatch::new_with_size(
             sorted_items,
             epoch,
@@ -246,6 +252,7 @@ impl LocalVersionManager {
             } else {
                 self.buffer_tracker.upload_size.clone()
             },
+            StaticCompactionGroupId::StateDefault.into(),
         );
 
         // Try get shared buffer with version read lock
@@ -268,7 +275,7 @@ impl LocalVersionManager {
         Ok(batch_size)
     }
 
-    pub async fn flush_shared_buffer(&self) -> HummockResult<()> {
+    pub async fn flush_shared_buffer(&self) -> HummockResult<bool> {
         // The current implementation is a trivial one, which issue only one flush task and wait for
         // the task to finish.
         //
@@ -285,7 +292,7 @@ impl LocalVersionManager {
         }
         let task = match task {
             Some(task) => task,
-            None => return Ok(()),
+            None => return Ok(false),
         };
 
         let epoch = task.epoch;
@@ -310,7 +317,7 @@ impl LocalVersionManager {
         match task_result {
             Ok(ssts) => {
                 shared_buffer_guard.succeed_upload_task(order_index, ssts);
-                Ok(())
+                Ok(true)
             }
             Err(e) => {
                 shared_buffer_guard.fail_upload_task(order_index);
@@ -385,7 +392,7 @@ impl LocalVersionManager {
         self.local_version.read().pinned_version().clone()
     }
 
-    pub fn get_uncommitted_ssts(&self, epoch: HummockEpoch) -> Vec<SstableInfo> {
+    pub fn get_uncommitted_ssts(&self, epoch: HummockEpoch) -> Vec<LocalSstableInfo> {
         self.local_version
             .read()
             .get_shared_buffer(epoch)
@@ -571,6 +578,8 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::HummockVersion;
@@ -711,6 +720,7 @@ mod tests {
                 LocalVersionManager::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
                 epochs[i],
                 buffer_tracker.clone(),
+                StaticCompactionGroupId::StateDefault.into(),
             );
             assert_eq!(
                 local_version
@@ -737,7 +747,10 @@ mod tests {
                 assert_eq!(1, payload[0].len());
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[0].clone()));
             }
-            shared_buffer_guard.succeed_upload_task(task_id, vec![sst1.clone()]);
+            shared_buffer_guard.succeed_upload_task(
+                task_id,
+                vec![(StaticCompactionGroupId::StateDefault.into(), sst1.clone())],
+            );
         }
 
         let local_version = local_version_manager.get_local_version();
@@ -767,7 +780,10 @@ mod tests {
             .get_shared_buffer(epochs[0])
             .unwrap()
             .read()
-            .get_ssts_to_commit();
+            .get_ssts_to_commit()
+            .into_iter()
+            .map(|(_, sst)| sst)
+            .collect_vec();
         assert_eq!(epoch_uncommitted_ssts.len(), 1);
         assert_eq!(*epoch_uncommitted_ssts.first().unwrap(), sst1);
 
@@ -785,7 +801,10 @@ mod tests {
                 assert_eq!(1, payload[0].len());
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[1].clone()));
             }
-            shared_buffer_guard.succeed_upload_task(task_id, vec![sst2.clone()]);
+            shared_buffer_guard.succeed_upload_task(
+                task_id,
+                vec![(StaticCompactionGroupId::StateDefault.into(), sst2.clone())],
+            );
         }
         let local_version = local_version_manager.get_local_version();
         // Check shared buffer
@@ -806,7 +825,10 @@ mod tests {
             .get_shared_buffer(epochs[1])
             .unwrap()
             .read()
-            .get_ssts_to_commit();
+            .get_ssts_to_commit()
+            .into_iter()
+            .map(|(_, sst)| sst)
+            .collect_vec();
         assert_eq!(epoch_uncommitted_ssts.len(), 1);
         assert_eq!(*epoch_uncommitted_ssts.first().unwrap(), sst2);
 
@@ -836,7 +858,10 @@ mod tests {
             .get_shared_buffer(epochs[1])
             .unwrap()
             .read()
-            .get_ssts_to_commit();
+            .get_ssts_to_commit()
+            .into_iter()
+            .map(|(_, sst)| sst)
+            .collect_vec();
         assert_eq!(epoch_uncommitted_ssts.len(), 1);
         assert_eq!(*epoch_uncommitted_ssts.first().unwrap(), sst2);
 

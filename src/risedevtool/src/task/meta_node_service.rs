@@ -42,8 +42,10 @@ impl MetaNodeService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
-        cmd.arg("--host")
+        cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
+            .arg("--host")
+            .arg(config.address.clone())
             .arg("--dashboard-host")
             .arg(format!(
                 "{}:{}",

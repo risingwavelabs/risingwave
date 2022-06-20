@@ -163,6 +163,8 @@ impl StreamMaterialize {
             is_index_on,
             distribution_keys: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
+            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            vnode_mapping: None,
         };
 
         Ok(Self { base, input, table })
@@ -214,10 +216,6 @@ impl fmt::Display for StreamMaterialize {
 
         if pk_column_names != order_descs {
             builder.field("order_descs", &format_args!("[{}]", order_descs));
-        }
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
         }
         builder.finish()
     }

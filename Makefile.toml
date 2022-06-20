@@ -105,7 +105,7 @@ do
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 4000 )) ; then
     echo "$(tput setaf 3)log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
@@ -295,6 +295,25 @@ echo "Use \`./risedev d\` instead if you want to start a full cluster."
 set -ex
 
 RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
+'''
+
+[tasks.ctl]
+category = "RiseDev - Start"
+description = "Start RiseCtl"
+script = '''
+#!@shell
+
+RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
+  exit 1
+fi
+
+source "${RC_ENV_FILE}"
+
+cargo run --bin risectl --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
+test $? -eq 0 || exit 1
 '''
 
 [tasks.d]
