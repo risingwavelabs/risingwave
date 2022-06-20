@@ -15,6 +15,7 @@
 pub mod alloc;
 pub mod error;
 pub mod file;
+pub mod filter;
 pub mod manager;
 
 async fn asyncify<F, T>(f: F) -> error::Result<T>

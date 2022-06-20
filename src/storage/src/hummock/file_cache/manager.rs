@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use nix::sys::statfs::{statfs, FsType as NixFsType, EXT4_SUPER_MAGIC};
 
 use super::error::{Error, Result};
+use super::filter::Filter;
 
 #[derive(Clone, Copy, Debug)]
 pub enum FsType {
@@ -24,16 +26,19 @@ pub enum FsType {
     Xfs,
 }
 
-#[derive(Debug)]
 pub struct FileCacheManagerOptions {
     pub dir: String,
+    pub filters: Vec<Arc<dyn Filter>>,
 }
 
+#[derive(Clone)]
 pub struct FileCacheManager {
     _dir: String,
 
     _fs_type: FsType,
     _fs_block_size: usize,
+
+    _filters: Vec<Arc<dyn Filter>>,
 }
 
 impl FileCacheManager {
@@ -54,8 +59,11 @@ impl FileCacheManager {
 
         Ok(Self {
             _dir: options.dir,
+
             _fs_type: fs_type,
             _fs_block_size: fs_block_size,
+
+            _filters: options.filters,
         })
     }
 }
@@ -64,6 +72,13 @@ impl FileCacheManager {
 mod tests {
 
     use super::*;
+
+    fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
+
+    #[test]
+    fn ensure_send_sync_clone() {
+        is_send_sync_clone::<FileCacheManager>();
+    }
 
     #[tokio::test]
     async fn test_file_cache_manager() {
@@ -80,6 +95,7 @@ mod tests {
 
         let options = FileCacheManagerOptions {
             dir: tempdir.path().to_str().unwrap().to_string(),
+            filters: vec![],
         };
         let _manager = FileCacheManager::open(options).await.unwrap();
     }
