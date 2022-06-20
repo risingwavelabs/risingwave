@@ -207,17 +207,24 @@ pub async fn handle_grant_privilege(
             let user = reader.get_user_by_name(&granted_by.value);
             if user.is_none() {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
-            }else if !user.unwrap().is_supper && !user.unwrap().get_name().eq(session.user_name()) {
-                return Err(ErrorCode::BindError("User does not match for granted by".to_string()).into());
+            } else if !user.unwrap().is_supper && !user.unwrap().get_name().eq(session.user_name())
+            {
+                return Err(
+                    ErrorCode::BindError("User does not match for granted by".to_string()).into(),
+                );
             }
-
         }
     }
 
     let privileges = make_prost_privilege(&session, privileges, objects)?;
     let user_info_writer = session.env().user_info_writer();
     user_info_writer
-        .grant_privilege(users, privileges, with_grant_option, session.user_name().to_string())
+        .grant_privilege(
+            users,
+            privileges,
+            with_grant_option,
+            session.user_name().to_string(),
+        )
         .await?;
     Ok(PgResponse::empty_result(StatementType::GRANT_PRIVILEGE))
 }

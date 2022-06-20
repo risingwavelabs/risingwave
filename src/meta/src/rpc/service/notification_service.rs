@@ -85,7 +85,11 @@ where
                 let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
                 let user_guard = self.user_manager.get_user_core_guard().await;
-                let users = user_guard.get_user_info().values().cloned().collect::<Vec<_>>();
+                let users = user_guard
+                    .get_user_info()
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>();
 
                 // Send the snapshot on subscription. After that we will send only updates.
                 let meta_snapshot = MetaSnapshot {
