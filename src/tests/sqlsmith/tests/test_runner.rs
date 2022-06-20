@@ -42,7 +42,7 @@ mod tests {
                     with_options,
                     ..
                 } => {
-                    let context = OptimizerContext::new(session.clone());
+                    let context = OptimizerContext::new(session.clone(), Arc::from(sql.clone()));
                     create_table::handle_create_table(
                         context,
                         name.clone(),
@@ -81,7 +81,8 @@ mod tests {
             let statements =
                 Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
             let stmt = statements[0].clone();
-            let context: OptimizerContextRef = OptimizerContext::new(session.clone()).into();
+            let context: OptimizerContextRef =
+                OptimizerContext::new(session.clone(), Arc::from(sql.clone())).into();
 
             match stmt.clone() {
                 Statement::Query(_) => {
