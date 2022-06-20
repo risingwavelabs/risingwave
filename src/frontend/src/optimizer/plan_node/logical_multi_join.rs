@@ -20,10 +20,12 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanNodeType, PlanRef,
+    PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanTreeNode;
+use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::utils::{ColIndexMapping, Condition, ConnectedComponentLabeller};
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
@@ -53,6 +55,98 @@ impl fmt::Display for LogicalMultiJoin {
     }
 }
 
+pub struct LogicalMultiJoinBuilder {
+    output_indices: Vec<usize>,
+    /// the predicates in the on condition, we do not use Condition here to emit unnecessary
+    /// simplify.
+    conjunctions: Vec<ExprImpl>,
+    inputs: Vec<PlanRef>,
+}
+
+impl LogicalMultiJoinBuilder {
+    pub fn build(self) -> LogicalMultiJoin {
+        LogicalMultiJoin::new(
+            self.inputs,
+            Condition {
+                conjunctions: self.conjunctions,
+            },
+            self.output_indices,
+        )
+    }
+
+    pub fn into_parts(self) -> (Vec<usize>, Vec<ExprImpl>, Vec<PlanRef>) {
+        (self.output_indices, self.conjunctions, self.inputs)
+    }
+
+    pub fn new(plan: PlanRef) -> LogicalMultiJoinBuilder {
+        match plan.node_type() {
+            PlanNodeType::LogicalJoin => Self::with_join(plan),
+            PlanNodeType::LogicalFilter => Self::with_filter(plan),
+            PlanNodeType::LogicalProject => Self::with_project(plan),
+            _ => Self::with_input(plan),
+        }
+    }
+
+    fn with_join(plan: PlanRef) -> LogicalMultiJoinBuilder {
+        let join: &LogicalJoin = plan.as_logical_join().unwrap();
+        if join.join_type() != JoinType::Inner {
+            return Self::with_input(plan);
+        }
+        let left = join.left();
+        let right = join.right();
+
+        let left_col_num = left.schema().len();
+        let right_col_num = right.schema().len();
+        // the mapping from the right's output column index to the join's internal output column
+        // index
+        let mut mapping = ColIndexMapping::with_shift_offset(right_col_num, left_col_num as isize);
+
+        let mut builder = Self::new(left);
+        let (r_output_indices, r_conjunctions, r_inputs) = Self::new(right).into_parts();
+
+        builder.inputs.append(&mut r_inputs);
+        builder.conjunctions.extend(
+            r_conjunctions
+                .into_iter()
+                .map(|expr| mapping.rewrite_expr(expr)),
+        );
+        builder
+            .output_indices
+            .extend(r_output_indices.into_iter().map(|idx| mapping.map(idx)));
+        builder.output_indices = join
+            .output_indices()
+            .iter()
+            .map(|idx| builder.output_indices[*idx])
+            .collect();
+        builder
+    }
+
+    fn with_filter(plan: PlanRef) -> LogicalMultiJoinBuilder {
+        let filter: &LogicalFilter = plan.as_logical_filter().unwrap();
+        let mut builder = Self::new(filter.input());
+        builder.conjunctions.extend(filter.predicate().conjunctions);
+        builder
+    }
+
+    fn with_project(plan: PlanRef) -> LogicalMultiJoinBuilder {
+        let proj: &LogicalProject = plan.as_logical_project().unwrap();
+        let output_indices = match proj.try_as_projection() {
+            Some(output_indices) => output_indices,
+            None => return Self::with_input(plan),
+        };
+        let mut builder = Self::new(proj.input());
+        builder.output_indices = output_indices;
+        builder
+    }
+
+    fn with_input(input: PlanRef) -> LogicalMultiJoinBuilder {
+        LogicalMultiJoinBuilder {
+            output_indices: (0..input.schema().len()).collect_vec(),
+            conjunctions: vec![],
+            inputs: vec![input],
+        }
+    }
+}
 impl LogicalMultiJoin {
     pub(crate) fn new(inputs: Vec<PlanRef>, on: Condition, output_indices: Vec<usize>) -> Self {
         let input_schemas = inputs
@@ -124,58 +218,6 @@ impl LogicalMultiJoin {
         }
     }
 
-    pub(crate) fn from_join(join: &PlanRef) -> Option<Self> {
-        let logical_join = join.as_logical_join()?;
-        if logical_join.join_type() != JoinType::Inner {
-            return None;
-        }
-        let left = logical_join.left();
-        let right = logical_join.right();
-
-        let left_col_num = left.schema().len();
-        let right_col_num = right.schema().len();
-
-        let mut inputs = vec![];
-        let mut conjunctions = logical_join.on().conjunctions.clone();
-        if let Some(multi_join) = left.as_logical_multi_join() {
-            inputs.extend(multi_join.inputs());
-            conjunctions.extend(multi_join.on().clone());
-        } else {
-            inputs.push(left.clone());
-        }
-        if let Some(multi_join) = right.as_logical_multi_join() {
-            inputs.extend(multi_join.inputs());
-            let right_on = multi_join.on().clone();
-            let mut mapping =
-                ColIndexMapping::with_shift_offset(right_col_num, left_col_num as isize);
-            let new_on = right_on.rewrite_expr(&mut mapping);
-            conjunctions.extend(new_on.conjunctions);
-        } else {
-            inputs.push(right.clone());
-        }
-
-        Some(Self {
-            base: logical_join.base.clone(),
-            inputs,
-            on: Condition { conjunctions },
-        })
-    }
-
-    pub(crate) fn from_filter(join: &PlanRef) -> Option<Self> {
-        let logical_filter = join.as_logical_filter()?;
-        let input = logical_filter.input();
-        let multijoin = input.as_logical_multi_join()?;
-
-        Some(Self {
-            base: logical_filter.base.clone(),
-            inputs: multijoin.inputs().to_vec(),
-            on: multijoin
-                .on()
-                .clone()
-                .and(logical_filter.predicate().clone()),
-        })
-    }
-
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.on
@@ -194,12 +236,13 @@ impl PlanTreeNode for LogicalMultiJoin {
         vec
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> crate::optimizer::PlanRef {
+    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
         Self::new(
             inputs.to_vec(),
             self.on().clone(),
             self.output_indices.clone(),
-        );
+        )
+        .into()
     }
 }
 

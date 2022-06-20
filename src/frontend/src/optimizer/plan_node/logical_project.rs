@@ -157,6 +157,17 @@ impl LogicalProject {
                 })
     }
 
+    pub fn try_as_projection(&self) -> Option<Vec<usize>> {
+        self.exprs
+            .iter()
+            .enumerate()
+            .map(|(i, expr)| match expr {
+                ExprImpl::InputRef(input_ref) => Some(input_ref.index),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+    }
+
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
         (self.exprs, self.input)
     }
