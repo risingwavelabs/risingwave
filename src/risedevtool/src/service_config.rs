@@ -35,7 +35,6 @@ pub struct ComputeNodeConfig {
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
-    pub enable_in_memory_kv_state_backend: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -160,6 +159,7 @@ pub struct PrometheusConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub provide_etcd: Option<Vec<EtcdConfig>>,
+    pub provide_redpanda: Option<Vec<RedPandaConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

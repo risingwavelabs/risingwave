@@ -16,10 +16,11 @@ use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, Op};
-use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 
 /// States for [`crate::executor::LocalSimpleAggExecutor`],
@@ -44,9 +45,13 @@ impl<S: StateStore> Debug for AggState<S> {
 pub const ROW_COUNT_COLUMN: usize = 0;
 
 impl<S: StateStore> AggState<S> {
-    pub async fn row_count(&mut self, epoch: u64) -> Result<i64> {
+    pub async fn row_count(
+        &mut self,
+        epoch: u64,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<i64> {
         Ok(self.managed_states[ROW_COUNT_COLUMN]
-            .get_output(epoch)
+            .get_output(epoch, state_table)
             .await?
             .map(|x| *x.as_int64())
             .unwrap_or(0))
@@ -71,14 +76,18 @@ impl<S: StateStore> AggState<S> {
     /// changes to the state. If the state is already marked dirty in this epoch, this function does
     /// no-op.
     /// After calling this function, `self.is_dirty()` will return `true`.
-    pub async fn may_mark_as_dirty(&mut self, epoch: u64) -> Result<()> {
+    pub async fn may_mark_as_dirty(
+        &mut self,
+        epoch: u64,
+        state_tables: &[StateTable<S>],
+    ) -> StreamExecutorResult<()> {
         if self.is_dirty() {
             return Ok(());
         }
 
         let mut outputs = vec![];
-        for state in &mut self.managed_states {
-            outputs.push(state.get_output(epoch).await?);
+        for (state, state_table) in self.managed_states.iter_mut().zip_eq(state_tables.iter()) {
+            outputs.push(state.get_output(epoch, state_table).await?);
         }
         self.prev_states = Some(outputs);
         Ok(())
@@ -93,12 +102,15 @@ impl<S: StateStore> AggState<S> {
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
         epoch: u64,
-    ) -> Result<usize> {
+        state_tables: &[StateTable<S>],
+    ) -> StreamExecutorResult<usize> {
         if !self.is_dirty() {
             return Ok(0);
         }
 
-        let row_count = self.row_count(epoch).await?;
+        let row_count = self
+            .row_count(epoch, &state_tables[ROW_COUNT_COLUMN])
+            .await?;
         let prev_row_count = self.prev_row_count();
 
         trace!(
@@ -120,8 +132,12 @@ impl<S: StateStore> AggState<S> {
                 // previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
-                for (builder, state) in builders.iter_mut().zip_eq(self.managed_states.iter_mut()) {
-                    let data = state.get_output(epoch).await?;
+                for ((builder, state), state_table) in builders
+                    .iter_mut()
+                    .zip_eq(self.managed_states.iter_mut())
+                    .zip_eq(state_tables.iter())
+                {
+                    let data = state.get_output(epoch, state_table).await?;
                     trace!("append_datum (0 -> N): {:?}", &data);
                     builder.append_datum(&data)?;
                 }
@@ -149,12 +165,13 @@ impl<S: StateStore> AggState<S> {
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
 
-                for (builder, prev_state, cur_state) in itertools::multizip((
+                for (builder, prev_state, cur_state, state_table) in itertools::multizip((
                     builders.iter_mut(),
                     self.prev_states.as_ref().unwrap().iter(),
                     self.managed_states.iter_mut(),
+                    state_tables.iter(),
                 )) {
-                    let cur_state = cur_state.get_output(epoch).await?;
+                    let cur_state = cur_state.get_output(epoch, state_table).await?;
                     trace!(
                         "append_datum (N -> N): prev = {:?}, cur = {:?}",
                         prev_state,

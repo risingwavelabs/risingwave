@@ -125,8 +125,14 @@ impl TaskService for BatchServiceImpl {
         let plan = req.get_plan().expect("no plan found").clone();
         let epoch = req.epoch;
         let context = ComputeNodeContext::new(self.env.clone());
+        trace!(
+            "local execute request: plan:{:?} with task id:{:?}",
+            plan,
+            task_id
+        );
         let task = BatchTaskExecution::new(task_id, plan, context, epoch)?;
         let task = Arc::new(task);
+
         if let Err(e) = task.clone().async_execute().await {
             error!(
                 "failed to build executors and trigger execution of Task {:?}: {}",

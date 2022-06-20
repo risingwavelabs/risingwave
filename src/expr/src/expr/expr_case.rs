@@ -14,10 +14,10 @@
 
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk, Row};
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ScalarRefImpl, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct WhenClause {
@@ -58,17 +58,19 @@ impl Expression for CaseExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        // TODO: we can avoid the compact here.
+        let input = input.clone().compact()?;
         let mut els = self
             .else_clause
             .as_deref()
-            .map(|else_clause| else_clause.eval(input).unwrap());
+            .map(|else_clause| else_clause.eval(&input).unwrap());
         let when_thens = self
             .when_clauses
             .iter()
             .map(|when_clause| {
                 (
-                    when_clause.when.eval(input).unwrap(),
-                    when_clause.then.eval(input).unwrap(),
+                    when_clause.when.eval(&input).unwrap(),
+                    when_clause.then.eval(&input).unwrap(),
                 )
             })
             .collect_vec();
@@ -169,7 +171,8 @@ mod tests {
              3
              4
              5",
-        );
+        )
+        .with_invisible_holes();
         let output = searched_case_expr.eval(&input).unwrap();
         assert_eq!(output.datum_at(0), Some(3.1f32.into()));
         assert_eq!(output.datum_at(1), Some(3.1f32.into()));
@@ -201,7 +204,8 @@ mod tests {
              4
              3
              4",
-        );
+        )
+        .with_invisible_holes();
         let output = searched_case_expr.eval(&input).unwrap();
         assert_eq!(output.datum_at(0), Some(3.1f32.into()));
         assert_eq!(output.datum_at(1), None);

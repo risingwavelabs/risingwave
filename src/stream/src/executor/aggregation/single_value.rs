@@ -17,11 +17,12 @@
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{option_to_owned_scalar, Datum, Scalar, ScalarImpl};
 
 use crate::executor::aggregation::StreamingAggStateImpl;
+use crate::executor::error::StreamExecutorResult;
 
 /// `StreamingSingleValueAgg` is a temporary workaround to deal with scalar subquery.
 /// Scalar subquery can at most return one row, otherwise runtime error should be emitted.
@@ -53,7 +54,7 @@ impl<T: Array> StreamingSingleValueAgg<T> {
     /// This function makes the assumption that if this function gets called, then
     /// we must have row count equal to 1. If the row count is equal to 0,
     /// then `new` will be called instead of this function.
-    pub fn new_with_datum(x: Datum) -> Result<Self> {
+    pub fn new_with_datum(x: Datum) -> StreamExecutorResult<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(T::OwnedItem::try_from(scalar)?);
@@ -81,25 +82,19 @@ impl<T: Array> StreamingSingleValueAgg<T> {
         }
     }
 
-    fn accumulate(&mut self, input: Option<T::RefItem<'_>>) -> Result<()> {
+    fn accumulate(&mut self, input: Option<T::RefItem<'_>>) -> StreamExecutorResult<()> {
         self.row_cnt += 1;
         if self.row_cnt > 1 {
-            Err(ErrorCode::InternalError(
-                "SingleValue aggregation can only accept exactly one value. But there is more than one.".to_string(),
-            )
-            .into())
+            bail!("SingleValue aggregation can only accept exactly one value. But there is more than one.");
         } else {
             self.result = option_to_owned_scalar(&input);
             Ok(())
         }
     }
 
-    fn retract(&mut self, _input: Option<T::RefItem<'_>>) -> Result<()> {
+    fn retract(&mut self, _input: Option<T::RefItem<'_>>) -> StreamExecutorResult<()> {
         if self.row_cnt != 1 {
-            Err(ErrorCode::InternalError(
-                format!("SingleValue aggregation can only retract exactly one value. But there are {} values.", self.row_cnt)
-            )
-            .into())
+            bail!("SingleValue aggregation can only retract exactly one value. But there are {} values.", self.row_cnt);
         } else {
             self.row_cnt -= 1;
             self.result = None;
@@ -112,7 +107,7 @@ impl<T: Array> StreamingSingleValueAgg<T> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &T,
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         match visibility {
             None => {
                 for (op, data) in ops.iter().zip_eq(data.iter()) {
@@ -147,11 +142,11 @@ macro_rules! impl_single_value_agg {
                 ops: Ops<'_>,
                 visibility: Option<&Bitmap>,
                 data: &[&ArrayImpl],
-            ) -> Result<()> {
+            ) -> StreamExecutorResult<()> {
                 self.apply_batch_concrete(ops, visibility, data[0].into())
             }
 
-            fn get_output(&self) -> Result<Datum> {
+            fn get_output(&self) -> StreamExecutorResult<Datum> {
                 Ok(self.result.clone().map(Scalar::to_scalar_value))
             }
 

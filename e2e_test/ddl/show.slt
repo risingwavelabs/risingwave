@@ -40,7 +40,7 @@ dev
 query T
 show schemas;
 ----
-dev
+public
 
 query T
 show tables;
@@ -48,12 +48,12 @@ show tables;
 t3
 
 query T
-show tables from dev;
+show tables from public;
 ----
 t3
 
 query T
-show materialized views from dev;
+show materialized views from public;
 ----
 mv3
 

@@ -150,13 +150,11 @@ impl KinesisSplitReader {
     async fn get_records(
         &mut self,
     ) -> core::result::Result<GetRecordsOutput, SdkError<GetRecordsError>> {
-        let resp = self
-            .client
+        self.client
             .get_records()
             .set_shard_iterator(self.shard_iter.take())
             .send()
-            .await;
-        resp
+            .await
     }
 }
 
@@ -275,7 +273,7 @@ mod tests {
             stream_region: "cn-northwest-1".to_string(),
             endpoint: None,
             session_token: None,
-            assume_role_externeal_id: None,
+            assume_role_external_id: None,
         };
 
         let mut trim_horizen_reader = KinesisSplitReader::new(
@@ -326,7 +324,7 @@ mod tests {
             stream_region: "cn-northwest-1".to_string(),
             endpoint: None,
             session_token: None,
-            assume_role_externeal_id: None,
+            assume_role_external_id: None,
         };
 
         let splits = vec!["shardId-000000000000", "shardId-000000000001"]

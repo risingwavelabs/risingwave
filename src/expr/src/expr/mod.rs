@@ -15,7 +15,6 @@
 mod agg;
 pub mod build_expr_from_prost;
 pub mod data_types;
-mod expr_array;
 mod expr_binary_bytes;
 pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
@@ -27,6 +26,7 @@ mod expr_in;
 mod expr_input_ref;
 mod expr_is_null;
 mod expr_literal;
+mod expr_nested_construct;
 mod expr_ternary_bytes;
 pub mod expr_unary;
 mod template;
@@ -39,16 +39,16 @@ pub use agg::AggKind;
 pub use expr_input_ref::InputRefExpression;
 pub use expr_literal::*;
 use risingwave_common::array::{ArrayRef, DataChunk, Row};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
+use super::Result;
 use crate::expr::build_expr_from_prost::*;
-use crate::expr::expr_array::ArrayExpression;
 use crate::expr::expr_coalesce::CoalesceExpression;
 use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
+use crate::expr::expr_nested_construct::NestedConstructExpression;
+use crate::ExprError;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
@@ -63,6 +63,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// * `input` - input data of the Project Executor
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
 
+    /// Evaluate the expression in row-based execution.
     fn eval_row(&self, input: &Row) -> Result<Datum>;
 
     fn boxed(self) -> BoxedExpression
@@ -78,16 +79,14 @@ pub type BoxedExpression = Box<dyn Expression>;
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
-    match prost.get_expr_type()? {
+    match prost.get_expr_type().unwrap() {
         Cast | Upper | Lower | Md5 | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot => {
-            build_unary_expr_prost(prost)
-        }
+        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot | CharLength
+        | BoolOut => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
-        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor => {
-            build_binary_expr_prost(prost)
-        }
+        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
+        | ConcatOp => build_binary_expr_prost(prost),
         And | Or | IsDistinctFrom | ArrayAccess => build_nullable_binary_expr_prost(prost),
         ToChar => build_to_char_expr(prost),
         Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
@@ -98,6 +97,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
+        Repeat => build_repeat_expr(prost),
         ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
         SplitPart => build_split_part_expr(prost),
         ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),
@@ -106,17 +106,17 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Translate => build_translate_expr(prost),
         In => build_in_expr(prost),
         Field => FieldExpression::try_from(prost).map(Expression::boxed),
-        Array => ArrayExpression::try_from(prost).map(Expression::boxed),
-        _ => Err(InternalError(format!(
-            "Unsupported expression type: {:?}",
+        Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
+        Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
+        _ => Err(ExprError::UnsupportedFunction(format!(
+            "{:?}",
             prost.get_expr_type()
-        ))
-        .into()),
+        ))),
     }
 }
 
-#[derive(Debug)]
 /// Simply wrap a row level expression as an array level expression
+#[derive(Debug)]
 pub struct RowExpression {
     expr: BoxedExpression,
 }

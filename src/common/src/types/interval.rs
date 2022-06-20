@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Sub};
 
+use anyhow::anyhow;
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedSub};
@@ -24,7 +27,6 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use super::*;
-use crate::error::ErrorCode::IoError;
 
 /// Every interval can be represented by a `IntervalUnit`.
 /// Note that the difference between Interval and Instant.
@@ -34,16 +36,15 @@ use crate::error::ErrorCode::IoError;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-///
-/// FIXME: if this derives `PartialEq` and `PartialOrd`, caller must guarantee the fields are valid.
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
-)]
+/// FIXME: the comparison of memcomparable encoding will be just compare these three numbers.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct IntervalUnit {
     months: i32,
     days: i32,
     ms: i64,
 }
+
+const DAY_MS: i64 = 86400000;
 
 impl IntervalUnit {
     pub fn new(months: i32, days: i32, ms: i64) -> Self {
@@ -66,23 +67,23 @@ impl IntervalUnit {
         self.ms
     }
 
-    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> Result<Self> {
+    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> ArrayResult<Self> {
         // TODO: remove IntervalType later.
         match ty {
             // the unit is months
             Year | YearToMonth | Month => {
-                let bytes = bytes.try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
-                })?;
+                let bytes = bytes
+                    .try_into()
+                    .map_err(|e| anyhow!("Failed to deserialize i32: {:?}", e))?;
                 let mouths = i32::from_be_bytes(bytes);
                 Ok(IntervalUnit::from_month(mouths))
             }
             // the unit is ms
             Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
             | Minute | MinuteToSecond | Second => {
-                let bytes = bytes.try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
-                })?;
+                let bytes = bytes
+                    .try_into()
+                    .map_err(|e| anyhow!("Failed to deserialize i64: {:?}", e))?;
                 let ms = i64::from_be_bytes(bytes);
                 Ok(IntervalUnit::from_millis(ms))
             }
@@ -93,6 +94,17 @@ impl IntervalUnit {
                 read_interval_unit(&mut cursor)
             }
         }
+    }
+
+    /// Justify interval, convert 1 month to 30 days and 86400 ms to 1 day.
+    /// If day is positive, complement the ms negative value.
+    /// These rules only use in interval comparison.
+    pub fn justify_interval(&mut self) {
+        let month = (self.months * 30) as i64 * DAY_MS;
+        self.ms = self.ms + month + (self.days) as i64 * DAY_MS;
+        self.days = (self.ms / DAY_MS) as i32;
+        self.ms %= DAY_MS;
+        self.months = 0;
     }
 
     #[must_use]
@@ -151,14 +163,11 @@ impl IntervalUnit {
         writer.into_inner().to_vec()
     }
 
-    pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
-        {
-            output.write_i32::<BigEndian>(self.months)?;
-            output.write_i32::<BigEndian>(self.days)?;
-            output.write_i64::<BigEndian>(self.ms)?;
-            Ok(16)
-        }
-        .map_err(|e| RwError::from(IoError(e)))
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output.write_i32::<BigEndian>(self.months)?;
+        output.write_i32::<BigEndian>(self.days)?;
+        output.write_i64::<BigEndian>(self.ms)?;
+        Ok(16)
     }
 
     /// Multiple [`IntervalUnit`] by an integer with overflow check.
@@ -207,7 +216,7 @@ impl IntervalUnit {
     }
 }
 
-#[allow(clippy::from_over_into)]
+#[expect(clippy::from_over_into)]
 impl Into<IntervalUnitProto> for IntervalUnit {
     fn into(self) -> IntervalUnitProto {
         IntervalUnitProto {
@@ -236,6 +245,46 @@ impl Add for IntervalUnit {
         let days = self.days + rhs.days;
         let ms = self.ms + rhs.ms;
         IntervalUnit { months, days, ms }
+    }
+}
+
+impl PartialOrd for IntervalUnit {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self.eq(other) {
+            Some(Ordering::Equal)
+        } else {
+            let diff = *self - *other;
+            let days = (diff.months * 30 + diff.days) as i64;
+            Some((days * DAY_MS + diff.ms).cmp(&0))
+        }
+    }
+}
+
+impl Hash for IntervalUnit {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let mut interval = *self;
+        interval.justify_interval();
+        interval.months.hash(state);
+        interval.ms.hash(state);
+        interval.days.hash(state);
+    }
+}
+
+impl PartialEq for IntervalUnit {
+    fn eq(&self, other: &Self) -> bool {
+        let mut interval = *self;
+        interval.justify_interval();
+        let mut other = *other;
+        other.justify_interval();
+        interval.days == other.days && interval.ms == other.ms
+    }
+}
+
+impl Eq for IntervalUnit {}
+
+impl Ord for IntervalUnit {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
     }
 }
 

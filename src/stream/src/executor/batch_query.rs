@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+use risingwave_common::catalog::{OrderedColumnDesc, Schema};
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -40,6 +41,10 @@ pub struct BatchQueryExecutor<S: StateStore> {
 
     /// vnode bitmap used to filter data belong to this parallel unit.
     hash_filter: Bitmap,
+
+    /// public key field descriptors. Used to decode pk into datums
+    /// for dedup pk encoding.
+    pk_descs: Vec<OrderedColumnDesc>,
 }
 
 impl<S> BatchQueryExecutor<S>
@@ -54,6 +59,7 @@ where
         info: ExecutorInfo,
         key_indices: Vec<usize>,
         hash_filter: Bitmap,
+        pk_descs: Vec<OrderedColumnDesc>,
     ) -> Self {
         Self {
             table,
@@ -61,12 +67,17 @@ where
             info,
             key_indices,
             hash_filter,
+            pk_descs,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
-        let mut iter = self.table.iter(epoch).await?;
+        let iter = self
+            .table
+            .batch_dedup_pk_iter(epoch, &self.pk_descs)
+            .await?;
+        pin_mut!(iter);
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(self.schema(), Some(self.batch_size))
@@ -79,9 +90,7 @@ where
                     continue;
                 }
             };
-            let compacted_chunk = filtered_data_chunk
-                .compact()
-                .map_err(StreamExecutorError::eval_error)?;
+            let compacted_chunk = filtered_data_chunk.compact()?;
             let ops = vec![Op::Insert; compacted_chunk.cardinality()];
             let stream_chunk = StreamChunk::from_parts(ops, compacted_chunk);
             yield Message::Chunk(stream_chunk);
@@ -144,6 +153,9 @@ mod test {
     use std::vec;
 
     use futures_async_stream::for_await;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
     use crate::executor::mview::test_utils::gen_basic_table;
@@ -166,12 +178,24 @@ mod test {
             }
             builder.finish()
         };
+        let pk_descs = vec![
+            OrderedColumnDesc {
+                column_desc: ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+                order: OrderType::Ascending,
+            },
+            OrderedColumnDesc {
+                column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+                order: OrderType::Descending,
+            },
+        ];
+
         let executor = Box::new(BatchQueryExecutor::new(
             table,
             Some(test_batch_size),
             info,
             vec![],
             hash_filter,
+            pk_descs,
         ));
 
         let stream = executor.execute_with_epoch(u64::MAX);

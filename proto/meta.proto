@@ -54,6 +54,7 @@ message TableFragments {
   uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
   map<uint32, ActorStatus> actor_status = 3;
+  repeated uint32 internal_table_ids = 4;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -159,4 +160,15 @@ message SubscribeResponse {
 
 service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+}
+
+message MetaLeaderInfo {
+  string node_address = 1;
+  uint64 lease_id = 2;
+}
+
+message MetaLeaseInfo {
+  MetaLeaderInfo leader = 1;
+  uint64 lease_register_time = 2;
+  uint64 lease_expire_time = 3;
 }

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "catalog.proto";
 import "common.proto";
 import "data.proto";
 import "expr.proto";
@@ -24,15 +25,6 @@ message SourceNode {
   plan_common.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
-  // split allocation information,
-  // and in the future will distinguish between `StreamSource` and `TableSource`
-  // so that there is no need to put many fields that are not common into the same SourceNode structure
-  StreamSourceState stream_source_state = 4;
-}
-
-message StreamSourceState {
-  string split_type = 1;
-  repeated bytes stream_source_splits = 2;
 }
 
 message ProjectNode {
@@ -65,15 +57,21 @@ message MaterializeNode {
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   repeated uint32 distribution_keys = 2;
-  repeated uint32 table_ids = 3;
-  bool append_only = 4;
+  repeated catalog.Table internal_tables = 3;
+  map<uint32, int32> column_mapping = 4;
+  // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 5;
 }
 
 message HashAggNode {
   repeated uint32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
-  repeated uint32 table_ids = 3;
-  bool append_only = 4;
+  repeated catalog.Table internal_tables = 3;
+  map<uint32, int32> column_mapping = 4;
+  // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 5;
 }
 
 message TopNNode {
@@ -91,15 +89,21 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
-  repeated uint32 distribution_keys = 5;
   // Whether to use delta join for this hash join node. When enabled, arrangement will be created
   // on-the-fly within the plan.
   // TODO: remove this in the future when we have a separate DeltaHashJoin node.
-  bool is_delta_join = 6;
-  // Used for internal table states. Id of the left table.
-  uint32 left_table_id = 7;
-  // Used for internal table states. Id of the right table.
-  uint32 right_table_id = 8;
+  bool is_delta_join = 5;
+  // Used for internal table states.
+  catalog.Table left_table = 6;
+  // Used for internal table states.
+  catalog.Table right_table = 7;
+  repeated uint32 dist_key_l = 8;
+  repeated uint32 dist_key_r = 9;
+  // It is true when the input is append-only
+  bool is_append_only = 10;
+  // Whether to optimize for append only stream.
+  // the output indices of current node
+  repeated uint32 output_indices = 11;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -117,6 +121,8 @@ message DeltaIndexJoinNode {
   ArrangementInfo left_info = 9;
   // Info about the right index
   ArrangementInfo right_info = 10;
+  // the output indices of current node
+  repeated uint32 output_indices = 11;
 }
 
 message HopWindowNode {
@@ -160,11 +166,9 @@ message ChainNode {
 // BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan_common.
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
 message BatchPlanNode {
-  plan_common.TableRefId table_ref_id = 1;
+  plan_common.CellBasedTableDesc table_desc = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
   repeated uint32 distribution_keys = 3;
-  common.ParallelUnitMapping hash_mapping = 4;
-  uint32 parallel_unit_id = 5;
 }
 
 message ArrangementInfo {
@@ -301,7 +305,7 @@ message StreamActor {
   bool same_worker_node_as_upstream = 7;
   // Vnodes that the executors in this actor own. If this actor is the only actor in its fragment, `vnode_bitmap`
   // will be empty.
-  bytes vnode_bitmap = 8;
+  common.Buffer vnode_bitmap = 8;
 }
 
 enum FragmentType {

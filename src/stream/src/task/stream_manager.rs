@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::time::Duration;
 use std::fmt::Debug;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use parking_lot::Mutex;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
@@ -30,7 +31,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
-use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
@@ -64,7 +64,8 @@ pub struct LocalStreamManagerCore {
 
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
-
+    /// Store all actor execution time montioring tasks.
+    actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
@@ -118,7 +119,7 @@ pub struct ExecutorParams {
     pub actor_context: ActorContextRef,
 
     // Vnodes owned by this executor. Represented in bitmap.
-    pub vnode_bitmap: Rc<Vec<u8>>,
+    pub vnode_bitmap: Option<Bitmap>,
 }
 
 impl Debug for ExecutorParams {
@@ -160,54 +161,53 @@ impl LocalStreamManager {
         Self::with_core(LocalStreamManagerCore::for_test())
     }
 
-    /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
-    /// barrier is finished.
-    fn send_barrier(
+    /// Broadcast a barrier to all senders. Save a receiver in barrier manager
+    pub fn send_barrier(
         &self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<oneshot::Receiver<CollectResult>> {
+    ) -> Result<()> {
         let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
-        let rx = barrier_manager
-            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
-            .expect("no rx for local mode");
-        Ok(rx)
+        barrier_manager.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
+        Ok(())
     }
 
-    /// Broadcast a barrier to all senders. Returns when the barrier is fully collected.
-    pub async fn send_and_collect_barrier(
+    /// Use `prev_epoch` to find collect rx. And wait for all actor to be collected before
+    /// returning.
+    pub async fn collect_barrier_and_sync(
         &self,
-        barrier: &Barrier,
-        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
-        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
+        prev_epoch: u64,
         need_sync: bool,
-    ) -> Result<CollectResult> {
-        let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
-
+    ) -> CollectResult {
+        let rx = {
+            let core = self.core.lock();
+            let mut barrier_manager = core.context.lock_barrier_manager();
+            barrier_manager.remove_collect_rx(prev_epoch)
+        };
         // Wait for all actors finishing this barrier.
         let mut collect_result = rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         if need_sync {
             dispatch_state_store!(self.state_store(), store, {
-                match store.sync(Some(barrier.epoch.prev)).await {
+                match store.sync(Some(prev_epoch)).await {
                     Ok(_) => {
                         collect_result.synced_sstables =
-                            store.get_uncommitted_ssts(barrier.epoch.prev);
+                        store.get_uncommitted_ssts(prev_epoch);
                     }
                     // TODO: Handle sync failure by propagating it
                     // back to global barrier manager
                     Err(e) => panic!(
-                        "Failed to sync state store after receiving barrier {:?} due to {}",
-                        barrier, e
+                        "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
+                        prev_epoch, e
                     ),
                 }
             });
         }
 
-        Ok(collect_result)
+        collect_result
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
@@ -220,6 +220,7 @@ impl LocalStreamManager {
         let mut barrier_manager = core.context.lock_barrier_manager();
         assert!(barrier_manager.is_local_mode());
         barrier_manager.send_barrier(barrier, empty(), empty())?;
+        barrier_manager.remove_collect_rx(barrier.epoch.prev);
         Ok(())
     }
 
@@ -243,14 +244,15 @@ impl LocalStreamManager {
         if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
             return Ok(());
         }
-        let barrier = Barrier {
+        let barrier = &Barrier {
             epoch,
             mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
             span: tracing::Span::none(),
         };
 
-        self.send_and_collect_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect, false)
-            .await?;
+        self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
+        self.collect_barrier_and_sync(barrier.epoch.prev, false)
+            .await;
         self.core.lock().drop_all_actors();
 
         Ok(())
@@ -355,6 +357,7 @@ impl LocalStreamManagerCore {
             context: Arc::new(context),
             actor_infos: HashMap::new(),
             actors: HashMap::new(),
+            actor_monitor_tasks: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
@@ -461,7 +464,7 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Rc<Vec<u8>>,
+        vnode_bitmap: Option<Bitmap>,
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -479,7 +482,7 @@ impl LocalStreamManagerCore {
                     env.clone(),
                     store.clone(),
                     actor_context,
-                    Rc::clone(&vnode_bitmap),
+                    vnode_bitmap.clone(),
                 )
             })
             .try_collect()?;
@@ -512,6 +515,7 @@ impl LocalStreamManagerCore {
         let executor = Self::wrap_executor_for_debug(
             executor,
             actor_id,
+            executor_id,
             input_pos,
             self.streaming_metrics.clone(),
         );
@@ -526,7 +530,7 @@ impl LocalStreamManagerCore {
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Rc<Vec<u8>>,
+        vnode_bitmap: Option<Bitmap>,
     ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
@@ -545,10 +549,18 @@ impl LocalStreamManagerCore {
     fn wrap_executor_for_debug(
         executor: BoxedExecutor,
         actor_id: ActorId,
+        executor_id: u64,
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> BoxedExecutor {
-        DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
+        DebugExecutor::new(
+            executor,
+            input_pos,
+            actor_id,
+            executor_id,
+            streaming_metrics,
+        )
+        .boxed()
     }
 
     pub(crate) fn get_receive_message(
@@ -616,6 +628,11 @@ impl LocalStreamManagerCore {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
             let actor_context = Arc::new(Mutex::new(ActorContext::default()));
+            let vnode_bitmap = actor
+                .get_vnode_bitmap()
+                .ok()
+                .map(|b| b.try_into())
+                .transpose()?;
 
             let executor = self.create_nodes(
                 actor.fragment_id,
@@ -623,7 +640,7 @@ impl LocalStreamManagerCore {
                 actor.get_nodes()?,
                 env.clone(),
                 &actor_context,
-                Rc::new(actor.get_vnode_bitmap().to_owned()),
+                vnode_bitmap,
             )?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
@@ -634,13 +651,69 @@ impl LocalStreamManagerCore {
                 self.streaming_metrics.clone(),
                 actor_context,
             );
+            let monitor = tokio_metrics::TaskMonitor::new();
+
             self.handles.insert(
                 actor_id,
-                tokio::spawn(async move {
+                tokio::spawn(monitor.instrument(async move {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
-                }),
+                })),
             );
+
+            let actor_id_str = actor_id.to_string();
+
+            let metrics = self.streaming_metrics.clone();
+            let task = tokio::spawn(async move {
+                loop {
+                    metrics
+                        .actor_execution_time
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_fast_poll_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_fast_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_fast_poll_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_fast_poll_count as i64);
+                    metrics
+                        .actor_slow_poll_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_slow_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_slow_poll_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_slow_poll_count as i64);
+                    metrics
+                        .actor_poll_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_poll_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_poll_count as i64);
+                    metrics
+                        .actor_idle_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_idle_duration.as_secs_f64());
+                    metrics
+                        .actor_idle_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_idled_count as i64);
+                    metrics
+                        .actor_scheduled_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_scheduled_duration.as_secs_f64());
+                    metrics
+                        .actor_scheduled_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_scheduled_count as i64);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            });
+            self.actor_monitor_tasks.insert(actor_id, task);
         }
 
         Ok(())
@@ -686,7 +759,7 @@ impl LocalStreamManagerCore {
     fn drop_actor(&mut self, actor_id: ActorId) {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
-
+        self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
@@ -698,6 +771,7 @@ impl LocalStreamManagerCore {
     fn drop_all_actors(&mut self) {
         for (actor_id, handle) in self.handles.drain() {
             self.context.retain(|&(up_id, _)| up_id != actor_id);
+            self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
             self.actors.remove(&actor_id);
             // Task should have already stopped when this method is invoked.
             handle.abort();

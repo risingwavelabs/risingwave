@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
@@ -20,6 +20,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -34,6 +35,8 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
+#![feature(iterator_try_collect)]
+#![feature(lint_reasons)]
 
 pub mod execution;
 pub mod executor;

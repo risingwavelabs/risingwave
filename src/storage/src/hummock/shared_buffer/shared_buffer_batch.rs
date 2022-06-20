@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use risingwave_hummock_sdk::CompactionGroupId;
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
@@ -72,6 +73,7 @@ impl PartialEq for SharedBufferBatchInner {
 pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
+    compaction_group_id: CompactionGroupId,
 }
 
 impl SharedBufferBatch {
@@ -79,9 +81,16 @@ impl SharedBufferBatch {
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
         buffer_size_tracker: Arc<AtomicUsize>,
+        compaction_group_id: CompactionGroupId,
     ) -> Self {
         let size: usize = Self::measure_batch_size(&sorted_items);
-        Self::new_with_size(sorted_items, epoch, size, buffer_size_tracker)
+        Self::new_with_size(
+            sorted_items,
+            epoch,
+            size,
+            buffer_size_tracker,
+            compaction_group_id,
+        )
     }
 
     pub fn new_with_size(
@@ -89,6 +98,7 @@ impl SharedBufferBatch {
         epoch: HummockEpoch,
         size: usize,
         buffer_size_tracker: Arc<AtomicUsize>,
+        compaction_group_id: CompactionGroupId,
     ) -> Self {
         buffer_size_tracker.fetch_add(size, Relaxed);
 
@@ -99,6 +109,7 @@ impl SharedBufferBatch {
                 buffer_size_tracker,
             }),
             epoch,
+            compaction_group_id,
         }
     }
 
@@ -145,12 +156,10 @@ impl SharedBufferBatch {
         &self.inner
     }
 
-    #[allow(dead_code)]
     pub fn start_key(&self) -> &[u8] {
         &self.inner.first().unwrap().0
     }
 
-    #[allow(dead_code)]
     pub fn end_key(&self) -> &[u8] {
         &self.inner.last().unwrap().0
     }
@@ -169,6 +178,10 @@ impl SharedBufferBatch {
 
     pub fn size(&self) -> usize {
         self.inner.size
+    }
+
+    pub fn compaction_group_id(&self) -> CompactionGroupId {
+        self.compaction_group_id
     }
 }
 
@@ -275,6 +288,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 mod tests {
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::user_key;
 
     use super::*;
@@ -311,6 +325,7 @@ mod tests {
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
             buffer_size_tracker,
+            StaticCompactionGroupId::StateDefault.into(),
         );
 
         // Sketch
@@ -388,6 +403,7 @@ mod tests {
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
             buffer_size_tracker,
+            StaticCompactionGroupId::StateDefault.into(),
         );
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return

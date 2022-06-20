@@ -170,19 +170,10 @@ impl ColumnDesc {
         }
     }
 
-    /// Generate incremental `column_id` for `column_desc` and `field_descs`
-    pub fn generate_increment_id(&mut self, index: &mut i32) {
-        self.column_id = ColumnId::new(*index);
-        *index += 1;
-        for field in &mut self.field_descs {
-            field.generate_increment_id(index);
-        }
-    }
-
-    pub fn from_field_without_column_id(field: &Field) -> Self {
+    pub fn from_field_with_column_id(field: &Field, id: i32) -> Self {
         Self {
             data_type: field.data_type.clone(),
-            column_id: ColumnId::new(0),
+            column_id: ColumnId::new(id),
             name: field.name.clone(),
             field_descs: field
                 .sub_fields
@@ -191,6 +182,10 @@ impl ColumnDesc {
                 .collect_vec(),
             type_name: field.type_name.clone(),
         }
+    }
+
+    pub fn from_field_without_column_id(field: &Field) -> Self {
+        Self::from_field_with_column_id(field, 0)
     }
 }
 
@@ -234,6 +229,21 @@ impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
         Self {
             column_desc: prost.column_desc.unwrap().into(),
             order: OrderType::from_prost(&ProstOrderType::from_i32(prost.order).unwrap()),
+        }
+    }
+}
+
+impl From<&ProstOrderedColumnDesc> for OrderedColumnDesc {
+    fn from(prost: &ProstOrderedColumnDesc) -> Self {
+        prost.clone().into()
+    }
+}
+
+impl From<&OrderedColumnDesc> for ProstOrderedColumnDesc {
+    fn from(c: &OrderedColumnDesc) -> Self {
+        Self {
+            column_desc: Some((&c.column_desc).into()),
+            order: c.order.to_prost().into(),
         }
     }
 }

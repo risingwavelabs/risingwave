@@ -16,12 +16,19 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(any(test, feature = "test"))]
+use prost::Message;
+use risingwave_pb::meta::MetaLeaderInfo;
+#[cfg(any(test, feature = "test"))]
+use risingwave_pb::meta::MetaLeaseInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use super::{HashMappingManager, HashMappingManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, NotificationManager, NotificationManagerRef,
 };
+#[cfg(any(test, feature = "test"))]
+use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
 use crate::storage::MetaStore;
@@ -48,6 +55,8 @@ where
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
 
+    info: MetaLeaderInfo,
+
     /// options read by all services
     pub opts: Arc<MetaOpts>,
 }
@@ -66,12 +75,20 @@ impl Default for MetaOpts {
         }
     }
 }
+impl MetaOpts {
+    pub fn for_test(enable_recovery: bool, checkpoint_interval: u64) -> Self {
+        Self {
+            enable_recovery,
+            checkpoint_interval: Duration::from_millis(checkpoint_interval),
+        }
+    }
+}
 
 impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(opts: MetaOpts, meta_store: Arc<S>) -> Self {
+    pub async fn new(opts: MetaOpts, meta_store: Arc<S>, info: MetaLeaderInfo) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -84,6 +101,7 @@ where
             notification_manager,
             hash_mapping_manager,
             stream_client_pool,
+            info,
             opts: opts.into(),
         }
     }
@@ -127,14 +145,47 @@ where
     pub fn stream_client_pool(&self) -> &StreamClientPool {
         self.stream_client_pool.deref()
     }
+
+    pub fn get_leader_info(&self) -> MetaLeaderInfo {
+        self.info.clone()
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
 impl MetaSrvEnv<MemStore> {
     // Instance for test.
     pub async fn for_test() -> Self {
+        Self::for_test_opts(MetaOpts::default().into()).await
+    }
+
+    pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
+        let leader_info = MetaLeaderInfo {
+            lease_id: 0,
+            node_address: "".to_string(),
+        };
+        let lease_info = MetaLeaseInfo {
+            leader: Some(leader_info.clone()),
+            lease_register_time: 0,
+            lease_expire_time: 10,
+        };
         let meta_store = Arc::new(MemStore::default());
+        meta_store
+            .put_cf(
+                META_CF_NAME,
+                META_LEADER_KEY.as_bytes().to_vec(),
+                leader_info.encode_to_vec(),
+            )
+            .await
+            .unwrap();
+        meta_store
+            .put_cf(
+                META_CF_NAME,
+                META_LEASE_KEY.as_bytes().to_vec(),
+                lease_info.encode_to_vec(),
+            )
+            .await
+            .unwrap();
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new());
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -146,7 +197,8 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             hash_mapping_manager,
             stream_client_pool,
-            opts: MetaOpts::default().into(),
+            info: leader_info,
+            opts,
         }
     }
 }

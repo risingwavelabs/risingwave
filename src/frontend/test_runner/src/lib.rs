@@ -178,7 +178,7 @@ impl TestCase {
 
         if let Some(ref config_map) = self.with_config_map {
             for (key, val) in config_map {
-                session.set_config(key, val);
+                session.set_config(key, val).unwrap();
             }
         }
 
@@ -248,7 +248,7 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(session.clone());
+            let context = OptimizerContext::new(session.clone(), Arc::from(sql));
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -263,8 +263,13 @@ impl TestCase {
                     }
                     result = Some(ret);
                 }
-                Statement::CreateTable { name, columns, .. } => {
-                    create_table::handle_create_table(context, name, columns).await?;
+                Statement::CreateTable {
+                    name,
+                    columns,
+                    with_options,
+                    ..
+                } => {
+                    create_table::handle_create_table(context, name, columns, with_options).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,
@@ -485,12 +490,12 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
             if expected_err == actual_err {
                 Ok(())
             } else {
-                return Err(anyhow!(
+                Err(anyhow!(
                     "Expected {context} error: {}\n  Actual {context} error: {}",
                     expected_err,
                     actual_err,
                     context = ctx
-                ));
+                ))
             }
         }
     }

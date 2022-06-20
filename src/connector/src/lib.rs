@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
@@ -22,7 +22,7 @@
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -32,11 +32,14 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(let_chains)]
+#![feature(lint_reasons)]
+
+extern crate core;
 
 pub mod base;
-mod datagen;
+pub mod datagen;
 mod filesystem;
-mod kafka;
+pub mod kafka;
 pub mod kinesis;
 mod nexmark;
 mod pulsar;
@@ -46,6 +49,7 @@ pub use base::*;
 pub mod aws_utils;
 pub mod dummy_connector;
 mod macros;
+pub mod sink;
 pub mod state;
 
 pub use base::ConnectorState;

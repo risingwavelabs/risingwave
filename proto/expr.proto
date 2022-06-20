@@ -66,8 +66,12 @@ message ExprNode {
     CEIL = 221;
     FLOOR = 222;
     TO_CHAR = 223;
-
     MD5 = 224;
+    CHAR_LENGTH = 225;
+    REPEAT = 226;
+    CONCAT_OP = 227;
+    // BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL.
+    BOOL_OUT = 228;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -84,6 +88,7 @@ message ExprNode {
     // Array expression.
     ARRAY = 521;
     ARRAY_ACCESS = 522;
+    ROW = 523;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;

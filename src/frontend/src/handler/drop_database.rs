@@ -96,6 +96,11 @@ mod tests {
             .await
             .unwrap();
 
+        frontend
+            .run_sql("DROP SCHEMA database.public")
+            .await
+            .unwrap();
+
         frontend.run_sql("DROP DATABASE database").await.unwrap();
 
         let database = catalog_reader

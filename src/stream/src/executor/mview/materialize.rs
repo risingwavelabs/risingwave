@@ -54,7 +54,12 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let arrange_columns_set: HashSet<usize> =
             keys.iter().map(|k| k.column_idx).collect::<HashSet<_>>();
         let dist_key_set = distribution_keys.iter().copied().collect::<HashSet<_>>();
-        assert!(dist_key_set.is_subset(&arrange_columns_set));
+        assert!(
+            dist_key_set.is_subset(&arrange_columns_set),
+            "dist_key_set={:?}, arrange_columns_set={:?}",
+            dist_key_set,
+            arrange_columns_set
+        );
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
         let column_descs = column_ids
@@ -106,11 +111,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
                         }
 
                         // assemble pk row
-                        let arrange_row = Row(self
-                            .arrange_columns
-                            .iter()
-                            .map(|col_idx| chunk.column_at(*col_idx).array_ref().datum_at(idx))
-                            .collect_vec());
 
                         // assemble row
                         let row = Row(chunk
@@ -121,10 +121,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                         match op {
                             Insert | UpdateInsert => {
-                                self.state_table.insert(&arrange_row, row)?;
+                                self.state_table.insert(row)?;
                             }
                             Delete | UpdateDelete => {
-                                self.state_table.delete(&arrange_row, row)?;
+                                self.state_table.delete(row)?;
                             }
                         }
                     }
@@ -135,8 +135,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     // FIXME(ZBW): use a better error type
                     self.state_table
                         .commit_with_value_meta(b.epoch.prev)
-                        .await
-                        .map_err(StreamExecutorError::executor_v1)?;
+                        .await?;
                     Message::Barrier(b)
                 }
             }

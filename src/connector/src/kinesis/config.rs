@@ -117,7 +117,7 @@ impl AwsConfigInfo {
         if let Some(assume_role_arn) = properties.assume_role_arn {
             assume_role = Some(AwsAssumeRole {
                 arn: assume_role_arn,
-                external_id: properties.assume_role_externeal_id.clone(),
+                external_id: properties.assume_role_external_id.clone(),
             })
         }
 

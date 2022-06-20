@@ -12,20 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_pb::common::VNodeBitmap;
+use tokio::task::JoinHandle;
 
 use super::SstableMeta;
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableBuilder};
+use crate::hummock::{CachePolicy, HummockResult, SSTableBuilder, Sstable};
 
-struct SSTableBuilderWrapper {
-    id: HummockSSTableId,
-    builder: SSTableBuilder,
-    sealed: bool,
+pub struct SealedSstableBuilder {
+    pub id: HummockSSTableId,
+    pub meta: SstableMeta,
+    pub table_ids: Vec<u32>,
+    pub upload_join_handle: JoinHandle<HummockResult<()>>,
+    pub data_len: usize,
+    pub unit_id: u64,
 }
 
 /// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -37,31 +40,36 @@ pub struct CapacitySplitTableBuilder<B> {
     /// options.
     get_id_and_builder: B,
 
-    /// Wrapped [`SSTableBuilder`]s. The last one is what we are operating on.
-    builders: Vec<SSTableBuilderWrapper>,
+    sealed_builders: Vec<SealedSstableBuilder>,
+
+    current_builder: Option<SSTableBuilder>,
+
+    sstable_store: SstableStoreRef,
 }
 
 impl<B, F> CapacitySplitTableBuilder<B>
 where
     B: Clone + Fn() -> F,
-    F: Future<Output = HummockResult<(HummockSSTableId, SSTableBuilder)>>,
+    F: Future<Output = HummockResult<SSTableBuilder>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(get_id_and_builder: B) -> Self {
+    pub fn new(get_id_and_builder: B, sstable_store: SstableStoreRef) -> Self {
         Self {
             get_id_and_builder,
-            builders: Vec::new(),
+            sealed_builders: Vec::new(),
+            current_builder: None,
+            sstable_store,
         }
     }
 
     /// Returns the number of [`SSTableBuilder`]s.
     pub fn len(&self) -> usize {
-        self.builders.len()
+        self.sealed_builders.len() + if self.current_builder.is_some() { 1 } else { 0 }
     }
 
     /// Returns true if no builder is created.
     pub fn is_empty(&self) -> bool {
-        self.builders.is_empty()
+        self.sealed_builders.is_empty() && self.current_builder.is_none()
     }
 
     /// Adds a user key-value pair to the underlying builders, with given `epoch`.
@@ -93,23 +101,19 @@ where
         value: HummockValue<&[u8]>,
         allow_split: bool,
     ) -> HummockResult<()> {
-        let last_is_full = self
-            .builders
-            .last()
-            .map(|b| b.builder.reach_capacity() || b.sealed)
-            .unwrap_or(true);
-        let new_builder_required = self.builders.is_empty() || (allow_split && last_is_full);
-
-        if new_builder_required {
-            let (id, builder) = (self.get_id_and_builder)().await?;
-            self.builders.push(SSTableBuilderWrapper {
-                id,
-                builder,
-                sealed: false,
-            });
+        if let Some(builder) = self.current_builder.as_ref() {
+            if allow_split && builder.reach_capacity() {
+                self.seal_current();
+            }
         }
 
-        let builder = &mut self.builders.last_mut().unwrap().builder;
+        if self.current_builder.is_none() {
+            let _ = self
+                .current_builder
+                .insert((self.get_id_and_builder)().await?);
+        }
+
+        let builder = self.current_builder.as_mut().unwrap();
         builder.add(full_key.into_inner(), value);
         Ok(())
     }
@@ -119,20 +123,38 @@ where
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
     pub fn seal_current(&mut self) {
-        if let Some(b) = self.builders.last_mut() {
-            b.sealed = true;
+        if let Some(builder) = self.current_builder.take() {
+            let (table_id, data, meta, table_ids) = builder.finish();
+            let len = data.len();
+            let sstable_store = self.sstable_store.clone();
+            let meta_clone = meta.clone();
+            let upload_join_handle = tokio::spawn(async move {
+                sstable_store
+                    .put(
+                        Sstable {
+                            id: table_id,
+                            meta: meta_clone,
+                        },
+                        data,
+                        CachePolicy::Fill,
+                    )
+                    .await
+            });
+            self.sealed_builders.push(SealedSstableBuilder {
+                id: table_id,
+                meta,
+                table_ids,
+                upload_join_handle,
+                data_len: len,
+                unit_id: 0,
+            })
         }
     }
 
     /// Finalizes all the tables to be ids, blocks and metadata.
-    pub fn finish(self) -> Vec<(HummockSSTableId, Bytes, SstableMeta, Vec<VNodeBitmap>)> {
-        self.builders
-            .into_iter()
-            .map(|b| {
-                let (data, meta, vnode_bitmaps) = b.builder.finish();
-                (b.id, data, meta, vnode_bitmaps)
-            })
-            .collect()
+    pub fn finish(mut self) -> Vec<SealedSstableBuilder> {
+        self.seal_current();
+        self.sealed_builders
     }
 }
 
@@ -144,6 +166,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::default_builder_opt_for_test;
     use crate::hummock::{SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
@@ -154,18 +177,18 @@ mod tests {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let get_id_and_builder = || async {
-            Ok((
+            Ok(SSTableBuilder::new(
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(SSTableBuilderOptions {
+                SSTableBuilderOptions {
                     capacity: table_capacity,
                     block_capacity: block_size,
                     restart_interval: DEFAULT_RESTART_INTERVAL,
                     bloom_false_positive: 0.1,
                     compression_algorithm: CompressionAlgorithm::None,
-                }),
+                },
             ))
         };
-        let builder = CapacitySplitTableBuilder::new(get_id_and_builder);
+        let builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
         let results = builder.finish();
         assert!(results.is_empty());
     }
@@ -177,18 +200,18 @@ mod tests {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let get_id_and_builder = || async {
-            Ok((
+            Ok(SSTableBuilder::new(
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(SSTableBuilderOptions {
+                SSTableBuilderOptions {
                     capacity: table_capacity,
                     block_capacity: block_size,
                     restart_interval: DEFAULT_RESTART_INTERVAL,
                     bloom_false_positive: 0.1,
                     compression_algorithm: CompressionAlgorithm::None,
-                }),
+                },
             ))
         };
-        let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
+        let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
 
         for i in 0..table_capacity {
             builder
@@ -203,18 +226,21 @@ mod tests {
 
         let results = builder.finish();
         assert!(results.len() > 1);
-        assert_eq!(results.iter().map(|p| p.0).duplicates().count(), 0);
+        assert_eq!(results.iter().map(|p| p.id).duplicates().count(), 0);
     }
 
     #[tokio::test]
     async fn test_table_seal() {
         let next_id = AtomicU64::new(1001);
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            Ok((
-                next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(default_builder_opt_for_test()),
-            ))
-        });
+        let mut builder = CapacitySplitTableBuilder::new(
+            || async {
+                Ok(SSTableBuilder::new(
+                    next_id.fetch_add(1, SeqCst),
+                    default_builder_opt_for_test(),
+                ))
+            },
+            mock_sstable_store(),
+        );
         let mut epoch = 100;
 
         macro_rules! add {
@@ -250,12 +276,15 @@ mod tests {
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
         let next_id = AtomicU64::new(1001);
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            Ok((
-                next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(default_builder_opt_for_test()),
-            ))
-        });
+        let mut builder = CapacitySplitTableBuilder::new(
+            || async {
+                Ok(SSTableBuilder::new(
+                    next_id.fetch_add(1, SeqCst),
+                    default_builder_opt_for_test(),
+                ))
+            },
+            mock_sstable_store(),
+        );
 
         builder
             .add_full_key(

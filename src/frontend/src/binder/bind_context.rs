@@ -112,7 +112,6 @@ impl BindContext {
 }
 
 impl BindContext {
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         BindContext {
             columns: Vec::new(),

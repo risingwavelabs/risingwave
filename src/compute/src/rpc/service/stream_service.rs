@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::Source;
+use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::{Barrier, Epoch};
@@ -136,21 +137,38 @@ impl StreamService for StreamServiceImpl {
         let barrier =
             Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
 
-        let collect_result = self
-            .mgr
-            .send_and_collect_barrier(
-                &barrier,
-                req.actor_ids_to_send,
-                req.actor_ids_to_collect,
-                true,
-            )
-            .await?;
+        self.mgr
+            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
             status: None,
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn barrier_complete(
+        &self,
+        request: Request<BarrierCompleteRequest>,
+    ) -> Result<Response<BarrierCompleteResponse>, Status> {
+        let req = request.into_inner();
+        let collect_result = self
+            .mgr
+            .collect_barrier_and_sync(req.prev_epoch, true)
+            .await;
+
+        Ok(Response::new(BarrierCompleteResponse {
+            request_id: req.request_id,
+            status: None,
             create_mview_progress: collect_result.create_mview_progress,
-            sycned_sstables: collect_result.synced_sstables,
+            sycned_sstables: collect_result
+                .synced_sstables
+                .into_iter()
+                .map(|(compaction_group_id, sst)| GroupedSstableInfo {
+                    compaction_group_id,
+                    sst: Some(sst),
+                })
+                .collect_vec(),
         }))
     }
 

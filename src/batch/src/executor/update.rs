@@ -99,11 +99,11 @@ impl UpdateExecutor {
             let len = data_chunk.cardinality();
 
             let updated_data_chunk = {
-                let columns = self
+                let columns: Vec<_> = self
                     .exprs
                     .iter_mut()
                     .map(|expr| expr.eval(&data_chunk).map(Column::new))
-                    .collect::<Result<Vec<_>>>()?;
+                    .try_collect()?;
 
                 DataChunk::new(columns, len)
             };
@@ -123,7 +123,7 @@ impl UpdateExecutor {
             let columns = builders
                 .into_iter()
                 .map(|b| b.finish().map(|a| a.into()))
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
 
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -176,11 +176,11 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 
         let table_id = TableId::from(&update_node.table_source_ref_id);
 
-        let exprs = update_node
+        let exprs: Vec<_> = update_node
             .get_exprs()
             .iter()
             .map(build_from_prost)
-            .collect::<Result<Vec<BoxedExpression>>>()?;
+            .try_collect()?;
 
         Ok(Box::new(Self::new(
             table_id,

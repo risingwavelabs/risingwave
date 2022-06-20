@@ -20,7 +20,7 @@ use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
-use crate::error::{ErrorCode, Result as RwResult};
+use crate::error::Result as RwResult;
 use crate::hash::HashCode;
 use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
@@ -185,6 +185,13 @@ impl ops::Index<usize> for Row {
     }
 }
 
+impl AsRef<Row> for Row {
+    #[inline]
+    fn as_ref(&self) -> &Row {
+        self
+    }
+}
+
 // TODO: remove this due to implicit allocation
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {
@@ -210,6 +217,11 @@ impl Ord for Row {
 impl Row {
     pub fn new(values: Vec<Datum>) -> Self {
         Self(values)
+    }
+
+    pub fn empty<'a>() -> &'a Self {
+        static EMPTY_ROW: Row = Row(Vec::new());
+        &EMPTY_ROW
     }
 
     /// Serialize the row into a memcomparable bytes.
@@ -290,7 +302,11 @@ impl Row {
     }
 
     /// Compute hash value of a row on corresponding indices.
-    pub fn hash_by_indices<H>(&self, hash_indices: &[usize], hash_builder: &H) -> RwResult<HashCode>
+    pub fn hash_by_indices<H>(
+        &self,
+        hash_indices: &[usize],
+        hash_builder: &H,
+    ) -> super::ArrayResult<HashCode>
     where
         H: BuildHasher,
     {
@@ -299,14 +315,17 @@ impl Row {
             let datum = self.0.get(*idx);
             match datum {
                 Some(datum) => datum.hash(&mut hasher),
-                None => {
-                    return Err(
-                        ErrorCode::InternalError(format!("index {} out of row bound", idx)).into(),
-                    )
-                }
+                None => bail!("index {} out of row bound", idx),
             }
         }
         Ok(HashCode(hasher.finish()))
+    }
+
+    /// Get an owned `Row` by the given `indices` from current row.
+    ///
+    /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
+    pub fn by_indices(&self, indices: &[usize]) -> Row {
+        Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
     }
 }
 

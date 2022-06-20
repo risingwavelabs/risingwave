@@ -20,9 +20,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_hummock_sdk::VersionedComparator;
 use {lz4, zstd};
 
-use super::utils::{
-    bytes_diff, var_u32_len, xxhash64_verify, BufExt, BufMutExt, CompressionAlgorithm,
-};
+use super::utils::{bytes_diff, xxhash64_verify, CompressionAlgorithm};
 use crate::hummock::sstable::utils::xxhash64_checksum;
 use crate::hummock::{HummockError, HummockResult};
 
@@ -84,7 +82,7 @@ impl Block {
     }
 
     /// Entries data len.
-    #[allow(clippy::len_without_is_empty)]
+    #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         assert!(!self.data.is_empty());
         self.data.len()
@@ -132,16 +130,16 @@ pub struct KeyPrefix {
 }
 
 impl KeyPrefix {
-    pub fn encode(&self, mut buf: &mut impl BufMut) {
-        buf.put_var_u32(self.overlap as u32);
-        buf.put_var_u32(self.diff as u32);
-        buf.put_var_u32(self.value as u32);
+    pub fn encode(&self, buf: &mut impl BufMut) {
+        buf.put_u16(self.overlap as u16);
+        buf.put_u16(self.diff as u16);
+        buf.put_u32(self.value as u32);
     }
 
-    pub fn decode(mut buf: &mut impl Buf, offset: usize) -> Self {
-        let overlap = buf.get_var_u32() as usize;
-        let diff = buf.get_var_u32() as usize;
-        let value = buf.get_var_u32() as usize;
+    pub fn decode(buf: &mut impl Buf, offset: usize) -> Self {
+        let overlap = buf.get_u16() as usize;
+        let diff = buf.get_u16() as usize;
+        let value = buf.get_u32() as usize;
         Self {
             overlap,
             diff,
@@ -152,9 +150,7 @@ impl KeyPrefix {
 
     /// Encoded length.
     fn len(&self) -> usize {
-        var_u32_len(self.overlap as u32)
-            + var_u32_len(self.diff as u32)
-            + var_u32_len(self.value as u32)
+        2 + 2 + 4
     }
 
     /// Gets overlap len.
@@ -299,7 +295,7 @@ impl BlockBuilder {
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 encoder
-                    .write(&self.buf[..])
+                    .write_all(&self.buf[..])
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 let (writer, result) = encoder.finish();
@@ -312,7 +308,7 @@ impl BlockBuilder {
                         .map_err(HummockError::encode_error)
                         .unwrap();
                 encoder
-                    .write(&self.buf[..])
+                    .write_all(&self.buf[..])
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 let writer = encoder

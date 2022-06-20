@@ -21,6 +21,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -31,6 +32,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(generic_associated_types)]
 #![feature(more_qualified_paths)]
+#![feature(lint_reasons)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(map_first_last)]
 #![feature(let_chains)]
@@ -41,6 +43,7 @@
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(unzip_option)]
+#![feature(allocator_api)]
 
 #[macro_use]
 extern crate log;

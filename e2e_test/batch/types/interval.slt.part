@@ -1,0 +1,54 @@
+query TTTTT
+select interval '500' year, interval '-50' month, interval '5' hour, interval '5' minute, interval '5' second;
+----
+500 years 00:00:00 -4 years -2 mons 00:00:00 05:00:00 00:05:00 00:00:05
+
+query TTTTT
+SELECT interval '1 year', interval '1 y', interval '1 yr';
+----
+1 year 00:00:00 1 year 00:00:00 1 year 00:00:00
+
+query TTTTT
+SELECT interval '2 month', interval '2 mon';
+----
+2 mons 00:00:00 2 mons 00:00:00
+
+query TTTTT
+SELECT interval '3 day';
+----
+3 days 00:00:00
+
+query TTTTT
+SELECT interval '4 hour';
+----
+04:00:00
+
+query TTTTT
+SELECT interval '5 minute', interval '2 m';
+----
+00:05:00 00:02:00
+
+query TTTTT
+SELECT interval '6 second';
+----
+00:00:06
+
+query T
+SELECT interval '1' month = interval '30' day;
+----
+t
+
+query T
+SELECT interval '1' day = interval '24' hour;
+----
+t
+
+query T
+SELECT interval '1' day = interval '86400' second;
+----
+t
+
+query T
+SELECT interval '1' day - interval '12' hour = interval '12' hour;
+----
+t

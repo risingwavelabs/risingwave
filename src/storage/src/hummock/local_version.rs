@@ -17,11 +17,15 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
+use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
+use crate::hummock::shared_buffer::{OrderIndex, UploadTaskType};
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
@@ -90,6 +94,16 @@ impl LocalVersion {
             pinned_version: self.pinned_version.clone(),
         }
     }
+
+    pub fn new_upload_task(
+        &self,
+        epoch: HummockEpoch,
+        task_type: UploadTaskType,
+    ) -> Option<(OrderIndex, UploadTaskPayload)> {
+        self.shared_buffer
+            .get(&epoch)
+            .and_then(|shared_buffer| shared_buffer.write().new_upload_task(task_type))
+    }
 }
 
 #[derive(Debug)]
@@ -120,7 +134,9 @@ impl PinnedVersion {
     }
 
     pub fn levels(&self) -> &Vec<Level> {
-        &self.version.levels
+        // TODO #2065: use correct compaction group id
+        self.version
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
     }
 
     pub fn max_committed_epoch(&self) -> u64 {

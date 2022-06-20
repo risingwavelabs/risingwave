@@ -24,7 +24,7 @@ pub struct UserInfoManager {
     users: HashMap<UserName, UserInfo>,
 }
 
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for UserInfoManager {
     fn default() -> Self {
         UserInfoManager {
@@ -57,11 +57,11 @@ impl UserInfoManager {
         self.users.insert(user_info.name.clone(), user_info);
     }
 
-    pub fn verify(&mut self, _user_name: &str, _password: &str) -> bool {
+    pub fn authorize(&mut self, _user_name: &str, _password: &str) -> bool {
         todo!()
     }
 
-    pub fn authorize(&self, _user_name: &str, _privileges: &[GrantPrivilege]) -> bool {
+    pub fn verify(&self, _user_name: &str, _privileges: &[GrantPrivilege]) -> bool {
         todo!()
     }
 

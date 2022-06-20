@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use futures::channel::oneshot::{channel, Canceled, Receiver, Sender};
-use spin::Mutex;
+use parking_lot::Mutex;
 
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
@@ -321,7 +321,6 @@ pub struct LruCacheShard<K: LruKey, T: LruValue> {
 }
 
 unsafe impl<K: LruKey, T: LruValue> Send for LruCacheShard<K, T> {}
-unsafe impl<K: LruKey, T: LruValue> Sync for LruCacheShard<K, T> {}
 
 impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     fn new(capacity: usize, object_capacity: usize) -> Self {

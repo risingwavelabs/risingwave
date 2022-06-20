@@ -15,10 +15,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{
-    CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, SubscribeCompactTasksResponse, VacuumTask,
 };
+use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
 
@@ -91,8 +92,12 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch, _sstables: Vec<SstableInfo>) -> Result<()> {
-        Err(ErrorCode::NotImplemented("commit_epoch unsupported".to_string(), None.into()).into())
+    async fn commit_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _sstables: Vec<LocalSstableInfo>,
+    ) -> Result<()> {
+        panic!("Only meta service can commit_epoch in production.")
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
@@ -101,5 +106,20 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
         self.meta_client.report_vacuum_task(vacuum_task).await
+    }
+
+    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+        self.meta_client.get_compaction_groups().await
+    }
+
+    async fn trigger_manual_compaction(
+        &self,
+        compaction_group_id: u64,
+        table_id: u32,
+        level: u32,
+    ) -> Result<()> {
+        self.meta_client
+            .trigger_manual_compaction(compaction_group_id, table_id, level)
+            .await
     }
 }

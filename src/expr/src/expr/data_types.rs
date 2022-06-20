@@ -177,7 +177,6 @@ macro_rules! time {
     };
 }
 
-#[allow(unused_imports)]
 pub(crate) use time;
 
 #[macro_export]

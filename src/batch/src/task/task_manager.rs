@@ -81,7 +81,7 @@ impl BatchManager {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
             match task_output.take_data(&mut writer).await {
                 Ok(_) => {
-                    tracing::debug!(
+                    tracing::trace!(
                         from = ?task_id,
                         "exchanged {} chunks",
                         writer.written_chunks(),
@@ -96,7 +96,6 @@ impl BatchManager {
 
     pub fn take_output(&self, output_id: &ProstTaskOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
-        debug!("Trying to take output of: {:?}", output_id);
         self.tasks
             .lock()
             .get(&task_id)
@@ -175,11 +174,13 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
+    use risingwave_pb::batch_plan::table_function_node::Type;
     use risingwave_pb::batch_plan::{
-        ExchangeInfo, GenerateSeriesNode, PlanFragment, PlanNode, TaskId as ProstTaskId,
+        ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, TaskId as ProstTaskId,
         TaskOutputId as ProstTaskOutputId, ValuesNode,
     };
     use tonic::Code;
@@ -258,12 +259,16 @@ mod tests {
             root: Some(PlanNode {
                 children: vec![],
                 identity: "".to_string(),
-                node_body: Some(NodeBody::GenerateSeries(GenerateSeriesNode {
-                    start: Some(make_i32_literal(1)),
+                node_body: Some(NodeBody::TableFunction(TableFunctionNode {
+                    function_type: Type::Generate as i32,
+                    args: vec![
+                        make_i32_literal(1),
+                        make_i32_literal(i32::MAX),
+                        make_i32_literal(1),
+                    ],
                     // This is a bit hacky as we want to make sure the task lasts long enough
                     // for us to abort it.
-                    stop: Some(make_i32_literal(i32::MAX)),
-                    step: Some(make_i32_literal(1)),
+                    return_type: Some(DataType::Int32.to_protobuf()),
                 })),
             }),
             exchange_info: Some(ExchangeInfo {

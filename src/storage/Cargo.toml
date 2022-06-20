@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 
 [dependencies]
@@ -27,6 +27,7 @@ lz4 = "1.23.1"
 madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.8", features = ["future"] }
+nix = { version = "0.24.1", features = ["fs"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -58,6 +59,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+tokio-metrics = "0.1.0"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
@@ -74,6 +76,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
+risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
 [features]
@@ -97,4 +100,8 @@ harness = false
 
 [[bench]]
 name = "bench_fs_operation"
+harness = false
+
+[[bench]]
+name = "bench_compression"
 harness = false

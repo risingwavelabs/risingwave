@@ -17,10 +17,10 @@ use std::sync::Arc;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayRef, BoolArrayBuilder, DataChunk, Row,
 };
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct IsNullExpression {

@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
+use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
@@ -47,6 +48,17 @@ pub struct TableCatalog {
 
     /// If set to Some(TableId), then this table is an index on another table.
     pub is_index_on: Option<TableId>,
+
+    /// The appendonly attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
+    /// on this to derive an append-only stream plan
+    pub appendonly: bool,
+
+    /// Owner of the table.
+    pub owner: String,
+
+    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
+    /// table.
+    pub vnode_mapping: Option<Vec<u32>>,
 }
 
 impl TableCatalog {
@@ -79,6 +91,7 @@ impl TableCatalog {
             pks: self.pks.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_keys: self.distribution_keys.clone(),
+            appendonly: self.appendonly,
         }
     }
 
@@ -123,6 +136,9 @@ impl TableCatalog {
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
+            appendonly: self.appendonly,
+            owner: self.owner.clone(),
+            mapping: None,
         }
     }
 }
@@ -163,6 +179,11 @@ impl From<ProstTable> for TableCatalog {
             })
             .collect();
 
+        let vnode_mapping = decompress_data(
+            &tb.mapping.as_ref().unwrap().original_indices,
+            &tb.mapping.as_ref().unwrap().data,
+        );
+
         Self {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
@@ -180,6 +201,9 @@ impl From<ProstTable> for TableCatalog {
                 .map(|k| *k as usize)
                 .collect_vec(),
             pks: tb.pk.iter().map(|x| *x as _).collect(),
+            appendonly: tb.appendonly,
+            owner: tb.owner,
+            vnode_mapping: Some(vnode_mapping),
         }
     }
 }
@@ -195,9 +219,11 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
+    use risingwave_common::util::compress::compress_data;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::common::ParallelUnitMapping;
     use risingwave_pb::plan_common::{
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
     };
@@ -208,6 +234,8 @@ mod tests {
 
     #[test]
     fn test_into_table_catalog() {
+        let mapping = [1, 1, 2, 2, 3, 3, 4, 4].to_vec();
+        let (original_indices, data) = compress_data(&mapping);
         let table: TableCatalog = ProstTable {
             is_index: false,
             index_on_id: 0,
@@ -248,6 +276,13 @@ mod tests {
             distribution_keys: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
+            appendonly: false,
+            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            mapping: Some(ParallelUnitMapping {
+                table_id: 0,
+                original_indices,
+                data,
+            }),
         }
         .into();
 
@@ -294,6 +329,9 @@ mod tests {
                     order: OrderType::Ascending
                 }],
                 distribution_keys: vec![],
+                appendonly: false,
+                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+                vnode_mapping: Some(mapping),
             }
         );
     }

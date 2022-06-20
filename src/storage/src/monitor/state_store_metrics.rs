@@ -45,6 +45,10 @@ macro_rules! for_all_metrics {
             range_backward_scan_size: Histogram,
             range_backward_scan_duration: Histogram,
 
+            iter_size: Histogram,
+            iter_item: Histogram,
+            iter_duration: Histogram,
+
             write_batch_tuple_counts: GenericCounter<AtomicU64>,
             write_batch_duration: Histogram,
             write_batch_size: Histogram,
@@ -60,12 +64,17 @@ macro_rules! for_all_metrics {
             shared_buffer_to_sstable_size: Histogram,
 
             compaction_upload_sst_counts: GenericCounter<AtomicU64>,
-            compaction_read_bytes: GenericCounter<AtomicU64>,
-            compaction_write_bytes: GenericCounter<AtomicU64>,
+            compact_frequency: GenericCounterVec<AtomicU64>,
+            compact_write_bytes: GenericCounterVec<AtomicU64>,
+            compact_read_current_level: GenericCounterVec<AtomicU64>,
+            compact_read_next_level: GenericCounterVec<AtomicU64>,
+            compact_read_sstn_current_level: GenericCounterVec<AtomicU64>,
+            compact_read_sstn_next_level: GenericCounterVec<AtomicU64>,
+            compact_write_sstn: GenericCounterVec<AtomicU64>,
             compact_sst_duration: Histogram,
             compact_task_duration: HistogramVec,
-            get_table_id_total_time_duration: Histogram,
 
+            get_table_id_total_time_duration: Histogram,
             remote_read_time: Histogram,
         }
     };
@@ -169,6 +178,27 @@ impl StateStoreMetrics {
         let range_backward_scan_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let opts = histogram_opts!(
+            "state_store_iter_size",
+            "Total bytes gotten from state store scan(), for calculating read throughput",
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+        );
+        let iter_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_item",
+            "Total bytes gotten from state store scan(), for calculating read throughput",
+            exponential_buckets(1.0, 2.0, 20).unwrap() // max 2^20 items
+        );
+        let iter_item = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_duration",
+            "Total time of scan that have been issued to state store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let iter_duration = register_histogram_with_registry!(opts, registry).unwrap();
+
         // ----- write_batch -----
         let write_batch_tuple_counts = register_int_counter_with_registry!(
             "state_store_write_batch_tuple_counts",
@@ -250,18 +280,6 @@ impl StateStoreMetrics {
             registry
         )
         .unwrap();
-        let compaction_read_bytes = register_int_counter_with_registry!(
-            "state_store_compaction_read_bytes",
-            "Total size of file size that read from object store in compaction job",
-            registry
-        )
-        .unwrap();
-        let compaction_write_bytes = register_int_counter_with_registry!(
-            "state_store_compaction_write_bytes",
-            "Total size of compaction files size that have been written to object store",
-            registry
-        )
-        .unwrap();
 
         let opts = histogram_opts!(
             "state_store_compact_sst_duration",
@@ -290,6 +308,61 @@ impl StateStoreMetrics {
             exponential_buckets(0.001, 1.6, 28).unwrap() // max 520s
         );
         let remote_read_time = register_histogram_with_registry!(opts, registry).unwrap();
+        let compact_read_current_level = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_curr",
+            "KBs read from current level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let compact_read_next_level = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_next",
+            "KBs read from next level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let compact_write_bytes = register_int_counter_vec_with_registry!(
+            "storage_level_compact_write",
+            "KBs written into next level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let compact_read_sstn_current_level = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_sstn_curr",
+            "num of SSTs read from current level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let compact_read_sstn_next_level = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_sstn_next",
+            "num of SSTs read from next level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let compact_write_sstn = register_int_counter_vec_with_registry!(
+            "storage_level_compact_write_sstn",
+            "num of SSTs written into next level during history compactions to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
+
+        let compact_frequency = register_int_counter_vec_with_registry!(
+            "storage_level_compact_frequency",
+            "num of compactions from each level to next level",
+            &["group", "level_index"],
+            registry
+        )
+        .unwrap();
 
         monitor_process(&registry).unwrap();
         Self {
@@ -297,14 +370,15 @@ impl StateStoreMetrics {
             get_key_size,
             get_value_size,
             get_shared_buffer_hit_counts,
-
             bloom_filter_true_negative_counts,
             bloom_filter_might_positive_counts,
-
             range_scan_size,
             range_scan_duration,
             range_backward_scan_size,
             range_backward_scan_duration,
+            iter_size,
+            iter_item,
+            iter_duration,
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
@@ -317,12 +391,16 @@ impl StateStoreMetrics {
             shared_buffer_to_sstable_size,
 
             compaction_upload_sst_counts,
-            compaction_read_bytes,
-            compaction_write_bytes,
+            compact_frequency,
+            compact_write_bytes,
+            compact_read_current_level,
+            compact_read_next_level,
+            compact_read_sstn_current_level,
+            compact_read_sstn_next_level,
+            compact_write_sstn,
             compact_sst_duration,
             compact_task_duration,
             get_table_id_total_time_duration,
-
             remote_read_time,
         }
     }

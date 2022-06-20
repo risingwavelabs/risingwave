@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-use std::mem::swap;
+use std::collections::HashMap;
+use std::mem;
 use std::sync::Arc;
 
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result};
+use anyhow::anyhow;
+use risingwave_common::bail;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -32,7 +32,7 @@ use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::HummockSnapshotManagerRef;
+use crate::scheduler::{HummockSnapshotManagerRef, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -55,13 +55,13 @@ enum QueryState {
         runner: QueryRunner,
 
         /// Receiver of root stage info.
-        root_stage_receiver: oneshot::Receiver<Result<QueryResultFetcher>>,
+        root_stage_receiver: oneshot::Receiver<SchedulerResult<QueryResultFetcher>>,
     },
 
     /// Running
     Running {
         _msg_sender: Sender<QueryMessage>,
-        _task_handle: JoinHandle<Result<()>>,
+        _task_handle: JoinHandle<SchedulerResult<()>>,
     },
 
     /// Failed
@@ -87,7 +87,7 @@ struct QueryRunner {
     msg_sender: Sender<QueryMessage>,
 
     /// Will be set to `None` after all stage scheduled.
-    root_stage_sender: Option<oneshot::Sender<Result<QueryResultFetcher>>>,
+    root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
 
     epoch: u64,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -131,7 +131,7 @@ impl QueryExecution {
         };
 
         let (root_stage_sender, root_stage_receiver) =
-            oneshot::channel::<Result<QueryResultFetcher>>();
+            oneshot::channel::<SchedulerResult<QueryResultFetcher>>();
 
         let runner = QueryRunner {
             query: query.clone(),
@@ -158,10 +158,9 @@ impl QueryExecution {
     }
 
     /// Start execution of this query.
-    pub async fn start(&self) -> Result<QueryResultFetcher> {
+    pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
-        let mut cur_state = Failed;
-        swap(&mut *state, &mut cur_state);
+        let cur_state = mem::replace(&mut *state, Failed);
 
         match cur_state {
             QueryState::Pending {
@@ -177,9 +176,9 @@ impl QueryExecution {
                     })
                 });
 
-                let root_stage = root_stage_receiver.await.map_err(|e| {
-                    InternalError(format!("Starting query execution failed: {:?}", e))
-                })??;
+                let root_stage = root_stage_receiver
+                    .await
+                    .map_err(|e| anyhow!("Starting query execution failed: {:?}", e))??;
 
                 info!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
@@ -196,19 +195,19 @@ impl QueryExecution {
             s => {
                 // Restore old state
                 *state = s;
-                Err(ErrorCode::InternalError("Query not pending!".to_string()).into())
+                bail!("Query not pending!")
             }
         }
     }
 
     /// Cancel execution of this query.
-    pub async fn abort(&mut self) -> Result<()> {
+    pub async fn abort(&mut self) -> SchedulerResult<()> {
         todo!()
     }
 }
 
 impl QueryRunner {
-    async fn run(mut self) -> Result<()> {
+    async fn run(mut self) -> SchedulerResult<()> {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -217,28 +216,18 @@ impl QueryRunner {
                 "Starting query stage: {:?}-{:?}",
                 self.query.query_id, stage_id
             );
-            self.stage_executions
-                .get(stage_id)
-                .as_ref()
-                .unwrap()
-                .start()
-                .await
-                .map_err(|e| {
-                    error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
-                    e
-                })?;
+            self.stage_executions[stage_id].start().await.map_err(|e| {
+                error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
+                e
+            })?;
             info!(
                 "Query stage {:?}-{:?} started.",
                 self.query.query_id, stage_id
             );
         }
-        let mut stages_has_table_scan = self
-            .query
-            .stage_has_table_scan()
-            .into_iter()
-            .collect::<HashSet<_>>();
+        let mut stages_with_table_scan = self.query.stages_with_table_scan();
 
-        // Schedule stages when leaf stages all scheduled
+        // Schedule other stages after leaf stages are all scheduled.
         while let Some(msg) = self.msg_receiver.recv().await {
             match msg {
                 Stage(Scheduled(stage_id)) => {
@@ -247,15 +236,13 @@ impl QueryRunner {
                         self.query.query_id, stage_id
                     );
                     self.scheduled_stages_count += 1;
-                    stages_has_table_scan.remove(&stage_id);
-                    if stages_has_table_scan.is_empty() {
-                        // Since all the iterators are created during building the leaf tasks in the
-                        // backend, we can be sure here that all the
-                        // iterator have been created, thus they all successfully pinned a
-                        // HummockVersion. So we can now unpin their epoch.
+                    stages_with_table_scan.remove(&stage_id);
+                    if stages_with_table_scan.is_empty() {
+                        // We can be sure here that all the Hummock iterators have been created,
+                        // thus they all successfully pinned a HummockVersion.
+                        // So we can now unpin their epoch.
                         info!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
-                            .clone()
                             .unpin_snapshot(self.epoch, self.query.query_id())
                             .await?;
                     }
@@ -266,32 +253,25 @@ impl QueryRunner {
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
                             if self.all_children_scheduled(parent).await {
-                                self.get_stage_execution_unchecked(parent)
-                                    .start()
-                                    .await
-                                    .map_err(|e| {
-                                        error!(
-                                            "Failed to start stage: {}, reason: {:?}",
-                                            stage_id, e
-                                        );
-                                        e
-                                    })?;
+                                self.stage_executions[parent].start().await.map_err(|e| {
+                                    error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
+                                    e
+                                })?;
                             }
                         }
                     }
                 }
                 Stage(StageEvent::Failed { id, reason }) => {
                     error!(
-                        "Query stage {:?}-{:?} failed: {}.",
+                        "Query stage {:?}-{:?} failed: {:?}.",
                         self.query.query_id, id, reason
                     );
 
                     // Consume sender here.
-                    let mut tmp_sender = None;
-                    swap(&mut self.root_stage_sender, &mut tmp_sender);
+                    let root_stage_sender = mem::take(&mut self.root_stage_sender);
                     // It's possible we receive stage failed event message multi times and the
                     // sender has been consumed in first failed event.
-                    if let Some(sender) = tmp_sender {
+                    if let Some(sender) = root_stage_sender {
                         if let Err(e) = sender.send(Err(reason)) {
                             warn!("Query execution dropped: {:?}", e);
                         } else {
@@ -303,12 +283,11 @@ impl QueryRunner {
                     }
                     // TODO: We should can cancel all scheduled stages here.
                 }
-                _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        "unsupported type for QueryRunner.run".to_string(),
+                rest => {
+                    return Err(SchedulerError::NotImplemented(
+                        format!("unsupported message \"{:?}\" for QueryRunner.run", rest),
                         None.into(),
-                    )
-                    .into())
+                    ));
                 }
             }
         }
@@ -343,10 +322,9 @@ impl QueryRunner {
         );
 
         // Consume sender here.
-        let mut tmp_sender = None;
-        swap(&mut self.root_stage_sender, &mut tmp_sender);
+        let root_stage_sender = mem::take(&mut self.root_stage_sender);
 
-        if let Err(e) = tmp_sender.unwrap().send(Ok(root_stage_result)) {
+        if let Err(e) = root_stage_sender.unwrap().send(Ok(root_stage_result)) {
             warn!("Query execution dropped: {:?}", e);
         } else {
             debug!("Root stage for {:?} sent.", self.query.query_id);
@@ -355,19 +333,11 @@ impl QueryRunner {
 
     async fn all_children_scheduled(&self, stage_id: &StageId) -> bool {
         for child in self.query.stage_graph.get_child_stages_unchecked(stage_id) {
-            if !self
-                .get_stage_execution_unchecked(child)
-                .is_scheduled()
-                .await
-            {
+            if !self.stage_executions[child].is_scheduled().await {
                 return false;
             }
         }
         true
-    }
-
-    fn get_stage_execution_unchecked(&self, stage_id: &StageId) -> Arc<StageExecution> {
-        self.stage_executions.get(stage_id).unwrap().clone()
     }
 }
 
@@ -386,7 +356,7 @@ mod tests {
 
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
+        BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
@@ -425,9 +395,8 @@ mod tests {
         //
         let ctx = OptimizerContext::mock().await;
 
-        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
+        let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
-            vec![0, 1],
             Rc::new(TableDesc {
                 table_id: 0.into(),
                 pks: vec![],
@@ -449,11 +418,13 @@ mod tests {
                     },
                 ],
                 distribution_keys: vec![],
+                appendonly: false,
             }),
             vec![],
             ctx,
-        ))
-        .into();
+        )
+        .to_batch()
+        .unwrap();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),

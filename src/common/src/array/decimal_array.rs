@@ -16,13 +16,13 @@ use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 use itertools::Itertools;
-use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
+use risingwave_pb::common::buffer::CompressionType;
+use risingwave_pb::common::Buffer;
+use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::array::{ArrayBuilderImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::error::Result;
 use crate::types::Decimal;
 
 #[derive(Debug)]
@@ -32,7 +32,7 @@ pub struct DecimalArray {
 }
 
 impl DecimalArray {
-    pub fn from_slice(data: &[Option<Decimal>]) -> Result<Self> {
+    pub fn from_slice(data: &[Option<Decimal>]) -> ArrayResult<Self> {
         let mut builder = <Self as Array>::Builder::new(data.len())?;
         for i in data {
             builder.append(*i)?;
@@ -123,7 +123,7 @@ impl Array for DecimalArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
         let array_builder = DecimalArrayBuilder::new(capacity)?;
         Ok(ArrayBuilderImpl::Decimal(array_builder))
     }
@@ -139,14 +139,14 @@ pub struct DecimalArrayBuilder {
 impl ArrayBuilder for DecimalArrayBuilder {
     type ArrayType = DecimalArray;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> ArrayResult<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         })
     }
 
-    fn append(&mut self, value: Option<Decimal>) -> Result<()> {
+    fn append(&mut self, value: Option<Decimal>) -> ArrayResult<()> {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -160,7 +160,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Ok(())
     }
 
-    fn append_array(&mut self, other: &DecimalArray) -> Result<()> {
+    fn append_array(&mut self, other: &DecimalArray) -> ArrayResult<()> {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -168,7 +168,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Ok(())
     }
 
-    fn finish(self) -> Result<DecimalArray> {
+    fn finish(self) -> ArrayResult<DecimalArray> {
         Ok(DecimalArray {
             bitmap: self.bitmap.finish(),
             data: self.data,

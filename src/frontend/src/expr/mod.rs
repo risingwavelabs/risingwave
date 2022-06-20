@@ -43,7 +43,10 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
-pub use type_inference::{align_types, cast_ok, infer_type, least_restrictive, CastContext};
+pub use type_inference::{
+    align_types, cast_ok, func_sig_map, infer_type, least_restrictive, CastContext, DataTypeName,
+    FuncSign,
+};
 pub use utils::*;
 
 /// the trait of bound exprssions
@@ -77,6 +80,12 @@ impl ExprImpl {
     #[inline(always)]
     pub fn literal_bool(v: bool) -> Self {
         Literal::new(Some(v.to_scalar_value()), DataType::Boolean).into()
+    }
+
+    /// A literal varchar value.
+    #[inline(always)]
+    pub fn literal_varchar(v: String) -> Self {
+        Literal::new(Some(v.to_scalar_value()), DataType::Varchar).into()
     }
 
     /// A `count(*)` aggregate function.
@@ -113,6 +122,25 @@ impl ExprImpl {
     /// Shorthand to create cast expr to `target` type in explicit context.
     pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl> {
         FunctionCall::new_cast(self, target, CastContext::Explicit)
+    }
+
+    /// Create "cast" expr to string (`varchar`) type. This is different from a real cast, as
+    /// boolean is converted to a single char rather than full word.
+    ///
+    /// Choose between `cast_output` and `cast_{assign,explicit}(Varchar)` based on `PostgreSQL`'s
+    /// behavior on bools. For example, `concat(':', true)` is `:t` but `':' || true` is `:true`.
+    /// All other types have the same behavior when formatting to output and casting to string.
+    ///
+    /// References in `PostgreSQL`:
+    /// * [cast](https://github.com/postgres/postgres/blob/a3ff08e0b08dbfeb777ccfa8f13ebaa95d064c04/src/include/catalog/pg_cast.dat#L437-L444)
+    /// * [impl](https://github.com/postgres/postgres/blob/27b77ecf9f4d5be211900eda54d8155ada50d696/src/backend/utils/adt/bool.c#L204-L209)
+    pub fn cast_output(self) -> Result<ExprImpl> {
+        if self.return_type() == DataType::Boolean {
+            return Ok(FunctionCall::new(ExprType::BoolOut, vec![self])?.into());
+        }
+        // Use normal cast for other types. Both `assign` and `explicit` can pass the castability
+        // check and there is no difference.
+        self.cast_assign(DataType::Varchar)
     }
 }
 
@@ -209,6 +237,69 @@ impl ExprImpl {
         let mut visitor = Has { has: false };
         visitor.visit_expr(self);
         !visitor.has
+    }
+
+    /// Returns the `InputRefs` of an Equality predicate if it matches
+    /// ordered by the canonical ordering (lower, higher), else returns None
+    pub fn as_eq_cond(&self) -> Option<(InputRef, InputRef)> {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::Equal
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+        {
+            if x.index() < y.index() {
+                Some((*x, *y))
+            } else {
+                Some((*y, *x))
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_eq_const(&self) -> Option<(InputRef, Literal)> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+        function_call.get_expr_type() == ExprType::Equal{
+            match function_call.clone().decompose_as_binary() {
+                (_, ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, *y)),
+                (_, ExprImpl::Literal(x), ExprImpl::InputRef(y)) => Some((*y, *x)),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_comparison_const(&self) -> Option<(InputRef, ExprType, Literal)> {
+        fn reverse_comparison(comparison: ExprType) -> ExprType {
+            match comparison {
+                ExprType::LessThan => ExprType::GreaterThan,
+                ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
+                ExprType::GreaterThan => ExprType::LessThan,
+                ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+                _ => unreachable!(),
+            }
+        }
+
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    match (op1, op2) {
+                        (ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, ty, *y)),
+                        (ExprImpl::Literal(x), ExprImpl::InputRef(y)) => {
+                            Some((*y, reverse_comparison(ty), *x))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
     }
 }
 

@@ -61,7 +61,7 @@ macro_rules! impl_numeric_type {
 pub struct NumericFieldRandomConcrete<T> {
     min: T,
     max: T,
-    rng: StdRng,
+    seed: u64,
 }
 
 #[derive(Default)]
@@ -94,13 +94,12 @@ where
 
         assert!(min < max);
 
-        let rng = StdRng::seed_from_u64(seed);
-
-        Ok(Self { min, max, rng })
+        Ok(Self { min, max, seed })
     }
 
-    fn generate(&mut self) -> serde_json::Value {
-        let result = self.rng.gen_range(self.min..=self.max);
+    fn generate(&mut self, offset: u64) -> serde_json::Value {
+        let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
+        let result = rng.gen_range(self.min..=self.max);
         json!(result)
     }
 }
@@ -199,8 +198,8 @@ mod tests {
     fn test_random_field_generator() {
         let mut i64_field =
             I64RandomField::new(Some("5".to_string()), Some("10".to_string()), 114).unwrap();
-        for _ in 0..100 {
-            let res = i64_field.generate();
+        for i in 0..100 {
+            let res = i64_field.generate(i as u64);
             assert!(res.is_number());
             let res = res.as_i64().unwrap();
             assert!((5..=10).contains(&res));

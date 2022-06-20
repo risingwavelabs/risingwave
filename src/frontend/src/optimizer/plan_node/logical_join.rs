@@ -21,13 +21,12 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, StreamHashJoin, ToBatch, ToStream,
+    BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchNestedLoopJoin, BatchProject, EqJoinPredicate, LogicalFilter,
-    StreamFilter, StreamProject,
+    BatchFilter, BatchHashJoin, BatchNestedLoopJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
 use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
@@ -286,6 +285,11 @@ impl LogicalJoin {
     /// Get the join type of the logical join.
     pub fn join_type(&self) -> JoinType {
         self.join_type
+    }
+
+    /// Get the output indices of the logical join.
+    pub fn output_indices(&self) -> &[usize] {
+        &self.output_indices
     }
 
     /// Clone with new `on` condition
@@ -670,16 +674,16 @@ impl ToBatch for LogicalJoin {
         let left = self.left().to_batch()?;
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
-        let new_output_indices = logical_join.output_indices.clone();
-        let new_internal_column_num = logical_join.internal_column_num();
-        let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
-        let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
 
-        let plan = if predicate.has_eq() {
+        if predicate.has_eq() {
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
+                let new_output_indices = logical_join.output_indices.clone();
+                let new_internal_column_num = logical_join.internal_column_num();
+                let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
+                let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
                 let eq_cond = EqJoinPredicate::new(
                     Condition::true_cond(),
                     predicate.eq_keys().to_vec(),
@@ -688,26 +692,25 @@ impl ToBatch for LogicalJoin {
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                BatchFilter::new(logical_filter).into()
+                let plan = BatchFilter::new(logical_filter).into();
+                if self.output_indices != default_indices {
+                    let logical_project = LogicalProject::with_mapping(
+                        plan,
+                        ColIndexMapping::with_remaining_columns(
+                            &new_output_indices,
+                            new_internal_column_num,
+                        ),
+                    );
+                    Ok(BatchProject::new(logical_project).into())
+                } else {
+                    Ok(plan)
+                }
             } else {
-                BatchHashJoin::new(logical_join, predicate).into()
+                Ok(BatchHashJoin::new(logical_join, predicate).into())
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            BatchNestedLoopJoin::new(logical_join).into()
-        };
-
-        if self.output_indices != default_indices {
-            let logical_project = LogicalProject::with_mapping(
-                plan,
-                ColIndexMapping::with_remaining_columns(
-                    &new_output_indices,
-                    new_internal_column_num,
-                ),
-            );
-            Ok(BatchProject::new(logical_project).into())
-        } else {
-            Ok(plan)
+            Ok(BatchNestedLoopJoin::new(logical_join).into())
         }
     }
 }
@@ -736,18 +739,18 @@ impl ToStream for LogicalJoin {
 
         let left = self.left().to_stream_with_dist_required(&left_dist)?;
         let logical_join = self.clone_with_left_right(left, right);
-        let new_output_indices = logical_join.output_indices.clone();
-        let new_internal_column_num = logical_join.internal_column_num();
-        let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
 
-        // Temporarily remove output indices.
-        let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
-
-        let plan = if predicate.has_eq() {
+        if predicate.has_eq() {
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
+                let new_output_indices = logical_join.output_indices.clone();
+                let new_internal_column_num = logical_join.internal_column_num();
+                let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
+
+                // Temporarily remove output indices.
+                let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
                 let eq_cond = EqJoinPredicate::new(
                     Condition::true_cond(),
                     predicate.eq_keys().to_vec(),
@@ -756,28 +759,27 @@ impl ToStream for LogicalJoin {
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                StreamFilter::new(logical_filter).into()
+                let plan = StreamFilter::new(logical_filter).into();
+                if self.output_indices != default_indices {
+                    let logical_project = LogicalProject::with_mapping(
+                        plan,
+                        ColIndexMapping::with_remaining_columns(
+                            &new_output_indices,
+                            new_internal_column_num,
+                        ),
+                    );
+                    Ok(StreamProject::new(logical_project).into())
+                } else {
+                    Ok(plan)
+                }
             } else {
-                StreamHashJoin::new(logical_join, predicate).into()
+                Ok(StreamHashJoin::new(logical_join, predicate).into())
             }
         } else {
-            return Err(RwError::from(ErrorCode::NotImplemented(
+            Err(RwError::from(ErrorCode::NotImplemented(
                 "stream nested-loop join".to_string(),
                 None.into(),
-            )));
-        };
-
-        if self.output_indices != default_indices {
-            let logical_project = LogicalProject::with_mapping(
-                plan,
-                ColIndexMapping::with_remaining_columns(
-                    &new_output_indices,
-                    new_internal_column_num,
-                ),
-            );
-            Ok(StreamProject::new(logical_project).into())
-        } else {
-            Ok(plan)
+            )))
         }
     }
 

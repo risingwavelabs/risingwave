@@ -24,7 +24,7 @@ use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
@@ -221,8 +221,9 @@ impl DispatchExecutorInner {
 
             Mutation::AddOutput(adds) => {
                 for dispatcher in &mut self.dispatchers {
-                    if let Some(downstream_actor_infos) =
-                        adds.get(&(self.actor_id, dispatcher.get_dispatcher_id()))
+                    if let Some(downstream_actor_infos) = adds
+                        .map
+                        .get(&(self.actor_id, dispatcher.get_dispatcher_id()))
                     {
                         let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                         for downstream_actor_info in downstream_actor_infos {
@@ -778,12 +779,12 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::ActorContext;
+    use crate::executor::{ActorContext, AddOutput};
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -985,13 +986,16 @@ mod tests {
         add_local_channels(ctx.clone(), vec![(233, 245)]);
         add_remote_channels(ctx.clone(), 233, vec![246]);
         tx.send(Message::Barrier(
-            Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput({
-                let mut actors = HashMap::default();
-                actors.insert(
-                    (233, 666),
-                    vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
-                );
-                actors
+            Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput(AddOutput {
+                map: {
+                    let mut actors = HashMap::default();
+                    actors.insert(
+                        (233, 666),
+                        vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
+                    );
+                    actors
+                },
+                ..Default::default()
             })),
         ))
         .await

@@ -15,7 +15,6 @@
 use std::alloc::Layout;
 use std::backtrace::Backtrace;
 use std::convert::Infallible;
-use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
 use std::sync::Arc;
@@ -29,12 +28,16 @@ use tokio::task::JoinError;
 use tonic::metadata::{MetadataMap, MetadataValue};
 use tonic::Code;
 
+use crate::array::ArrayError;
 use crate::util::value_encoding::error::ValueEncodingError;
 
 /// Header used to store serialized [`RwError`] in grpc status.
 pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
-pub type BoxedError = Box<dyn Error + Send + Sync>;
+pub trait Error = std::error::Error + Send + Sync + 'static;
+pub type BoxedError = Box<dyn Error>;
+
+pub use anyhow::anyhow as anyhow_error;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrackingIssue(Option<u32>);
@@ -96,12 +99,18 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
+    #[error("Expr error: {0:?}")]
+    ExprError(BoxedError),
+    #[error("Array error: {0:?}")]
+    ArrayError(ArrayError),
     #[error("Stream error: {0:?}")]
     StreamError(
         #[backtrace]
         #[source]
         BoxedError,
     ),
+    #[error("RPC error: {0:?}")]
+    RpcError(BoxedError),
     #[error("Parse error: {0}")]
     ParseError(String),
     #[error("Bind error: {0}")]
@@ -110,8 +119,10 @@ pub enum ErrorCode {
     CatalogError(BoxedError),
     #[error("Out of range")]
     NumericValueOutOfRange,
-    #[error("protocol error: {0}")]
+    #[error("Protocol error: {0}")]
     ProtocolError(String),
+    #[error("Scheduler error: {0}")]
+    SchedulerError(BoxedError),
     #[error("Task not found")]
     TaskNotFound,
     #[error("Item not found: {0}")]
@@ -131,11 +142,16 @@ pub enum ErrorCode {
     },
     #[error("Invalid Parameter Value: {0}")]
     InvalidParameterValue(String),
+    #[error("MySQL error: {0}")]
+    SinkError(BoxedError),
 
     /// This error occurs when the meta node receives heartbeat from a previous removed worker
     /// node. Currently we don't support re-register, and the worker node need a full restart.
     #[error("Unknown worker")]
     UnknownWorker,
+
+    #[error("unrecognized configuration parameter \"{0}\"")]
+    UnrecognizedConfigurationParameter(String),
 
     /// `Eof` represents an upstream node will not generate new data. This error is rare in our
     /// system, currently only used in the `BatchQueryExecutor` as an ephemeral solution.
@@ -144,6 +160,10 @@ pub enum ErrorCode {
 
     #[error("Unknown error: {0}")]
     UnknownError(String),
+}
+
+pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
+    ErrorCode::InternalError(msg.into().to_string()).into()
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -245,6 +265,12 @@ impl From<std::net::AddrParseError> for RwError {
     }
 }
 
+impl From<anyhow::Error> for RwError {
+    fn from(e: anyhow::Error) -> Self {
+        ErrorCode::InternalError(e.to_error_str()).into()
+    }
+}
+
 impl From<Infallible> for RwError {
     fn from(x: Infallible) -> Self {
         match x {}
@@ -269,8 +295,8 @@ impl Display for RwError {
     }
 }
 
-impl Error for RwError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+impl std::error::Error for RwError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.inner)
     }
 }
@@ -308,6 +334,12 @@ impl ErrorCode {
             ErrorCode::UnknownWorker => 24,
             ErrorCode::ConnectorError(_) => 25,
             ErrorCode::InvalidParameterValue(_) => 26,
+            ErrorCode::UnrecognizedConfigurationParameter(_) => 27,
+            ErrorCode::ExprError(_) => 28,
+            ErrorCode::ArrayError(_) => 29,
+            ErrorCode::SchedulerError(_) => 30,
+            ErrorCode::SinkError(_) => 31,
+            ErrorCode::RpcError(_) => 32,
             ErrorCode::UnknownError(_) => 101,
         }
     }
@@ -338,19 +370,24 @@ impl From<ProstFieldNotFound> for RwError {
     }
 }
 
+impl From<tonic::Status> for RwError {
+    fn from(err: tonic::Status) -> Self {
+        ErrorCode::RpcError(err.into()).into()
+    }
+}
+
+impl From<tonic::transport::Error> for RwError {
+    fn from(err: tonic::transport::Error) -> Self {
+        ErrorCode::RpcError(err.into()).into()
+    }
+}
+
 /// Convert `RwError` into `tonic::Status`. Generally used in `map_err`.
 pub fn tonic_err(err: impl Into<RwError>) -> tonic::Status {
     err.into().into()
 }
 
 pub type Result<T> = std::result::Result<T, RwError>;
-
-#[macro_export]
-macro_rules! gen_error {
-    ($error_code:expr) => {
-        return std::result::Result::Err($crate::error::RwError::from($error_code));
-    };
-}
 
 /// A helper to convert a third-party error to string.
 pub trait ToErrorStr {
@@ -372,20 +409,6 @@ impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
         self.map_err(|e| {
             ErrorCode::InternalError(format!("{}: {}", func(), e.to_error_str())).into()
         })
-    }
-}
-
-impl ToErrorStr for tonic::Status {
-    /// [`tonic::Status`] means no transportation error but only application-level failure.
-    /// In this case we focus on the message rather than other fields.
-    fn to_error_str(self) -> String {
-        self.message().to_string()
-    }
-}
-
-impl ToErrorStr for tonic::transport::Error {
-    fn to_error_str(self) -> String {
-        format!("tonic transport error: {}", self)
     }
 }
 
@@ -415,7 +438,7 @@ impl ToErrorStr for anyhow::Error {
 /// ```
 /// This will generate following error:
 /// ```ignore
-/// RwError(ErrorCode::InternalError("a < 0"))
+/// anyhow!("a < 0").into()
 /// ```
 ///
 /// # Case 2: Error message only.
@@ -424,7 +447,7 @@ impl ToErrorStr for anyhow::Error {
 /// ```
 /// This will generate following error:
 /// ```ignore
-/// RwError(ErrorCode::InternalError("a should not be negative!"));
+/// anyhow!("a should not be negative!").into();
 /// ```
 ///
 /// # Case 3: Error message with argument.
@@ -433,7 +456,7 @@ impl ToErrorStr for anyhow::Error {
 /// ```
 /// This will generate following error:
 /// ```ignore
-/// RwError(ErrorCode::InternalError("a should not be negative, value: 1"));
+/// anyhow!("a should not be negative, value: 1").into();
 /// ```
 ///
 /// # Case 4: Error code.
@@ -442,33 +465,30 @@ impl ToErrorStr for anyhow::Error {
 /// ```
 /// This will generate following error:
 /// ```ignore
-/// RwError(ErrorCode::MemoryError { layout });
+/// ErrorCode::MemoryError { layout }.into();
 /// ```
 #[macro_export]
 macro_rules! ensure {
-    ($cond:expr) => {
+    ($cond:expr $(,)?) => {
         if !$cond {
-            let msg = stringify!($cond).to_string();
-            $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
+            return Err($crate::error::anyhow_error!(stringify!($cond)).into());
         }
     };
-    ($cond:expr, $msg:literal) => {
+    ($cond:expr, $msg:literal $(,)?) => {
         if !$cond {
-            let msg = $msg.to_string();
-            $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
+            return Err($crate::error::anyhow_error!($msg).into());
         }
     };
-    ($cond:expr, $fmt:literal, $($arg:expr)*) => {
+    ($cond:expr, $fmt:expr, $($arg:tt)*) => {
         if !$cond {
-            let msg = format!($fmt, $($arg)*);
-            $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
+            return Err($crate::error::anyhow_error!($fmt, $($arg)*).into());
         }
     };
     ($cond:expr, $error_code:expr) => {
         if !$cond {
-            $crate::gen_error!($error_code);
+            return Err($error_code.into());
         }
-    }
+    };
 }
 
 /// Util macro to generate error when the two arguments are not equal.
@@ -478,7 +498,7 @@ macro_rules! ensure_eq {
         match (&$left, &$right) {
             (left_val, right_val) => {
                 if !(left_val == right_val) {
-                    $crate::gen_error!($crate::error::ErrorCode::InternalError(format!(
+                    $crate::bail!(
                         "{} == {} assertion failed ({} is {}, {} is {})",
                         stringify!($left),
                         stringify!($right),
@@ -486,10 +506,23 @@ macro_rules! ensure_eq {
                         &*left_val,
                         stringify!($right),
                         &*right_val,
-                    )));
+                    );
                 }
             }
         }
+    };
+}
+
+#[macro_export]
+macro_rules! bail {
+    ($msg:literal $(,)?) => {
+        return Err($crate::error::anyhow_error!($msg).into())
+    };
+    ($err:expr $(,)?) => {
+        return Err($crate::error::anyhow_error!($err).into())
+    };
+    ($fmt:expr, $($arg:tt)*) => {
+        return Err($crate::error::anyhow_error!($fmt, $($arg)*).into())
     };
 }
 

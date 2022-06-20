@@ -67,6 +67,10 @@ impl LogicalSource {
             .map(|f| f.name.clone())
             .collect()
     }
+
+    pub fn source_catalog(&self) -> Rc<SourceCatalog> {
+        self.source_catalog.clone()
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalSource}

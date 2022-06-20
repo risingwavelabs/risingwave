@@ -14,12 +14,12 @@
 
 use std::marker::PhantomData;
 
-use risingwave_common::error::Result;
 use risingwave_common::types::{
     deserialize_datum_from, serialize_datum_into, DataType, Datum, Scalar,
 };
 use smallvec::SmallVec;
 
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkDataTypes;
 
 type ExtremePkItem = Datum;
@@ -51,6 +51,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         }
     }
 
+    #[allow(dead_code)]
     fn is_reversed_order(&self) -> bool {
         match EXTREME_TYPE {
             variants::EXTREME_MAX => true,
@@ -62,7 +63,8 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
     /// Serialize key and `pk` (or, `row_id`s) into a sort key
     ///
     /// TODO: support `&K` instead of `K` as parameter.
-    pub fn serialize(&self, key: Option<K>, pk: &ExtremePk) -> Result<Vec<u8>> {
+    #[allow(dead_code)]
+    pub fn serialize(&self, key: Option<K>, pk: &ExtremePk) -> StreamExecutorResult<Vec<u8>> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serializer.set_reverse(self.is_reversed_order());
 
@@ -82,7 +84,8 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
     }
 
     /// Extract the pks from the sort key
-    pub fn get_pk(&self, data: &[u8]) -> Result<ExtremePk> {
+    #[allow(dead_code)]
+    pub fn get_pk(&self, data: &[u8]) -> StreamExecutorResult<ExtremePk> {
         if self.pk_data_types.is_empty() {
             return Ok(ExtremePk::default());
         }
@@ -121,7 +124,7 @@ mod tests {
         test_extreme_serde::<{ variants::EXTREME_MAX }>().unwrap()
     }
 
-    fn test_extreme_serde<const EXTREME_TYPE: usize>() -> Result<()> {
+    fn test_extreme_serde<const EXTREME_TYPE: usize>() -> StreamExecutorResult<()> {
         let pk_length_cases = [0, 1, 10];
         let key_cases = [1.14, 5.14, 19.19, 8.10].map(OrderedF64::from);
 

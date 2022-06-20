@@ -1,0 +1,75 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table lt (v1 int[][]);
+
+statement ok
+insert into lt values(Array[Array[1],Array[2,3]]);
+
+statement ok
+insert into lt values(Array[Array[1],Array[2,4]]);
+
+query I
+select * from lt;
+----
+[[1],[2,3]]
+[[1],[2,4]]
+
+query I
+select * from lt where v1 = Array[Array[1],Array[2,3]];
+----
+[[1],[2,3]]
+
+query I
+select * from lt where v1 != Array[Array[1],Array[2,3]];
+----
+[[1],[2,4]]
+
+query I
+select * from lt where v1 < Array[Array[1],Array[2,4]];
+----
+[[1],[2,3]]
+
+query I
+select * from lt where v1 > Array[Array[1],Array[2,3]];
+----
+[[1],[2,4]]
+
+query I
+select max(v1) from lt;
+----
+[[1],[2,4]]
+
+query I
+select min(v1) from lt;
+----
+[[1],[2,3]]
+
+statement ok
+create materialized view mv as select min(v1) as m from lt;
+
+query I
+select * from mv;
+----
+[[1],[2,3]]
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table lt;
+
+statement ok
+create table lt (v1 int[][]);
+
+statement ok
+insert into lt values(Array[Array[1],Array[2,null]]);
+
+query II
+select * from lt;
+----
+[[1],[2,NULL]]
+
+statement ok
+drop table lt;

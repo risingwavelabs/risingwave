@@ -15,6 +15,7 @@
 use futures_async_stream::for_await;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
+use risingwave_common::session_config::IMPLICIT_FLUSH;
 use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
@@ -22,11 +23,6 @@ use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{ExecutionContext, ExecutionContextRef};
 use crate::session::{OptimizerContext, SessionImpl};
-
-/// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
-/// until the entire dataflow is refreshed. In other words, every related table & MV will
-/// be able to see the write.
-pub static IMPLICIT_FLUSH: &str = "RW_IMPLICIT_FLUSH";
 
 pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
@@ -88,10 +84,11 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
-            client.flush().await
+            client.flush().await?;
         }
-        _ => Ok(()),
+        _ => {}
     }
+    Ok(())
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {

@@ -13,8 +13,15 @@
                   - 1
                 appendOnly: true
                 batchPlan:
-                  tableRefId:
+                  tableDesc:
                     tableId: 2
+                    orderKey:
+                      - columnDesc:
+                          columnType:
+                            typeName: INT64
+                            isNullable: true
+                          name: _row_id
+                        order: ASCENDING
                   columnDescs:
                     - columnType:
                         typeName: INT32
@@ -131,6 +138,7 @@
       - 1
     pk:
       - 1
+    owner: root
 - sql: |
     /* test projection */
     create table t (v1 int);
@@ -144,8 +152,15 @@
               - 1
             appendOnly: true
             batchPlan:
-              tableRefId:
+              tableDesc:
                 tableId: 2
+                orderKey:
+                  - columnDesc:
+                      columnType:
+                        typeName: INT64
+                        isNullable: true
+                      name: _row_id
+                    order: ASCENDING
               columnDescs:
                 - columnType:
                     typeName: INT32
@@ -232,6 +247,7 @@
       - 1
     pk:
       - 1
+    owner: root
 - sql: |
     /* test projection for single column */
     create table t (v1 int, v2 int);
@@ -245,8 +261,15 @@
               - 1
             appendOnly: true
             batchPlan:
-              tableRefId:
+              tableDesc:
                 tableId: 2
+                orderKey:
+                  - columnDesc:
+                      columnType:
+                        typeName: INT64
+                        isNullable: true
+                      name: _row_id
+                    order: ASCENDING
               columnDescs:
                 - columnType:
                     typeName: INT32
@@ -337,6 +360,7 @@
       - 1
     pk:
       - 1
+    owner: root
 - sql: |
     /* test simple agg */
     create table t (v1 int);
@@ -352,8 +376,15 @@
                       - 1
                     appendOnly: true
                     batchPlan:
-                      tableRefId:
+                      tableDesc:
                         tableId: 2
+                        orderKey:
+                          - columnDesc:
+                              columnType:
+                                typeName: INT64
+                                isNullable: true
+                              name: _row_id
+                            order: ASCENDING
                       columnDescs:
                         - columnType:
                             typeName: INT32
@@ -406,9 +437,6 @@
             exchange:
               strategy:
                 type: SIMPLE
-        pkIndices:
-          - 0
-          - 1
         fields:
           - dataType:
               typeName: INT64
@@ -433,9 +461,25 @@
               returnType:
                 typeName: INT64
                 isNullable: true
-    pkIndices:
-      - 0
-      - 1
+          internalTables:
+            - id: 4294967294
+              schemaId: 2147483646
+              databaseId: 2147483646
+              columns:
+                - columnDesc:
+                    columnType:
+                      typeName: INT64
+                      isNullable: true
+              owner: root
+            - id: 4294967294
+              schemaId: 2147483646
+              databaseId: 2147483646
+              columns:
+                - columnDesc:
+                    columnType:
+                      typeName: INT64
+                      isNullable: true
+              owner: root
     fields:
       - dataType:
           typeName: INT64
@@ -446,18 +490,6 @@
           isNullable: true
         name: "agg#1"
     materialize:
-      columnOrders:
-        - orderType: ASCENDING
-          inputRef: {}
-          returnType:
-            typeName: INT64
-            isNullable: true
-        - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
       columnIds:
         - 0
         - 1
@@ -477,15 +509,7 @@
             isNullable: true
           columnId: 1
           name: sum
-    orderColumnIds:
-      - 0
-      - 1
-    orders:
-      - ASCENDING
-      - ASCENDING
-    pk:
-      - 0
-      - 1
+    owner: root
 - sql: |
     /* test simple agg */
     create table t (v1 int, v2 int);
@@ -503,8 +527,15 @@
                               - 2
                             appendOnly: true
                             batchPlan:
-                              tableRefId:
+                              tableDesc:
                                 tableId: 2
+                                orderKey:
+                                  - columnDesc:
+                                      columnType:
+                                        typeName: INT64
+                                        isNullable: true
+                                      name: _row_id
+                                    order: ASCENDING
                               columnDescs:
                                 - columnType:
                                     typeName: INT32
@@ -644,6 +675,55 @@
                   returnType:
                     typeName: INT64
                     isNullable: true
+              internalTables:
+                - id: 4294967294
+                  schemaId: 2147483646
+                  databaseId: 2147483646
+                  columns:
+                    - columnDesc:
+                        columnType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v2
+                    - columnDesc:
+                        columnType:
+                          typeName: INT64
+                          isNullable: true
+                        columnId: 1
+                  orderColumnIds:
+                    - 0
+                  orders:
+                    - ASCENDING
+                  distributionKeys:
+                    - 0
+                  pk:
+                    - 0
+                  owner: root
+                - id: 4294967294
+                  schemaId: 2147483646
+                  databaseId: 2147483646
+                  columns:
+                    - columnDesc:
+                        columnType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v2
+                    - columnDesc:
+                        columnType:
+                          typeName: INT64
+                          isNullable: true
+                        columnId: 1
+                  orderColumnIds:
+                    - 0
+                  orders:
+                    - ASCENDING
+                  distributionKeys:
+                    - 0
+                  pk:
+                    - 0
+                  owner: root
+              columnMapping:
+                0: 0
         pkIndices:
           - 1
         fields:
@@ -716,3 +796,4 @@
       - 1
     pk:
       - 1
+    owner: root

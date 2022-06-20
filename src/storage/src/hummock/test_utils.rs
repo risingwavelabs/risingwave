@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::sync::Arc;
 
@@ -23,16 +23,18 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::common::VNodeBitmap;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
-use crate::hummock::iterator::test_utils::mock_sstable_store;
+use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_sstable_store};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
     SSTableBuilderOptions, Sstable, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;
+use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
@@ -50,6 +52,38 @@ pub fn default_config_for_test() -> StorageConfig {
         disable_remote_compactor: false,
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
+        share_buffer_upload_concurrency: 1,
+    }
+}
+
+pub fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
+    vec![(
+        iterator_test_key_of_epoch(0, epoch).into(),
+        StorageValue::new_put(ValueMeta::default(), b"value1".to_vec()),
+    )]
+}
+
+pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
+    let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
+    let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
+    for batch in batches.iter().skip(1) {
+        if min_key.as_slice() > batch.start_key() {
+            min_key = batch.start_key().to_vec();
+        }
+        if max_key.as_slice() < batch.end_key() {
+            max_key = batch.end_key().to_vec();
+        }
+    }
+    SstableInfo {
+        id,
+        key_range: Some(KeyRange {
+            left: min_key,
+            right: max_key,
+            inf: false,
+        }),
+        file_size: batches.len() as u64,
+        table_ids: vec![],
+        unit_id: u64::MAX,
     }
 }
 
@@ -88,12 +122,13 @@ pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
 pub fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
-) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
-    let mut b = SSTableBuilder::new(opts);
+) -> (Bytes, SstableMeta, Vec<u32>) {
+    let mut b = SSTableBuilder::new(0, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }
-    b.finish()
+    let (_, data, meta, table_ids) = b.finish();
+    (data, meta, table_ids)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`

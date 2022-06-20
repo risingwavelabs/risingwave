@@ -198,13 +198,13 @@ impl Binder {
     pub fn expr_to_field(&self, item: &ExprImpl, name: String) -> Result<Field> {
         if let DataType::Struct { .. } = item.return_type() {
             // Derive the schema of a struct including its fields name.
-            // NOTE: The implementation assumes that only Min/Max/Field/InputRef
-            // will return a STRUCT. Because we assumes the first argument (if in a function form)
-            // must be a STRUCT.
+            // NOTE: The implementation assumes that only Min/Max/Field/InputRef/Struct ExprImpl
+            // will return a STRUCT type. Because we assumes the first argument (if in a function
+            // form) must be a STRUCT type.
             let is_struct_function = match item {
                 ExprImpl::InputRef(_) => true,
                 ExprImpl::FunctionCall(function) => {
-                    matches!(function.get_expr_type(), ExprType::Field)
+                    matches!(function.get_expr_type(), ExprType::Field | ExprType::Row)
                 }
                 ExprImpl::AggCall(agg) => {
                     matches!(agg.agg_kind(), AggKind::Max | AggKind::Min)
@@ -220,13 +220,15 @@ impl Binder {
             }
             let mut visitor = GetFieldDesc::new(self.context.columns.clone());
             visitor.visit_expr(item);
-            let column = visitor.collect()?;
-            Ok(Field::with_struct(
-                item.return_type(),
-                name,
-                column.sub_fields,
-                column.type_name,
-            ))
+            match visitor.collect()? {
+                None => Ok(Field::with_name(item.return_type(), name)),
+                Some(column) => Ok(Field::with_struct(
+                    item.return_type(),
+                    name,
+                    column.sub_fields,
+                    column.type_name,
+                )),
+            }
         } else {
             Ok(Field::with_name(item.return_type(), name))
         }
@@ -260,6 +262,9 @@ impl ExprVisitor for GetFieldDesc {
     /// `Field{Field,Literal(i32)}`. So we only need to check the first input to get
     /// `column_desc` from bindings. And then we get the `field_desc` by second input.
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        if func_call.get_expr_type() == ExprType::Row {
+            return;
+        }
         match func_call.inputs().get(0) {
             Some(ExprImpl::FunctionCall(function)) => {
                 self.visit_function_call(function);
@@ -325,15 +330,10 @@ impl GetFieldDesc {
     }
 
     /// Returns the `field_desc` by the `GetFieldDesc`.
-    fn collect(self) -> Result<Field> {
+    fn collect(self) -> Result<Option<Field>> {
         match self.err {
             Some(err) => Err(err.into()),
-            None => match self.field {
-                Some(field) => Ok(field),
-                None => {
-                    Err(ErrorCode::BindError("Not find field for struct item".to_string()).into())
-                }
-            },
+            None => Ok(self.field),
         }
     }
 }
