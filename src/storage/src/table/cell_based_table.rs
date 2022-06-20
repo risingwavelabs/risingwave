@@ -48,13 +48,13 @@ impl<S: StateStore> CellBasedTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
-        ordered_row_serializer: Option<OrderedRowSerializer>,
+        order_types: Vec<OrderType>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         CellBasedTableExtended::new_extended(
             keyspace,
             column_descs,
-            ordered_row_serializer,
+            order_types,
             dist_key_indices,
             CellBasedRowSerializer::new(),
         )
@@ -68,7 +68,7 @@ impl<S: StateStore> CellBasedTable<S> {
         CellBasedTable::new(
             keyspace,
             column_descs,
-            Some(OrderedRowSerializer::new(order_types)),
+            order_types,
             None,
         )
     }
@@ -165,7 +165,7 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
 }
 
 /// Get & Write
-impl<S: StateStore> CellBasedTable<S> {
+impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
     /// Get a single row by point get
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: use multi-get for cell_based get_row
