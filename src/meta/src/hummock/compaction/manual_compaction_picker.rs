@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
@@ -70,11 +71,8 @@ impl CompactionPicker for ManualCompactionPicker {
                 }
 
                 // to collect internal_table_id from sst_info
-                let table_id_in_sst: Vec<u32> = sst_info
-                    .vnode_bitmaps
-                    .iter()
-                    .map(|vmap| vmap.table_id)
-                    .collect();
+                let table_id_in_sst: Vec<u32> =
+                    sst_info.get_table_ids().iter().cloned().collect_vec();
 
                 // to filter sst_file by table_id
                 for table_id in &table_id_in_sst {
@@ -149,7 +147,6 @@ impl CompactionPicker for ManualCompactionPicker {
 pub mod tests {
     use std::collections::HashSet;
 
-    use risingwave_pb::common::VNodeBitmap;
     pub use risingwave_pb::hummock::{KeyRange, LevelType};
 
     use super::*;
@@ -255,9 +252,9 @@ pub mod tests {
 
             let level_table_info = &mut levels[1].table_infos;
             let table_info_1 = &mut level_table_info[1];
-            table_info_1.vnode_bitmaps.resize(2, VNodeBitmap::default());
-            table_info_1.vnode_bitmaps[0].table_id = 1;
-            table_info_1.vnode_bitmaps[1].table_id = 2;
+            table_info_1.table_ids.resize(2, 0);
+            table_info_1.table_ids[0] = 1;
+            table_info_1.table_ids[1] = 2;
 
             // test internal_table_id
             let option = ManualCompactionOption {
@@ -289,9 +286,9 @@ pub mod tests {
             // include all table_info
             let level_table_info = &mut levels[1].table_infos;
             for table_info in level_table_info {
-                table_info.vnode_bitmaps.resize(2, VNodeBitmap::default());
-                table_info.vnode_bitmaps[0].table_id = 1;
-                table_info.vnode_bitmaps[1].table_id = 2;
+                table_info.table_ids.resize(2, 0);
+                table_info.table_ids[0] = 1;
+                table_info.table_ids[1] = 2;
             }
 
             // test key range filter first
