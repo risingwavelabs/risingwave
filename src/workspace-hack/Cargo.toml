@@ -18,7 +18,6 @@ axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "
 bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
 chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "std", "time", "winapi"] }
-clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "lazy_static", "std", "strsim", "suggestions", "termcolor"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 digest = { version = "0.10", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 either = { version = "1", features = ["use_std"] }
@@ -40,7 +39,7 @@ libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
-madsim-tokio = { version = "0.2.0-alpha.3", default-features = false, features = ["fs", "macros", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+madsim-tokio = { version = "0.2.0-alpha.3", default-features = false, features = ["fs", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
 nom = { version = "7", default-features = false, features = ["alloc", "std"] }
@@ -75,7 +74,6 @@ bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", 
 bytes = { version = "1", features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
 chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "std", "time", "winapi"] }
-clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "lazy_static", "std", "strsim", "suggestions", "termcolor"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 digest = { version = "0.10", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 either = { version = "1", features = ["use_std"] }
@@ -97,7 +95,7 @@ libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
-madsim-tokio = { version = "0.2.0-alpha.3", default-features = false, features = ["fs", "macros", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+madsim-tokio = { version = "0.2.0-alpha.3", default-features = false, features = ["fs", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
 nom = { version = "7", default-features = false, features = ["alloc", "std"] }
