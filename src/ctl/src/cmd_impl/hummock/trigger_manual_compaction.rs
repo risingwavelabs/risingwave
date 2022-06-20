@@ -16,11 +16,15 @@ use risingwave_rpc_client::HummockMetaClient;
 
 use crate::common::MetaServiceOpts;
 
-pub async fn trigger_manual_compaction(compaction_group_id: u64) -> anyhow::Result<()> {
+pub async fn trigger_manual_compaction(
+    compaction_group_id: u64,
+    table_id: u32,
+    level: u32,
+) -> anyhow::Result<()> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
     let result = meta_client
-        .trigger_manual_compaction(compaction_group_id)
+        .trigger_manual_compaction(compaction_group_id, table_id, level)
         .await;
     println!("{:#?}", result);
     Ok(())

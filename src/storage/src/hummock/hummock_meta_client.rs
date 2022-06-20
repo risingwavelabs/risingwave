@@ -112,9 +112,14 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.get_compaction_groups().await
     }
 
-    async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()> {
+    async fn trigger_manual_compaction(
+        &self,
+        compaction_group_id: u64,
+        table_id: u32,
+        level: u32,
+    ) -> Result<()> {
         self.meta_client
-            .trigger_manual_compaction(compaction_group_id)
+            .trigger_manual_compaction(compaction_group_id, table_id, level)
             .await
     }
 }

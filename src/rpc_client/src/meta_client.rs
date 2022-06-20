@@ -434,9 +434,19 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.compaction_groups)
     }
 
-    async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()> {
+    async fn trigger_manual_compaction(
+        &self,
+        compaction_group_id: u64,
+        table_id: u32,
+        level: u32,
+    ) -> Result<()> {
+        // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
             compaction_group_id,
+            table_id, /* if table_id not exist, manual_compaction will include all the sst
+                       * without check internal_table_id */
+            level,
+            ..Default::default()
         };
 
         self.inner.trigger_manual_compaction(req).await?;

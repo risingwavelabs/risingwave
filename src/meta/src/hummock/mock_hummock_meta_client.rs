@@ -146,7 +146,12 @@ impl HummockMetaClient for MockHummockMetaClient {
         todo!()
     }
 
-    async fn trigger_manual_compaction(&self, _compaction_group_id: u64) -> Result<()> {
+    async fn trigger_manual_compaction(
+        &self,
+        _compaction_group_id: u64,
+        _table_id: u32,
+        _level: u32,
+    ) -> Result<()> {
         todo!()
     }
 }
