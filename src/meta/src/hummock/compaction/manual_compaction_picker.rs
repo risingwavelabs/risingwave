@@ -116,8 +116,14 @@ impl CompactionPicker for ManualCompactionPicker {
             .overlap_strategy
             .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos)
             .into_iter()
-            .filter(|table| !level_handlers[level].is_pending_compact(&table.id))
             .collect_vec();
+
+        if target_input_ssts
+            .iter()
+            .any(|table| level_handlers[level].is_pending_compact(&table.id))
+        {
+            return None;
+        }
 
         level_handlers[level].add_pending_task(self.compact_task_id, &select_input_ssts);
         if !target_input_ssts.is_empty() {
