@@ -108,7 +108,6 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
             unit_id: u64::MAX,
             file_size: 1,
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],
-            unit_id: 0,
         });
     }
     sst_info
