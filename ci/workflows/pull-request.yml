@@ -73,7 +73,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
 
   - label: "pre unit test"
     command: "ci/scripts/pre-unit-test.sh"

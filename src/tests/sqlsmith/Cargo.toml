@@ -14,15 +14,7 @@ madsim = "=0.2.0-alpha.3"
 rand = "0.8"
 risingwave_frontend = { path = "../../frontend" }
 risingwave_sqlparser = { path = "../../sqlparser" }
-tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
