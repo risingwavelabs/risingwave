@@ -56,7 +56,7 @@ is an in-memory buffer for caching table operations during one epoch, and the Ce
 Executors perform operations on relational table, and these operations will first be cached in Mem Table. Once an executor wants to write these operations to state store, cell-based table will covert these operations into kv pairs and write to state store with specific epoch. 
 
 ### Read Path
-Executors should be able to read the just written data, which means uncommited data is visiable. The data in Mem Table(memory) is fresher than that in shared storage(state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table. For example, let's assume that the first column is the pk of relational table, and the following operations are performed.
+Executors should be able to read the just written data, which means uncommited data is visible. The data in Mem Table(memory) is fresher than that in shared storage(state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table. For example, let's assume that the first column is the pk of relational table, and the following operations are performed.
 ```
 insert [1, 11, 111]
 insert [2, 22, 222]
