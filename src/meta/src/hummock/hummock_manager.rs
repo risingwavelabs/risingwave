@@ -20,7 +20,6 @@ use std::time::{Duration, Instant};
 
 use itertools::Itertools;
 use prost::Message;
-use risingwave_common::util::compress::compress_data;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
@@ -29,7 +28,6 @@ use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
     HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo,
 };
-use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
@@ -631,27 +629,7 @@ where
                     })
                     .collect::<HashSet<u32>>();
 
-                if compact_task.target_level != 0 {
-                    compact_task.vnode_mappings.reserve_exact(table_ids.len());
-                }
-
                 for table_id in table_ids {
-                    if compact_task.target_level != 0 {
-                        if let Some(vnode_mapping) = self
-                            .env
-                            .hash_mapping_manager()
-                            .get_table_hash_mapping(&table_id)
-                        {
-                            let (original_indices, compressed_data) = compress_data(&vnode_mapping);
-                            let compressed_mapping = ParallelUnitMapping {
-                                table_id,
-                                original_indices,
-                                data: compressed_data,
-                            };
-                            compact_task.vnode_mappings.push(compressed_mapping);
-                        }
-                    }
-
                     // to found exist table_id from
                     if existing_table_ids_from_meta.contains(&table_id) {
                         compact_task.existing_table_ids.push(table_id);
