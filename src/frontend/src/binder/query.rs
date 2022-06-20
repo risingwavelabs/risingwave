@@ -140,7 +140,7 @@ impl Binder {
                 }
             },
             expr => {
-                extra_order_exprs.push(self.bind_expr(expr.clone())?);
+                extra_order_exprs.push(self.bind_expr(expr)?);
                 visible_output_num + extra_order_exprs.len() - 1
             }
         };
