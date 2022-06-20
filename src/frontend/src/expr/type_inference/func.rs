@@ -90,6 +90,55 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         .into());
     }
 
+    best_candidate = rule_e(&inputs, best_candidate);
+
+    if best_candidate.len() > 1 {
+        let mut t = None;
+        for e in &inputs {
+            if e.is_null() {
+                continue;
+            }
+            let tc = e.return_type();
+            match &t {
+                None => {
+                    t = Some(tc);
+                }
+                Some(tt) => {
+                    if *tt != tc {
+                        t = None;
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(t) = t {
+            let cand_temp = best_candidate
+                .iter()
+                .filter(|(ps, _ret)| ps.iter().all(|p| cast_ok(&t, p, &CastContext::Implicit)))
+                .cloned()
+                .collect_vec();
+            if !cand_temp.is_empty() {
+                best_candidate = cand_temp;
+            }
+        }
+    }
+
+    match &best_candidate[..] {
+        [] => unreachable!(),
+        [(_ps, ret)] => Ok((inputs, (*ret).clone())),
+        _ => Err(ErrorCode::BindError(format!(
+            "multi func match: {:?} {:?}",
+            func_type,
+            inputs.iter().map(|e| e.return_type()).collect_vec(),
+        ))
+        .into()),
+    }
+}
+
+fn rule_e<'a, 'b>(
+    inputs: &'a [ExprImpl],
+    best_candidate: Vec<(&'b Vec<DataType>, &'b DataType)>,
+) -> Vec<(&'b Vec<DataType>, &'b DataType)> {
     let mut ets = Vec::new();
     for (i, arg) in inputs.iter().enumerate() {
         if !arg.is_null() {
@@ -148,49 +197,9 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         .cloned()
         .collect_vec();
     if !cands_temp.is_empty() {
-        best_candidate = cands_temp;
-    }
-
-    if best_candidate.len() > 1 {
-        let mut t = None;
-        for e in &inputs {
-            if e.is_null() {
-                continue;
-            }
-            let tc = e.return_type();
-            match &t {
-                None => {
-                    t = Some(tc);
-                }
-                Some(tt) => {
-                    if *tt != tc {
-                        t = None;
-                        break;
-                    }
-                }
-            }
-        }
-        if let Some(t) = t {
-            let cand_temp = best_candidate
-                .iter()
-                .filter(|(ps, _ret)| ps.iter().all(|p| cast_ok(&t, p, &CastContext::Implicit)))
-                .cloned()
-                .collect_vec();
-            if !cand_temp.is_empty() {
-                best_candidate = cand_temp;
-            }
-        }
-    }
-
-    match &best_candidate[..] {
-        [] => unreachable!(),
-        [(_ps, ret)] => Ok((inputs, (*ret).clone())),
-        _ => Err(ErrorCode::BindError(format!(
-            "multi func match: {:?} {:?}",
-            func_type,
-            inputs.iter().map(|e| e.return_type()).collect_vec(),
-        ))
-        .into()),
+        cands_temp
+    } else {
+        best_candidate
     }
 }
 
