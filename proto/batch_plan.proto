@@ -13,6 +13,10 @@ message RowSeqScanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
   ScanRange scan_range = 3;
+  // The partition to read for scan tasks.
+  // 
+  // Will be filled by the scheduler.
+  repeated common.RangeInclusive vnode_ranges = 4;
 }
 
 // The range to scan, which specifies a consecutive range of the PK
@@ -158,7 +162,6 @@ message TaskOutputId {
 message LocalExecutePlan {
   batch_plan.PlanFragment plan = 1;
   uint64 epoch = 2;
-  repeated common.RangeInclusive vnode_ranges = 3;
 }
 
 // ExchangeSource describes where to read results from children operators

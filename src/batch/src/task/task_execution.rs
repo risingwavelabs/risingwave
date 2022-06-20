@@ -18,7 +18,6 @@ use std::sync::Arc;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
-use risingwave_common::consistent_hashing::VNodeRanges;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
@@ -164,7 +163,6 @@ impl TaskOutput {
 pub struct BatchTaskExecution<C> {
     /// Task id.
     task_id: TaskId,
-    vnode_ranges: VNodeRanges,
 
     /// Inner plan to execute.
     plan: PlanFragment,
@@ -190,14 +188,12 @@ pub struct BatchTaskExecution<C> {
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn new(
         prost_tid: &ProstTaskId,
-        vnode_ranges: VNodeRanges,
         plan: PlanFragment,
         context: C,
         epoch: u64,
     ) -> Result<Self> {
         Ok(Self {
             task_id: TaskId::from(prost_tid),
-            vnode_ranges,
             plan,
             state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(Vec::new()),
@@ -228,7 +224,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let exec = ExecutorBuilder::new(
             self.plan.root.as_ref().unwrap(),
             &self.task_id,
-            &self.vnode_ranges,
             self.context.clone(),
             self.epoch,
         )

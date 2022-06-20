@@ -18,7 +18,6 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use log::debug;
 use risingwave_common::array::DataChunk;
-use risingwave_common::consistent_hashing::full_vnode_range;
 use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
 use risingwave_pb::common::HostAddress;
@@ -98,7 +97,7 @@ impl QueryManager {
             .await?;
 
         let creat_task_resp = compute_client
-            .create_task(task_id.clone(), plan, full_vnode_range(), epoch)
+            .create_task(task_id.clone(), plan, epoch)
             .await;
         self.hummock_snapshot_manager
             .unpin_snapshot(epoch, &query_id)

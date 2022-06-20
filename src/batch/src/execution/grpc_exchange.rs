@@ -46,7 +46,6 @@ impl GrpcExchangeSource {
                     task_id: Some(task_id),
                     plan: plan.plan,
                     epoch: plan.epoch,
-                    vnode_ranges: plan.vnode_ranges,
                 };
                 client.execute(execute_request).await?
             }

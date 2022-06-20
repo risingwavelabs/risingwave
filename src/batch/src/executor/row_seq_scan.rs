@@ -156,7 +156,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 None,
             );
 
-            let vnode_ranges = source.vnode_ranges;
+            let vnode_ranges = seq_scan_node.vnode_ranges.clone();
             vnode_ranges
                 .iter()
                 .map(|RangeInclusive { start, end }| {

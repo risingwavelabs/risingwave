@@ -50,7 +50,6 @@ pub use order_by::*;
 pub use project::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::consistent_hashing::VNodeRanges;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -102,7 +101,6 @@ pub trait BoxedExecutorBuilder {
 pub struct ExecutorBuilder<'a, C> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
-    pub vnode_ranges: &'a VNodeRanges,
     context: C,
     epoch: u64,
 }
@@ -120,17 +118,10 @@ macro_rules! build_executor {
 }
 
 impl<'a, C: Clone> ExecutorBuilder<'a, C> {
-    pub fn new(
-        plan_node: &'a PlanNode,
-        task_id: &'a TaskId,
-        vnode_ranges: &'a VNodeRanges,
-        context: C,
-        epoch: u64,
-    ) -> Self {
+    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, context: C, epoch: u64) -> Self {
         Self {
             plan_node,
             task_id,
-            vnode_ranges,
             context,
             epoch,
         }
@@ -138,13 +129,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 
     #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(
-            plan_node,
-            self.task_id,
-            self.vnode_ranges,
-            self.context.clone(),
-            self.epoch,
-        )
+        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
     }
 
     pub fn plan_node(&self) -> &PlanNode {
@@ -224,11 +209,9 @@ mod tests {
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
-        let vnode_ranges = Default::default();
         let builder = ExecutorBuilder::new(
             &plan_node,
             task_id,
-            &vnode_ranges,
             ComputeNodeContext::new_for_test(),
             u64::MAX,
         );

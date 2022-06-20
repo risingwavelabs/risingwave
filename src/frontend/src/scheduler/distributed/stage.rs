@@ -311,14 +311,9 @@ impl StageRunner {
                     stage_id: self.stage.id,
                     task_id: i as u32,
                 };
-                let plan_fragment = self.create_plan_fragment(i as u32);
                 let vnode_ranges = vnode_ranges_mapping[&parallel_unit_id].clone();
-                futures.push(self.schedule_task(
-                    task_id,
-                    plan_fragment,
-                    vnode_ranges,
-                    Some(worker),
-                ));
+                let plan_fragment = self.create_plan_fragment(i as u32, Some(vnode_ranges));
+                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
             }
         } else {
             for id in 0..self.stage.parallelism {
@@ -327,8 +322,8 @@ impl StageRunner {
                     stage_id: self.stage.id,
                     task_id: id,
                 };
-                let plan_fragment = self.create_plan_fragment(id);
-                futures.push(self.schedule_task(task_id, plan_fragment, vec![], None));
+                let plan_fragment = self.create_plan_fragment(id, None);
+                futures.push(self.schedule_task(task_id, plan_fragment, None));
             }
         }
         let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
@@ -342,7 +337,6 @@ impl StageRunner {
         &self,
         task_id: TaskIdProst,
         plan_fragment: PlanFragment,
-        vnode_ranges: VNodeRanges,
         worker: Option<WorkerNode>,
     ) -> SchedulerResult<()> {
         let worker_node_addr = worker
@@ -358,7 +352,7 @@ impl StageRunner {
 
         let t_id = task_id.task_id;
         compute_client
-            .create_task2(task_id, plan_fragment, vnode_ranges, self.epoch)
+            .create_task2(task_id, plan_fragment, self.epoch)
             .await
             .map_err(|e| anyhow!(e))?;
 
@@ -370,8 +364,12 @@ impl StageRunner {
         Ok(())
     }
 
-    fn create_plan_fragment(&self, task_id: TaskId) -> PlanFragment {
-        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id);
+    fn create_plan_fragment(
+        &self,
+        task_id: TaskId,
+        vnode_ranges: Option<VNodeRanges>,
+    ) -> PlanFragment {
+        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id, vnode_ranges);
         let exchange_info = self.stage.exchange_info.clone();
 
         PlanFragment {
@@ -384,6 +382,7 @@ impl StageRunner {
         &self,
         execution_plan_node: &ExecutionPlanNode,
         task_id: TaskId,
+        vnode_ranges: Option<VNodeRanges>,
     ) -> PlanNodeProst {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
@@ -426,11 +425,24 @@ impl StageRunner {
                     _ => unreachable!(),
                 }
             }
+            PlanNodeType::BatchSeqScan => {
+                let node_body = execution_plan_node.node.clone();
+                let NodeBody::RowSeqScan(mut scan_node) = node_body else {
+                    unreachable!();
+                };
+                scan_node.vnode_ranges = vnode_ranges.unwrap();
+                PlanNodeProst {
+                    children: vec![],
+                    // TODO: Generate meaningful identify
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(NodeBody::RowSeqScan(scan_node)),
+                }
+            }
             _ => {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, task_id))
+                    .map(|e| self.convert_plan_node(e, task_id, vnode_ranges.clone()))
                     .collect();
 
                 PlanNodeProst {

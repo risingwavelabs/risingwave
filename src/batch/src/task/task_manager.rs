@@ -17,7 +17,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use risingwave_common::consistent_hashing::VNodeRanges;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::{
@@ -48,12 +47,11 @@ impl BatchManager {
         &self,
         tid: &ProstTaskId,
         plan: PlanFragment,
-        vnode_ranges: VNodeRanges,
         epoch: u64,
         context: ComputeNodeContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
-        let task = BatchTaskExecution::new(tid, vnode_ranges, plan, context, epoch)?;
+        let task = BatchTaskExecution::new(tid, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
 
@@ -242,17 +240,11 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                Default::default(),
-                0,
-                context.clone(),
-            )
+            .fire_task(&task_id, plan.clone(), 0, context.clone())
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, Default::default(), 0, context)
+            .fire_task(&task_id, plan, 0, context)
             .await
             .unwrap_err();
         assert!(err
@@ -291,13 +283,7 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                Default::default(),
-                0,
-                context.clone(),
-            )
+            .fire_task(&task_id, plan.clone(), 0, context.clone())
             .await
             .unwrap();
         manager.abort_task(&task_id).unwrap();

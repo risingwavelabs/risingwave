@@ -55,7 +55,6 @@ impl TaskService for BatchServiceImpl {
             task_id,
             plan,
             epoch,
-            vnode_ranges,
         } = request.into_inner();
 
         let res = self
@@ -63,7 +62,6 @@ impl TaskService for BatchServiceImpl {
             .fire_task(
                 &task_id.expect("no task id found"),
                 plan.expect("no plan found").clone(),
-                vnode_ranges,
                 epoch,
                 ComputeNodeContext::new(self.env.clone()),
             )
@@ -130,7 +128,6 @@ impl TaskService for BatchServiceImpl {
             task_id,
             plan,
             epoch,
-            vnode_ranges,
         } = req.into_inner();
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
@@ -139,7 +136,7 @@ impl TaskService for BatchServiceImpl {
             "local execute request: plan:{:?} with task id:{:?}",
             plan, task_id
         );
-        let task = BatchTaskExecution::new(&task_id, vnode_ranges, plan, context, epoch)?;
+        let task = BatchTaskExecution::new(&task_id, plan, context, epoch)?;
         let task = Arc::new(task);
 
         if let Err(e) = task.clone().async_execute().await {
