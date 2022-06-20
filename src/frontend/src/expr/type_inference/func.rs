@@ -93,34 +93,7 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
     best_candidate = rule_e(&inputs, best_candidate);
 
     if best_candidate.len() > 1 {
-        let mut t = None;
-        for e in &inputs {
-            if e.is_null() {
-                continue;
-            }
-            let tc = e.return_type();
-            match &t {
-                None => {
-                    t = Some(tc);
-                }
-                Some(tt) => {
-                    if *tt != tc {
-                        t = None;
-                        break;
-                    }
-                }
-            }
-        }
-        if let Some(t) = t {
-            let cand_temp = best_candidate
-                .iter()
-                .filter(|(ps, _ret)| ps.iter().all(|p| cast_ok(&t, p, &CastContext::Implicit)))
-                .cloned()
-                .collect_vec();
-            if !cand_temp.is_empty() {
-                best_candidate = cand_temp;
-            }
-        }
+        best_candidate = rule_f(&inputs, best_candidate);
     }
 
     match &best_candidate[..] {
@@ -135,6 +108,40 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
     }
 }
 
+fn rule_f<'a, 'b>(
+    inputs: &'a [ExprImpl],
+    best_candidate: Vec<(&'b Vec<DataType>, &'b DataType)>,
+) -> Vec<(&'b Vec<DataType>, &'b DataType)> {
+    let mut t = None;
+    for e in inputs {
+        if e.is_null() {
+            continue;
+        }
+        let tc = e.return_type();
+        match &t {
+            None => {
+                t = Some(tc);
+            }
+            Some(tt) => {
+                if *tt != tc {
+                    t = None;
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(t) = t {
+        let cand_temp = best_candidate
+            .iter()
+            .filter(|(ps, _ret)| ps.iter().all(|p| cast_ok(&t, p, &CastContext::Implicit)))
+            .cloned()
+            .collect_vec();
+        if !cand_temp.is_empty() {
+            return cand_temp;
+        }
+    }
+    return best_candidate;
+}
 fn rule_e<'a, 'b>(
     inputs: &'a [ExprImpl],
     best_candidate: Vec<(&'b Vec<DataType>, &'b DataType)>,
