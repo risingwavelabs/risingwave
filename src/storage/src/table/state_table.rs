@@ -53,14 +53,14 @@ impl<S: StateStore> StateTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
 
         Self {
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
                 keyspace,
                 column_descs,
-                Some(pk_serializer.clone()),
+                order_types,
                 dist_key_indices,
             ),
             pk_serializer,

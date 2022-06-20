@@ -75,6 +75,7 @@ impl OrderedRowSerializer {
         Self { order_types }
     }
 
+    #[must_use]
     pub fn prefix(&self, len: usize) -> Self {
         Self {
             order_types: self.order_types[..len].to_vec(),
