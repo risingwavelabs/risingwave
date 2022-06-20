@@ -25,7 +25,6 @@ use super::{
 };
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanTreeNode;
-use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::utils::{ColIndexMapping, Condition, ConnectedComponentLabeller};
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
@@ -40,12 +39,16 @@ pub struct LogicalMultiJoin {
     inputs: Vec<PlanRef>,
     on: Condition,
     output_indices: Vec<usize>,
+    // XXX(st1page): these fields will be used in prune_col and pk_derive soon.
+    #[allow(unused)]
     inner2output: ColIndexMapping,
     /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
     /// not consider output_indices**
+    #[allow(unused)]
     inner_o2i_mapping: Vec<(usize, usize)>,
     /// the mapping ColIndexMapping<input_idx->output_idx> of each inputs, **"output_col_idx" is
     /// internal, not consider output_indices**
+    #[allow(unused)]
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }
 
@@ -165,7 +168,7 @@ impl LogicalMultiJoin {
             let mut tot_col_num = 0;
             for (input_idx, input_schema) in input_schemas.iter().enumerate() {
                 tot_col_num += input_schema.len();
-                for (col_idx, field) in input_schema.fields().iter().enumerate() {
+                for (col_idx, _field) in input_schema.fields().iter().enumerate() {
                     inner_o2i_mapping.push((input_idx, col_idx));
                 }
             }

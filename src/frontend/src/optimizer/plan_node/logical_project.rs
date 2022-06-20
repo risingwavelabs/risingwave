@@ -161,7 +161,7 @@ impl LogicalProject {
         self.exprs
             .iter()
             .enumerate()
-            .map(|(i, expr)| match expr {
+            .map(|(_i, expr)| match expr {
                 ExprImpl::InputRef(input_ref) => Some(input_ref.index),
                 _ => None,
             })

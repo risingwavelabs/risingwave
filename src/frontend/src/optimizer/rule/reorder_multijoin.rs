@@ -45,7 +45,7 @@ mod tests {
 
     use super::*;
     use crate::expr::{ExprImpl, FunctionCall, InputRef};
-    use crate::optimizer::rule::MergeMultiJoinRule;
+    
     use crate::session::OptimizerContext;
     use crate::utils::Condition;
 
