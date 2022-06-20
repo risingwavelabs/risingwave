@@ -35,19 +35,57 @@ type UserName = String;
 /// session user should be done in Frontend before passing to Meta.
 pub struct UserManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
-    core: Mutex<HashMap<UserName, UserInfo>>,
+    core: Mutex<UserManagerInner>,
 }
+
+pub struct UserManagerInner {
+    user_info: HashMap<UserName, UserInfo>,
+    user_grant_relation: HashMap<UserName, HashMap<UserName, Vec<Object>>>,
+}
+
+impl UserManagerInner {
+    pub fn get_user_info(&self) -> &HashMap<UserName, UserInfo> {
+        return &self.user_info;
+    }
+}
+
+fn get_relation(user_info: &HashMap<UserName, UserInfo>) -> HashMap<UserName, HashMap<UserName, Vec<Object>>> {
+    let mut user_grant_relation: HashMap<UserName, HashMap<UserName, Vec<Object>>> = HashMap::new();
+    for user_info_item in user_info {
+        for grant_privilege_item in &user_info_item.1.grant_privileges {
+            for option in & grant_privilege_item.action_with_opts {
+                if !user_grant_relation.contains_key(&option.get_grantor().to_string()) {
+                    user_grant_relation.insert(option.get_grantor().to_string(), HashMap::new());
+
+                }
+                let realtion_item = user_grant_relation.get_mut(option.get_grantor()).unwrap();
+                if !realtion_item.contains_key(user_info_item.0) {
+                        realtion_item.insert(user_info_item.0.clone(), Vec::new());
+                }
+                realtion_item.get_mut(user_info_item.0).unwrap().push(grant_privilege_item.get_object().unwrap().clone());
+            }
+        }
+    }
+    return user_grant_relation;
+}
+
 
 pub type UserInfoManagerRef<S> = Arc<UserManager<S>>;
 
 impl<S: MetaStore> UserManager<S> {
     pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
         let users = UserInfo::list(env.meta_store()).await?;
+        let user_info = HashMap::from_iter(
+            users.into_iter().map(|user| (user.name.clone(), user)),
+        );
+        let user_grant_relation = get_relation(&user_info);
+        let inner = UserManagerInner {
+            user_info,
+            user_grant_relation,
+        };
         let user_manager = Self {
             env,
-            core: Mutex::new(HashMap::from_iter(
-                users.into_iter().map(|user| (user.name.clone(), user)),
-            )),
+            core: Mutex::new(inner),
         };
         user_manager.init().await?;
         Ok(user_manager)
@@ -56,7 +94,7 @@ impl<S: MetaStore> UserManager<S> {
     async fn init(&self) -> Result<()> {
         let mut core = self.core.lock().await;
         for user in [DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_FOR_PG] {
-            if !core.contains_key(user) {
+            if !core.user_info.contains_key(user) {
                 let default_user = UserInfo {
                     name: user.to_string(),
                     is_supper: true,
@@ -66,7 +104,7 @@ impl<S: MetaStore> UserManager<S> {
                 };
 
                 default_user.insert(self.env.meta_store()).await?;
-                core.insert(user.to_string(), default_user);
+                core.user_info.insert(user.to_string(), default_user);
             }
         }
 
@@ -75,25 +113,25 @@ impl<S: MetaStore> UserManager<S> {
 
     /// Used in `NotificationService::subscribe`.
     /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
-    pub async fn get_user_core_guard(&self) -> MutexGuard<'_, HashMap<UserName, UserInfo>> {
+    pub async fn get_user_core_guard(&self) -> MutexGuard<'_, UserManagerInner> {
         self.core.lock().await
     }
 
     pub async fn list_users(&self) -> Result<Vec<UserInfo>> {
         let core = self.core.lock().await;
-        Ok(core.values().cloned().collect())
+        Ok(core.user_info.values().cloned().collect())
     }
 
     pub async fn create_user(&self, user: &UserInfo) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
-        if core.contains_key(&user.name) {
+        if core.user_info.contains_key(&user.name) {
             return Err(RwError::from(InternalError(format!(
                 "User {} already exists",
                 user.name
             ))));
         }
         user.insert(self.env.meta_store()).await?;
-        core.insert(user.name.clone(), user.clone());
+        core.user_info.insert(user.name.clone(), user.clone());
 
         let version = self
             .env
@@ -106,14 +144,14 @@ impl<S: MetaStore> UserManager<S> {
     pub async fn get_user(&self, user_name: &UserName) -> Result<UserInfo> {
         let core = self.core.lock().await;
 
-        core.get(user_name)
+        core.user_info.get(user_name)
             .cloned()
             .ok_or_else(|| RwError::from(InternalError(format!("User {} not found", user_name))))
     }
 
     pub async fn drop_user(&self, user_name: &UserName) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
-        if !core.contains_key(user_name) {
+        if !core.user_info.contains_key(user_name) {
             return Err(RwError::from(InternalError(format!(
                 "User {} does not exist",
                 user_name
@@ -125,16 +163,21 @@ impl<S: MetaStore> UserManager<S> {
                 user_name
             ))));
         }
-        if !core.get(user_name).unwrap().grant_privileges.is_empty() {
+        if !core.user_info.get(user_name).unwrap().grant_privileges.is_empty() {
             return Err(RwError::from(InternalError(format!(
                 "Cannot drop user {} with privileges",
                 user_name
             ))));
         }
-
+        if core.user_grant_relation.contains_key(user_name) && !core.user_grant_relation.get(user_name).unwrap().is_empty() {
+            return Err(RwError::from(InternalError(format!(
+                "Cannot drop user {} with privileges granted to others",
+                user_name
+            ))));           
+        }
         // TODO: add more check, like whether he owns any database/schema/table/source.
         UserInfo::delete(self.env.meta_store(), user_name).await?;
-        let user = core.remove(user_name).unwrap();
+        let user = core.user_info.remove(user_name).unwrap();
 
         let version = self
             .env
@@ -152,24 +195,25 @@ impl<S: MetaStore> UserManager<S> {
     fn merge_privilege(origin_privilege: &mut GrantPrivilege, new_privilege: &GrantPrivilege) {
         assert_eq!(origin_privilege.object, new_privilege.object);
 
-        let mut action_map = HashMap::<i32, bool>::from_iter(
+        let mut action_map = HashMap::<i32, (bool,String)>::from_iter(
             origin_privilege
                 .action_with_opts
                 .iter()
-                .map(|ao| (ao.action, ao.with_grant_option)),
+                .map(|ao| (ao.action, (ao.with_grant_option,ao.grantor.clone()))),
         );
         for nao in &new_privilege.action_with_opts {
             if let Some(o) = action_map.get_mut(&nao.action) {
-                *o |= nao.with_grant_option;
+                (*o).0 |= nao.with_grant_option;
             } else {
-                action_map.insert(nao.action, nao.with_grant_option);
+                action_map.insert(nao.action, (nao.with_grant_option, nao.grantor.clone()));
             }
         }
         origin_privilege.action_with_opts = action_map
             .into_iter()
-            .map(|(action, with_grant_option)| ActionWithGrantOption {
+            .map(|(action, with_grant_option_tuple)| ActionWithGrantOption {
                 action,
-                with_grant_option,
+                with_grant_option: with_grant_option_tuple.0,
+                grantor: with_grant_option_tuple.1,
             })
             .collect();
     }
@@ -178,15 +222,21 @@ impl<S: MetaStore> UserManager<S> {
         &self,
         users: &[UserName],
         new_grant_privileges: &[GrantPrivilege],
+        grantor: String,
     ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
         let mut user_updated = Vec::with_capacity(users.len());
         for user_name in users {
-            let mut user = core
+            let mut user = core.user_info
                 .get(user_name)
                 .ok_or_else(|| InternalError(format!("User {} does not exist", user_name)))
                 .cloned()?;
+
+            if !core.user_grant_relation.contains_key(&grantor) {
+                core.user_grant_relation.insert(grantor.clone(), HashMap::new());
+            }
+            let grant_user = core.user_grant_relation.get_mut(&grantor).unwrap();
 
             if user.is_supper {
                 return Err(RwError::from(InternalError(format!(
@@ -204,6 +254,10 @@ impl<S: MetaStore> UserManager<S> {
                     Self::merge_privilege(privilege, new_grant_privilege);
                 } else {
                     user.grant_privileges.push(new_grant_privilege.clone());
+                    if !grant_user.contains_key(user_name) {
+                        grant_user.insert(user_name.clone(), Vec::new());
+                    }
+                    grant_user.get_mut(user_name).unwrap().push(new_grant_privilege.get_object().unwrap().clone());
                 }
             });
             user.upsert_in_transaction(&mut transaction)?;
@@ -213,7 +267,7 @@ impl<S: MetaStore> UserManager<S> {
         self.env.meta_store().txn(transaction).await?;
         let mut version = 0;
         for user in user_updated {
-            core.insert(user.name.clone(), user.clone());
+            core.user_info.insert(user.name.clone(), user.clone());
             version = self
                 .env
                 .notification_manager()
@@ -260,16 +314,20 @@ impl<S: MetaStore> UserManager<S> {
         users: &[UserName],
         revoke_grant_privileges: &[GrantPrivilege],
         revoke_grant_option: bool,
+        cascade: bool,
     ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
         let mut user_updated = Vec::with_capacity(users.len());
         for user_name in users {
-            let mut user = core
+            let mut user = core.user_info
                 .get(user_name)
                 .ok_or_else(|| InternalError(format!("User {} does not exist", user_name)))
                 .cloned()?;
-
+            if !core.user_grant_relation.contains_key(user_name) {
+                core.user_grant_relation.insert(user_name.clone(), HashMap::new());
+            }
+            let relations = core.user_grant_relation.get_mut(user_name).unwrap();
             if user.is_supper {
                 return Err(RwError::from(InternalError(format!(
                     "Cannot revoke privilege from supper user {}",
@@ -283,6 +341,7 @@ impl<S: MetaStore> UserManager<S> {
                 .for_each(|revoke_grant_privilege| {
                     for privilege in &mut user.grant_privileges {
                         if privilege.object == revoke_grant_privilege.object {
+                            
                             Self::revoke_privilege_inner(
                                 privilege,
                                 revoke_grant_privilege,
@@ -295,6 +354,22 @@ impl<S: MetaStore> UserManager<S> {
                 });
 
             if empty_privilege {
+                for privilege in &user.grant_privileges {
+                    if privilege.action_with_opts.is_empty(){
+                        for relation in &mut *relations {
+                            if cascade {
+                                relation.1.retain(|o| !(o == privilege.get_object().unwrap()));
+                            }else{
+                                if relation.1.contains(privilege.get_object().unwrap()) {
+                                    return Err(RwError::from(InternalError(format!(
+                                        "Cannot revoke privilege from user {} for restrict",
+                                        user_name
+                                    ))));
+                                }
+                            }
+                        }
+                    }
+                }
                 user.grant_privileges
                     .retain(|privilege| !privilege.action_with_opts.is_empty());
             }
@@ -305,7 +380,7 @@ impl<S: MetaStore> UserManager<S> {
         self.env.meta_store().txn(transaction).await?;
         let mut version = 0;
         for user in user_updated {
-            core.insert(user.name.clone(), user.clone());
+            core.user_info.insert(user.name.clone(), user.clone());
             version = self
                 .env
                 .notification_manager()
@@ -322,7 +397,7 @@ impl<S: MetaStore> UserManager<S> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
         let mut users_need_update = vec![];
-        for user in core.values() {
+        for user in core.user_info.values() {
             let cnt = user.grant_privileges.len();
             let mut user = user.clone();
             user.grant_privileges
@@ -335,7 +410,7 @@ impl<S: MetaStore> UserManager<S> {
 
         self.env.meta_store().txn(transaction).await?;
         for user in users_need_update {
-            core.insert(user.name.clone(), user.clone());
+            core.user_info.insert(user.name.clone(), user.clone());
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Update, Info::User(user))
@@ -371,6 +446,7 @@ mod tests {
                 .map(|&action| ActionWithGrantOption {
                     action: action as i32,
                     with_grant_option,
+                    grantor: DEFAULT_SUPPER_USER.to_string(),
                 })
                 .collect(),
         }
@@ -399,6 +475,7 @@ mod tests {
                     &[Action::Select, Action::Insert],
                     false,
                 )],
+                DEFAULT_SUPPER_USER.to_string(),
             )
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
@@ -419,6 +496,7 @@ mod tests {
                     &[Action::Select, Action::Insert],
                     true,
                 )],
+                DEFAULT_SUPPER_USER.to_string(),
             )
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
@@ -439,6 +517,7 @@ mod tests {
                     &[Action::Select, Action::Update, Action::Delete],
                     true,
                 )],
+                DEFAULT_SUPPER_USER.to_string(),
             )
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
@@ -465,6 +544,7 @@ mod tests {
                     false,
                 )],
                 true,
+                true,
             )
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;
@@ -484,6 +564,7 @@ mod tests {
                     false,
                 )],
                 false,
+                true,
             )
             .await?;
         let user = user_manager.get_user(&test_user.to_string()).await?;

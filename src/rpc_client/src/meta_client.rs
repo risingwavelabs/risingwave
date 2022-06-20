@@ -232,11 +232,13 @@ impl MetaClient {
         users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
+        grantor: String,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
             users,
             privileges,
             with_grant_option,
+            grantor,
         };
         let resp = self.inner.grant_privilege(request).await?;
         Ok(resp.version)
@@ -247,11 +249,13 @@ impl MetaClient {
         users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         revoke_grant_option: bool,
+        cascade: bool,
     ) -> Result<u64> {
         let request = RevokePrivilegeRequest {
             users,
             privileges,
             revoke_grant_option,
+            cascade,
         };
         let resp = self.inner.revoke_privilege(request).await?;
         Ok(resp.version)

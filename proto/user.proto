@@ -28,6 +28,7 @@ message UserInfo {
 
   /// Granted privileges will be only updated through the command of GRANT/REVOKE.
   repeated GrantPrivilege grant_privileges = 6;
+
 }
 
 /// GrantPrivilege defines a privilege granted to a user.
@@ -45,6 +46,7 @@ message GrantPrivilege {
   message ActionWithGrantOption {
     Action action = 1;
     bool with_grant_option = 2;
+    string grantor = 3;
   }
 
   oneof object {
@@ -80,6 +82,7 @@ message GrantPrivilegeRequest {
   repeated string users = 1;
   repeated GrantPrivilege privileges = 2;
   bool with_grant_option = 3;
+  string grantor = 4;
 }
 
 message GrantPrivilegeResponse {
@@ -91,6 +94,7 @@ message RevokePrivilegeRequest {
   repeated string users = 1;
   repeated GrantPrivilege privileges = 2;
   bool revoke_grant_option = 3;
+  bool cascade = 4;
 }
 
 message RevokePrivilegeResponse {
