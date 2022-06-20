@@ -20,7 +20,7 @@ use regex::Regex;
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_protocol::cstr_to_str;
 
-/// Parse params accoring the type description.
+/// Parse params according the type description.
 ///
 /// # Example
 ///
@@ -31,7 +31,7 @@ use crate::pg_protocol::cstr_to_str;
 /// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
 /// ```
 fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Vec<String> {
-    assert!(type_description.len() == raw_params.len());
+    assert_eq!(type_description.len(), raw_params.len());
 
     raw_params
         .iter()
@@ -118,17 +118,17 @@ impl PgStatement {
         self.row_description.clone()
     }
 
-    pub fn instance(&self, name: String, params: &[Bytes]) -> PgPortal {
+    pub fn instance(&self, portal_name: String, params: &[Bytes]) -> PgPortal {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
         if params.is_empty() {
             return PgPortal {
-                name,
+                name: portal_name,
                 query_string: self.query_string.clone(),
             };
         }
 
-        // 1. Identify all the $n.
+        // 1. Identify all the $n. For example, "SELECT $3, $2, $1" -> [3, 2, 1].
         let parameter_pattern = Regex::new(r"\$[0-9][0-9]*").unwrap();
         let generic_params: Vec<usize> = parameter_pattern
             .find_iter(statement.as_str())
@@ -141,15 +141,16 @@ impl PgStatement {
             })
             .collect();
 
-        // 2. parse params.
+        // 2. Parse params bytes into string form according to type.
         let params = parse_params(&self.type_description, params);
 
-        // 3. replace params.
+        // 3. Replace generic params in statement to real value. For example, "SELECT $3, $2, $1" ->
+        // "SELECT 'A', 'B', 'C'".
         let instance_query_string = replace_params(statement, &generic_params, &params);
 
         // 4. Create a new portal.
         PgPortal {
-            name,
+            name: portal_name,
             query_string: Bytes::from(instance_query_string),
         }
     }
@@ -189,14 +190,14 @@ mod tests {
             let params = parse_params(&type_description, &raw_params);
 
             let res = replace_params("SELECT $3,$2,$1".to_string(), &[1, 2, 3], &params);
-            assert!(res == "SELECT 'C','B','A'");
+            assert_eq!(res, "SELECT 'C','B','A'");
 
             let res = replace_params(
                 "SELECT $2,$3,$1  ,$3 ,$2 ,$1     ;".to_string(),
                 &[1, 2, 3],
                 &params,
             );
-            assert!(res == "SELECT 'B','C','A'  ,'C' ,'B' ,'A'     ;");
+            assert_eq!(res, "SELECT 'B','C','A'  ,'C' ,'B' ,'A'     ;");
         }
 
         {
@@ -221,7 +222,7 @@ mod tests {
                 &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
                 &params,
             );
-            assert!(res == "SELECT 'K','B','A';");
+            assert_eq!(res, "SELECT 'K','B','A';");
         }
 
         {
@@ -247,14 +248,20 @@ mod tests {
                 &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
                 &params,
             );
-            assert!(res == "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;");
+            assert_eq!(
+                res,
+                "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;"
+            );
 
             let res = replace_params(
                 "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  'He1ll2o',1;".to_string(),
                 &[2, 1, 11, 10, 12, 9, 7, 8, 5, 6, 4, 3],
                 &params,
             );
-            assert!(res == "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;");
+            assert_eq!(
+                res,
+                "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;"
+            );
         }
 
         {
