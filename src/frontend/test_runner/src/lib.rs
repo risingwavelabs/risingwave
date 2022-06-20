@@ -248,7 +248,7 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(session.clone());
+            let context = OptimizerContext::new(session.clone(), Arc::from(sql));
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
