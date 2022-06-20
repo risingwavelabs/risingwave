@@ -76,55 +76,7 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         }
     }
 
-    let mut best_exact = 0;
-    let mut best_preferred = 0;
-    let mut best_candidate = Vec::new();
-
-    for (param_types, ret) in candidates {
-        let mut n_exact = 0;
-        let mut n_preferred = 0;
-        let mut castable = true;
-        for (a, p) in inputs.iter().zip_eq(param_types) {
-            if !a.is_null() {
-                if a.return_type() == *p {
-                    n_exact += 1;
-                } else if !cast_ok(&a.return_type(), p, &CastContext::Implicit) {
-                    castable = false;
-                    break;
-                }
-                // Only count non-nulls. Example:
-                // ```
-                // create function xxx(text, int, int) returns text language sql return 1;
-                // create function xxx(int, text, int) returns text language sql return 2;
-                // create function xxx(int, int, int) returns text language sql return 3;
-                // select xxx(null, null, null);
-                // select xxx(null, null, 1::smallint);  -- 3
-                // ```
-                // If we count null positions, the first 2 wins because text is preferred.
-                if matches!(
-                    p,
-                    DataType::Float64
-                        | DataType::Boolean
-                        | DataType::Varchar
-                        | DataType::Timestampz
-                        | DataType::Interval
-                ) {
-                    n_preferred += 1;
-                }
-            }
-        }
-        if !castable {
-            continue;
-        }
-        if n_exact > best_exact || n_exact == best_exact && n_preferred > best_preferred {
-            best_exact = n_exact;
-            best_preferred = n_preferred;
-            best_candidate.clear();
-        }
-        if n_exact == best_exact && n_preferred == best_preferred {
-            best_candidate.push((param_types, ret));
-        }
-    }
+    let mut best_candidate = exact_n_prefer(&inputs, candidates);
 
     if best_candidate.is_empty() {
         return Err(ErrorCode::NotImplemented(
@@ -240,6 +192,62 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         ))
         .into()),
     }
+}
+
+fn exact_n_prefer<'a, 'b>(
+    inputs: &'a [ExprImpl],
+    candidates: &'b [(Vec<DataType>, DataType)],
+) -> Vec<(&'b Vec<DataType>, &'b DataType)> {
+    let mut best_exact = 0;
+    let mut best_preferred = 0;
+    let mut best_candidate = Vec::new();
+
+    for (param_types, ret) in candidates {
+        let mut n_exact = 0;
+        let mut n_preferred = 0;
+        let mut castable = true;
+        for (a, p) in inputs.iter().zip_eq(param_types) {
+            if !a.is_null() {
+                if a.return_type() == *p {
+                    n_exact += 1;
+                } else if !cast_ok(&a.return_type(), p, &CastContext::Implicit) {
+                    castable = false;
+                    break;
+                }
+                // Only count non-nulls. Example:
+                // ```
+                // create function xxx(text, int, int) returns text language sql return 1;
+                // create function xxx(int, text, int) returns text language sql return 2;
+                // create function xxx(int, int, int) returns text language sql return 3;
+                // select xxx(null, null, null);
+                // select xxx(null, null, 1::smallint);  -- 3
+                // ```
+                // If we count null positions, the first 2 wins because text is preferred.
+                if matches!(
+                    p,
+                    DataType::Float64
+                        | DataType::Boolean
+                        | DataType::Varchar
+                        | DataType::Timestampz
+                        | DataType::Interval
+                ) {
+                    n_preferred += 1;
+                }
+            }
+        }
+        if !castable {
+            continue;
+        }
+        if n_exact > best_exact || n_exact == best_exact && n_preferred > best_preferred {
+            best_exact = n_exact;
+            best_preferred = n_preferred;
+            best_candidate.clear();
+        }
+        if n_exact == best_exact && n_preferred == best_preferred {
+            best_candidate.push((param_types, ret));
+        }
+    }
+    best_candidate
 }
 
 #[derive(PartialEq, Hash)]
