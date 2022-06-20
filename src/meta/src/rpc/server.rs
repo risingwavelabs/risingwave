@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
+use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -336,6 +337,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             barrier_manager.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
+            compaction_group_manager.clone(),
         )
         .await
         .unwrap(),
@@ -360,6 +362,24 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap(),
     );
 
+    compaction_group_manager
+        .purge_stale_members(
+            &fragment_manager
+                .list_table_fragments()
+                .await
+                .expect("list_table_fragments"),
+            &catalog_manager
+                .get_catalog_core_guard()
+                .await
+                .list_sources()
+                .await
+                .expect("list_sources")
+                .into_iter()
+                .map(|source| source.id)
+                .collect_vec(),
+        )
+        .await
+        .unwrap();
     let compaction_scheduler = Arc::new(CompactionScheduler::new(
         hummock_manager.clone(),
         compactor_manager.clone(),

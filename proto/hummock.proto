@@ -42,8 +42,12 @@ message UncommittedEpoch {
 }
 
 message HummockVersion {
+  message Levels {
+    repeated Level levels = 1;
+  }
   uint64 id = 1;
-  repeated Level levels = 2;
+  // Levels of each compaction group
+  map<uint64, Levels> levels = 2;
   uint64 max_committed_epoch = 4;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
