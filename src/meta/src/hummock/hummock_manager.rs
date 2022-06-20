@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
-    HummockRefCount, HummockSSTableId, HummockVersionId,
+    HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo,
 };
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::hummock::{
@@ -598,7 +598,7 @@ where
             Some(mut compact_task) => {
                 let existing_table_ids_from_meta = self
                     .compaction_group_manager
-                    .internal_table_ids_by_compation_group_id(compaction_group_id)
+                    .internal_table_ids_by_compaction_group_id(compaction_group_id)
                     .await?;
 
                 compact_task.watermark = {
@@ -837,8 +837,11 @@ where
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
-        sstables: Vec<SstableInfo>,
+        sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
+        // TODO #2065: add SSTs to corresponding compaction groups' levels.
+        let sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
+
         let mut versioning_guard = self.versioning.write().await;
         let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();

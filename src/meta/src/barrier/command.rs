@@ -21,7 +21,8 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::SplitImpl;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{AddMutation, DispatcherMutation, SourceChangeSplit, StopMutation};
+use risingwave_pb::data::{AddMutation, DispatcherMutation, StopMutation};
+use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
@@ -147,23 +148,23 @@ where
                     )
                     .collect();
 
-                let splits = source_state
+                let actor_splits = source_state
                     .iter()
                     .filter(|(_, splits)| !splits.is_empty())
                     .map(|(actor_id, splits)| {
-                        let split_type = splits.iter().next().unwrap().get_type();
-                        SourceChangeSplit {
-                            actor_id: *actor_id,
-                            split_type,
-                            source_splits: splits
-                                .iter()
-                                .map(|split| split.to_json_bytes().to_vec())
-                                .collect(),
-                        }
+                        (
+                            *actor_id,
+                            ConnectorSplits {
+                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        )
                     })
                     .collect();
 
-                Some(Mutation::Add(AddMutation { mutations, splits }))
+                Some(Mutation::Add(AddMutation {
+                    mutations,
+                    actor_splits,
+                }))
             }
         };
 

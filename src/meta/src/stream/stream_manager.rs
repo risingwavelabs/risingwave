@@ -20,7 +20,7 @@ use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
+use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
@@ -851,6 +851,9 @@ mod tests {
                 meta_metrics.clone(),
             ));
 
+            let compaction_group_manager =
+                Arc::new(CompactionGroupManager::new(env.clone()).await?);
+
             let source_manager = Arc::new(
                 SourceManager::new(
                     env.clone(),
@@ -858,6 +861,7 @@ mod tests {
                     barrier_manager.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
+                    compaction_group_manager.clone(),
                 )
                 .await?,
             );

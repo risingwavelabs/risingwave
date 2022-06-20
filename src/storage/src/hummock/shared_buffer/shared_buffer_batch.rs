@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -79,6 +80,7 @@ impl PartialEq for SharedBufferBatchInner {
 pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
+    compaction_group_id: CompactionGroupId,
 }
 
 impl SharedBufferBatch {
@@ -86,6 +88,7 @@ impl SharedBufferBatch {
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
         buffer_release_notifier: Arc<mpsc::UnboundedSender<SharedBufferEvent>>,
+        compaction_group_id: CompactionGroupId,
     ) -> Self {
         let size: usize = Self::measure_batch_size(&sorted_items);
         Self {
@@ -95,6 +98,7 @@ impl SharedBufferBatch {
                 buffer_release_notifier,
             }),
             epoch,
+            compaction_group_id,
         }
     }
 
@@ -163,6 +167,10 @@ impl SharedBufferBatch {
 
     pub fn size(&self) -> usize {
         self.inner.size
+    }
+
+    pub fn compaction_group_id(&self) -> CompactionGroupId {
+        self.compaction_group_id
     }
 }
 
@@ -269,6 +277,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 mod tests {
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::user_key;
 
     use super::*;
@@ -304,6 +313,7 @@ mod tests {
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
             Arc::new(mpsc::unbounded_channel().0),
+            StaticCompactionGroupId::StateDefault.into(),
         );
 
         // Sketch
@@ -380,6 +390,7 @@ mod tests {
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
             Arc::new(mpsc::unbounded_channel().0),
+            StaticCompactionGroupId::StateDefault.into(),
         );
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch};
+use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 
@@ -30,7 +30,7 @@ use crate::hummock::{HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
 pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
-pub(crate) type UploadTaskResult = HummockResult<Vec<SstableInfo>>;
+pub(crate) type UploadTaskResult = HummockResult<Vec<LocalSstableInfo>>;
 
 pub struct SharedBufferUploader {
     options: Arc<StorageConfig>,
@@ -75,8 +75,8 @@ impl SharedBufferUploader {
         &self,
         _epoch: HummockEpoch,
         is_local: bool,
-        payload: &UploadTaskPayload,
-    ) -> HummockResult<Vec<SstableInfo>> {
+        payload: UploadTaskPayload,
+    ) -> HummockResult<Vec<LocalSstableInfo>> {
         if payload.is_empty() {
             return Ok(vec![]);
         }
@@ -103,20 +103,29 @@ impl SharedBufferUploader {
             compaction_executor: self.compaction_executor.as_ref().cloned(),
         };
 
-        let tables = Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), payload).await?;
+        let tables = Compactor::compact_shared_buffer_by_compaction_group(
+            Arc::new(mem_compactor_ctx),
+            payload,
+        )
+        .await?;
 
-        let uploaded_sst_info: Vec<SstableInfo> = tables
+        let uploaded_sst_info = tables
             .into_iter()
-            .map(|(sst, unit_id, vnode_bitmaps)| SstableInfo {
-                id: sst.id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: sst.meta.smallest_key.clone(),
-                    right: sst.meta.largest_key.clone(),
-                    inf: false,
-                }),
-                file_size: sst.meta.estimated_size as u64,
-                vnode_bitmaps,
-                unit_id,
+            .map(|(compaction_group_id, sst, unit_id, vnode_bitmaps)| {
+                (
+                    compaction_group_id,
+                    SstableInfo {
+                        id: sst.id,
+                        key_range: Some(risingwave_pb::hummock::KeyRange {
+                            left: sst.meta.smallest_key.clone(),
+                            right: sst.meta.largest_key.clone(),
+                            inf: false,
+                        }),
+                        file_size: sst.meta.estimated_size as u64,
+                        vnode_bitmaps,
+                        unit_id,
+                    },
+                )
             })
             .collect();
 

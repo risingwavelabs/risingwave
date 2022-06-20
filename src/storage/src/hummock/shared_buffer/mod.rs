@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_hummock_sdk::{is_remote_sst_id, HummockEpoch};
+use risingwave_hummock_sdk::{is_remote_sst_id, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -40,7 +40,7 @@ use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UncommittedData {
-    Sst(SstableInfo),
+    Sst(LocalSstableInfo),
     Batch(SharedBufferBatch),
 }
 
@@ -60,7 +60,7 @@ fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
 impl UncommittedData {
     pub fn start_user_key(&self) -> &[u8] {
         match self {
-            UncommittedData::Sst(info) => {
+            UncommittedData::Sst((_, info)) => {
                 let key_range = get_sst_key_range(info);
                 user_key(key_range.left.as_slice())
             }
@@ -70,7 +70,7 @@ impl UncommittedData {
 
     pub fn end_user_key(&self) -> &[u8] {
         match self {
-            UncommittedData::Sst(info) => {
+            UncommittedData::Sst((_, info)) => {
                 let key_range = get_sst_key_range(info);
                 user_key(key_range.right.as_slice())
             }
@@ -116,7 +116,7 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
                     data_iters.push(Box::new(batch.clone().into_directed_iter::<T::Direction>())
                         as BoxedHummockIterator<T::Direction>);
                 }
-                UncommittedData::Sst(table_info) => {
+                UncommittedData::Sst((_, table_info)) => {
                     let table = sstable_store.sstable(table_info.id, local_stats).await?;
                     data_iters.push(Box::new(T::SstableIteratorType::create(
                         table,
@@ -251,7 +251,7 @@ impl SharedBuffer {
                 UncommittedData::Batch(batch) => {
                     range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
                 }
-                UncommittedData::Sst(info) => filter_single_sst(info, key_range),
+                UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
             })
             .map(|((_, order_index), data)| (*order_index, data.clone()));
 
@@ -390,8 +390,8 @@ impl SharedBuffer {
     pub fn succeed_upload_task(
         &mut self,
         order_index: OrderIndex,
-        new_sst: Vec<SstableInfo>,
-    ) -> Vec<SstableInfo> {
+        new_sst: Vec<LocalSstableInfo>,
+    ) -> Vec<LocalSstableInfo> {
         let payload = self
             .uploading_tasks
             .remove(&order_index)
@@ -429,7 +429,7 @@ impl SharedBuffer {
         previous_sst
     }
 
-    pub fn get_ssts_to_commit(&self) -> Vec<SstableInfo> {
+    pub fn get_ssts_to_commit(&self) -> Vec<LocalSstableInfo> {
         assert!(
             self.uploading_tasks.is_empty(),
             "when committing sst there should not be uploading task"
@@ -440,12 +440,12 @@ impl SharedBuffer {
                 UncommittedData::Batch(_) => {
                     panic!("there should not be any batch when committing sst");
                 }
-                UncommittedData::Sst(sst) => {
+                UncommittedData::Sst((compaction_group_id, sst)) => {
                     assert!(
                         is_remote_sst_id(sst.id),
                         "all sst should be remote when trying to get ssts to commit"
                     );
-                    ret.push(sst.clone());
+                    ret.push((*compaction_group_id, sst.clone()));
                 }
             }
         }
@@ -470,7 +470,7 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use futures::executor::block_on;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
     use tokio::sync::mpsc;
 
@@ -480,7 +480,7 @@ mod tests {
     use crate::hummock::test_utils::gen_dummy_sst_info;
     use crate::hummock::HummockValue;
 
-    async fn generate_and_write_batch(
+    fn generate_and_write_batch(
         put_keys: &[Vec<u8>],
         delete_keys: &[Vec<u8>],
         epoch: u64,
@@ -507,6 +507,7 @@ mod tests {
             shared_buffer_items,
             epoch,
             Arc::new(mpsc::unbounded_channel().0),
+            StaticCompactionGroupId::StateDefault.into(),
         );
         if is_replicate {
             shared_buffer.replicate_batch(batch.clone());
@@ -537,13 +538,11 @@ mod tests {
             &mut idx,
             &mut shared_buffer,
             false,
-        )
-        .await;
+        );
 
         // Write to replicate buffer
         let shared_buffer_batch2 =
-            generate_and_write_batch(&keys[0..3], &[], epoch1, &mut idx, &mut shared_buffer, true)
-                .await;
+            generate_and_write_batch(&keys[0..3], &[], epoch1, &mut idx, &mut shared_buffer, true);
 
         // Get overlap batches and verify
         for key in &keys[0..3] {
@@ -577,7 +576,7 @@ mod tests {
 
         // Non-existent key range forward
         let (replicate_batches, overlap_data) =
-            shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key.clone()));
+            shared_buffer.get_overlap_data(&(keys[3].clone()..=large_key));
         assert!(replicate_batches.is_empty());
         assert!(overlap_data.is_empty());
     }
@@ -587,14 +586,14 @@ mod tests {
         let shared_buffer = RefCell::new(SharedBuffer::default());
         let mut idx = 0;
         let mut generate_test_data = |key: &str| {
-            block_on(generate_and_write_batch(
+            generate_and_write_batch(
                 &[key.as_bytes().to_vec()],
                 &[],
                 1,
                 &mut idx,
                 shared_buffer.borrow_mut().deref_mut(),
                 false,
-            ))
+            )
         };
 
         let batch1 = generate_test_data("aa");
@@ -641,9 +640,10 @@ mod tests {
         assert_eq!(batch1.size() + batch2.size(), task_write_batch_size);
 
         let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2]);
-        shared_buffer
-            .borrow_mut()
-            .succeed_upload_task(order_index1, vec![sst1.clone()]);
+        shared_buffer.borrow_mut().succeed_upload_task(
+            order_index1,
+            vec![(StaticCompactionGroupId::StateDefault.into(), sst1.clone())],
+        );
 
         shared_buffer.borrow_mut().fail_upload_task(order_index2);
 
@@ -657,6 +657,12 @@ mod tests {
         assert_eq!(batch3.size() + batch4.size(), task_write_batch_size);
         assert_eq!(vec![UncommittedData::Batch(batch4)], payload3[0]);
         assert_eq!(vec![UncommittedData::Batch(batch3)], payload3[1]);
-        assert_eq!(vec![UncommittedData::Sst(sst1)], payload3[2]);
+        assert_eq!(
+            vec![UncommittedData::Sst((
+                StaticCompactionGroupId::StateDefault.into(),
+                sst1
+            ))],
+            payload3[2]
+        );
     }
 }

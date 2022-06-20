@@ -26,14 +26,15 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
+use crate::task::BOUNDED_BUFFER_SIZE;
 
 pub struct HashShuffleSender {
-    senders: Vec<mpsc::UnboundedSender<Option<DataChunk>>>,
+    senders: Vec<mpsc::Sender<Option<DataChunk>>>,
     hash_info: exchange_info::HashInfo,
 }
 
 pub struct HashShuffleReceiver {
-    receiver: mpsc::UnboundedReceiver<Option<DataChunk>>,
+    receiver: mpsc::Receiver<Option<DataChunk>>,
 }
 
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<usize>> {
@@ -122,6 +123,7 @@ impl HashShuffleSender {
             if new_data_chunk.cardinality() > 0 {
                 self.senders[sink_id]
                     .send(Some(new_data_chunk))
+                    .await
                     .to_rw_result_with(|| "HashShuffleSender::send".into())?;
             }
         }
@@ -129,10 +131,14 @@ impl HashShuffleSender {
     }
 
     async fn send_done(&mut self) -> Result<()> {
-        self.senders.iter_mut().try_for_each(|s| {
-            s.send(None)
-                .to_rw_result_with(|| "HashShuffleSender::send".into())
-        })
+        for sender in &self.senders {
+            sender
+                .send(None)
+                .await
+                .to_rw_result_with(|| "HashShuffleSender::send".into())?;
+        }
+
+        Ok(())
     }
 }
 
@@ -160,7 +166,7 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (ChanSenderImpl, Vec<
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
     for _ in 0..output_count {
-        let (s, r) = mpsc::unbounded_channel();
+        let (s, r) = mpsc::channel(BOUNDED_BUFFER_SIZE);
         senders.push(s);
         receivers.push(r);
     }

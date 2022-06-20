@@ -16,6 +16,7 @@ use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
 use risingwave_common::catalog::Schema;
 
+use super::merge::cooperative_scheduling;
 use super::{ActorContextRef, OperatorInfoStatus};
 use crate::executor::{
     BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
@@ -66,12 +67,11 @@ impl ReceiverExecutor {
 impl Executor for ReceiverExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let mut status = self.status;
-        self.receiver
-            .map(move |msg| {
-                status.next_message(&msg);
-                Ok(msg)
-            })
-            .boxed()
+        cooperative_scheduling(self.receiver.map(move |msg| {
+            status.next_message(&msg);
+            Ok(msg)
+        }))
+        .boxed()
     }
 
     fn schema(&self) -> &Schema {

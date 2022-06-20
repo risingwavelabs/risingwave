@@ -23,7 +23,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::{
-    Column, ConnectorProperties, ConnectorState, SourceMessage, SplitReaderImpl,
+    Column, ConnectorProperties, ConnectorState, SourceMessage, SplitMetaData, SplitReaderImpl,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{mpsc, oneshot};
