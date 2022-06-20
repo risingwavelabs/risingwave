@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
@@ -301,7 +302,7 @@ message StreamActor {
   bool same_worker_node_as_upstream = 7;
   // Vnodes that the executors in this actor own. If this actor is the only actor in its fragment, `vnode_bitmap`
   // will be empty.
-  bytes vnode_bitmap = 8;
+  common.Buffer vnode_bitmap = 8;
 }
 
 enum FragmentType {

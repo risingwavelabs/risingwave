@@ -25,14 +25,16 @@ use std::env;
 use std::future::Future;
 use std::pin::Pin;
 
+use anyhow::{bail, Result};
 use clap::StructOpt;
 use risingwave_cmd_all::playground;
 
-type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Box<dyn Future<Output = ()>>>>;
+type RwFns =
+    HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Box<dyn Future<Output = Result<()>>>>>;
 
 #[cfg_attr(coverage, no_coverage)]
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let mut fns: RwFns = HashMap::new();
 
     // compute node configuration
@@ -48,7 +50,9 @@ async fn main() {
                     risingwave_logging::oneshot_common();
                     risingwave_logging::init_risingwave_logger(opts.enable_jaeger_tracing, false);
 
-                    risingwave_compute::start(opts).await
+                    risingwave_compute::start(opts).await;
+
+                    Ok(())
                 })
             }),
         );
@@ -67,7 +71,9 @@ async fn main() {
                     risingwave_logging::oneshot_common();
                     risingwave_logging::init_risingwave_logger(false, false);
 
-                    risingwave_meta::start(opts).await
+                    risingwave_meta::start(opts).await;
+
+                    Ok(())
                 })
             }),
         );
@@ -86,7 +92,9 @@ async fn main() {
                     risingwave_logging::oneshot_common();
                     risingwave_logging::init_risingwave_logger(false, false);
 
-                    risingwave_frontend::start(opts).await
+                    risingwave_frontend::start(opts).await;
+
+                    Ok(())
                 })
             }),
         );
@@ -105,7 +113,9 @@ async fn main() {
                     risingwave_logging::oneshot_common();
                     risingwave_logging::init_risingwave_logger(false, false);
 
-                    risingwave_compactor::start(opts).await
+                    risingwave_compactor::start(opts).await;
+
+                    Ok(())
                 })
             }),
         );
@@ -131,7 +141,7 @@ async fn main() {
     for fn_name in ["play", "playground"] {
         fns.insert(
             fn_name,
-            Box::new(|_: Vec<String>| Box::new(async move { playground().await.unwrap() })),
+            Box::new(|_: Vec<String>| Box::new(async move { playground().await })),
         );
     }
 
@@ -158,11 +168,13 @@ async fn main() {
 
     match fns.remove(target.as_str()) {
         Some(func) => {
-            let func: Pin<Box<dyn Future<Output = ()>>> = func(args).into();
-            func.await
+            let func: Pin<Box<dyn Future<Output = Result<()>>>> = func(args).into();
+            func.await?;
         }
         None => {
-            panic!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, fns.keys().collect::<Vec<_>>());
+            bail!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, fns.keys().collect::<Vec<_>>());
         }
     }
+
+    Ok(())
 }

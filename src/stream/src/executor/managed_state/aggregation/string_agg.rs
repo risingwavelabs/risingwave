@@ -23,6 +23,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedArraysSerializer;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -161,6 +162,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
+        _state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
         for sort_key_index in &self.sort_key_indices {
@@ -207,7 +209,11 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         Ok(())
     }
 
-    async fn get_output(&mut self, epoch: u64) -> StreamExecutorResult<Datum> {
+    async fn get_output(
+        &mut self,
+        epoch: u64,
+        _state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Datum> {
         // We allow people to get output when the data is dirty.
         // As this is easier compared to `ManagedMinState` as we have a all-or-nothing cache policy
         // here.
@@ -241,7 +247,11 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         self.dirty
     }
 
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> StreamExecutorResult<()> {
+    fn flush(
+        &mut self,
+        write_batch: &mut WriteBatch<S>,
+        _state_table: &mut StateTable<S>,
+    ) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             return Ok(());
         }
@@ -308,6 +318,10 @@ mod tests {
         .unwrap()
     }
 
+    fn mock_state_table<S: StateStore>(keyspace: Keyspace<S>) -> StateTable<S> {
+        StateTable::new(keyspace, vec![], vec![], None, vec![])
+    }
+
     #[tokio::test]
     async fn test_managed_string_agg_state() {
         let keyspace = create_in_memory_keyspace();
@@ -315,6 +329,7 @@ mod tests {
         let mut managed_state = create_managed_state(&keyspace, 0).await;
         assert!(!managed_state.is_dirty());
         let mut epoch: u64 = 0;
+        let mut state_table = mock_state_table(keyspace.clone());
 
         // Insert.
         managed_state
@@ -330,6 +345,7 @@ mod tests {
                         .into(),
                 ],
                 epoch,
+                &mut state_table,
             )
             .await
             .unwrap();
@@ -337,12 +353,14 @@ mod tests {
 
         // Check output after insertion.
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("ghi||def||abc".to_string()))
         );
 
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -360,6 +378,7 @@ mod tests {
                         .into(),
                 ],
                 epoch,
+                &mut state_table,
             )
             .await
             .unwrap();
@@ -367,13 +386,15 @@ mod tests {
 
         // Check output after insertion and deletion.
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("ghi||def||def||abc".to_string()))
         );
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -391,6 +412,7 @@ mod tests {
                         .into(),
                 ],
                 epoch,
+                &mut state_table,
             )
             .await
             .unwrap();
@@ -399,19 +421,21 @@ mod tests {
 
         // Check output after deletion.
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("ghi".to_string()))
         );
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Check output after flush.
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("ghi".to_string()))
         );
 
@@ -424,7 +448,7 @@ mod tests {
         assert!(!managed_state.is_dirty());
         // Get the output after recovery
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("ghi".to_string()))
         );
 
@@ -442,12 +466,13 @@ mod tests {
                         .into(),
                 ],
                 epoch,
+                &mut state_table,
             )
             .await
             .unwrap();
         assert!(managed_state.is_dirty());
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("ghi||ghi".to_string()))
         );
         // Check dirtiness after getting the output.
@@ -466,11 +491,15 @@ mod tests {
                     &I64Array::from_slice(&[Some(5), Some(6)]).unwrap().into(),
                 ],
                 epoch,
+                &mut state_table,
             )
             .await
             .unwrap();
         assert!(managed_state.is_dirty());
-        assert_eq!(managed_state.get_output(epoch).await.unwrap(), None,);
+        assert_eq!(
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
+            None,
+        );
         assert_eq!(managed_state.get_row_count(), 0);
 
         managed_state
@@ -484,13 +513,16 @@ mod tests {
                     &I64Array::from_slice(&[Some(7), Some(8)]).unwrap().into(),
                 ],
                 epoch,
+                &mut state_table,
             )
             .await
             .unwrap();
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.get_row_count();
@@ -509,17 +541,20 @@ mod tests {
                     &I64Array::from_slice(&[Some(7), Some(9)]).unwrap().into(),
                 ],
                 epoch,
+                &mut state_table,
             )
             .await
             .unwrap();
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("miko||miko".to_string()))
         );
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state
+            .flush(&mut write_batch, &mut state_table)
+            .unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -528,7 +563,7 @@ mod tests {
         drop(managed_state);
         let mut managed_state = create_managed_state(&keyspace, row_count).await;
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("miko||miko".to_string()))
         );
 
@@ -546,11 +581,12 @@ mod tests {
                         .into(),
                 ],
                 epoch,
+                &mut state_table,
             )
             .await
             .unwrap();
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("simple||naive||miko".to_string()))
         );
 
@@ -561,7 +597,7 @@ mod tests {
         // As we didn't flush the changes, the result should be the same as the result before last
         // changes.
         assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
+            managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("miko||miko".to_string()))
         );
     }

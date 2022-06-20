@@ -108,6 +108,14 @@ message DropMaterializedSourceResponse {
   uint64 version = 2;
 }
 
+// Used by risectl (and in the future, dashboard)
+message ListMaterializedViewRequest {}
+
+// Used by risectl (and in the future, dashboard)
+message ListMaterializedViewResponse {
+  repeated catalog.Table tables = 1;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -119,4 +127,5 @@ service DdlService {
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
   rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
+  rpc ListMaterializedView(ListMaterializedViewRequest) returns (ListMaterializedViewResponse);
 }

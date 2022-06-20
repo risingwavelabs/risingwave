@@ -21,7 +21,6 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -150,7 +149,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().order_key;
         let pk_descs: Vec<OrderedColumnDesc> = pk_descs_proto.iter().map(|d| d.into()).collect();
         let order_types: Vec<OrderType> = pk_descs.iter().map(|desc| desc.order).collect();
-        let ordered_row_serializer = OrderedRowSerializer::new(order_types);
 
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
         let (pk_prefix_value, next_col_bounds) = get_scan_bound(scan_range.clone());
@@ -158,12 +156,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
             let batch_stats = source.context().stats();
-            let table = CellBasedTable::new(
-                keyspace.clone(),
-                column_descs,
-                Some(ordered_row_serializer),
-                None,
-            );
+            let table = CellBasedTable::new(keyspace.clone(), column_descs, order_types, None);
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
                 let iter = table.batch_dedup_pk_iter(source.epoch, &pk_descs).await?;
