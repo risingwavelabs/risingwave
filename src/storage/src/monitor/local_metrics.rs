@@ -42,14 +42,22 @@ impl StoreLocalStatistic {
         self.bloom_filter_true_negative_count += other.bloom_filter_true_negative_count;
         self.bloom_filter_might_positive_count += other.bloom_filter_might_positive_count;
         self.remote_io_time += other.remote_io_time;
+
+        // clear all metrics stored locally, so that we can collect multiple times.
+        *self = Default::default();
     }
 
-    pub fn report(&self, metrics: &StateStoreMetrics) {
+    /// Report partial result. Can be called multiple times throughput the process.
+    ///
+    /// To developers: only put counters in this function. Remember to set zero.
+    #[inline(always)]
+    pub fn report_partial(&mut self, metrics: &StateStoreMetrics) {
         if self.cache_data_block_total > 0 {
             metrics
                 .sst_store_block_request_counts
                 .with_label_values(&["data_total"])
                 .inc_by(self.cache_data_block_total);
+            self.cache_data_block_total = 0;
         }
 
         if self.cache_data_block_miss > 0 {
@@ -57,6 +65,7 @@ impl StoreLocalStatistic {
                 .sst_store_block_request_counts
                 .with_label_values(&["data_miss"])
                 .inc_by(self.cache_data_block_miss);
+            self.cache_data_block_miss = 0;
         }
 
         if self.cache_meta_block_total > 0 {
@@ -64,6 +73,7 @@ impl StoreLocalStatistic {
                 .sst_store_block_request_counts
                 .with_label_values(&["meta_total"])
                 .inc_by(self.cache_meta_block_total);
+            self.cache_meta_block_total = 0;
         }
 
         if self.cache_meta_block_miss > 0 {
@@ -71,20 +81,27 @@ impl StoreLocalStatistic {
                 .sst_store_block_request_counts
                 .with_label_values(&["meta_miss"])
                 .inc_by(self.cache_meta_block_miss);
+            self.cache_meta_block_miss = 0;
         }
 
         if self.bloom_filter_true_negative_count > 0 {
             metrics
                 .bloom_filter_true_negative_counts
                 .inc_by(self.bloom_filter_true_negative_count);
+            self.bloom_filter_true_negative_count = 0;
         }
 
         if self.bloom_filter_might_positive_count > 0 {
             metrics
                 .bloom_filter_might_positive_counts
                 .inc_by(self.bloom_filter_might_positive_count);
+            self.bloom_filter_might_positive_count = 0;
         }
+    }
 
+    /// Report full result of this local metrics. Can only be called once.
+    pub fn report(mut self, metrics: &StateStoreMetrics) {
+        self.report_partial(metrics);
         if self.remote_io_time > 0.0 {
             metrics.remote_read_time.observe(self.remote_io_time);
         }

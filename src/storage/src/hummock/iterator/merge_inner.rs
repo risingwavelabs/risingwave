@@ -105,8 +105,14 @@ pub struct MergeIteratorInner<D: HummockIteratorDirection, NE: NodeExtraOrderInf
     /// The heap for merge sort.
     heap: BinaryHeap<Node<D, NE>>,
 
-    /// Statistics.
+    /// Prometheus statistics.
     stats: Arc<StateStoreMetrics>,
+
+    /// Local statistics.
+    local_stats: Option<Box<StoreLocalStatistic>>,
+
+    /// When report cnt reaches a threshold, we report the statistics.
+    report_cnt: usize,
 }
 
 /// An order aware merge iterator.
@@ -128,6 +134,8 @@ impl<D: HummockIteratorDirection> OrderedMergeIteratorInner<D> {
                 .collect(),
             heap: BinaryHeap::new(),
             stats,
+            local_stats: Some(Box::new(StoreLocalStatistic::default())),
+            report_cnt: 0,
         }
     }
 }
@@ -140,6 +148,12 @@ impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> MergeIteratorInner<D, 
         for node in &self.unused_iters {
             node.iter.collect_local_statistic(stats);
         }
+    }
+
+    fn collect_to_local_metrics(&mut self) {
+        let mut metrics = self.local_stats.take().unwrap();
+        self.collect_local_statistic_impl(&mut metrics);
+        self.local_stats = Some(metrics);
     }
 }
 pub type UnorderedMergeIteratorInner<D> = MergeIteratorInner<D, UnorderedNodeExtra>;
@@ -159,6 +173,8 @@ impl<D: HummockIteratorDirection> UnorderedMergeIteratorInner<D> {
                 .collect(),
             heap: BinaryHeap::new(),
             stats,
+            local_stats: Some(Box::new(StoreLocalStatistic::default())),
+            report_cnt: 0,
         }
     }
 }
@@ -279,7 +295,17 @@ where
     type Direction = D;
 
     async fn next(&mut self) -> HummockResult<()> {
-        self.next_inner().await
+        let res = self.next_inner().await;
+        self.report_cnt += 1;
+        if self.report_cnt >= 16384 {
+            self.report_cnt = 0;
+            self.collect_to_local_metrics();
+            self.local_stats
+                .as_mut()
+                .unwrap()
+                .report_partial(&self.stats);
+        }
+        res
     }
 
     fn key(&self) -> &[u8] {
@@ -317,8 +343,7 @@ where
 
 impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> Drop for MergeIteratorInner<D, NE> {
     fn drop(&mut self) {
-        let mut stats = StoreLocalStatistic::default();
-        self.collect_local_statistic_impl(&mut stats);
-        stats.report(self.stats.as_ref());
+        self.collect_to_local_metrics();
+        self.local_stats.take().unwrap().report(self.stats.as_ref());
     }
 }
