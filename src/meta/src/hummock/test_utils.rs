@@ -109,11 +109,11 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
             vnode_bitmaps: vec![
                 VNodeBitmap {
                     table_id: (i + 1) as u32,
-                    bitmap: vec![],
+                    bitmap: None,
                 },
                 VNodeBitmap {
                     table_id: (i + 2) as u32,
-                    bitmap: vec![],
+                    bitmap: None,
                 },
             ],
             unit_id: 0,

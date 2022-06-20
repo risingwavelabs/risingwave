@@ -956,8 +956,7 @@ mod tests {
                 .cloned()
                 .unwrap()
                 .clone();
-            assert!(!scheduled_actor.vnode_bitmap.is_empty());
-            scheduled_actor.vnode_bitmap.clear();
+            scheduled_actor.vnode_bitmap.take().unwrap();
             assert_eq!(scheduled_actor, actor);
             assert!(services
                 .state
@@ -1057,8 +1056,7 @@ mod tests {
                 .get(&actor.get_actor_id())
                 .cloned()
                 .unwrap();
-            assert!(!scheduled_actor.vnode_bitmap.is_empty());
-            scheduled_actor.vnode_bitmap.clear();
+            scheduled_actor.vnode_bitmap.take().unwrap();
             assert_eq!(scheduled_actor, actor);
             assert!(services
                 .state
