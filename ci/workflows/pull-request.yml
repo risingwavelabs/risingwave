@@ -1,8 +1,23 @@
+cargo-cache: &cargo-cache
+  id: cache
+  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+  restore-keys:
+    - 'v1-cache-{{ id }}-{{ runner.os }}-'
+    - 'v1-cache-{{ id }}-'
+  backend: s3
+  s3:
+    bucket: ci-cache-bucket
+  paths:
+    - ".cargo/registry/index"
+    - ".cargo/registry/cache"
+    - ".cargo/git/db"
+
 steps:
   - label: "build"
     command: "ci/scripts/build.sh -t debug -p dev"
     key: "build"
     plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -13,6 +28,7 @@ steps:
     command: "ci/scripts/e2e-test.sh -p dev"
     depends_on: "build"
     plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -24,6 +40,7 @@ steps:
     command: "ci/scripts/e2e-test-parallel.sh -p dev"
     depends_on: "build"
     plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -35,6 +52,7 @@ steps:
     command: "ci/scripts/e2e-source-test.sh"
     depends_on: "build"
     plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -46,6 +64,7 @@ steps:
     command: "ci/scripts/unit-test.sh"
     plugins:
       - ./ci/plugins/swapfile
+      - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
           env:
             CODECOV_TOKEN: my-codecov-token
@@ -54,11 +73,12 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 15
+    timeout_in_minutes: 30 # TODO(TaoWu): Decrease the timeout when we switch to larger memory instances.
 
   - label: "pre unit test"
     command: "ci/scripts/pre-unit-test.sh"
     plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -67,6 +87,7 @@ steps:
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-simulation-test.sh"
     plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -77,6 +98,7 @@ steps:
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"
     plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml

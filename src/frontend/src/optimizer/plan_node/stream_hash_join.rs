@@ -141,8 +141,27 @@ impl fmt::Display for StreamHashJoin {
         };
         builder
             .field("type", &format_args!("{:?}", self.logical.join_type()))
-            .field("predicate", &format_args!("{}", self.eq_join_predicate()))
-            .finish()
+            .field("predicate", &format_args!("{}", self.eq_join_predicate()));
+
+        if self.append_only() {
+            builder.field("append_only", &format_args!("{}", true));
+        }
+        if self
+            .logical
+            .output_indices()
+            .iter()
+            .copied()
+            .eq(0..self.logical.internal_column_num())
+        {
+            builder.field("output_indices", &format_args!("all"));
+        } else {
+            builder.field(
+                "output_indices",
+                &format_args!("{:?}", self.logical.output_indices()),
+            );
+        }
+
+        builder.finish()
     }
 }
 
@@ -207,6 +226,12 @@ impl ToStreamProst for StreamHashJoin {
                 SchemaId::placeholder() as u32,
                 DatabaseId::placeholder() as u32,
             )),
+            output_indices: self
+                .logical
+                .output_indices()
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
             is_append_only: self.is_append_only,
         })
     }

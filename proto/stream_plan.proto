@@ -3,6 +3,7 @@ syntax = "proto3";
 package stream_plan;
 
 import "catalog.proto";
+import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
@@ -98,9 +99,11 @@ message HashJoinNode {
   catalog.Table right_table = 7;
   repeated uint32 dist_key_l = 8;
   repeated uint32 dist_key_r = 9;
-  // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 12;
+  bool is_append_only = 10;
+  // Whether to optimize for append only stream.
+  // the output indices of current node
+  repeated uint32 output_indices = 11;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -118,6 +121,8 @@ message DeltaIndexJoinNode {
   ArrangementInfo left_info = 9;
   // Info about the right index
   ArrangementInfo right_info = 10;
+  // the output indices of current node
+  repeated uint32 output_indices = 11;
 }
 
 message HopWindowNode {
@@ -300,7 +305,7 @@ message StreamActor {
   bool same_worker_node_as_upstream = 7;
   // Vnodes that the executors in this actor own. If this actor is the only actor in its fragment, `vnode_bitmap`
   // will be empty.
-  bytes vnode_bitmap = 8;
+  common.Buffer vnode_bitmap = 8;
 }
 
 enum FragmentType {

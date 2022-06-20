@@ -30,8 +30,10 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{SourceChangeSplit, SourceChangeSplitMutation};
-use risingwave_pb::meta::{ConnectorSplit, SourceActorInfo as ProstSourceActorInfo};
+use risingwave_pb::data::SourceChangeSplitMutation;
+use risingwave_pb::source::{
+    ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
+};
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
     DropSourceRequest as ComputeNodeDropSourceRequest,
@@ -46,6 +48,7 @@ use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::ClusterManagerRef;
+use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
@@ -61,6 +64,7 @@ pub struct SourceManager<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     barrier_manager: BarrierManagerRef<S>,
+    compaction_group_manager: CompactionGroupManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
 
@@ -95,12 +99,9 @@ impl MetadataModel for SourceActorInfo {
     fn to_protobuf(&self) -> Self::ProstType {
         Self::ProstType {
             actor_id: self.actor_id,
-            splits: self
-                .splits
-                .iter()
-                .cloned()
-                .map(ConnectorSplit::from)
-                .collect(),
+            splits: Some(ConnectorSplits {
+                splits: self.splits.iter().map(ConnectorSplit::from).collect(),
+            }),
         }
     }
 
@@ -109,8 +110,10 @@ impl MetadataModel for SourceActorInfo {
             actor_id: prost.actor_id,
             splits: prost
                 .splits
+                .unwrap_or_default()
+                .splits
                 .into_iter()
-                .map(|split| split.try_into().unwrap())
+                .map(|split| SplitImpl::try_from(&split).unwrap())
                 .collect(),
         }
     }
@@ -407,6 +410,7 @@ where
         barrier_manager: BarrierManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> Result<Self> {
         let mut managed_sources = HashMap::new();
         {
@@ -443,6 +447,7 @@ where
             cluster_manager,
             catalog_manager,
             barrier_manager,
+            compaction_group_manager,
             core,
         })
     }
@@ -572,6 +577,10 @@ where
 
     /// Broadcast the create source request to all compute nodes.
     pub async fn create_source(&self, source: &Source) -> Result<()> {
+        // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
+        self.compaction_group_manager
+            .register_source(source.id)
+            .await?;
         let futures = self
             .all_stream_clients()
             .await?
@@ -645,6 +654,19 @@ where
             );
         }
 
+        // Unregister afterwards and is safeguarded by CompactionGroupManager::purge_stale_members.
+        if let Err(e) = self
+            .compaction_group_manager
+            .unregister_source(source_id)
+            .await
+        {
+            tracing::warn!(
+                "Failed to unregister source {}. It wll be unregistered eventually.\n{:#?}",
+                source_id,
+                e
+            );
+        }
+
         Ok(())
     }
 
@@ -656,16 +678,15 @@ where
 
         if !diff.is_empty() {
             let command = Command::Plain(Some(Mutation::Splits(SourceChangeSplitMutation {
-                mutations: diff
+                actor_splits: diff
                     .iter()
-                    .filter(|(_, splits)| !splits.is_empty())
-                    .map(|(actor_id, splits)| SourceChangeSplit {
-                        actor_id: *actor_id,
-                        split_type: splits.first().unwrap().get_type(),
-                        source_splits: splits
-                            .iter()
-                            .map(|split| split.encode_to_bytes().to_vec())
-                            .collect(),
+                    .map(|(&actor_id, splits)| {
+                        (
+                            actor_id,
+                            ConnectorSplits {
+                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        )
                     })
                     .collect(),
             })));
