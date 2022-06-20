@@ -38,6 +38,8 @@ pub enum BenchCommands {
     },
 }
 
+/// Spawn a tokio task with output of `anyhow::Result`, so that we can write dead loop in async
+/// functions.
 fn spawn_okk(fut: impl Future<Output = Result<()>> + Send + 'static) -> JoinHandle<Result<()>> {
     tokio::spawn(fut)
 }
