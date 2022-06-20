@@ -165,22 +165,12 @@ impl PgStatement {
     }
 }
 
+#[derive(Default)]
 pub struct PgPortal {
     name: String,
     query_string: Bytes,
     result_cache: Option<IntoIter<Row>>,
     stmt_type: Option<StatementType>,
-}
-
-impl Default for PgPortal {
-    fn default() -> Self {
-        Self {
-            name: Default::default(),
-            query_string: Default::default(),
-            result_cache: None,
-            stmt_type: None,
-        }
-    }
 }
 
 impl PgPortal {

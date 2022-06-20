@@ -258,7 +258,7 @@ where
             FeMessage::Execute(m) => {
                 // 1. Get portal.
                 let portal_name = cstr_to_str(&m.portal_name).unwrap().to_string();
-                let portal = if m.portal_name.is_empty() {
+                let _portal = if m.portal_name.is_empty() {
                     unnamed_portal
                 } else {
                     // NOTE Error handle need modify later.
