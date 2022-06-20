@@ -454,12 +454,19 @@ fn build_type_derive_map() -> FuncSigMap {
         (T::Timestamp, T::Interval),
         (T::Timestampz, T::Interval),
         (T::Time, T::Interval),
-        (T::Interval, T::Interval),
     ] {
         build_commutative_funcs(&mut map, E::Add, base, delta, base);
         map.insert(FuncSign::new(E::Subtract, vec![base, delta]), base);
         map.insert(FuncSign::new(E::Subtract, vec![base, base]), delta);
     }
+    map.insert(
+        FuncSign::new(E::Add, vec![T::Interval, T::Interval]),
+        T::Interval,
+    );
+    map.insert(
+        FuncSign::new(E::Subtract, vec![T::Interval, T::Interval]),
+        T::Interval,
+    );
 
     // date + interval = timestamp, date - interval = timestamp
     build_commutative_funcs(&mut map, E::Add, T::Date, T::Interval, T::Timestamp);
