@@ -45,8 +45,12 @@ mod set;
 mod show;
 pub mod util;
 
-pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
-    let context = OptimizerContext::new(session.clone());
+pub(super) async fn handle(
+    session: Arc<SessionImpl>,
+    stmt: Statement,
+    sql: &str,
+) -> Result<PgResponse> {
+    let context = OptimizerContext::new(session.clone(), Arc::from(sql));
     match stmt {
         Statement::Explain {
             statement, verbose, ..

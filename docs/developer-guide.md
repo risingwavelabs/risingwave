@@ -22,6 +22,7 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
     - [Dashboard v1](#dashboard-v1)
     - [Dashboard v2](#dashboard-v2)
   - [Observability components](#observability-components)
+    - [Cluster Control](#cluster-control)
     - [Monitoring](#monitoring)
     - [Tracing](#tracing)
     - [Dashboard](#dashboard)
@@ -199,6 +200,22 @@ The development instructions for dashboard v2 are available [here](../dashboard/
 
 RiseDev supports several observability components.
 
+### Cluster Control
+
+`risectl` is the tool for providing internal access to the RisingWave cluster. See
+
+```
+cargo run --bin risectl -- --help
+```
+
+... or
+
+```
+./risingwave risectl --help
+```
+
+for more information.
+
 ### Monitoring
 
 Uncomment `grafana` and `prometheus` lines in `risedev.yml` to enable Grafana and Prometheus services. 
@@ -338,17 +355,6 @@ Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependenc
 workspace.
 
 And use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
-
-## Check in PRs from forks
-
-```shell
-gh pr checkout <PR id>
-git checkout -b forks/<PR id>
-git push origin HEAD -u
-```
-
-After that, CI checks will begin on branches of RisingWave's main repo,
-and the status will be automatically updated to PRs from forks.
 
 ## Submit PRs
 

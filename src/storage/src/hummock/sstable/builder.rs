@@ -15,8 +15,9 @@
 use std::collections::BTreeMap;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::types::{VNODE_BITMAP_LEN, VNODE_BITS};
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
 use risingwave_pb::common::VNodeBitmap;
 
@@ -80,7 +81,7 @@ pub struct SSTableBuilder {
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
     /// `table_id` -> Bitmaps of value meta.
-    vnode_bitmaps: BTreeMap<u32, [u8; VNODE_BITMAP_LEN]>,
+    vnode_bitmaps: BTreeMap<u32, BitmapBuilder>,
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
     /// Last added full key.
@@ -125,14 +126,14 @@ impl SSTableBuilder {
 
         // TODO: refine me
         let mut raw_value = BytesMut::default();
-        let value_meta = value.encode(&mut raw_value) & ((1 << VNODE_BITS) - 1);
+        let value_meta = value.encode(&mut raw_value) % VIRTUAL_NODE_COUNT as u16;
         if let Some(table_id) = get_table_id(full_key) {
             // We use 8 bit of bitmap[x] to indicate existence of virtual node x*8..(x+1)*8,
             // respectively
             self.vnode_bitmaps
                 .entry(table_id)
-                .or_insert([0; VNODE_BITMAP_LEN])[(value_meta >> 3) as usize] |=
-                1 << (value_meta & 0b111);
+                .or_insert_with(|| BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT))
+                .set(value_meta as _, true);
         }
         let raw_value = raw_value.freeze();
 
@@ -193,10 +194,10 @@ impl SSTableBuilder {
             self.buf.freeze(),
             meta,
             self.vnode_bitmaps
-                .iter()
+                .into_iter()
                 .map(|(table_id, vnode_bitmaps)| VNodeBitmap {
-                    table_id: *table_id,
-                    bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmaps),
+                    table_id,
+                    bitmap: Some(vnode_bitmaps.finish().to_protobuf()),
                 })
                 .collect(),
         )

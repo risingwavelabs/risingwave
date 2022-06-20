@@ -198,11 +198,11 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_with_pk_prefix<'a>(
-        &'a self,
-        pk_prefix: &'a Row,
+    pub async fn iter_with_pk_prefix(
+        &self,
+        pk_prefix: &Row,
         epoch: u64,
-    ) -> StorageResult<RowStream<'a, S>> {
+    ) -> StorageResult<RowStream<'_, S>> {
         let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);

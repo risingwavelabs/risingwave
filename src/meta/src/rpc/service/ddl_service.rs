@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{tonic_err, ErrorCode, Result as RwResult};
@@ -29,7 +29,7 @@ use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
 use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableId};
-use crate::model::TableFragments;
+use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
     ActorGraphBuilder, FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef,
@@ -379,6 +379,17 @@ where
             version,
         }))
     }
+
+    async fn list_materialized_view(
+        &self,
+        _request: Request<ListMaterializedViewRequest>,
+    ) -> Result<Response<ListMaterializedViewResponse>, Status> {
+        use crate::model::MetadataModel;
+        let tables = Table::list(self.env.meta_store())
+            .await
+            .map_err(tonic_err)?;
+        Ok(Response::new(ListMaterializedViewResponse { tables }))
+    }
 }
 
 impl<S> DdlServiceImpl<S>
@@ -429,14 +440,32 @@ where
             affiliated_source,
             ..Default::default()
         };
-        let graph = ActorGraphBuilder::generate_graph(
-            self.env.id_gen_manager_ref(),
-            self.fragment_manager.clone(),
-            parallel_degree as u32,
-            &fragment_graph,
-            &mut ctx,
-        )
-        .await?;
+
+        let mut actor_graph_builder =
+            ActorGraphBuilder::new(self.env.id_gen_manager_ref(), &fragment_graph, &mut ctx)
+                .await?;
+
+        // TODO(Kexiang): now simply use Count(ParallelUnit) - 1 as parallelism of each fragment
+        let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
+            .list_fragment_ids()
+            .into_iter()
+            .map(|(fragment_id, is_singleton)| {
+                if is_singleton {
+                    (fragment_id, 1)
+                } else {
+                    (fragment_id, parallel_degree as u32)
+                }
+            })
+            .collect();
+
+        let graph = actor_graph_builder
+            .generate_graph(
+                self.env.id_gen_manager_ref(),
+                self.fragment_manager.clone(),
+                parallelisms,
+                &mut ctx,
+            )
+            .await?;
         assert_eq!(
             fragment_graph.table_ids_cnt,
             ctx.internal_table_id_set.len() as u32

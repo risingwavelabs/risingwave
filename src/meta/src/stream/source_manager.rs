@@ -48,6 +48,7 @@ use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::ClusterManagerRef;
+use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
@@ -63,6 +64,7 @@ pub struct SourceManager<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     barrier_manager: BarrierManagerRef<S>,
+    compaction_group_manager: CompactionGroupManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
 
@@ -408,6 +410,7 @@ where
         barrier_manager: BarrierManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> Result<Self> {
         let mut managed_sources = HashMap::new();
         {
@@ -444,6 +447,7 @@ where
             cluster_manager,
             catalog_manager,
             barrier_manager,
+            compaction_group_manager,
             core,
         })
     }
@@ -573,6 +577,10 @@ where
 
     /// Broadcast the create source request to all compute nodes.
     pub async fn create_source(&self, source: &Source) -> Result<()> {
+        // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
+        self.compaction_group_manager
+            .register_source(source.id)
+            .await?;
         let futures = self
             .all_stream_clients()
             .await?
@@ -643,6 +651,19 @@ where
             log::warn!(
                 "dropping source {}, but associated fragments still exists",
                 source_id
+            );
+        }
+
+        // Unregister afterwards and is safeguarded by CompactionGroupManager::purge_stale_members.
+        if let Err(e) = self
+            .compaction_group_manager
+            .unregister_source(source_id)
+            .await
+        {
+            tracing::warn!(
+                "Failed to unregister source {}. It wll be unregistered eventually.\n{:#?}",
+                source_id,
+                e
             );
         }
 

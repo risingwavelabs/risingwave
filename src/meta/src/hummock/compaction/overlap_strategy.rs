@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 
 use itertools::Itertools;
+use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -182,12 +183,11 @@ fn check_key_vnode_overlap(info: &SstableInfo, table: &SstableInfo) -> bool {
                 j += 1;
             }
             Ordering::Equal => {
-                let maplen = x.get_bitmap().len();
-                assert_eq!(maplen, y.get_bitmap().len());
-                for bitmap_idx in 0..maplen as usize {
-                    if (x.get_bitmap()[bitmap_idx] & y.get_bitmap()[bitmap_idx]) != 0 {
-                        return true;
-                    }
+                let x_bitmap: Bitmap = x.get_bitmap().unwrap().try_into().unwrap();
+                let y_bitmap: Bitmap = y.get_bitmap().unwrap().try_into().unwrap();
+                let overlapped = x_bitmap.iter().zip_eq(y_bitmap.iter()).any(|(x, y)| x && y);
+                if overlapped {
+                    return true;
                 }
                 i += 1;
                 j += 1;

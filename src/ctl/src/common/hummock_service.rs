@@ -15,8 +15,9 @@
 use std::env;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::StorageConfig;
+use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::{
@@ -39,22 +40,25 @@ impl HummockServiceOpts {
     /// * `RW_HUMMOCK_URL`: meta service address
     pub fn from_env() -> Result<Self> {
         let meta_opts = MetaServiceOpts::from_env()?;
-        let hummock_url = env::var("RW_HUMMOCK_URL").unwrap_or_else(|_| {
-            const DEFAULT_ADDR: &str =
-                "hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001";
-            tracing::warn!(
-                "`RW_HUMMOCK_URL` not found, using default hummock URL {}",
-                DEFAULT_ADDR
-            );
-            DEFAULT_ADDR.to_string()
-        });
+
+        let hummock_url = match env::var("RW_HUMMOCK_URL") {
+            Ok(url) => {
+                tracing::info!("using Hummock URL from `RW_HUMMOCK_URL`: {}", url);
+                url
+            }
+            Err(_) => {
+                bail!("env variable `RW_HUMMOCK_URL` not found, please do one of the following:\n* use `./risedev ctl` to start risectl.\n* `source .risingwave/config/risectl-env` or `source ~/risingwave-deploy/risectl-env` before running risectl.\n* manually set `RW_HUMMOCK_URL` in env variable.\nPlease also remember to add `use: minio` to risedev config.");
+            }
+        };
         Ok(Self {
             meta_opts,
             hummock_url,
         })
     }
 
-    pub async fn create_hummock_store(&self) -> Result<MonitoredStateStore<HummockStorage>> {
+    pub async fn create_hummock_store(
+        &self,
+    ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
         let meta_client = self.meta_opts.create_meta_client().await?;
 
         // FIXME: allow specify custom config
@@ -66,7 +70,7 @@ impl HummockServiceOpts {
             &self.hummock_url,
             Arc::new(config),
             Arc::new(MonitoredHummockMetaClient::new(
-                meta_client,
+                meta_client.clone(),
                 Arc::new(HummockMetrics::unused()),
             )),
             Arc::new(StateStoreMetrics::unused()),
@@ -75,7 +79,7 @@ impl HummockServiceOpts {
         .await?;
 
         if let StateStoreImpl::HummockStateStore(hummock_state_store) = state_store_impl {
-            Ok(hummock_state_store)
+            Ok((meta_client, hummock_state_store))
         } else {
             Err(anyhow!("only Hummock state store is supported in risectl"))
         }

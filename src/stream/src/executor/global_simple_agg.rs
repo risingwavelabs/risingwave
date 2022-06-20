@@ -110,7 +110,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 ks.clone(),
                 agg_call,
                 &key_indices,
-                &pk_indices,
+                &input_info.pk_indices,
                 &schema,
                 input.as_ref(),
             ));
@@ -142,7 +142,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         keyspace: &[Keyspace<S>],
         chunk: StreamChunk,
         epoch: u64,
-        state_tables: &[StateTable<S>],
+        state_tables: &mut [StateTable<S>],
     ) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -181,12 +181,17 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         let states = states.as_mut().unwrap();
 
         // 2. Mark the state as dirty by filling prev states
-        states.may_mark_as_dirty(epoch).await?;
+        states.may_mark_as_dirty(epoch, state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
+        for ((agg_state, data), state_table) in states
+            .managed_states
+            .iter_mut()
+            .zip_eq(all_agg_data.iter())
+            .zip_eq(state_tables.iter_mut())
+        {
             agg_state
-                .apply_batch(&ops, visibility.as_ref(), data, epoch)
+                .apply_batch(&ops, visibility.as_ref(), data, epoch, state_table)
                 .await?;
         }
 
@@ -234,7 +239,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         // --- Retrieve modified states and put the changes into the builders ---
         states
-            .build_changes(&mut builders, &mut new_ops, epoch)
+            .build_changes(&mut builders, &mut new_ops, epoch, state_tables)
             .await?;
 
         let columns: Vec<Column> = builders
@@ -279,7 +284,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                         &keyspace,
                         chunk,
                         epoch,
-                        &state_tables,
+                        &mut state_tables,
                     )
                     .await?;
                 }

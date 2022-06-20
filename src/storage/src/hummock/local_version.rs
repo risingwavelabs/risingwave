@@ -17,6 +17,8 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
@@ -132,7 +134,9 @@ impl PinnedVersion {
     }
 
     pub fn levels(&self) -> &Vec<Level> {
-        &self.version.levels
+        // TODO #2065: use correct compaction group id
+        self.version
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
     }
 
     pub fn max_committed_epoch(&self) -> u64 {
