@@ -194,11 +194,15 @@ impl DynamicLevelSelector {
             }
             if level_idx == 0 {
                 // trigger intra-l0 compaction at first when the number of files is too large.
-                let score = idle_file_count * SCORE_BASE
+                let l0_score = idle_file_count * SCORE_BASE
                     / self.config.level0_tier_compact_file_number as u64;
-                ctx.score_levels.push((score, 0, 0));
-                let score =
-                    total_size * SCORE_BASE / self.config.max_bytes_for_level_base + score / 2;
+                if total_size < self.config.max_bytes_for_level_base {
+                    ctx.score_levels.push((l0_score, 0, 0));
+                } else {
+                    ctx.score_levels
+                        .push((std::cmp::min(SCORE_BASE + 1, l0_score), 0, 0));
+                };
+                let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
                 ctx.score_levels.push((score, 0, ctx.base_level));
             } else {
                 ctx.score_levels.push((
@@ -384,13 +388,15 @@ pub mod tests {
             .compaction_mode(CompactionMode::Range as i32)
             .build();
         let mut levels = vec![
-            generate_level(0, generate_tables(15..25, 0..600, 3, 10)),
+            generate_level(0, generate_tables(15..35, 0..600, 3, 8)),
             generate_level(1, vec![]),
             generate_level(2, generate_tables(0..5, 0..1000, 3, 10)),
             generate_level(3, generate_tables(5..10, 0..1000, 2, 50)),
             generate_level(4, generate_tables(10..15, 0..1000, 1, 200)),
         ];
         levels[0].level_type = LevelType::Overlapping as i32;
+        levels[0].table_infos[0] = generate_table(15, 1, 0, 599, 3);
+        levels[0].table_infos[0].file_size = 15;
 
         let selector = DynamicLevelSelector::new(
             Arc::new(config.clone()),
@@ -402,7 +408,7 @@ pub mod tests {
             .unwrap();
         assert_eq!(compaction.select_level.level_idx, 0);
         assert_eq!(compaction.target_level.level_idx, 0);
-        assert_eq!(compaction.select_level.table_infos.len(), 10);
+        assert_eq!(compaction.select_level.table_infos.len(), 20);
         assert_eq!(compaction.target_level.table_infos.len(), 0);
 
         let config = CompactionConfigBuilder::new_with(config)
@@ -417,7 +423,7 @@ pub mod tests {
             .unwrap();
         assert_eq!(compaction.select_level.level_idx, 0);
         assert_eq!(compaction.target_level.level_idx, 2);
-        assert_eq!(compaction.select_level.table_infos.len(), 10);
+        assert_eq!(compaction.select_level.table_infos.len(), 20);
         assert_eq!(compaction.target_level.table_infos.len(), 3);
 
         levels_handlers[0].remove_task(1);

@@ -631,15 +631,16 @@ where
                     })
                     .collect::<HashSet<u32>>();
 
-                if compact_task.target_level != 0 {
+                let create_units = compact_task.target_level != 0
+                    || compact_task.input_ssts[0].total_file_size
+                        > compact_status.get_config().min_compaction_bytes;
+
+                if create_units {
                     compact_task.vnode_mappings.reserve_exact(table_ids.len());
                 }
 
                 for table_id in table_ids {
-                    if compact_task.target_level != 0
-                        || compact_task.input_ssts[0].total_file_size
-                            > compact_status.get_config().min_compaction_bytes
-                    {
+                    if create_units {
                         if let Some(vnode_mapping) = self
                             .env
                             .hash_mapping_manager()
