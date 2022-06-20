@@ -4504,7 +4504,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlsmith"
-version = "0.1.0"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4516,7 +4516,6 @@ dependencies = [
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_frontend",
- "risingwave_pb",
  "risingwave_sqlparser",
  "tokio-postgres",
  "workspace-hack",

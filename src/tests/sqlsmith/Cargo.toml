@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_sqlsmith"
-version = "0.1.0"
+version = "0.1.9"
 edition = "2021"
 
 [dependencies]
@@ -13,7 +13,6 @@ log = "0.4"
 madsim = "=0.2.0-alpha.3"
 rand = "0.8"
 risingwave_frontend = { path = "../../frontend" }
-risingwave_pb = { path = "../../prost" }
 risingwave_sqlparser = { path = "../../sqlparser" }
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "rt",

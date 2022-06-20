@@ -39,7 +39,7 @@ libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
-madsim-tokio = { version = "0.2.0-alpha.3", default-features = false, features = ["fs", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+madsim-tokio = { version = "0.2.0-alpha.3", default-features = false, features = ["fs", "macros", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
 nom = { version = "7", default-features = false, features = ["alloc", "std"] }
@@ -95,7 +95,7 @@ libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
-madsim-tokio = { version = "0.2.0-alpha.3", default-features = false, features = ["fs", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+madsim-tokio = { version = "0.2.0-alpha.3", default-features = false, features = ["fs", "macros", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
 nom = { version = "7", default-features = false, features = ["alloc", "std"] }
