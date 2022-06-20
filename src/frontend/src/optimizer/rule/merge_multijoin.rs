@@ -16,23 +16,25 @@ use super::super::plan_node::*;
 use super::Rule;
 use crate::optimizer::rule::BoxedRule;
 
-/// Merges adjacent inner joins into a single `LogicalMultiJoin`.
-/// The `LogicalMultiJoin` is short-lived and will be immediately
-/// rewritten into a join tree of binary joins.
-pub struct MultiJoinJoinRule {}
+/// Merges adjacent inner joins, filters and projections into a single `LogicalMultiJoin`.
+pub struct MergeMultiJoinRule {}
 
-impl Rule for MultiJoinJoinRule {
+impl Rule for MergeMultiJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let join = LogicalMultiJoin::from_join(&plan)?;
-        Some(join.into())
+        let multijoin_builder = LogicalMultiJoinBuilder::new(plan);
+        if multijoin_builder.inputs().len() <= 1 {
+            return None;
+        }
+        Some(multijoin_builder.build().into())
     }
 }
 
-impl MultiJoinJoinRule {
+impl MergeMultiJoinRule {
     pub fn create() -> BoxedRule {
-        Box::new(MultiJoinJoinRule {})
+        Box::new(MergeMultiJoinRule {})
     }
 }
+
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
@@ -47,7 +49,7 @@ mod tests {
     use crate::utils::Condition;
 
     #[tokio::test]
-    async fn test_multijoin_join_merge() {
+    async fn test_merge_multijoin_join() {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..10)
@@ -90,8 +92,9 @@ mod tests {
             left.clone().into(),
             right.clone().into(),
             join_type,
-            Condition::with_expr(on_0),
+            Condition::true_cond(),
         );
+        let filter_on_join = LogicalFilter::new(join_0.into(), Condition::with_expr(on_0));
 
         let on_1: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
@@ -105,11 +108,15 @@ mod tests {
         ));
         let join_1 = LogicalJoin::new(
             mid.clone().into(),
-            LogicalMultiJoin::from_join(&join_0.into()).unwrap().into(),
+            filter_on_join.into(),
             join_type,
             Condition::with_expr(on_1.clone()),
         );
-        let multi_join = LogicalMultiJoin::from_join(&join_1.into()).unwrap();
+        let multi_join = MergeMultiJoinRule::create()
+            .apply(join_1.into())
+            .unwrap()
+            .as_logical_multi_join()
+            .unwrap();
         for (input, schema) in
             multi_join
                 .inputs()

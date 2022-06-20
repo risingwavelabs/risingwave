@@ -102,7 +102,7 @@ impl LogicalMultiJoinBuilder {
         let mut mapping = ColIndexMapping::with_shift_offset(right_col_num, left_col_num as isize);
 
         let mut builder = Self::new(left);
-        let (r_output_indices, r_conjunctions, r_inputs) = Self::new(right).into_parts();
+        let (r_output_indices, r_conjunctions, mut r_inputs) = Self::new(right).into_parts();
 
         builder.inputs.append(&mut r_inputs);
         builder.conjunctions.extend(
@@ -124,7 +124,9 @@ impl LogicalMultiJoinBuilder {
     fn with_filter(plan: PlanRef) -> LogicalMultiJoinBuilder {
         let filter: &LogicalFilter = plan.as_logical_filter().unwrap();
         let mut builder = Self::new(filter.input());
-        builder.conjunctions.extend(filter.predicate().conjunctions);
+        builder
+            .conjunctions
+            .extend(filter.predicate().conjunctions.clone());
         builder
     }
 
@@ -145,6 +147,10 @@ impl LogicalMultiJoinBuilder {
             conjunctions: vec![],
             inputs: vec![input],
         }
+    }
+
+    pub fn inputs(&self) -> &[PlanRef] {
+        self.inputs.as_ref()
     }
 }
 impl LogicalMultiJoin {
@@ -171,7 +177,7 @@ impl LogicalMultiJoin {
             fields: output_indices
                 .iter()
                 .map(|idx| inner_o2i_mapping[*idx])
-                .map(|(input_idx, col_idx)| input_schemas[input_idx].fields()[col_idx])
+                .map(|(input_idx, col_idx)| input_schemas[input_idx].fields()[col_idx].clone())
                 .collect(),
         };
 

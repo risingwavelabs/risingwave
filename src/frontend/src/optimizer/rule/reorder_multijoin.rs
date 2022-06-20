@@ -45,6 +45,7 @@ mod tests {
 
     use super::*;
     use crate::expr::{ExprImpl, FunctionCall, InputRef};
+    use crate::optimizer::rule::MergeMultiJoinRule;
     use crate::session::OptimizerContext;
     use crate::utils::Condition;
 
@@ -115,12 +116,16 @@ mod tests {
             .unwrap(),
         ));
         let join_1 = LogicalJoin::new(
-            LogicalMultiJoin::from_join(&join_0.into()).unwrap().into(),
+            join_0.into(),
             relation_b.clone().into(),
             join_type,
             Condition::with_expr(on_1),
         );
-        let multi_join = LogicalMultiJoin::from_join(&join_1.into()).unwrap();
+        let multi_join = MergeMultiJoinRule::create()
+            .apply(join_1.into())
+            .unwrap()
+            .as_logical_multi_join()
+            .unwrap();
         for (input, schema) in multi_join.inputs().iter().zip_eq(vec![
             relation_a.schema(),
             relation_c.schema(),
