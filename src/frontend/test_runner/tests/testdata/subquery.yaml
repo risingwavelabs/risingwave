@@ -84,3 +84,7 @@
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a, b, c) join t on a=v1;
   binder_error: 'Bind error: table "tt" has less columns available but more aliases specified'
+- sql: |
+    create table t(x int);
+    select * from t, (select * from t as t2 order by t.x desc) as t3;
+  binder_error: 'Bind error: ORDER BY expression "t.x" has correlated input reference'
