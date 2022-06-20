@@ -477,6 +477,9 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
                 return None;
             }
             // Remove the handle from table.
+            for listener in &self.listeners {
+                listener.on_evict((*h).get_key(), (*h).get_value());
+            }
             self.table.remove((*h).hash, (*h).get_key());
         }
 
@@ -1133,41 +1136,70 @@ mod tests {
     #[test]
     fn test_event_listener() {
         unsafe {
-            // unhold
             let listener = Arc::new(TestLruCacheEventListener::default());
             let mut cache = create_cache_with_event_listeners(2, vec![listener.clone()]);
+
+            // full-fill cache
             let h = cache.insert("k1".to_string(), 0, 1, "v1".to_string(), &mut vec![]);
             cache.release(h);
             let h = cache.insert("k2".to_string(), 0, 1, "v2".to_string(), &mut vec![]);
             cache.release(h);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 2);
             assert!(listener.erased.lock().is_empty());
             assert!(listener.evicted.lock().is_empty());
+
+            // test evict
             let h = cache.insert("k3".to_string(), 0, 1, "v3".to_string(), &mut vec![]);
             cache.release(h);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 2);
             assert!(listener.erased.lock().is_empty());
             assert!(listener.evicted.lock().remove("k1").is_some());
+
+            // test erase
             cache.erase(0, &"k2".to_string());
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 1);
             assert!(listener.erased.lock().remove("k2").is_some());
             assert!(listener.evicted.lock().is_empty());
 
-            // hold
-            let listener = Arc::new(TestLruCacheEventListener::default());
-            let mut cache = create_cache_with_event_listeners(2, vec![listener.clone()]);
-            let mut to_delete = vec![];
-            let h = cache.insert("k1".to_string(), 0, 1, "v1".to_string(), &mut to_delete);
+            // test refill
+            let h = cache.insert("k4".to_string(), 0, 1, "v4".to_string(), &mut vec![]);
             cache.release(h);
-            let h = cache.insert("k2".to_string(), 0, 1, "v2".to_string(), &mut to_delete);
-            cache.release(h);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 2);
             assert!(listener.erased.lock().is_empty());
             assert!(listener.evicted.lock().is_empty());
-            let h = cache.insert("k3".to_string(), 0, 1, "v3".to_string(), &mut to_delete);
-            cache.release(h);
+
+            // test release after full
+            // 1. full-full cache but not release
+            let h1 = cache.insert("k5".to_string(), 0, 1, "v5".to_string(), &mut vec![]);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 2);
             assert!(listener.erased.lock().is_empty());
-            assert!(listener.evicted.lock().remove("k1").is_some());
-            cache.erase(0, &"k2".to_string());
-            assert!(listener.erased.lock().remove("k2").is_some());
+            assert!(listener.evicted.lock().remove("k3").is_some());
+            let h2 = cache.insert("k6".to_string(), 0, 1, "v6".to_string(), &mut vec![]);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 2);
+            assert!(listener.erased.lock().is_empty());
+            assert!(listener.evicted.lock().remove("k4").is_some());
+
+            // 2. insert one more entry after cache is full, cache will be oversized
+            let h3 = cache.insert("k7".to_string(), 0, 1, "v7".to_string(), &mut vec![]);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 3);
+            assert!(listener.erased.lock().is_empty());
             assert!(listener.evicted.lock().is_empty());
-            drop(to_delete);
+
+            // 3. release one entry, and it will be evicted immediately bucause cache is oversized
+            cache.release(h1);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 2);
+            assert!(listener.erased.lock().is_empty());
+            assert!(listener.evicted.lock().remove("k5").is_some());
+
+            // 4. release other entries, no entry will be evicted
+            cache.release(h2);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 2);
+            assert!(listener.erased.lock().is_empty());
+            assert!(listener.evicted.lock().is_empty());
+            cache.release(h3);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 2);
+            assert!(listener.erased.lock().is_empty());
+            assert!(listener.evicted.lock().is_empty());
         }
     }
 }
