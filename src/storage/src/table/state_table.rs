@@ -203,8 +203,7 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let order_types = &self.pk_serializer().clone().into_order_types()[0..pk_prefix.size()];
-        let prefix_serializer = OrderedRowSerializer::new(order_types.into());
+        let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
 
