@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::hash::VNODE_BITMAP_LEN;
+use risingwave_common::types::VNODE_BITMAP_LEN;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -202,10 +202,13 @@ where
             // Normal fragment
 
             // Find out all the hash parallel units in the cluster.
-            let parallel_units = self
+            let mut parallel_units = self
                 .cluster_manager
                 .list_parallel_units(Some(ParallelUnitType::Hash))
                 .await;
+            // FIXME(Kexiang): select appropriate parallel_units, currently only support
+            // `parallel_degree < parallel_units.size()`
+            parallel_units.truncate(fragment.actors.len());
 
             // Build vnode mapping according to the parallel units.
             self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
@@ -288,7 +291,7 @@ mod test {
     use std::time::Duration;
 
     use itertools::Itertools;
-    use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::plan_common::TableRefId;
