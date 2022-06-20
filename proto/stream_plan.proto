@@ -96,9 +96,11 @@ message HashJoinNode {
   uint32 right_table_id = 7;
   repeated uint32 dist_key_l = 8;
   repeated uint32 dist_key_r = 9;
-  // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 10;
+  // Whether to optimize for append only stream.
+  // the output indices of current node
+  repeated uint32 output_indices = 11;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -116,6 +118,8 @@ message DeltaIndexJoinNode {
   ArrangementInfo left_info = 9;
   // Info about the right index
   ArrangementInfo right_info = 10;
+  // the output indices of current node
+  repeated uint32 output_indices = 11;
 }
 
 message HopWindowNode {
