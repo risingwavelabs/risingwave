@@ -29,7 +29,6 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
@@ -136,7 +135,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<VNodeBitmap>)>);
+pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<u32>)>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -151,7 +150,7 @@ impl Compactor {
     pub async fn compact_shared_buffer_by_compaction_group(
         context: Arc<CompactorContext>,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, u64, Vec<VNodeBitmap>)>> {
+    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, u64, Vec<u32>)>> {
         let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
         for uncommitted_list in payload {
             let mut next_inner = HashSet::new();
@@ -198,7 +197,7 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, u64, Vec<VNodeBitmap>)>> {
+    ) -> HummockResult<Vec<(Sstable, u64, Vec<u32>)>> {
         let mut start_user_keys = payload
             .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
@@ -500,7 +499,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, unit_id, vnode_bitmaps) in ssts {
+            for (sst, unit_id, table_ids) in ssts {
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -509,7 +508,7 @@ impl Compactor {
                         inf: false,
                     }),
                     file_size: sst.meta.estimated_size as u64,
-                    vnode_bitmaps,
+                    table_ids,
                     unit_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
@@ -601,7 +600,7 @@ impl Compactor {
         for SealedSstableBuilder {
             id: table_id,
             meta,
-            vnode_bitmaps,
+            table_ids,
             upload_join_handle,
             data_len,
             unit_id,
@@ -609,7 +608,7 @@ impl Compactor {
         {
             let sst = Sstable { id: table_id, meta };
             let len = data_len;
-            ssts.push((sst.clone(), unit_id, vnode_bitmaps));
+            ssts.push((sst.clone(), unit_id, table_ids));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {

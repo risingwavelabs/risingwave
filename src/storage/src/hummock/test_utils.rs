@@ -23,7 +23,6 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
@@ -83,7 +82,7 @@ pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>)
             inf: false,
         }),
         file_size: batches.len() as u64,
-        vnode_bitmaps: vec![],
+        table_ids: vec![],
         unit_id: u64::MAX,
     }
 }
@@ -123,13 +122,13 @@ pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
 pub fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
-) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
+) -> (Bytes, SstableMeta, Vec<u32>) {
     let mut b = SSTableBuilder::new(0, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }
-    let (_, data, meta, vnodes) = b.finish();
-    (data, meta, vnodes)
+    let (_, data, meta, table_ids) = b.finish();
+    (data, meta, table_ids)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`

@@ -379,7 +379,7 @@ pub mod tests {
                 inf: false,
             }),
             file_size: (right - left + 1) as u64,
-            vnode_bitmaps: vec![],
+            table_ids: vec![],
             unit_id: u64::MAX,
         }
     }
