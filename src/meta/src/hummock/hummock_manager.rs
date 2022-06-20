@@ -624,9 +624,7 @@ where
                         level
                             .table_infos
                             .iter()
-                            .flat_map(|sst_info| {
-                                sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
-                            })
+                            .flat_map(|sst_info| sst_info.table_ids.iter().cloned())
                             .collect_vec()
                     })
                     .collect::<HashSet<u32>>();

@@ -15,7 +15,6 @@
 use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_pb::common::VNodeBitmap;
 use tokio::task::JoinHandle;
 
 use super::SstableMeta;
@@ -26,7 +25,7 @@ use crate::hummock::{CachePolicy, HummockResult, SSTableBuilder, Sstable};
 pub struct SealedSstableBuilder {
     pub id: HummockSSTableId,
     pub meta: SstableMeta,
-    pub vnode_bitmaps: Vec<VNodeBitmap>,
+    pub table_ids: Vec<u32>,
     pub upload_join_handle: JoinHandle<HummockResult<()>>,
     pub data_len: usize,
     pub unit_id: u64,
@@ -125,7 +124,7 @@ where
     /// will be no-op.
     pub fn seal_current(&mut self) {
         if let Some(builder) = self.current_builder.take() {
-            let (table_id, data, meta, vnode_bitmap) = builder.finish();
+            let (table_id, data, meta, table_ids) = builder.finish();
             let len = data.len();
             let sstable_store = self.sstable_store.clone();
             let meta_clone = meta.clone();
@@ -144,7 +143,7 @@ where
             self.sealed_builders.push(SealedSstableBuilder {
                 id: table_id,
                 meta,
-                vnode_bitmaps: vnode_bitmap,
+                table_ids,
                 upload_join_handle,
                 data_len: len,
                 unit_id: 0,
