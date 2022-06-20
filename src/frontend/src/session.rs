@@ -542,14 +542,15 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
-        // With pgwire, there would be at most 1 statement in the vec.
-        assert!(stmts.len() <= 1);
         if stmts.is_empty() {
-            return Ok(PgResponse::new(
+            return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
-                0,
-                vec![],
-                vec![],
+            ));
+        }
+        if stmts.len() > 1 {
+            return Ok(PgResponse::empty_result_with_notice(
+                pgwire::pg_response::StatementType::EMPTY,
+                "cannot insert multiple commands into statement".to_string(),
             ));
         }
         let stmt = stmts.swap_remove(0);
@@ -569,10 +570,14 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
-        // With pgwire, there would be at most 1 statement in the vec.
-        assert!(stmts.len() <= 1);
         if stmts.is_empty() {
             return Ok(vec![]);
+        }
+        if stmts.len() > 1 {
+            return Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "cannot insert multiple commands into statement",
+            )));
         }
         let stmt = stmts.swap_remove(0);
         let rsp = infer(self, stmt, sql).map_err(|e| {
