@@ -140,7 +140,7 @@ fn rule_f<'a, 'b>(
             return cand_temp;
         }
     }
-    return best_candidate;
+    best_candidate
 }
 fn rule_e<'a, 'b>(
     inputs: &'a [ExprImpl],
@@ -157,11 +157,9 @@ fn rule_e<'a, 'b>(
             if tc == &DataType::Varchar {
                 t = Some(&DataType::Varchar);
             } else if let Some(tt) = t {
-                if tt == &DataType::Varchar {
-                } else if tt == tc {
+                if tt == &DataType::Varchar || tc == tt || cast_ok(tc, tt, &CastContext::Implicit) {
                 } else if cast_ok(tt, tc, &CastContext::Implicit) {
                     t = Some(tc);
-                } else if cast_ok(tc, tt, &CastContext::Implicit) {
                 } else {
                     t = None;
                 }
@@ -193,10 +191,8 @@ fn rule_e<'a, 'b>(
                     if p != *t {
                         return false;
                     }
-                } else {
-                    if !cast_ok(p, t, &CastContext::Implicit) {
-                        return false;
-                    }
+                } else if !cast_ok(p, t, &CastContext::Implicit) {
+                    return false;
                 }
             }
             true
