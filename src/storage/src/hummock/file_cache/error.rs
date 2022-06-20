@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use context::*;
-pub use env::*;
-pub use task_execution::*;
-pub use task_manager::*;
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("io error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("nix error: {0}")]
+    NixError(#[from] nix::errno::Errno),
+    #[error("unsupported file system, super block magic: {0}")]
+    UnsupportedFilesystem(i64),
+    #[error("other error: {0}")]
+    Other(String),
+}
 
-mod broadcast_channel;
-mod channel;
-mod context;
-mod env;
-mod fifo_channel;
-mod hash_shuffle_channel;
-mod task_execution;
-mod task_manager;
-
-const BOUNDED_BUFFER_SIZE: usize = 64;
+pub type Result<T> = core::result::Result<T, Error>;

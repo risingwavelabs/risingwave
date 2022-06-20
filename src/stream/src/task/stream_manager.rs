@@ -665,6 +665,46 @@ impl LocalStreamManagerCore {
                         .actor_execution_time
                         .with_label_values(&[&actor_id_str])
                         .set(monitor.cumulative().total_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_fast_poll_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_fast_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_fast_poll_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_fast_poll_count as i64);
+                    metrics
+                        .actor_slow_poll_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_slow_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_slow_poll_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_slow_poll_count as i64);
+                    metrics
+                        .actor_poll_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_poll_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_poll_count as i64);
+                    metrics
+                        .actor_idle_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_idle_duration.as_secs_f64());
+                    metrics
+                        .actor_idle_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_idled_count as i64);
+                    metrics
+                        .actor_scheduled_duration
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_scheduled_duration.as_secs_f64());
+                    metrics
+                        .actor_scheduled_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .set(monitor.cumulative().total_scheduled_count as i64);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             });

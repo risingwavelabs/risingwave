@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -34,8 +33,7 @@ use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
 use risingwave_pb::data::{
     AddMutation, Barrier as ProstBarrier, DispatcherMutation, Epoch as ProstEpoch,
-    SourceChangeSplit, SourceChangeSplitMutation, StopMutation,
-    StreamMessage as ProstStreamMessage, UpdateMutation,
+    SourceChangeSplitMutation, StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
 };
 use smallvec::SmallVec;
 use tracing::trace_span;
@@ -95,6 +93,7 @@ pub use merge::MergeExecutor;
 pub use mview::*;
 pub use project::ProjectExecutor;
 pub use rearranged_chain::RearrangedChainExecutor;
+use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use source::*;
 pub use top_n::TopNExecutor;
@@ -316,26 +315,24 @@ impl Mutation {
                         info: actors.clone(),
                     })
                     .collect(),
-                splits: vec![],
+                ..Default::default()
             }),
             Mutation::SourceChangeSplit(changes) => {
                 ProstMutation::Splits(SourceChangeSplitMutation {
-                    mutations: changes
+                    actor_splits: changes
                         .iter()
-                        .map(|(&actor_id, splits)| SourceChangeSplit {
-                            actor_id,
-                            split_type: if let Some(s) = splits {
-                                s[0].get_type()
-                            } else {
-                                "".to_string()
-                            },
-                            source_splits: match splits.clone() {
-                                Some(split) => split
-                                    .into_iter()
-                                    .map(|s| s.to_json_bytes().to_vec())
-                                    .collect::<Vec<_>>(),
-                                None => vec![],
-                            },
+                        .map(|(&actor_id, splits)| {
+                            (
+                                actor_id,
+                                ConnectorSplits {
+                                    splits: splits
+                                        .clone()
+                                        .unwrap_or_default()
+                                        .iter()
+                                        .map(ConnectorSplit::from)
+                                        .collect(),
+                                },
+                            )
                         })
                         .collect(),
                 })
@@ -348,6 +345,7 @@ impl Mutation {
             ProstMutation::Stop(stop) => {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
             }
+
             ProstMutation::Update(update) => Mutation::UpdateOutputs(
                 update
                     .mutations
@@ -372,45 +370,38 @@ impl Mutation {
                     })
                     .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
                 splits: adds
-                    .splits
+                    .actor_splits
                     .iter()
-                    .map(|split| {
+                    .map(|(&actor_id, splits)| {
                         (
-                            split.actor_id,
-                            split
-                                .source_splits
+                            actor_id,
+                            splits
+                                .splits
                                 .iter()
-                                .map(|s| {
-                                    SplitImpl::restore_from_bytes(
-                                        split.borrow().split_type.clone(),
-                                        s,
-                                    )
-                                    .unwrap()
-                                })
-                                .collect_vec(),
+                                .map(|split| split.try_into().unwrap())
+                                .collect(),
                         )
                     })
                     .collect(),
             }),
             ProstMutation::Splits(s) => {
                 let mut change_splits: Vec<(ActorId, ConnectorState)> =
-                    Vec::with_capacity(s.mutations.len());
-                for change_split in &s.mutations {
-                    if change_split.source_splits.is_empty() {
-                        change_splits.push((change_split.actor_id, None));
+                    Vec::with_capacity(s.actor_splits.len());
+                for (&actor_id, splits) in &s.actor_splits {
+                    if splits.splits.is_empty() {
+                        change_splits.push((actor_id, None));
                     } else {
-                        let split_impl = change_split
-                            .source_splits
-                            .iter()
-                            .map(|split| {
-                                SplitImpl::restore_from_bytes(
-                                    change_split.split_type.clone(),
-                                    split,
-                                )
-                            })
-                            .collect::<anyhow::Result<Vec<SplitImpl>>>()
-                            .to_rw_result()?;
-                        change_splits.push((change_split.actor_id, Some(split_impl)));
+                        change_splits.push((
+                            actor_id,
+                            Some(
+                                splits
+                                    .splits
+                                    .iter()
+                                    .map(SplitImpl::try_from)
+                                    .collect::<anyhow::Result<Vec<SplitImpl>>>()
+                                    .to_rw_result()?,
+                            ),
+                        ));
                     }
                 }
                 Mutation::SourceChangeSplit(
