@@ -23,12 +23,14 @@ use prost::Message;
 use risingwave_common::util::compress::compress_data;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
     HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo,
 };
 use risingwave_pb::common::ParallelUnitMapping;
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
     HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
@@ -229,31 +231,29 @@ where
         if versioning_guard.hummock_versions.is_empty() {
             let mut init_version = HummockVersion {
                 id: versioning_guard.current_version_id.id(),
-                levels: vec![Level {
-                    level_idx: 0,
-                    level_type: LevelType::Overlapping as i32,
-                    table_infos: vec![],
-                    total_file_size: 0,
-                }],
+                levels: Default::default(),
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
-            // TODO #2065: Initialize independent levels via corresponding compaction group' config.
-            // Currently all SSTs belongs to `StateDefault`.
-            let max_level = self
-                .compaction_group_manager
-                .compaction_group(StaticCompactionGroupId::StateDefault.into())
-                .await
-                .unwrap()
-                .compaction_config()
-                .max_level;
-            for l in 0..max_level {
-                init_version.levels.push(Level {
-                    level_idx: (l + 1) as u32,
-                    level_type: LevelType::Nonoverlapping as i32,
+            // Initialize independent levels via corresponding compaction group' config.
+            for compaction_group in self.compaction_group_manager.compaction_groups().await {
+                let mut levels = vec![Level {
+                    level_idx: 0u32,
+                    level_type: LevelType::Overlapping as i32,
                     table_infos: vec![],
                     total_file_size: 0,
-                });
+                }];
+                for l in 0..compaction_group.compaction_config().max_level {
+                    levels.push(Level {
+                        level_idx: (l + 1) as u32,
+                        level_type: LevelType::Nonoverlapping as i32,
+                        table_infos: vec![],
+                        total_file_size: 0,
+                    });
+                }
+                init_version
+                    .levels
+                    .insert(compaction_group.group_id(), Levels { levels });
             }
             init_version.insert(self.env.meta_store()).await?;
             versioning_guard
@@ -588,7 +588,7 @@ where
         );
         let current_version = self.versioning.read().await.current_version();
         let compact_task = compact_status.get_compact_task(
-            &current_version.levels,
+            current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
             compaction_group_id,
         );
@@ -660,10 +660,11 @@ where
 
                 commit_multi_var!(self, None, compact_status)?;
                 tracing::trace!(
-                    "pick up {} tables in level {} to compact, The number of total tables is {}. cost time: {:?}",
+                    "For compaction group {}: pick up {} tables in level {} to compact, The number of total tables is {}. cost time: {:?}",
+                    compaction_group_id,
                     compact_task.input_ssts[0].table_infos.len(),
                     compact_task.input_ssts[0].level_idx,
-                    current_version.levels[compact_task.input_ssts[0].level_idx as usize]
+                    current_version.get_compaction_group_levels(compaction_group_id)[compact_task.input_ssts[0].level_idx as usize]
                         .table_infos
                         .len(),
                     start_time.elapsed()
@@ -893,8 +894,9 @@ where
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
+        // TODO #2065: use correct compaction group id
         let version_first_level = new_hummock_version
-            .levels
+            .get_compaction_group_levels_mut(StaticCompactionGroupId::StateDefault.into())
             .first_mut()
             .expect("Expect at least one level");
         assert_eq!(version_first_level.level_idx, 0);
@@ -1203,6 +1205,7 @@ where
                     versioning
                         .levels
                         .iter()
+                        .flat_map(|(_, l)| &l.levels)
                         .flat_map(|level| {
                             level.table_infos.iter().map(|table_info| {
                                 versioning_guard

@@ -18,6 +18,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
@@ -56,10 +57,12 @@ async fn test_hummock_pin_unpin() {
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap();
+        let levels = hummock_version
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
         assert_eq!(version_id, hummock_version.id);
-        assert_eq!(7, hummock_version.levels.len());
-        assert_eq!(0, hummock_version.levels[0].table_infos.len());
-        assert_eq!(0, hummock_version.levels[1].table_infos.len());
+        assert_eq!(7, levels.len());
+        assert_eq!(0, levels[0].table_infos.len());
+        assert_eq!(0, levels[1].table_infos.len());
 
         let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
         assert_eq!(pin_versions_sum(&pinned_versions), 1);
@@ -306,7 +309,7 @@ async fn test_hummock_table() {
     assert_eq!(
         Ordering::Equal,
         pinned_version
-            .levels
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|info| info.id)
