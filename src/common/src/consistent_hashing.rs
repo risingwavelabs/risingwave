@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use risingwave_pb::common::RangeInclusive;
 
-use crate::types::{ParallelUnitId, VirtualNode, VIRTUAL_NODE_COUNT};
+use crate::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 
 pub type VNodeRanges = Vec<RangeInclusive>;
 
@@ -24,39 +24,6 @@ pub fn full_vnode_range() -> VNodeRanges {
         start: 0,
         end: VIRTUAL_NODE_COUNT as u64 - 1,
     }]
-}
-
-pub fn build_vnode_mapping(
-    parallel_units: &[u32],
-) -> (
-    Vec<ParallelUnitId>,
-    HashMap<ParallelUnitId, Vec<VirtualNode>>,
-) {
-    let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
-    let mut owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
-
-    let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
-    let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
-    let mut init_bound = 0;
-
-    parallel_units.iter().for_each(|&parallel_unit_id| {
-        let vnode_count = if one_more_count > 0 {
-            one_more_count -= 1;
-            hash_shard_size + 1
-        } else {
-            hash_shard_size
-        };
-        init_bound += vnode_count;
-        vnode_mapping.resize(init_bound, parallel_unit_id);
-        let vnodes = (init_bound - vnode_count..init_bound)
-            .map(|id| id as VirtualNode)
-            .collect();
-        owner_mapping.insert(parallel_unit_id, vnodes);
-
-        init_bound += hash_shard_size;
-    });
-
-    (vnode_mapping, owner_mapping)
 }
 
 pub fn vnode_mapping_to_ranges(
