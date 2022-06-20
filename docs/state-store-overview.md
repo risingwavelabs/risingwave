@@ -2,7 +2,7 @@
 
 - [An Overview of RisingWave State Store](#an-overview-of-risingwave-state-store)
   - [Overview](#overview)
-  - [Cell-based Relational Table](#Relational-table)
+  - [Relational Table](#Relational-table)
     - [Write Path](#relational-table-write-path)
     - [Read Path](#relational-table-read-path)
   - [State Store Architecture](#architecture)
@@ -23,7 +23,7 @@
 
 In RisingWave, all streaming executors store their data into a state store. This KV state store is backed by a service called Hummock, a cloud-native LSM-Tree-based storage engine. Hummock provides key-value API, and stores all data on S3-compatible service. However, it is not a KV store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
 
-As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. We implement a cell-based relational table layer as the bridge between stateful executors and KV state store, which provides the interfaces accessing KV data in relational semantic.
+As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. We implement a relational table layer as the bridge between stateful executors and KV state store, which provides the interfaces accessing KV data in relational semantic.
 
 
 ## Architecture
@@ -42,13 +42,12 @@ Streaming state store has distinguished workload characteristics.
 
 This leads to the design of Hummock, the cloud-native KV-based streaming state store. We’ll explain concepts like “epoch”, “key space” and “barrier” in the following chapters.
 
-## Cell-based Relational Table
+## Relational Table
 [source code](https://github.com/singularity-data/risingwave/blob/main/src/storage/src/table/state_table.rs)
 
 In this part, we will introduce how stateful executors interact with KV state store through the relational table layer.
 
-Relational table layer consists of State Table, Mem Table and Cell-based Table. The State Table provides the table operations by these APIs: `get_row`, `scan`, `insert_row`, `delete_row` and `update_row`, which are the read and write  interfaces for executors. The Mem Table
-is an in-memory buffer for caching table operations during one epoch, and the Cell-based Table is responsible for performing serialization and deserialization between cell-based encoding and KV encoding.
+Relational table layer consists of State Table, Mem Table and Cell-based Table. The State Table provides the table operations by these APIs: `get_row`, `scan`, `insert_row`, `delete_row` and `update_row`, which are the read and write  interfaces for executors. The Mem Table is an in-memory buffer for caching table operations during one epoch, and the Cell-based Table is responsible for performing serialization and deserialization between cell-based encoding and KV encoding.
 
 ![Overview of Relational Table](images/relational-table-layer/relational-table-01.svg)
 
