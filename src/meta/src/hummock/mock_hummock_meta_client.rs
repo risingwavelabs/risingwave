@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableInfo,
+    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableIdInfo, SstableInfo,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -141,6 +141,10 @@ impl HummockMetaClient for MockHummockMetaClient {
     }
 
     async fn trigger_manual_compaction(&self, _compaction_group_id: u64) -> Result<()> {
+        todo!()
+    }
+
+    async fn list_sstable_id_infos(&self, _version_id: u64) -> Result<Vec<SstableIdInfo>> {
         todo!()
     }
 }

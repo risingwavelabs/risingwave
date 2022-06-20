@@ -29,6 +29,9 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
     let version = meta_client.pin_version(u64::MAX).await?;
 
+    let sstable_id_infos = meta_client.list_sstable_id_infos(version.id).await?;
+    let mut sstable_id_infos_iter = sstable_id_infos.iter();
+
     for level in version.levels {
         for sstable_info in level.table_infos {
             let id = sstable_info.id;
@@ -39,8 +42,22 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             let sstable = sstable_cache.value().as_ref();
             let sstable_meta = &sstable.meta;
 
+            let sstable_id_info = sstable_id_infos_iter.next().unwrap();
+
             println!("SST id: {}", id);
             println!("-------------------------------------");
+            println!(
+                "Creation Timestamp: {}",
+                sstable_id_info.id_create_timestamp
+            );
+            println!(
+                "Creation Timestamp (Meta): {}",
+                sstable_id_info.meta_create_timestamp
+            );
+            println!(
+                "Deletion Timestamp (Meta): {}",
+                sstable_id_info.meta_delete_timestamp
+            );
             println!("File Size: {}", sstable_info.file_size);
 
             if let Some(key_range) = sstable_info.key_range {
@@ -53,10 +70,10 @@ pub async fn sst_dump() -> anyhow::Result<()> {
                 println!("Key Range: None");
             }
 
+            let data_path = sstable_store.get_sst_data_path(id);
             println!("Block Metadata:");
             for (i, block_meta) in sstable_meta.block_metas.iter().enumerate() {
                 // Retrieve encoded block data in bytes
-                let data_path = sstable_store.get_sst_data_path(sstable.id);
                 let store = sstable_store.store();
                 let block_loc = BlockLocation {
                     offset: block_meta.offset as usize,
