@@ -18,7 +18,7 @@ use itertools::Itertools as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{name_of, DataTypeName};
+use super::DataTypeName;
 use crate::expr::{Expr as _, ExprImpl};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -77,7 +77,7 @@ pub enum CastContext {
 
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
 pub fn cast_ok(source: &DataType, target: &DataType, allows: &CastContext) -> bool {
-    let k = (name_of(source), name_of(target));
+    let k = (DataTypeName::from(source), DataTypeName::from(target));
     matches!(CAST_MAP.get(&k), Some(context) if context <= allows)
 }
 
