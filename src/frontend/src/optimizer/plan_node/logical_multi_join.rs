@@ -65,6 +65,7 @@ pub struct LogicalMultiJoinBuilder {
     /// simplify.
     conjunctions: Vec<ExprImpl>,
     inputs: Vec<PlanRef>,
+    tot_input_col_num: usize,
 }
 
 impl LogicalMultiJoinBuilder {
@@ -78,8 +79,13 @@ impl LogicalMultiJoinBuilder {
         )
     }
 
-    pub fn into_parts(self) -> (Vec<usize>, Vec<ExprImpl>, Vec<PlanRef>) {
-        (self.output_indices, self.conjunctions, self.inputs)
+    pub fn into_parts(self) -> (Vec<usize>, Vec<ExprImpl>, Vec<PlanRef>, usize) {
+        (
+            self.output_indices,
+            self.conjunctions,
+            self.inputs,
+            self.tot_input_col_num,
+        )
     }
 
     pub fn new(plan: PlanRef) -> LogicalMultiJoinBuilder {
@@ -99,16 +105,20 @@ impl LogicalMultiJoinBuilder {
         let left = join.left();
         let right = join.right();
 
-        let left_col_num = left.schema().len();
-        let right_col_num = right.schema().len();
-        // the mapping from the right's output column index to the join's internal output column
-        // index
-        let mut mapping = ColIndexMapping::with_shift_offset(right_col_num, left_col_num as isize);
-
         let mut builder = Self::new(left);
-        let (r_output_indices, r_conjunctions, mut r_inputs) = Self::new(right).into_parts();
 
+        let (r_output_indices, r_conjunctions, mut r_inputs, r_tot_input_col_num) =
+            Self::new(right).into_parts();
+
+        // the mapping from the right's column index to the current multi join's internal column
+        // index
+        let mut mapping = ColIndexMapping::with_shift_offset(
+            r_tot_input_col_num,
+            builder.tot_input_col_num as isize,
+        );
         builder.inputs.append(&mut r_inputs);
+        builder.tot_input_col_num += r_tot_input_col_num;
+
         builder.conjunctions.extend(
             r_conjunctions
                 .into_iter()
@@ -153,6 +163,7 @@ impl LogicalMultiJoinBuilder {
         LogicalMultiJoinBuilder {
             output_indices: (0..input.schema().len()).collect_vec(),
             conjunctions: vec![],
+            tot_input_col_num: input.schema().len(),
             inputs: vec![input],
         }
     }

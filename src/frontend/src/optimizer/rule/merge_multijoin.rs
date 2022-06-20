@@ -22,7 +22,7 @@ pub struct MergeMultiJoinRule {}
 impl Rule for MergeMultiJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let multijoin_builder = LogicalMultiJoinBuilder::new(plan);
-        if multijoin_builder.inputs().len() <= 1 {
+        if multijoin_builder.inputs().len() <= 2 {
             return None;
         }
         Some(multijoin_builder.build().into())
