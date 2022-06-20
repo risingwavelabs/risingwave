@@ -4140,6 +4140,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "size",
  "tracing",
  "workspace-hack",
 ]
@@ -4980,6 +4981,15 @@ name = "siphasher"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bd3e3206899af3f8b12af284fafc038cc1dc2b41d1b89dd17297221c5d225de"
+
+[[package]]
+name = "size"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fb3f61ca4410df5894add0b47d4d2c882c837dfa660d579c9b3fd29b1ce3a0e"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "skeptic"
