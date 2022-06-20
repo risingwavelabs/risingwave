@@ -26,15 +26,16 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
+use crate::task::data_chunk_in_channel::DataChunkInChannel;
 use crate::task::BOUNDED_BUFFER_SIZE;
 
 pub struct HashShuffleSender {
-    senders: Vec<mpsc::Sender<Option<DataChunk>>>,
+    senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     hash_info: exchange_info::HashInfo,
 }
 
 pub struct HashShuffleReceiver {
-    receiver: mpsc::Receiver<Option<DataChunk>>,
+    receiver: mpsc::Receiver<Option<DataChunkInChannel>>,
 }
 
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<usize>> {
@@ -122,7 +123,7 @@ impl HashShuffleSender {
             // `generate_new_data_chunks` may generate an empty chunk.
             if new_data_chunk.cardinality() > 0 {
                 self.senders[sink_id]
-                    .send(Some(new_data_chunk))
+                    .send(Some(DataChunkInChannel::Normal(new_data_chunk)))
                     .await
                     .to_rw_result_with(|| "HashShuffleSender::send".into())?;
             }
@@ -143,7 +144,7 @@ impl HashShuffleSender {
 }
 
 impl ChanReceiver for HashShuffleReceiver {
-    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>>;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {
