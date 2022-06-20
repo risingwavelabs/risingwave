@@ -598,7 +598,7 @@ where
             Some(mut compact_task) => {
                 let existing_table_ids_from_meta = self
                     .compaction_group_manager
-                    .internal_table_ids_by_compation_group_id(compaction_group_id)
+                    .internal_table_ids_by_compaction_group_id(compaction_group_id)
                     .await?;
 
                 compact_task.watermark = {
