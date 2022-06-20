@@ -121,11 +121,8 @@ mod tests {
             join_type,
             Condition::with_expr(on_1),
         );
-        let multi_join = MergeMultiJoinRule::create()
-            .apply(join_1.into())
-            .unwrap()
-            .as_logical_multi_join()
-            .unwrap();
+        let multijoin_builder = LogicalMultiJoinBuilder::new(join_1.into());
+        let multi_join = multijoin_builder.build();
         for (input, schema) in multi_join.inputs().iter().zip_eq(vec![
             relation_a.schema(),
             relation_c.schema(),
