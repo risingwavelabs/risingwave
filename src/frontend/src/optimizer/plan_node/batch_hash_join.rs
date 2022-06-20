@@ -83,9 +83,20 @@ impl fmt::Display for BatchHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "BatchHashJoin {{ type: {:?}, predicate: {} }}",
+            "BatchHashJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
             self.logical.join_type(),
-            self.eq_join_predicate()
+            self.eq_join_predicate(),
+            if self
+                .logical
+                .output_indices()
+                .iter()
+                .copied()
+                .eq(0..self.logical.internal_column_num())
+            {
+                "all".to_string()
+            } else {
+                format!("{:?}", self.logical.output_indices())
+            }
         )
     }
 }
@@ -152,6 +163,12 @@ impl ToBatchProst for BatchHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
+            output_indices: self
+                .logical
+                .output_indices()
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
         })
     }
 }
