@@ -308,8 +308,9 @@ where
             // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
+            let default = Row::default();
             let all_data_iter = state_table
-                .iter_with_pk_prefix(self.group_key.as_ref().unwrap_or(&Row::default()), epoch)
+                .iter_with_pk_prefix(self.group_key.as_ref().unwrap_or(&default), epoch)
                 .await?;
             pin_mut!(all_data_iter);
 
