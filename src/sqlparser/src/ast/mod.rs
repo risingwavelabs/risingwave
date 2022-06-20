@@ -356,7 +356,7 @@ impl fmt::Display for Expr {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
                 } else {
-                    write!(f, "{} {}", op, expr)
+                    write!(f, "{} {}", op, fmt_expr_with_paren(expr))
                 }
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
@@ -490,8 +490,8 @@ impl fmt::Display for Expr {
 /// Wrap complex expressions with parentheses.
 fn fmt_expr_with_paren(e: &Expr) -> String {
     use BinaryOperator as B;
-    if let Expr::BinaryOp { op, .. } = e {
-        match op {
+    match e {
+        Expr::BinaryOp { op, .. } => match op {
             B::Plus
             | B::Multiply
             | B::Modulo
@@ -511,8 +511,10 @@ fn fmt_expr_with_paren(e: &Expr) -> String {
             | B::PGBitwiseShiftLeft
             | B::PGBitwiseShiftRight => return format!("({})", e),
             _ => {}
-        }
-    }
+        },
+        Expr::UnaryOp { .. } => return format!("({})", e),
+        _ => {}
+    };
     format!("{}", e)
 }
 

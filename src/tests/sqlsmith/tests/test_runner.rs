@@ -74,7 +74,7 @@ mod tests {
 
             let sql_copy = sql.clone();
             panic::set_hook(Box::new(move |e| {
-                println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e,);
+                println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);
             }));
 
             // The generated SQL must be parsable.
