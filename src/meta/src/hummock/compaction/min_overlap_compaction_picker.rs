@@ -168,14 +168,14 @@ impl CompactionPicker for MinOverlappingPicker {
             select_level: Level {
                 level_idx: self.level as u32,
                 level_type: levels[self.level].level_type,
+                total_file_size: select_input_ssts.iter().map(|table| table.file_size).sum(),
                 table_infos: select_input_ssts,
-                total_file_size: 0,
             },
             target_level: Level {
                 level_idx: target_level as u32,
                 level_type: levels[target_level].level_type,
+                total_file_size: target_input_ssts.iter().map(|table| table.file_size).sum(),
                 table_infos: target_input_ssts,
-                total_file_size: 0,
             },
             split_ranges: vec![],
         })

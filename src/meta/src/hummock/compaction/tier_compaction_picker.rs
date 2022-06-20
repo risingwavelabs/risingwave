@@ -199,15 +199,20 @@ impl CompactionPicker for LevelCompactionPicker {
             select_level: Level {
                 level_idx: select_level as u32,
                 level_type: LevelType::Overlapping as i32,
+                total_file_size: select_level_inputs
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum(),
                 table_infos: select_level_inputs,
-                // no use
-                total_file_size: 0,
             },
             target_level: Level {
                 level_idx: target_level as u32,
                 level_type: LevelType::Nonoverlapping as i32,
+                total_file_size: target_level_inputs
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum(),
                 table_infos: target_level_inputs,
-                total_file_size: 0,
             },
             split_ranges: splits,
         })

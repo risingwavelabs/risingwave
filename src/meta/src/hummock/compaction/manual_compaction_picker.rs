@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
@@ -114,9 +113,7 @@ impl CompactionPicker for ManualCompactionPicker {
 
         let target_input_ssts = self
             .overlap_strategy
-            .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos)
-            .into_iter()
-            .collect_vec();
+            .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos);
 
         if target_input_ssts
             .iter()
@@ -134,14 +131,14 @@ impl CompactionPicker for ManualCompactionPicker {
             select_level: Level {
                 level_idx: level as u32,
                 level_type: levels[level].level_type,
+                total_file_size: select_input_ssts.iter().map(|table| table.file_size).sum(),
                 table_infos: select_input_ssts,
-                total_file_size: 0,
             },
             target_level: Level {
                 level_idx: target_level as u32,
                 level_type: levels[target_level].level_type,
+                total_file_size: target_input_ssts.iter().map(|table| table.file_size).sum(),
                 table_infos: target_input_ssts,
-                total_file_size: 0,
             },
             split_ranges: vec![],
         })

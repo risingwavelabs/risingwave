@@ -264,12 +264,12 @@ impl LevelSelector for DynamicLevelSelector {
             option.level + 1
         };
 
-        let picker = Box::new(ManualCompactionPicker::new(
+        let picker = ManualCompactionPicker::new(
             task_id,
             self.overlap_strategy.clone(),
             option,
             target_level,
-        ));
+        );
 
         picker.pick_compaction(levels, level_handlers)
     }
