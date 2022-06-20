@@ -267,6 +267,7 @@ where
         {
             option.internal_table_id = HashSet::from_iter(table_frgament.internal_table_ids());
         }
+        option.internal_table_id.insert(request.table_id); // need to handle outter table_id (mv)
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",
