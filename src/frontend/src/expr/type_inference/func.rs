@@ -41,12 +41,6 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
     {
         return Ok((inputs, DataType::Boolean));
     }
-    if matches!(func_type, ExprType::IsNull | ExprType::IsNotNull)
-        && inputs.len() == 1
-        && inputs[0].is_null()
-    {
-        // return Ok((inputs, DataType::Boolean));
-    }
 
     let candidates = FUNC_SIG_MAP
         .0
@@ -106,6 +100,17 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         ))
         .into()),
     }
+}
+
+fn is_preferred(t: &DataType) -> bool {
+    matches!(
+        t,
+        DataType::Float64
+            | DataType::Boolean
+            | DataType::Varchar
+            | DataType::Timestampz
+            | DataType::Interval
+    )
 }
 
 fn rule_f<'a, 'b>(
@@ -180,14 +185,7 @@ fn rule_e<'a, 'b>(
                     continue;
                 }
                 let Some(t) = ets_iter.next() else {return false};
-                if matches!(
-                    t,
-                    DataType::Boolean
-                        | DataType::Float64
-                        | DataType::Varchar
-                        | DataType::Timestampz
-                        | DataType::Interval
-                ) {
+                if is_preferred(t) {
                     if p != *t {
                         return false;
                     }
@@ -235,14 +233,7 @@ fn exact_n_prefer<'a, 'b>(
                 // select xxx(null, null, 1::smallint);  -- 3
                 // ```
                 // If we count null positions, the first 2 wins because text is preferred.
-                if matches!(
-                    p,
-                    DataType::Float64
-                        | DataType::Boolean
-                        | DataType::Varchar
-                        | DataType::Timestampz
-                        | DataType::Interval
-                ) {
+                if is_preferred(p) {
                     n_preferred += 1;
                 }
             }
