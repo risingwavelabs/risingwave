@@ -13,12 +13,17 @@
 // limitations under the License.
 
 use std::ops::Sub;
+use std::sync::Arc;
+use std::vec::IntoIter;
 
 use bytes::Bytes;
 use regex::Regex;
 
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_protocol::cstr_to_str;
+use crate::pg_response::{PgResponse, StatementType};
+use crate::pg_server::{BoxedError, Session, SessionManager};
+use crate::types::Row;
 
 /// Parse params according the type description.
 ///
@@ -125,6 +130,8 @@ impl PgStatement {
             return PgPortal {
                 name: portal_name,
                 query_string: self.query_string.clone(),
+                result_cache: None,
+                stmt_type: None,
             };
         }
 
@@ -152,19 +159,38 @@ impl PgStatement {
         PgPortal {
             name: portal_name,
             query_string: Bytes::from(instance_query_string),
+            result_cache: None,
+            stmt_type: None,
         }
     }
 }
 
-#[derive(Default)]
 pub struct PgPortal {
     name: String,
     query_string: Bytes,
+    result_cache: Option<IntoIter<Row>>,
+    stmt_type: Option<StatementType>,
+}
+
+impl Default for PgPortal {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            query_string: Default::default(),
+            result_cache: None,
+            stmt_type: None,
+        }
+    }
 }
 
 impl PgPortal {
     pub fn new(name: String, query_string: Bytes) -> Self {
-        PgPortal { name, query_string }
+        PgPortal {
+            name,
+            query_string,
+            result_cache: None,
+            stmt_type: None,
+        }
     }
 
     pub fn name(&self) -> String {
@@ -173,6 +199,55 @@ impl PgPortal {
 
     pub fn query_string(&self) -> Bytes {
         self.query_string.clone()
+    }
+
+    pub async fn execute<SM: SessionManager>(
+        &mut self,
+        session: Arc<SM::Session>,
+        row_limit: usize,
+    ) -> Result<PgResponse, BoxedError> {
+        if self.result_cache.is_none() {
+            let process_res = session
+                .run_statement(cstr_to_str(&self.query_string).unwrap())
+                .await;
+
+            // Return result directly if
+            // - it's not a query result.
+            // - query result needn't cache. (row_limit == 0).
+            if !(process_res.is_ok() && process_res.as_ref().unwrap().is_query()) || row_limit == 0
+            {
+                return process_res;
+            }
+
+            // Return result need to cache.
+            self.stmt_type = Some(process_res.as_ref().unwrap().get_stmt_type());
+            self.result_cache = Some(process_res.unwrap().values().into_iter());
+        }
+
+        // Consume row_limit row.
+        let mut data_set = vec![];
+        let mut row_end = false;
+        for _i in 0..row_limit {
+            let data = self.result_cache.as_mut().unwrap().next();
+            match data {
+                Some(d) => {
+                    data_set.push(d);
+                }
+                None => {
+                    row_end = true;
+                    self.result_cache = None;
+                    break;
+                }
+            }
+        }
+
+        Ok(PgResponse::new(
+            self.stmt_type.unwrap(),
+            data_set.len().try_into().unwrap(),
+            data_set,
+            vec![],
+            row_end,
+        ))
     }
 }
 
