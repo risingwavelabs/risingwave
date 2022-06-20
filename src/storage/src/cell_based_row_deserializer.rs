@@ -24,7 +24,38 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
-pub type ColumnDescMapping = HashMap<ColumnId, (ColumnDesc, usize)>;
+pub struct ColumnDescMapping {
+    pub table_column_descs: Vec<ColumnDesc>,
+
+    pub id_to_column_index: HashMap<ColumnId, usize>,
+}
+
+impl ColumnDescMapping {
+    pub fn new(table_column_descs: Vec<ColumnDesc>) -> Arc<Self> {
+        let id_to_column_index = table_column_descs
+            .iter()
+            .enumerate()
+            .map(|(index, d)| (d.column_id, index))
+            .collect();
+
+        Self {
+            table_column_descs,
+            id_to_column_index,
+        }
+        .into()
+    }
+
+    pub fn get(&self, id: ColumnId) -> Option<(&ColumnDesc, usize)> {
+        self.id_to_column_index
+            .get(&id)
+            .map(|&index| (&self.table_column_descs[index], index))
+    }
+
+    pub fn len(&self) -> usize {
+        self.table_column_descs.len()
+    }
+}
+
 pub type GeneralCellBasedRowDeserializer = CellBasedRowDeserializer<Arc<ColumnDescMapping>>;
 
 #[derive(Clone)]
@@ -43,15 +74,7 @@ pub struct CellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
 pub fn make_cell_based_row_deserializer(
     table_column_descs: Vec<ColumnDesc>,
 ) -> GeneralCellBasedRowDeserializer {
-    GeneralCellBasedRowDeserializer::new(Arc::new(make_column_desc_index(table_column_descs)))
-}
-
-pub fn make_column_desc_index(table_column_descs: Vec<ColumnDesc>) -> ColumnDescMapping {
-    table_column_descs
-        .into_iter()
-        .enumerate()
-        .map(|(index, d)| (d.column_id, (d, index)))
-        .collect()
+    GeneralCellBasedRowDeserializer::new(ColumnDescMapping::new(table_column_descs))
 }
 
 impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
@@ -94,9 +117,9 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
             result = None;
         }
         let mut cell = cell.as_ref();
-        if let Some((column_desc, index)) = self.columns.get(&cell_id) {
+        if let Some((column_desc, index)) = self.columns.get(cell_id) {
             if let Some(datum) = deserialize_cell(&mut cell, &column_desc.data_type)? {
-                let old = self.data.get_mut(*index).unwrap().replace(datum);
+                let old = self.data.get_mut(index).unwrap().replace(datum);
                 assert!(old.is_none());
             }
         } else {

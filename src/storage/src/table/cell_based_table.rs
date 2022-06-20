@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -33,9 +33,7 @@ use risingwave_hummock_sdk::key::{next_key, range_of_prefix};
 
 use super::mem_table::RowOp;
 use super::TableIter;
-use crate::cell_based_row_deserializer::{
-    make_column_desc_index, CellBasedRowDeserializer, ColumnDescMapping,
-};
+use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
@@ -52,9 +50,6 @@ pub struct CellBasedTable<S: StateStore> {
 
     /// The schema of this table viewed by some source executor, e.g. RowSeqScanExecutor.
     schema: Schema,
-
-    /// `ColumnDesc` contains strictly more info than `schema`.
-    column_descs: Vec<ColumnDesc>,
 
     /// Mapping from column id to column index
     pk_serializer: OrderedRowSerializer,
@@ -78,9 +73,7 @@ pub struct CellBasedTable<S: StateStore> {
 
 impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CellBasedTable")
-            .field("column_descs", &self.column_descs)
-            .finish()
+        f.debug_struct("CellBasedTable").finish_non_exhaustive()
     }
 }
 
@@ -109,8 +102,7 @@ impl<S: StateStore> CellBasedTable<S> {
         Self {
             keyspace,
             schema,
-            mapping: Arc::new(make_column_desc_index(column_descs.clone())),
-            column_descs,
+            mapping: ColumnDescMapping::new(column_descs),
             pk_serializer,
             cell_based_row_serializer: CellBasedRowSerializer::new(),
             column_ids,
@@ -564,7 +556,7 @@ struct DedupPkCellBasedIter<I> {
 impl<I> DedupPkCellBasedIter<I> {
     async fn new(
         inner: I,
-        table_descs: Arc<ColumnDescMapping>,
+        mapping: Arc<ColumnDescMapping>,
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<Self> {
         let (data_types, order_types) = pk_descs
@@ -578,18 +570,12 @@ impl<I> DedupPkCellBasedIter<I> {
             .unzip();
         let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
 
-        // TODO: pre-calculate this instead of calculate it every time when creating new iterator
-        let col_id_to_row_idx: HashMap<ColumnId, usize> = table_descs
-            .iter()
-            .map(|(column_id, (_, idx))| (*column_id, *idx))
-            .collect();
-
         let pk_to_row_mapping = pk_descs
             .iter()
             .map(|d| {
                 let column_desc = &d.column_desc;
                 if column_desc.data_type.mem_cmp_eq_value_enc() {
-                    col_id_to_row_idx.get(&column_desc.column_id).copied()
+                    mapping.get(column_desc.column_id).map(|(_, index)| index)
                 } else {
                     None
                 }
