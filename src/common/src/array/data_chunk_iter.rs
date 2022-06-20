@@ -219,6 +219,11 @@ impl Row {
         Self(values)
     }
 
+    pub fn empty<'a>() -> &'a Self {
+        static EMPTY_ROW: Row = Row(Vec::new());
+        &EMPTY_ROW
+    }
+
     /// Serialize the row into a memcomparable bytes.
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.

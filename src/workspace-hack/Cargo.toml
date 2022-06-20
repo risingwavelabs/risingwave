@@ -35,7 +35,7 @@ hashbrown = { version = "0.11", features = ["ahash", "inline-more", "nightly", "
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
-libc = { version = "0.2", features = ["std"] }
+libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
@@ -91,7 +91,7 @@ hashbrown = { version = "0.11", features = ["ahash", "inline-more", "nightly", "
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
-libc = { version = "0.2", features = ["std"] }
+libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }

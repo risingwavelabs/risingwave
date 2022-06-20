@@ -3,6 +3,7 @@ syntax = "proto3";
 package data;
 
 import "common.proto";
+import "source.proto";
 
 option optimize_for = SPEED;
 
@@ -156,17 +157,11 @@ message UpdateMutation {
 
 message AddMutation {
   repeated DispatcherMutation mutations = 1;
-  repeated SourceChangeSplit splits = 2;
+  map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
 message SourceChangeSplitMutation {
-  repeated SourceChangeSplit mutations = 1;
-}
-
-message SourceChangeSplit {
-  uint32 actor_id = 1;
-  string split_type = 2;
-  repeated bytes source_splits = 3;
+  map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
 message Epoch {

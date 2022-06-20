@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
@@ -21,6 +22,7 @@ use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 
 use super::*;
 use crate::executor::hash_join::*;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::PkIndices;
 
 pub struct HashJoinExecutorBuilder;
@@ -116,6 +118,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             keyspace_l: Keyspace::table_root(store.clone(), &left_table_id),
             keyspace_r: Keyspace::table_root(store, &right_table_id),
             is_append_only,
+            actor_id: params.actor_id as u64,
+            metrics: params.executor_stats,
         };
 
         for_all_join_types! { impl_create_hash_join_executor };
@@ -138,6 +142,8 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     keyspace_l: Keyspace<S>,
     keyspace_r: Keyspace<S>,
     is_append_only: bool,
+    actor_id: u64,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
@@ -153,12 +159,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.params_l,
             args.params_r,
             args.pk_indices,
+            args.actor_id,
             args.executor_id,
             args.cond,
             args.op_info,
             args.keyspace_l,
             args.keyspace_r,
             args.is_append_only,
+            args.metrics,
         )))
     }
 }

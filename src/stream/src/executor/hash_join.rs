@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -27,6 +29,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
 use super::managed_state::join::*;
+use super::monitor::StreamingMetrics;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
 use crate::executor::PROCESSING_WINDOW_SIZE;
@@ -189,6 +192,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
 
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
+
+    actor_id: u64,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -357,12 +363,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         params_l: JoinParams,
         params_r: JoinParams,
         pk_indices: PkIndices,
+        actor_id: u64,
         executor_id: u64,
         cond: Option<RowExpression>,
         op_info: String,
         ks_l: Keyspace<S>,
         ks_r: Keyspace<S>,
         is_append_only: bool,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -430,6 +438,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     col_l_datatypes.clone(),
                     ks_l,
                     Some(params_l.dist_keys.clone()),
+                    metrics.clone(),
+                    actor_id,
+                    "left",
                 ), // TODO: decide the target cap
                 key_indices: params_l.key_indices,
                 col_types: col_l_datatypes,
@@ -444,6 +455,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     col_r_datatypes.clone(),
                     ks_r,
                     Some(params_r.dist_keys.clone()),
+                    metrics.clone(),
+                    actor_id,
+                    "right",
                 ), // TODO: decide the target cap
                 key_indices: params_r.key_indices,
                 col_types: col_r_datatypes,
@@ -456,6 +470,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             op_info,
             epoch: 0,
             append_only_optimize,
+            actor_id,
+            metrics,
         }
     }
 
@@ -463,7 +479,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     async fn into_stream(mut self) {
         let input_l = self.input_l.take().unwrap();
         let input_r = self.input_r.take().unwrap();
-        let aligned_stream = barrier_align(input_l.execute(), input_r.execute());
+        let aligned_stream = barrier_align(
+            input_l.execute(),
+            input_r.execute(),
+            self.actor_id,
+            self.metrics.clone(),
+        );
         #[for_await]
         for msg in aligned_stream {
             match msg? {
@@ -731,7 +752,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::{HashJoinExecutor, JoinParams, JoinType, *};
+    use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{Barrier, Epoch, Message};
 
@@ -779,11 +800,13 @@ mod tests {
             params_r,
             vec![1],
             1,
+            1,
             cond,
             "HashJoinExecutor".to_string(),
             ks_l,
             ks_r,
             false,
+            Arc::new(StreamingMetrics::unused()),
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }
@@ -813,11 +836,13 @@ mod tests {
             params_r,
             vec![1],
             1,
+            1,
             cond,
             "HashJoinExecutor".to_string(),
             ks_l,
             ks_r,
             true,
+            Arc::new(StreamingMetrics::unused()),
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }

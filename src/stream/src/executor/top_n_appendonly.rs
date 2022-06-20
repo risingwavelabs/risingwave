@@ -146,7 +146,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
                 lower_sub_keyspace,
                 row_data_types.clone(),
                 ordered_row_deserializer.clone(),
-                pk_indices.clone(),
+                internal_key_indices.clone(),
             ),
             managed_higher_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
@@ -154,7 +154,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
                 higher_sub_keyspace,
                 row_data_types,
                 ordered_row_deserializer,
-                pk_indices.clone(),
+                internal_key_indices.clone(),
             ),
             pk_indices,
             internal_key_indices,
