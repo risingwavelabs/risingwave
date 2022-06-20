@@ -11,7 +11,7 @@ bytes = "1"
 madsim = "=0.2.0-alpha.3"
 regex = "1.5"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "macros"] }
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "macros", "net"] }
 tracing = { version = "0.1" }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
