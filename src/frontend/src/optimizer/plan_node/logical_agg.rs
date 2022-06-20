@@ -714,9 +714,9 @@ impl ToStream for LogicalAgg {
                     _ => continue,
                 }
             }
-            let is_append_only = input.append_only();
 
             let input_stream = input.to_stream()?;
+            let is_append_only = input_stream.append_only();
             let input_distribution = input_stream.distribution();
 
             // simple 2-phase-agg
