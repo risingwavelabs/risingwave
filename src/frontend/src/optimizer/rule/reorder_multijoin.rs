@@ -45,7 +45,6 @@ mod tests {
 
     use super::*;
     use crate::expr::{ExprImpl, FunctionCall, InputRef};
-    
     use crate::session::OptimizerContext;
     use crate::utils::Condition;
 

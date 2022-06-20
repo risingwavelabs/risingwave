@@ -58,6 +58,7 @@ impl fmt::Display for LogicalMultiJoin {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct LogicalMultiJoinBuilder {
     output_indices: Vec<usize>,
     /// the predicates in the on condition, we do not use Condition here to emit unnecessary
@@ -113,6 +114,10 @@ impl LogicalMultiJoinBuilder {
                 .into_iter()
                 .map(|expr| mapping.rewrite_expr(expr)),
         );
+        builder
+            .conjunctions
+            .extend(join.on().conjunctions.iter().cloned());
+
         builder
             .output_indices
             .extend(r_output_indices.into_iter().map(|idx| mapping.map(idx)));
