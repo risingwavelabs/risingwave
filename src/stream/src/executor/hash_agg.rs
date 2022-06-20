@@ -30,6 +30,7 @@ use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
+use tokio::sync::RwLock;
 
 use super::{
     expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
@@ -86,7 +87,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
 
-    state_tables: Vec<StateTable<S>>,
+    state_tables: Arc<RwLock<Vec<StateTable<S>>>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -125,7 +126,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 ks.clone(),
                 agg_call,
                 &key_indices,
-                &pk_indices,
+                &input_info.pk_indices,
                 &schema,
                 input.as_ref(),
             ));
@@ -142,7 +143,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 keyspace,
                 agg_calls,
                 key_indices,
-                state_tables,
+                state_tables: Arc::new(RwLock::new(state_tables)),
             },
             _phantom: PhantomData,
         })
@@ -200,16 +201,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn apply_chunk(
-        &HashAggExecutorExtra::<S> {
+        &mut HashAggExecutorExtra::<S> {
             ref key_indices,
             ref agg_calls,
             ref input_pk_indices,
             ref input_schema,
             ref keyspace,
             ref schema,
-            ref state_tables,
+            ref mut state_tables,
             ..
-        }: &HashAggExecutorExtra<S>,
+        }: &mut HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         chunk: StreamChunk,
         epoch: u64,
@@ -279,7 +280,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 input_pk_data_types.clone(),
                                 epoch,
                                 Some(hash_code),
-                                state_tables,
+                                &*state_tables.read().await,
                             )
                             .await?,
                         ),
@@ -287,15 +288,21 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 };
 
                 // 2. Mark the state as dirty by filling prev states
-                states.may_mark_as_dirty(epoch).await?;
+                states
+                    .may_mark_as_dirty(epoch, &*state_tables.read().await)
+                    .await?;
 
+                let mut state_tables = state_tables.write().await;
                 // 3. Apply batch to each of the state (per agg_call)
-                for (agg_state, data) in
-                    states.managed_states.iter_mut().zip_eq(all_agg_data.iter())
+                for ((agg_state, data), state_table) in states
+                    .managed_states
+                    .iter_mut()
+                    .zip_eq(all_agg_data.iter())
+                    .zip_eq(state_tables.iter_mut())
                 {
                     let data = data.iter().map(|d| &**d).collect_vec();
                     agg_state
-                        .apply_batch(&ops, Some(&vis_map), &data, epoch)
+                        .apply_batch(&ops, Some(&vis_map), &data, epoch, state_table)
                         .await?;
                 }
 
@@ -329,10 +336,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been
         // fully flushed.
-        let (write_batch, dirty_cnt) = {
+        let dirty_cnt = {
             let mut write_batch = store.start_write_batch();
             let mut dirty_cnt = 0;
-
+            let mut state_tables = state_tables.write().await;
             for states in state_map.values_mut() {
                 if states.as_ref().unwrap().is_dirty() {
                     dirty_cnt += 1;
@@ -348,21 +355,19 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
             }
 
-            // Batch commit state table.
-            for state_table in state_tables.iter_mut() {
-                state_table.commit(epoch).await?;
-            }
-
-            (write_batch, dirty_cnt)
+            dirty_cnt
         };
 
         if dirty_cnt == 0 {
             // Nothing to flush.
-            assert!(write_batch.is_empty());
             return Ok(());
         } else {
-            write_batch.ingest(epoch).await?;
+            // Batch commit data.
+            for state_table in state_tables.write().await.iter_mut() {
+                state_table.commit(epoch).await?;
+            }
 
+            let state_tables = state_tables.read().await;
             // --- Produce the stream chunk ---
             let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
             while let Some(batch) = batches.next() {
@@ -379,7 +384,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     let appended = states
                         .as_mut()
                         .unwrap()
-                        .build_changes(&mut builders[key_indices.len()..], &mut new_ops, epoch)
+                        .build_changes(
+                            &mut builders[key_indices.len()..],
+                            &mut new_ops,
+                            epoch,
+                            &state_tables,
+                        )
                         .await?;
 
                     for _ in 0..appended {
@@ -431,7 +441,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&extra, &mut state_map, chunk, epoch).await?;
+                    Self::apply_chunk(&mut extra, &mut state_map, chunk, epoch).await?;
                 }
                 Message::Barrier(barrier) => {
                     let next_epoch = barrier.epoch.curr;

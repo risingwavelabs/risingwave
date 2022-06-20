@@ -59,6 +59,11 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
         );
+        let output_indices = node
+            .get_output_indices()
+            .iter()
+            .map(|&x| x as usize)
+            .collect_vec();
 
         let condition = match node.get_condition() {
             Ok(cond_prost) => Some(RowExpression::new(build_from_prost(cond_prost)?)),
@@ -103,8 +108,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
 
-        let left_table_id = TableId::from(node.left_table_id);
-        let right_table_id = TableId::from(node.right_table_id);
+        let left_table_id = TableId::from(node.left_table.as_ref().unwrap().id);
+        let right_table_id = TableId::from(node.right_table.as_ref().unwrap().id);
 
         let args = HashJoinExecutorDispatcherArgs {
             source_l,
@@ -112,6 +117,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             params_l,
             params_r,
             pk_indices: params.pk_indices,
+            output_indices,
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
@@ -136,6 +142,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     params_l: JoinParams,
     params_r: JoinParams,
     pk_indices: PkIndices,
+    output_indices: Vec<usize>,
     executor_id: u64,
     cond: Option<RowExpression>,
     op_info: String,
@@ -159,6 +166,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.params_l,
             args.params_r,
             args.pk_indices,
+            args.output_indices,
             args.actor_id,
             args.executor_id,
             args.cond,

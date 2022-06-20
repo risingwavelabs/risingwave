@@ -297,6 +297,25 @@ set -ex
 RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
 '''
 
+[tasks.ctl]
+category = "RiseDev - Start"
+description = "Start RiseCtl"
+script = '''
+#!@shell
+
+RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
+  exit 1
+fi
+
+source "${RC_ENV_FILE}"
+
+cargo run --bin risectl --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
+test $? -eq 0 || exit 1
+'''
+
 [tasks.d]
 alias = "dev"
 

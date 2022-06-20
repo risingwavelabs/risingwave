@@ -54,9 +54,20 @@ impl fmt::Display for BatchNestedLoopJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "BatchNestedLoopJoin {{ type: {:?}, predicate: {} }}",
+            "BatchNestedLoopJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
             self.logical.join_type(),
-            self.logical.on()
+            self.logical.on(),
+            if self
+                .logical
+                .output_indices()
+                .iter()
+                .copied()
+                .eq(0..self.logical.internal_column_num())
+            {
+                "all".to_string()
+            } else {
+                format!("{:?}", self.logical.output_indices())
+            }
         )
     }
 }
@@ -95,6 +106,12 @@ impl ToBatchProst for BatchNestedLoopJoin {
         NodeBody::NestedLoopJoin(NestedLoopJoinNode {
             join_type: self.logical.join_type() as i32,
             join_cond: Some(ExprImpl::from(self.logical.on().clone()).to_expr_proto()),
+            output_indices: self
+                .logical
+                .output_indices()
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
         })
     }
 }

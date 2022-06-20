@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use futures::{FutureExt, StreamExt};
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch};
+use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::{mpsc, oneshot};
@@ -34,7 +34,7 @@ use crate::monitor::StateStoreMetrics;
 
 pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
 pub(crate) type UploadTaskResult =
-    BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<SstableInfo>>>;
+    BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<LocalSstableInfo>>>;
 
 #[derive(Debug)]
 pub struct UploadTask {
@@ -146,12 +146,10 @@ impl SharedBufferUploader {
                     "failed due to previous failure",
                 ))
             } else {
-                self.flush(epoch, is_local, &payload)
-                    .await
-                    .inspect_err(|e| {
-                        error!("Failed to flush shared buffer: {:?}", e);
-                        failed = true;
-                    })
+                self.flush(epoch, is_local, payload).await.inspect_err(|e| {
+                    error!("Failed to flush shared buffer: {:?}", e);
+                    failed = true;
+                })
             };
             assert!(
                 task_results.insert((epoch, order_index), result).is_none(),
@@ -170,8 +168,8 @@ impl SharedBufferUploader {
         &self,
         _epoch: HummockEpoch,
         is_local: bool,
-        payload: &UploadTaskPayload,
-    ) -> HummockResult<Vec<SstableInfo>> {
+        payload: UploadTaskPayload,
+    ) -> HummockResult<Vec<LocalSstableInfo>> {
         if payload.is_empty() {
             return Ok(vec![]);
         }
@@ -198,20 +196,29 @@ impl SharedBufferUploader {
             compaction_executor: self.compaction_executor.as_ref().cloned(),
         };
 
-        let tables = Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), payload).await?;
+        let tables = Compactor::compact_shared_buffer_by_compaction_group(
+            Arc::new(mem_compactor_ctx),
+            payload,
+        )
+        .await?;
 
-        let uploaded_sst_info: Vec<SstableInfo> = tables
+        let uploaded_sst_info = tables
             .into_iter()
-            .map(|(sst, _, vnode_bitmaps)| SstableInfo {
-                id: sst.id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: sst.meta.smallest_key.clone(),
-                    right: sst.meta.largest_key.clone(),
-                    inf: false,
-                }),
-                file_size: sst.meta.estimated_size as u64,
-                vnode_bitmaps,
-                unit_id: u64::MAX,
+            .map(|(compaction_group_id, sst, unit_id, table_ids)| {
+                (
+                    compaction_group_id,
+                    SstableInfo {
+                        id: sst.id,
+                        key_range: Some(risingwave_pb::hummock::KeyRange {
+                            left: sst.meta.smallest_key.clone(),
+                            right: sst.meta.largest_key.clone(),
+                            inf: false,
+                        }),
+                        file_size: sst.meta.estimated_size as u64,
+                        table_ids,
+                        unit_id,
+                    },
+                )
             })
             .collect();
 
