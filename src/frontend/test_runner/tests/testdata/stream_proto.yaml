@@ -722,7 +722,7 @@
                   pk:
                     - 0
                   owner: root
-              columnIndex2columnId:
+              columnMapping:
                 0: 0
         pkIndices:
           - 1

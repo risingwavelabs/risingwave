@@ -267,5 +267,6 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
         is_index_on: None,
         appendonly: input.append_only(),
         owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+        vnode_mapping: None,
     }
 }

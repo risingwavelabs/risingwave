@@ -201,7 +201,7 @@ fn make_stream_node() -> StreamNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
-            column_index2column_id: HashMap::new(),
+            column_mapping: HashMap::new(),
             is_append_only: false,
         })),
         input: vec![filter_node],
@@ -234,7 +234,7 @@ fn make_stream_node() -> StreamNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
-            column_index2column_id: HashMap::new(),
+            column_mapping: HashMap::new(),
             is_append_only: false,
         })),
         fields: vec![], // TODO: fill this later

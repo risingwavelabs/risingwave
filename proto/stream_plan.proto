@@ -58,7 +58,7 @@ message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   repeated uint32 distribution_keys = 2;
   repeated catalog.Table internal_tables = 3;
-  map<uint32, int32> column_index2column_id = 4;
+  map<uint32, int32> column_mapping = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
@@ -68,7 +68,7 @@ message HashAggNode {
   repeated uint32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated catalog.Table internal_tables = 3;
-  map<uint32, int32> column_index2column_id = 4;
+  map<uint32, int32> column_mapping = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
