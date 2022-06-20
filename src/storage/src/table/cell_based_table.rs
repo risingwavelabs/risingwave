@@ -22,9 +22,10 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use log::trace;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema};
 use risingwave_common::error::RwError;
-use risingwave_common::types::Datum;
+use risingwave_common::types::{Datum, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -66,9 +67,13 @@ pub struct CellBasedTable<S: StateStore> {
 
     column_ids: Vec<ColumnId>,
 
+    pk_indices: Vec<usize>,
+
     /// Indices of distribution keys in full row for computing value meta. None if value meta is
     /// not required.
     dist_key_indices: Option<Vec<usize>>,
+
+    vnodes: Bitmap,
 }
 
 impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
@@ -88,11 +93,18 @@ impl<S: StateStore> CellBasedTable<S> {
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         let column_ids = column_descs.iter().map(|d| d.column_id).collect();
         let pk_serializer = OrderedRowSerializer::new(order_types);
+
+        let default_vnodes = {
+            let mut b = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
+            b.set(0, true);
+            b.finish()
+        };
 
         Self {
             keyspace,
@@ -102,7 +114,9 @@ impl<S: StateStore> CellBasedTable<S> {
             pk_serializer,
             cell_based_row_serializer: CellBasedRowSerializer::new(),
             column_ids,
+            pk_indices,
             dist_key_indices,
+            vnodes: default_vnodes,
         }
     }
 
@@ -110,8 +124,9 @@ impl<S: StateStore> CellBasedTable<S> {
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
     ) -> Self {
-        Self::new(keyspace, column_descs, order_types, None)
+        Self::new(keyspace, column_descs, order_types, pk_indices, None)
     }
 
     pub fn schema(&self) -> &Schema {
@@ -120,6 +135,10 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub(super) fn pk_serializer(&self) -> &OrderedRowSerializer {
         &self.pk_serializer
+    }
+
+    pub(super) fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
     }
 }
 

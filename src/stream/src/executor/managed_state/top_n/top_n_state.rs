@@ -213,7 +213,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 Some(next_res) => {
                     let row = next_res.unwrap().into_owned();
                     let mut datums = vec![];
-                    for pk_indice in self.state_table.get_pk_indices() {
+                    for pk_indice in self.state_table.pk_indices() {
                         datums.push(row.index(*pk_indice).clone());
                     }
                     let pk = Row::new(datums);
@@ -260,7 +260,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
             let mut datums = vec![];
-            for pk_indice in self.state_table.get_pk_indices() {
+            for pk_indice in self.state_table.pk_indices() {
                 datums.push(row.index(*pk_indice).clone());
             }
             let pk = Row::new(datums);

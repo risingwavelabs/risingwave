@@ -150,13 +150,31 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let pk_descs: Vec<OrderedColumnDesc> = pk_descs_proto.iter().map(|d| d.into()).collect();
         let order_types: Vec<OrderType> = pk_descs.iter().map(|desc| desc.order).collect();
 
+        let pk_indices = pk_descs
+            .iter()
+            .map(|desc| desc.column_desc.column_id)
+            .map(|pk_id| {
+                column_descs
+                    .iter()
+                    .find_position(|desc| desc.column_id == pk_id)
+                    .unwrap()
+                    .0
+            })
+            .collect_vec();
+
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
         let (pk_prefix_value, next_col_bounds) = get_scan_bound(scan_range.clone());
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
             let batch_stats = source.context().stats();
-            let table = CellBasedTable::new(keyspace.clone(), column_descs, order_types, None);
+            let table = CellBasedTable::new(
+                keyspace.clone(),
+                column_descs,
+                order_types,
+                pk_indices,
+                None,
+            );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
                 let iter = table.batch_dedup_pk_iter(source.epoch, &pk_descs).await?;

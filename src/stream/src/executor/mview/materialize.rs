@@ -229,7 +229,8 @@ mod tests {
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
-        let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+        let table =
+            CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types, vec![0]);
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
             keyspace,

@@ -29,6 +29,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
+        let pk_indices = node.pk_indices.iter().map(|&i| i as usize).collect();
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
         let table_id = node.table_desc.as_ref().unwrap().table_id.into();
 
@@ -45,7 +46,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new(keyspace, column_descs, order_types, None);
+        let table = CellBasedTable::new(keyspace, column_descs, order_types, pk_indices, None);
         let key_indices = node
             .get_distribution_keys()
             .iter()
