@@ -16,7 +16,6 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{Index, RangeBounds};
-use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -26,26 +25,19 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::{CellBasedTable, CellBasedTableStreamingIter};
+use super::cell_based_table::CellBasedTable;
 use super::mem_table::{MemTable, RowOp};
-use crate::cell_based_row_deserializer::{make_column_desc_index, ColumnDescMapping};
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
-    keyspace: Keyspace<S>,
-    column_mapping: Arc<ColumnDescMapping>,
-
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
     cell_based_table: CellBasedTable<S>,
-
-    /// Serializer for pk
-    pk_serializer: OrderedRowSerializer,
 
     pk_indices: Vec<usize>,
 }
@@ -58,23 +50,20 @@ impl<S: StateStore> StateTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let cell_based_keyspace = keyspace.clone();
-        let cell_based_column_descs = column_descs.clone();
-        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
-
         Self {
-            keyspace,
-            column_mapping: Arc::new(make_column_desc_index(column_descs)),
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
-                cell_based_keyspace,
-                cell_based_column_descs,
-                Some(OrderedRowSerializer::new(order_types)),
+                keyspace,
+                column_descs,
+                order_types,
                 dist_key_indices,
             ),
-            pk_serializer,
             pk_indices,
         }
+    }
+
+    fn pk_serializer(&self) -> &OrderedRowSerializer {
+        self.cell_based_table.pk_serializer()
     }
 
     // TODO: remove, should not be exposed to user
@@ -82,18 +71,16 @@ impl<S: StateStore> StateTable<S> {
         &self.pk_indices
     }
 
-    // TODO: remove, should not be exposed to user
-    pub fn get_mem_table(&self) -> &MemTable {
-        &self.mem_table
+    pub fn is_dirty(&self) -> bool {
+        self.mem_table.is_dirty()
     }
 
     /// Get a single row from state table. This function will return a Cow. If the value is from
     /// memtable, it will be a [`Cow::Borrowed`]. If is from cell based table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
-    pub async fn get_row_ref(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Cow<Row>>> {
-        // TODO: change to Cow to avoid unnecessary clone.
-        let pk_bytes = serialize_pk(pk, &self.pk_serializer);
-        let mem_table_res = self.mem_table.get_row(&pk_bytes)?;
+    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Cow<Row>>> {
+        let pk_bytes = serialize_pk(pk, self.pk_serializer());
+        let mem_table_res = self.mem_table.get_row_op(&pk_bytes);
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row) => Ok(Some(Cow::Borrowed(row))),
@@ -108,8 +95,8 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        Ok(self.get_row_ref(pk, epoch).await?.map(|r| r.into_owned()))
+    pub async fn get_owned_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+        Ok(self.get_row(pk, epoch).await?.map(|r| r.into_owned()))
     }
 
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
@@ -120,8 +107,8 @@ impl<S: StateStore> StateTable<S> {
             datums.push(value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, &self.pk_serializer);
-        self.mem_table.insert(pk_bytes, value)?;
+        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
+        self.mem_table.insert(pk_bytes, value);
         Ok(())
     }
 
@@ -133,13 +120,18 @@ impl<S: StateStore> StateTable<S> {
             datums.push(old_value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, &self.pk_serializer);
-        self.mem_table.delete(pk_bytes, old_value)?;
+        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
+        self.mem_table.delete(pk_bytes, old_value);
         Ok(())
     }
 
-    pub fn update(&mut self, _pk: Row, _old_value: Row, _new_value: Row) -> StorageResult<()> {
-        todo!()
+    /// Update a row. The old and new value should have the same pk.
+    pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
+        let pk = old_value.by_indices(&self.pk_indices);
+        debug_assert_eq!(pk, new_value.by_indices(&self.pk_indices));
+        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
+        self.mem_table.update(pk_bytes, old_value, new_value);
+        Ok(())
     }
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
@@ -161,30 +153,25 @@ impl<S: StateStore> StateTable<S> {
 
 /// Iterator functions.
 impl<S: StateStore> StateTable<S> {
-    async fn iter_with_encoded_key_bounds<R>(
-        &self,
-        encoded_key_bounds: R,
+    async fn iter_with_encoded_key_range<'a, R>(
+        &'a self,
+        encoded_key_range: R,
         epoch: u64,
-    ) -> StorageResult<impl RowStream<'_>>
+    ) -> StorageResult<RowStream<'a, S>>
     where
-        R: RangeBounds<Vec<u8>> + Send + Clone + 'static,
+        R: RangeBounds<Vec<u8>> + Send + Clone + 'a,
     {
-        let cell_based_table_iter = CellBasedTableStreamingIter::new_with_bounds(
-            &self.keyspace,
-            self.column_mapping.clone(),
-            encoded_key_bounds.clone(),
-            epoch,
-        )
-        .await?
-        .into_stream();
-
-        let mem_table_iter = self.mem_table.buffer.range(encoded_key_bounds);
+        let cell_based_table_iter = self
+            .cell_based_table
+            .streaming_iter_with_encoded_key_range(encoded_key_range.clone(), epoch)
+            .await?;
+        let mem_table_iter = self.mem_table.iter(encoded_key_range);
 
         Ok(StateTableRowIter::new(mem_table_iter, cell_based_table_iter).into_stream())
     }
 
     /// This function scans rows from the relational table.
-    pub async fn iter(&self, epoch: u64) -> StorageResult<impl RowStream<'_>> {
+    pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
         self.iter_with_pk_bounds::<_, Row>(.., epoch).await
     }
 
@@ -193,22 +180,20 @@ impl<S: StateStore> StateTable<S> {
         &self,
         pk_bounds: R,
         epoch: u64,
-    ) -> StorageResult<impl RowStream<'_>>
+    ) -> StorageResult<RowStream<'_, S>>
     where
         R: RangeBounds<B> + Send + Clone + 'static,
         B: AsRef<Row> + Send + Clone + 'static,
     {
-        let pk_serializer = &self.pk_serializer;
-
         let encoded_start_key = pk_bounds
             .start_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), pk_serializer));
+            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
         let encoded_end_key = pk_bounds
             .end_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), pk_serializer));
-        let encoded_key_bounds = (encoded_start_key, encoded_end_key);
+            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
+        let encoded_key_range = (encoded_start_key, encoded_end_key);
 
-        self.iter_with_encoded_key_bounds(encoded_key_bounds, epoch)
+        self.iter_with_encoded_key_range(encoded_key_range, epoch)
             .await
     }
 
@@ -216,18 +201,18 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_with_pk_prefix(
         &self,
         pk_prefix: &Row,
-        prefix_serializer: OrderedRowSerializer,
         epoch: u64,
-    ) -> StorageResult<impl RowStream<'_>> {
-        let encoded_start_key = serialize_pk(pk_prefix, &prefix_serializer);
-        let encoded_key_bounds = range_of_prefix(&encoded_start_key);
+    ) -> StorageResult<RowStream<'_, S>> {
+        let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
+        let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
+        let encoded_key_range = range_of_prefix(&encoded_prefix);
 
-        self.iter_with_encoded_key_bounds(encoded_key_bounds, epoch)
+        self.iter_with_encoded_key_range(encoded_key_range, epoch)
             .await
     }
 }
 
-pub trait RowStream<'a> = Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
 
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,

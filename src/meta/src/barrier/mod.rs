@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -324,9 +324,15 @@ where
                     // We must ensure all epochs are committed in ascending order, because
                     // the storage engine will query from new to old in the order in which
                     // the L0 layer files are generated. see https://github.com/singularity-data/risingwave/issues/1251
-                    let synced_ssts = resps
+                    let synced_ssts: Vec<LocalSstableInfo> = resps
                         .iter()
                         .flat_map(|resp| resp.sycned_sstables.clone())
+                        .map(|grouped| {
+                            (
+                                grouped.compaction_group_id,
+                                grouped.sst.expect("field not None"),
+                            )
+                        })
                         .collect_vec();
                     self.hummock_manager
                         .commit_epoch(command_context.prev_epoch.0, synced_ssts)
@@ -371,7 +377,7 @@ where
                         curr: command_context.curr_epoch.0,
                         prev: command_context.prev_epoch.0,
                     }),
-                    mutation: Some(mutation),
+                    mutation,
                     // TODO(chi): add distributed tracing
                     span: vec![],
                 };

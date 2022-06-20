@@ -54,7 +54,7 @@ impl ManagedValueState {
             // View the state table as single-value table, and get the value via empty primary key
             // or group key.
             let raw_data = state_table
-                .get_row(pk.unwrap_or(&Row(vec![])), epoch)
+                .get_row(pk.unwrap_or_else(Row::empty), epoch)
                 .await?;
 
             // According to row layout, the last field of the row is value and we sure the row is
@@ -92,7 +92,7 @@ impl ManagedValueState {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    pub async fn get_output(&mut self) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(&self) -> StreamExecutorResult<Datum> {
         debug_assert!(!self.is_dirty());
         self.state.get_output()
     }
@@ -116,7 +116,7 @@ impl ManagedValueState {
         // front of value). In this case, the pk is just group key.
 
         let mut v = vec![];
-        v.extend_from_slice(&self.pk.as_ref().unwrap_or(&Row(vec![])).0);
+        v.extend_from_slice(&self.pk.as_ref().unwrap_or_else(Row::empty).0);
         v.push(self.state.get_output()?);
 
         state_table.insert(Row::new(v))?;
@@ -191,7 +191,7 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state =
+        let managed_state =
             ManagedValueState::new(create_test_count_state(), None, None, &state_table)
                 .await
                 .unwrap();
@@ -262,7 +262,7 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state =
+        let managed_state =
             ManagedValueState::new(create_test_max_agg_append_only(), None, None, &state_table)
                 .await
                 .unwrap();

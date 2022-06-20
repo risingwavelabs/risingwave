@@ -1,4 +1,0 @@
-query T
-values(extract(hour from timestamp '2001-02-16 20:38:40'));
-----
-20
