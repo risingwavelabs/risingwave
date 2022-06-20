@@ -193,7 +193,7 @@ impl<S: StateStore> CellBasedTable<S> {
         // stateful executors need to compute vnode.
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        let hash_builder = CRC32FastBuilder {};
+
         for (pk, row_op) in buffer {
             // If value meta is computed here, then the cell based table is guaranteed to have
             // distribution keys. Also, it is guaranteed that distribution key indices will
@@ -201,8 +201,7 @@ impl<S: StateStore> CellBasedTable<S> {
             match row_op {
                 RowOp::Insert(row) => {
                     let value_meta = if WITH_VALUE_META {
-                        let vnode = self.compute_vnode_by_row(&row);
-                        ValueMeta::with_vnode(vnode)
+                        ValueMeta::with_vnode(self.compute_vnode_by_row(&row))
                     } else {
                         ValueMeta::default()
                     };
@@ -217,11 +216,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 RowOp::Delete(old_row) => {
                     // TODO(wcy-fdu): only serialize key on deletion
                     let value_meta = if WITH_VALUE_META {
-                        let vnode = old_row
-                            .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
-                            .unwrap()
-                            .to_vnode();
-                        ValueMeta::with_vnode(vnode)
+                        ValueMeta::with_vnode(self.compute_vnode_by_row(&old_row))
                     } else {
                         ValueMeta::default()
                     };
@@ -235,11 +230,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 }
                 RowOp::Update((old_row, new_row)) => {
                     let value_meta = if WITH_VALUE_META {
-                        let vnode = new_row
-                            .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
-                            .unwrap()
-                            .to_vnode();
-                        ValueMeta::with_vnode(vnode)
+                        ValueMeta::with_vnode(self.compute_vnode_by_row(&new_row))
                     } else {
                         ValueMeta::default()
                     };
