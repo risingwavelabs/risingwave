@@ -33,6 +33,7 @@ pub enum BenchCommands {
         /// name of the materialized view to operate on
         mv_name: String,
         /// number of futures doing scan
+        #[clap(long, default_value_t = 1)]
         threads: usize,
     },
 }
@@ -46,20 +47,22 @@ pub struct InterestedMetrics {
     object_store_read: u64,
     object_store_write: u64,
     next_cnt: u64,
+    iter_cnt: u64,
     now: Instant,
 }
 
 impl InterestedMetrics {
     pub fn report(&self, metrics: &InterestedMetrics) {
-        let elapsed = self.now.elapsed().as_secs_f64();
+        let elapsed = self.now.duration_since(metrics.now).as_secs_f64();
         let read_rate = (self.object_store_read - metrics.object_store_read) as f64 / elapsed;
         let write_rate = (self.object_store_write - metrics.object_store_write) as f64 / elapsed;
         let next_rate = (self.next_cnt - metrics.next_cnt) as f64 / elapsed;
         println!(
-            "read_rate: {}/s\nwrite_rate:{}/s\nnext_rate:{}/s\n",
+            "read_rate: {}/s\nwrite_rate:{}/s\nnext_rate:{}/s\niter_rate:{}/s\n",
             Size::Bytes(read_rate),
             Size::Bytes(write_rate),
-            next_rate
+            next_rate,
+            iter_rate
         );
     }
 }
@@ -68,41 +71,48 @@ pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
     let hummock_opts = HummockServiceOpts::from_env()?;
     let (meta, hummock, metrics) = hummock_opts.create_hummock_store_with_metrics().await?;
     let next_cnt = Arc::new(AtomicU64::new(0));
+    let iter_cnt = Arc::new(AtomicU64::new(0));
     match cmd {
         BenchCommands::Scan { mv_name, threads } => {
             let table = get_table_catalog(meta.clone(), mv_name).await?;
             let mut handlers = vec![];
-            for _ in 0..threads {
+            for i in 0..threads {
                 let table = table.clone();
                 let next_cnt = next_cnt.clone();
                 let hummock = hummock.clone();
                 let handler = spawn_okk(async move {
+                    tracing::info!(thread = i, "starting scan");
                     let state_table = make_state_table(hummock, &table);
                     loop {
                         let stream = state_table.iter(u64::MAX).await?;
                         pin_mut!(stream);
+                        iter_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         while let Some(item) = stream.next().await {
                             next_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             item?;
                         }
+                        tokio::task::yield_now().await;
                     }
                 });
                 handlers.push(handler);
             }
             let handler = spawn_okk(async move {
+                tracing::info!("starting report metrics");
                 let mut last_collected_metrics = None;
                 loop {
                     let collected_metrics = InterestedMetrics {
                         object_store_read: metrics.object_store_metrics.read_bytes.get(),
                         object_store_write: metrics.object_store_metrics.write_bytes.get(),
                         next_cnt: next_cnt.load(std::sync::atomic::Ordering::Relaxed),
+                        iter_cnt: iter_cnt.load(std::sync::atomic::Ordering::Relaxed),
                         now: Instant::now(),
                     };
                     if let Some(ref last_collected_metrics) = last_collected_metrics {
                         collected_metrics.report(&last_collected_metrics);
                     }
                     last_collected_metrics = Some(collected_metrics);
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    tracing::info!("starting report metrics");
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
             });
             handlers.push(handler);

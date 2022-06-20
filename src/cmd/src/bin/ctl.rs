@@ -21,14 +21,15 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[cfg_attr(coverage, no_coverage)]
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::main]
 async fn main() -> Result<()> {
     use clap::StructOpt;
 
     let opts = risingwave_ctl::CliOpts::parse();
 
-    risingwave_logging::oneshot_common();
-    risingwave_logging::init_risingwave_logger(false, true);
+    // risingwave_logging::oneshot_common();
+    // risingwave_logging::init_risingwave_logger(false, true);
+    console_subscriber::init();
 
     risingwave_ctl::start(opts).await
 }
