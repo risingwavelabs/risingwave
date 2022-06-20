@@ -39,9 +39,6 @@ pub struct StateTable<S: StateStore> {
     /// Relation layer
     cell_based_table: CellBasedTable<S>,
 
-    /// Serializer for pk
-    pk_serializer: OrderedRowSerializer,
-
     pk_indices: Vec<usize>,
 }
 
@@ -53,8 +50,6 @@ impl<S: StateStore> StateTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
-
         Self {
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
@@ -63,9 +58,12 @@ impl<S: StateStore> StateTable<S> {
                 order_types,
                 dist_key_indices,
             ),
-            pk_serializer,
             pk_indices,
         }
+    }
+
+    fn pk_serializer(&self) -> &OrderedRowSerializer {
+        self.cell_based_table.pk_serializer()
     }
 
     // TODO: remove, should not be exposed to user
@@ -81,8 +79,7 @@ impl<S: StateStore> StateTable<S> {
     /// memtable, it will be a [`Cow::Borrowed`]. If is from cell based table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Cow<Row>>> {
-        // TODO: change to Cow to avoid unnecessary clone.
-        let pk_bytes = serialize_pk(pk, &self.pk_serializer);
+        let pk_bytes = serialize_pk(pk, self.pk_serializer());
         let mem_table_res = self.mem_table.get_row_op(&pk_bytes);
         match mem_table_res {
             Some(row_op) => match row_op {
@@ -110,7 +107,7 @@ impl<S: StateStore> StateTable<S> {
             datums.push(value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, &self.pk_serializer);
+        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.insert(pk_bytes, value);
         Ok(())
     }
@@ -123,7 +120,7 @@ impl<S: StateStore> StateTable<S> {
             datums.push(old_value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, &self.pk_serializer);
+        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.delete(pk_bytes, old_value);
         Ok(())
     }
@@ -132,7 +129,7 @@ impl<S: StateStore> StateTable<S> {
     pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
         let pk = old_value.by_indices(&self.pk_indices);
         debug_assert_eq!(pk, new_value.by_indices(&self.pk_indices));
-        let pk_bytes = serialize_pk(&pk, &self.pk_serializer);
+        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.update(pk_bytes, old_value, new_value);
         Ok(())
     }
@@ -190,10 +187,10 @@ impl<S: StateStore> StateTable<S> {
     {
         let encoded_start_key = pk_bounds
             .start_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), &self.pk_serializer));
+            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
         let encoded_end_key = pk_bounds
             .end_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), &self.pk_serializer));
+            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
         let encoded_key_range = (encoded_start_key, encoded_end_key);
 
         self.iter_with_encoded_key_range(encoded_key_range, epoch)
@@ -206,7 +203,7 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let order_types = &self.pk_serializer.clone().into_order_types()[0..pk_prefix.size()];
+        let order_types = &self.pk_serializer().clone().into_order_types()[0..pk_prefix.size()];
         let prefix_serializer = OrderedRowSerializer::new(order_types.into());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);

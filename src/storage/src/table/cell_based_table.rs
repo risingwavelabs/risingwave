@@ -118,6 +118,13 @@ impl<S: StateStore> CellBasedTable<S> {
         &self.schema
     }
 
+    pub(super) fn pk_serializer(&self) -> &OrderedRowSerializer {
+        &self.pk_serializer
+    }
+}
+
+/// Get & Write
+impl<S: StateStore> CellBasedTable<S> {
     /// Get a single row by point get
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: use multi-get for cell_based get_row
@@ -307,7 +314,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
     }
 }
 
-/// Iterator functions.
+/// Iterators
 impl<S: StateStore> CellBasedTable<S> {
     /// Get a [`StreamingIter`] with given `encoded_key_range`.
     pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
