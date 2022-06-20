@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::Source;
+use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::{Barrier, Epoch};
@@ -160,7 +161,14 @@ impl StreamService for StreamServiceImpl {
             request_id: req.request_id,
             status: None,
             create_mview_progress: collect_result.create_mview_progress,
-            sycned_sstables: collect_result.synced_sstables,
+            sycned_sstables: collect_result
+                .synced_sstables
+                .into_iter()
+                .map(|(compaction_group_id, sst)| GroupedSstableInfo {
+                    compaction_group_id,
+                    sst: Some(sst),
+                })
+                .collect_vec(),
         }))
     }
 

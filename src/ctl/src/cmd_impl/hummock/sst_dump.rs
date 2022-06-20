@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use bytes::Buf;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_object_store::object::BlockLocation;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::CompressionAlgorithm;
@@ -32,7 +34,11 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     let sstable_id_infos = meta_client.list_sstable_id_infos(version.id).await?;
     let mut sstable_id_infos_iter = sstable_id_infos.iter();
 
-    for level in version.levels {
+    // TODO #2065: iterate all compaction groups
+    for level in version
+        .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+        .clone()
+    {
         for sstable_info in level.table_infos {
             let id = sstable_info.id;
 

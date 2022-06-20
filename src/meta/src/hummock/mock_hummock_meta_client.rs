@@ -17,9 +17,11 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
+use risingwave_hummock_sdk::{
+    HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo,
+};
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableIdInfo, SstableInfo,
+    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableIdInfo,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -121,7 +123,11 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn commit_epoch(&self, epoch: HummockEpoch, sstables: Vec<SstableInfo>) -> Result<()> {
+    async fn commit_epoch(
+        &self,
+        epoch: HummockEpoch,
+        sstables: Vec<LocalSstableInfo>,
+    ) -> Result<()> {
         self.hummock_manager
             .commit_epoch(epoch, sstables)
             .await
@@ -140,7 +146,12 @@ impl HummockMetaClient for MockHummockMetaClient {
         todo!()
     }
 
-    async fn trigger_manual_compaction(&self, _compaction_group_id: u64) -> Result<()> {
+    async fn trigger_manual_compaction(
+        &self,
+        _compaction_group_id: u64,
+        _table_id: u32,
+        _level: u32,
+    ) -> Result<()> {
         todo!()
     }
 

@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
@@ -405,7 +405,11 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch, _sstables: Vec<SstableInfo>) -> Result<()> {
+    async fn commit_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _sstables: Vec<LocalSstableInfo>,
+    ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 
@@ -430,9 +434,19 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.compaction_groups)
     }
 
-    async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()> {
+    async fn trigger_manual_compaction(
+        &self,
+        compaction_group_id: u64,
+        table_id: u32,
+        level: u32,
+    ) -> Result<()> {
+        // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
             compaction_group_id,
+            table_id, /* if table_id not exist, manual_compaction will include all the sst
+                       * without check internal_table_id */
+            level,
+            ..Default::default()
         };
 
         self.inner.trigger_manual_compaction(req).await?;
