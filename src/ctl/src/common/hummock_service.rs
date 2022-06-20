@@ -68,8 +68,10 @@ impl HummockServiceOpts {
         let meta_client = self.meta_opts.create_meta_client().await?;
 
         // FIXME: allow specify custom config
-        let mut config = StorageConfig::default();
-        config.share_buffer_compaction_worker_threads_number = 0;
+        let config = StorageConfig {
+            share_buffer_compaction_worker_threads_number: 0,
+            ..Default::default()
+        };
 
         tracing::info!("using Hummock config: {:#?}", config);
 

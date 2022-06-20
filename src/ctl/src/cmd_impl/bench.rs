@@ -57,6 +57,7 @@ impl InterestedMetrics {
         let read_rate = (self.object_store_read - metrics.object_store_read) as f64 / elapsed;
         let write_rate = (self.object_store_write - metrics.object_store_write) as f64 / elapsed;
         let next_rate = (self.next_cnt - metrics.next_cnt) as f64 / elapsed;
+        let iter_rate = (self.iter_cnt - metrics.iter_cnt) as f64 / elapsed;
         println!(
             "read_rate: {}/s\nwrite_rate:{}/s\nnext_rate:{}/s\niter_rate:{}/s\n",
             Size::Bytes(read_rate),
@@ -79,6 +80,7 @@ pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
             for i in 0..threads {
                 let table = table.clone();
                 let next_cnt = next_cnt.clone();
+                let iter_cnt = iter_cnt.clone();
                 let hummock = hummock.clone();
                 let handler = spawn_okk(async move {
                     tracing::info!(thread = i, "starting scan");
@@ -108,7 +110,7 @@ pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
                         now: Instant::now(),
                     };
                     if let Some(ref last_collected_metrics) = last_collected_metrics {
-                        collected_metrics.report(&last_collected_metrics);
+                        collected_metrics.report(last_collected_metrics);
                     }
                     last_collected_metrics = Some(collected_metrics);
                     tracing::info!("starting report metrics");
