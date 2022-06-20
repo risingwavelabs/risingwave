@@ -32,6 +32,12 @@ pub struct HummockServiceOpts {
     pub hummock_url: String,
 }
 
+pub struct Metrics {
+    pub hummock_metrics: Arc<HummockMetrics>,
+    pub state_store_metrics: Arc<StateStoreMetrics>,
+    pub object_store_metrics: Arc<ObjectStoreMetrics>,
+}
+
 impl HummockServiceOpts {
     /// Recover hummock service options from env variable
     ///
@@ -56,32 +62,48 @@ impl HummockServiceOpts {
         })
     }
 
-    pub async fn create_hummock_store(
+    pub async fn create_hummock_store_with_metrics(
         &self,
-    ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
+    ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>, Metrics)> {
         let meta_client = self.meta_opts.create_meta_client().await?;
 
         // FIXME: allow specify custom config
-        let config = StorageConfig::default();
+        let config = StorageConfig {
+            share_buffer_compaction_worker_threads_number: 0,
+            ..Default::default()
+        };
 
         tracing::info!("using Hummock config: {:#?}", config);
+
+        let metrics = Metrics {
+            hummock_metrics: Arc::new(HummockMetrics::unused()),
+            state_store_metrics: Arc::new(StateStoreMetrics::unused()),
+            object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
+        };
 
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
             Arc::new(config),
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),
-                Arc::new(HummockMetrics::unused()),
+                metrics.hummock_metrics.clone(),
             )),
-            Arc::new(StateStoreMetrics::unused()),
-            Arc::new(ObjectStoreMetrics::unused()),
+            metrics.state_store_metrics.clone(),
+            metrics.object_store_metrics.clone(),
         )
         .await?;
 
         if let StateStoreImpl::HummockStateStore(hummock_state_store) = state_store_impl {
-            Ok((meta_client, hummock_state_store))
+            Ok((meta_client, hummock_state_store, metrics))
         } else {
             Err(anyhow!("only Hummock state store is supported in risectl"))
         }
+    }
+
+    pub async fn create_hummock_store(
+        &self,
+    ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
+        let (meta_client, hummock_client, _) = self.create_hummock_store_with_metrics().await?;
+        Ok((meta_client, hummock_client))
     }
 }

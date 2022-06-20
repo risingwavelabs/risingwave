@@ -32,6 +32,7 @@ mod values;
 
 pub use bind_context::BindContext;
 pub use delete::BoundDelete;
+pub use expr::bind_data_type;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{

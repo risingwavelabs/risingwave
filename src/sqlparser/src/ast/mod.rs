@@ -345,7 +345,13 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
+            Expr::BinaryOp { left, op, right } => write!(
+                f,
+                "{} {} {}",
+                fmt_expr_with_paren(left),
+                op,
+                fmt_expr_with_paren(right)
+            ),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
@@ -479,6 +485,35 @@ impl fmt::Display for Expr {
             ),
         }
     }
+}
+
+/// Wrap complex expressions with parentheses.
+fn fmt_expr_with_paren(e: &Expr) -> String {
+    use BinaryOperator as B;
+    if let Expr::BinaryOp { op, .. } = e {
+        match op {
+            B::Plus
+            | B::Multiply
+            | B::Modulo
+            | B::Minus
+            | B::LtEq
+            | B::GtEq
+            | B::Eq
+            | B::Gt
+            | B::Lt
+            | B::Xor
+            | B::NotEq
+            | B::Divide
+            | B::BitwiseAnd
+            | B::BitwiseOr
+            | B::BitwiseXor
+            | B::PGBitwiseXor
+            | B::PGBitwiseShiftLeft
+            | B::PGBitwiseShiftRight => return format!("({})", e),
+            _ => {}
+        }
+    }
+    format!("{}", e)
 }
 
 /// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`)

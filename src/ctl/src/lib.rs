@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use cmd_impl::bench::BenchCommands;
 mod cmd_impl;
 pub(crate) mod common;
 
@@ -37,9 +38,12 @@ enum Commands {
     /// Commands for Hummock
     #[clap(subcommand)]
     Hummock(HummockCommands),
-    /// Commands for Benchmarks
+    /// Commands for Tables
     #[clap(subcommand)]
     Table(TableCommands),
+    /// Commands for Benchmarks
+    #[clap(subcommand)]
+    Bench(BenchCommands),
 }
 
 #[derive(Subcommand)]
@@ -73,7 +77,6 @@ enum TableCommands {
     /// benchmark state table
     Scan {
         /// name of the materialized view to operate on
-        #[clap()]
         mv_name: String,
     },
 }
@@ -102,6 +105,7 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Table(TableCommands::Scan { mv_name }) => {
             tokio::spawn(cmd_impl::table::scan(mv_name)).await??
         }
+        Commands::Bench(cmd) => tokio::spawn(cmd_impl::bench::do_bench(cmd)).await??,
     }
     Ok(())
 }

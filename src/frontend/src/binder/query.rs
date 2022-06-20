@@ -136,7 +136,11 @@ impl Binder {
                 }
             },
             expr => {
-                extra_order_exprs.push(self.bind_expr(expr)?);
+                let order_expr = self.bind_expr(expr.clone())?;
+                if order_expr.has_correlated_input_ref() {
+                    return Err(ErrorCode::BindError(format!("ORDER BY expression \"{}\" has correlated input reference", expr)).into());
+                }
+                extra_order_exprs.push(order_expr);
                 visible_output_num + extra_order_exprs.len() - 1
             }
         };
