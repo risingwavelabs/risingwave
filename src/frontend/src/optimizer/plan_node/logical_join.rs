@@ -448,10 +448,6 @@ impl LogicalJoin {
             (false, false) => JoinType::Inner,
         }
     }
-
-    pub fn output_indices(&self) -> &[usize] {
-        self.output_indices.as_ref()
-    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
