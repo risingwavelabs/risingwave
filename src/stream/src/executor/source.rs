@@ -692,9 +692,6 @@ mod tests {
             "fields.v1.min".to_string() => "1".to_string(),
             "fields.v1.max".to_string() => "1000".to_string(),
             "fields.v1.seed".to_string() => "12345".to_string(),
-            "fields.v2.min".to_string() => "1".to_string(),
-            "fields.v2.max".to_string() => "1000".to_string(),
-            "fields.v2.seed".to_string() => "12345".to_string(),
         };
 
         let columns = vec![
@@ -721,18 +718,6 @@ mod tests {
                 }),
                 is_hidden: false,
             },
-            ProstColumnCatalog {
-                column_desc: Some(ProstColumnDesc {
-                    column_type: Some(ProstDataType {
-                        type_name: TypeName::Float as i32,
-                        ..Default::default()
-                    }),
-                    column_id: 2,
-                    name: "v2".to_string(),
-                    ..Default::default()
-                }),
-                is_hidden: false,
-            },
         ];
 
         StreamSourceInfo {
@@ -743,6 +728,13 @@ mod tests {
             columns,
             pk_column_ids: vec![0],
         }
+    }
+
+    fn drop_row_id(chunk: StreamChunk) -> StreamChunk {
+        let (ops, mut columns, bitmap) = chunk.into_inner();
+        columns.remove(0);
+        // columns.pop();
+        StreamChunk::new(ops, columns, bitmap)
     }
 
     #[tokio::test]
@@ -771,7 +763,7 @@ mod tests {
         let actor_id = ActorId::default();
         let source_desc = source_manager.get_source(&source_table_id)?;
         let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
-        let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+        let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
         let schema = get_schema(&column_ids, &source_desc);
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
@@ -822,7 +814,17 @@ mod tests {
 
         let _ = materialize.next().await.unwrap(); // barrier
 
-        let _ = materialize.next().await.unwrap();
+        let chunk_1 = materialize.next().await.unwrap().unwrap().into_chunk();
+
+        let chunk_1_truth = StreamChunk::from_pretty(
+            " I i
+            + 0 533
+            + 0 833
+            + 0 738
+            + 0 344",
+        );
+
+        assert_eq!(drop_row_id(chunk_1.unwrap()), drop_row_id(chunk_1_truth));
 
         let change_split_mutation = Barrier::new_test_barrier(curr_epoch + 1).with_mutation(
             Mutation::SourceChangeSplit(hashmap! {
@@ -847,8 +849,26 @@ mod tests {
 
         let _ = materialize.next().await.unwrap(); // barrier
 
-        let _ = materialize.next().await.unwrap();
-        let _ = materialize.next().await.unwrap();
+        let chunk_2 = materialize.next().await.unwrap().unwrap().into_chunk();
+
+        let chunk_2_truth = StreamChunk::from_pretty(
+            " I i
+            + 0 525
+            + 0 425
+            + 0 29
+            + 0 201",
+        );
+        assert_eq!(drop_row_id(chunk_2.unwrap()), drop_row_id(chunk_2_truth));
+
+        let chunk_3 = materialize.next().await.unwrap().unwrap().into_chunk();
+
+        let chunk_3_truth = StreamChunk::from_pretty(
+            " I i
+            + 0 833
+            + 0 533
+            + 0 344",
+        );
+        assert_eq!(drop_row_id(chunk_3.unwrap()), drop_row_id(chunk_3_truth));
 
         Ok(())
     }
