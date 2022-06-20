@@ -356,17 +356,6 @@ workspace.
 
 And use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
 
-## Check in PRs from forks
-
-```shell
-gh pr checkout <PR id>
-git checkout -b forks/<PR id>
-git push origin HEAD -u
-```
-
-After that, CI checks will begin on branches of RisingWave's main repo,
-and the status will be automatically updated to PRs from forks.
-
 ## Submit PRs
 
 Instructions about submitting PRs are included in the [contribution guidelines](../CONTRIBUTING.md).
