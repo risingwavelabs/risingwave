@@ -65,13 +65,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let column_descs = column_ids
             .into_iter()
             .zip_eq(schema.fields.iter().cloned())
-            .map(|(column_id, field)| ColumnDesc {
-                data_type: field.data_type,
-                column_id,
-                name: field.name,
-                field_descs: vec![],
-                type_name: "".to_string(),
-            })
+            .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
         Self {
             input,

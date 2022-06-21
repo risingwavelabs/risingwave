@@ -106,9 +106,9 @@ impl<S: StateStore> CellBasedTable<S> {
         pk_indices: Vec<usize>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        let schema = Schema::new(column_descs.iter().map(Into::into).collect());
+        let mapping = ColumnDescMapping::new_partial(column_descs, &column_ids);
+        let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
-        let mapping = ColumnDescMapping::new(column_descs);
 
         Self {
             keyspace,

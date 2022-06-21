@@ -25,35 +25,49 @@ use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
 pub struct ColumnDescMapping {
-    pub table_column_descs: Vec<ColumnDesc>,
+    pub output_columns: Vec<ColumnDesc>,
 
     pub id_to_column_index: HashMap<ColumnId, usize>,
 }
 
 #[allow(clippy::len_without_is_empty)]
 impl ColumnDescMapping {
-    pub fn new(table_column_descs: Vec<ColumnDesc>) -> Arc<Self> {
-        let id_to_column_index = table_column_descs
+    pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
+        let id_to_column_index = output_columns
             .iter()
             .enumerate()
             .map(|(index, d)| (d.column_id, index))
             .collect();
 
         Self {
-            table_column_descs,
+            output_columns,
             id_to_column_index,
         }
         .into()
     }
 
+    pub fn new_partial(table_columns: Vec<ColumnDesc>, column_ids: &[ColumnId]) -> Arc<Self> {
+        let mut table_columns = table_columns
+            .into_iter()
+            .map(|c| (c.column_id, c))
+            .collect::<HashMap<_, _>>();
+
+        let output_columns = column_ids
+            .iter()
+            .map(|id| table_columns.remove(id).unwrap())
+            .collect();
+
+        Self::new(output_columns)
+    }
+
     pub fn get(&self, id: ColumnId) -> Option<(&ColumnDesc, usize)> {
         self.id_to_column_index
             .get(&id)
-            .map(|&index| (&self.table_column_descs[index], index))
+            .map(|&index| (&self.output_columns[index], index))
     }
 
     pub fn len(&self) -> usize {
-        self.table_column_descs.len()
+        self.output_columns.len()
     }
 }
 
@@ -73,9 +87,9 @@ pub struct CellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
 }
 
 pub fn make_cell_based_row_deserializer(
-    table_column_descs: Vec<ColumnDesc>,
+    output_columns: Vec<ColumnDesc>,
 ) -> GeneralCellBasedRowDeserializer {
-    GeneralCellBasedRowDeserializer::new(ColumnDescMapping::new(table_column_descs))
+    GeneralCellBasedRowDeserializer::new(ColumnDescMapping::new(output_columns))
 }
 
 impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
