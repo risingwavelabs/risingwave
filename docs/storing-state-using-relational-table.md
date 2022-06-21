@@ -1,6 +1,6 @@
-# An Overview of RisingWave State Store
+# Storing State Using Relational Table
 
-- [Storing State Using Relational Table](#an-overview-of-risingwave-state-store)
+- [Storing State Using Relational Table](#an-overview-of-relational-table)
   - [Cell-Based Encoding](#cell-based-encoding)
   - [Relational Table Layer](#Relational-table)
     - [Write Path](#relational-table-write-path)
