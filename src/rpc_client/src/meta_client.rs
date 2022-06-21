@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, L
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
@@ -264,23 +264,6 @@ impl MetaClient {
         };
         self.inner.delete_worker_node(request).await?;
         Ok(())
-    }
-
-    /// Get live nodes with the specified type.
-    /// # Arguments
-    /// * `worker_type` `WorkerType` of the nodes
-    /// * `include_starting_nodes` Whether to include nodes still being created
-    pub async fn list_all_nodes(
-        &self,
-        worker_type: WorkerType,
-        include_starting_nodes: bool,
-    ) -> Result<Vec<WorkerNode>> {
-        let request = ListAllNodesRequest {
-            worker_type: worker_type as i32,
-            include_starting_nodes,
-        };
-        let resp = self.inner.list_all_nodes(request).await?;
-        Ok(resp.nodes)
     }
 
     pub fn start_heartbeat_loop(
