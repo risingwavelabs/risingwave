@@ -157,6 +157,22 @@ impl<S: StateStore> CellBasedTable<S> {
     pub(super) fn column_ids(&self) -> &[ColumnId] {
         &self.cell_based_row_serializer.column_ids
     }
+
+    #[cfg(debug_assertions)]
+    /// Returns whether the output columns are a complete set of the table's.
+    fn is_complete(&self) -> bool {
+        use std::collections::HashSet;
+
+        let output: HashSet<_> = self
+            .mapping
+            .output_columns
+            .iter()
+            .map(|c| c.column_id)
+            .collect();
+        let table: HashSet<_> = self.table_columns.iter().map(|c| c.column_id).collect();
+
+        output == table
+    }
 }
 
 /// Get & Write
@@ -226,6 +242,8 @@ impl<S: StateStore> CellBasedTable<S> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
+        debug_assert!(self.is_complete(), "cannot write to a partial table");
+
         // stateful executors need to compute vnode.
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
