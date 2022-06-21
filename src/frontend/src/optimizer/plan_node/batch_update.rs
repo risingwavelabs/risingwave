@@ -40,7 +40,7 @@ impl BatchUpdate {
             ctx,
             logical.schema().clone(),
             Distribution::Single,
-            Order::any().clone(),
+            Order::any(),
         );
         Self { base, logical }
     }

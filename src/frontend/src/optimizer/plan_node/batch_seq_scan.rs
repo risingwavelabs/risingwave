@@ -39,7 +39,7 @@ impl BatchSeqScan {
     pub fn new_inner(logical: LogicalScan, dist: Distribution, scan_range: ScanRange) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
 
         {
             // validate scan_range

@@ -246,7 +246,7 @@ impl PlanRoot {
             }
             Convention::Stream => self
                 .required_dist
-                .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
+                .enforce_if_not_satisfies(self.plan.clone(), &Order::any()),
             _ => unreachable!(),
         }?;
 
@@ -322,7 +322,7 @@ mod tests {
         let root = PlanRoot::new(
             values,
             RequiredDist::Any,
-            Order::any().clone(),
+            Order::any(),
             out_fields,
             out_names,
         );
