@@ -18,7 +18,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, Tabl
 
 use crate::{SqlGenerator, Table};
 
-impl<'a> SqlGenerator<'a> {
+impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
         match self.rng.gen_range(0..=9) {

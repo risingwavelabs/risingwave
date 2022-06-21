@@ -17,6 +17,7 @@ mod tests {
     use std::panic;
     use std::sync::Arc;
 
+    use rand::SeedableRng;
     use risingwave_frontend::binder::Binder;
     use risingwave_frontend::handler::create_table;
     use risingwave_frontend::planner::Planner;
@@ -62,14 +63,13 @@ mod tests {
         tables
     }
 
-    #[tokio::test]
-    async fn run_sqlsmith_on_frontend() {
+    async fn run_sqlsmith_with_seed(seed: u64) {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
         let tables = create_tables(session.clone()).await;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
 
-        for _ in 0..5000 {
+        for _ in 0..1024 {
             let sql = sql_gen(&mut rng, tables.clone());
 
             let sql_copy = sql.clone();
@@ -104,5 +104,25 @@ mod tests {
                 _ => unreachable!(),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn run_sqlsmith_on_frontend_1() {
+        run_sqlsmith_with_seed(0).await;
+    }
+
+    #[tokio::test]
+    async fn run_sqlsmith_on_frontend_2() {
+        run_sqlsmith_with_seed(1).await;
+    }
+
+    #[tokio::test]
+    async fn run_sqlsmith_on_frontend_3() {
+        run_sqlsmith_with_seed(2).await;
+    }
+
+    #[tokio::test]
+    async fn run_sqlsmith_on_frontend_4() {
+        run_sqlsmith_with_seed(3).await;
     }
 }
