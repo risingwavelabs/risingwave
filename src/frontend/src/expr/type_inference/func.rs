@@ -26,24 +26,7 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
-    let ret_type = infer_type_name(func_type, &inputs).map(|type_name| match type_name {
-        DataTypeName::Boolean => DataType::Boolean,
-        DataTypeName::Int16 => DataType::Int16,
-        DataTypeName::Int32 => DataType::Int32,
-        DataTypeName::Int64 => DataType::Int64,
-        DataTypeName::Decimal => DataType::Decimal,
-        DataTypeName::Float32 => DataType::Float32,
-        DataTypeName::Float64 => DataType::Float64,
-        DataTypeName::Varchar => DataType::Varchar,
-        DataTypeName::Date => DataType::Date,
-        DataTypeName::Timestamp => DataType::Timestamp,
-        DataTypeName::Timestampz => DataType::Timestampz,
-        DataTypeName::Time => DataType::Time,
-        DataTypeName::Interval => DataType::Interval,
-        DataTypeName::Struct | DataTypeName::List => {
-            panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
-        }
-    })?;
+    let ret_type = infer_type_name(func_type, &inputs)?.into();
     Ok((inputs, ret_type))
 }
 
