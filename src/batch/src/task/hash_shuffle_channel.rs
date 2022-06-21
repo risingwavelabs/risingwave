@@ -123,7 +123,7 @@ impl HashShuffleSender {
             // `generate_new_data_chunks` may generate an empty chunk.
             if new_data_chunk.cardinality() > 0 {
                 self.senders[sink_id]
-                    .send(Some(DataChunkInChannel::Normal(new_data_chunk)))
+                    .send(Some(DataChunkInChannel::new(new_data_chunk)))
                     .await
                     .to_rw_result_with(|| "HashShuffleSender::send".into())?;
             }

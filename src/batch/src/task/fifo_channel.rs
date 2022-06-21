@@ -37,7 +37,7 @@ impl ChanSender for FifoSender {
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
             self.sender
-                .send(chunk.map(DataChunkInChannel::Normal))
+                .send(chunk.map(DataChunkInChannel::new))
                 .await
                 .to_rw_result_with(|| "FifoSender::send".into())
         }

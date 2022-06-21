@@ -22,7 +22,7 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
-use crate::task::data_chunk_in_channel::{BroadcastDataChunk, DataChunkInChannel};
+use crate::task::data_chunk_in_channel::DataChunkInChannel;
 use crate::task::BOUNDED_BUFFER_SIZE;
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
@@ -36,8 +36,7 @@ impl ChanSender for BroadcastSender {
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
-            let broadcast_data_chunk =
-                chunk.map(|c| DataChunkInChannel::Broadcast(BroadcastDataChunk::new(c)));
+            let broadcast_data_chunk = chunk.map(DataChunkInChannel::new);
             for sender in &self.senders {
                 sender
                     .send(broadcast_data_chunk.as_ref().cloned())

@@ -20,14 +20,14 @@ use risingwave_pb::data::DataChunk as ProstDataChunk;
 use tokio::sync::OnceCell;
 
 #[derive(Debug, Clone)]
-pub(super) struct BroadcastDataChunk {
+pub(super) struct DataChunkInChannel {
     data_chunk: DataChunk,
     /// If the data chunk is only needed to transfer locally,
     /// this field should not be initialized.
     prost_data_chunk: OnceCell<Either<ProstDataChunk, String>>,
 }
 
-impl BroadcastDataChunk {
+impl DataChunkInChannel {
     pub fn new(data_chunk: DataChunk) -> Self {
         Self {
             data_chunk,
@@ -54,36 +54,12 @@ impl BroadcastDataChunk {
             }
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub(super) enum DataChunkInChannel {
-    Normal(DataChunk),
-    Broadcast(BroadcastDataChunk),
-}
-
-impl DataChunkInChannel {
-    pub async fn into_protobuf(self) -> Result<ProstDataChunk> {
-        match self {
-            Self::Normal(c) => {
-                let c = c.compact()?;
-                Ok(c.to_protobuf())
-            }
-            Self::Broadcast(c) => c.to_protobuf().await,
-        }
-    }
 
     pub fn into_data_chunk(self) -> DataChunk {
-        match self {
-            Self::Normal(chunk) => chunk,
-            Self::Broadcast(chunk) => chunk.data_chunk,
-        }
+        self.data_chunk
     }
 
     pub fn cardinality(&self) -> usize {
-        match self {
-            Self::Normal(chunk) => chunk.cardinality(),
-            Self::Broadcast(chunk) => chunk.data_chunk.cardinality(),
-        }
+        self.data_chunk.cardinality()
     }
 }
