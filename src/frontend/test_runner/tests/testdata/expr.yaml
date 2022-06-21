@@ -81,7 +81,7 @@
   batch_plan: |
     BatchProject { exprs: [$0] }
       BatchFilter { predicate: (In(1:Int32::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR (1:Int32 = $1)) }
-        BatchNestedLoopJoin { type: LeftOuter, predicate: true }
+        BatchNestedLoopJoin { type: LeftOuter, predicate: true, output_indices: all }
           BatchExchange { order: [], dist: Single }
             BatchScan { table: b, columns: [b2] }
           BatchSimpleAgg { aggs: [min($0)] }
@@ -94,13 +94,12 @@
     create table b (b1 int, b2 int);
     SELECT b2 from b where exists (select 2 from t where v1 in (3, 1.0, b1));
   batch_plan: |
-    BatchProject { exprs: [$1] }
-      BatchNestedLoopJoin { type: LeftSemi, predicate: (In($2::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR ($3 = $0)) }
-        BatchExchange { order: [], dist: Single }
-          BatchScan { table: b, columns: [b1, b2] }
-        BatchExchange { order: [], dist: Single }
-          BatchProject { exprs: [$0, $0] }
-            BatchScan { table: t, columns: [v1] }
+    BatchNestedLoopJoin { type: LeftSemi, predicate: (In($2::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR ($3 = $0)), output_indices: [1] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: b, columns: [b1, b2] }
+      BatchExchange { order: [], dist: Single }
+        BatchProject { exprs: [$0, $0] }
+          BatchScan { table: t, columns: [v1] }
 - sql: |
     select +1.0, -2.0;
   batch_plan: |

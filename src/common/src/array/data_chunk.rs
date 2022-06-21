@@ -412,10 +412,18 @@ impl DataChunk {
         table.to_string()
     }
 
-    /// Reorder columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
+    /// Reorder (and possibly remove) columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
     /// the chunk contains column `[a, b, c]`, then the output will be
-    /// `[c, b, a]`.
+    /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
+    /// If the input mapping is identity mapping, no reorder will be performed.
     pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
+        if column_mapping
+            .iter()
+            .copied()
+            .eq((0..self.columns().len()).into_iter())
+        {
+            return self;
+        }
         let mut new_columns = Vec::with_capacity(column_mapping.len());
         for &idx in column_mapping {
             new_columns.push(self.columns[idx].clone());
@@ -729,5 +737,38 @@ mod tests {
         let chunk_after_serde = DataChunk::from_protobuf(&chunk.to_protobuf()).unwrap();
         assert_eq!(chunk_after_serde.rows().count(), 10);
         assert_eq!(chunk_after_serde.cardinality(), 10);
+    }
+    #[test]
+    fn reorder_columns() {
+        let chunk = DataChunk::from_pretty(
+            "I I I
+             2 5 1
+             4 9 2
+             6 9 3",
+        );
+        let reorder = chunk.clone().reorder_columns(&[2, 1, 0]);
+        assert_eq!(
+            reorder,
+            DataChunk::from_pretty(
+                "I I I
+             1 5 2
+             2 9 4
+             3 9 6",
+            )
+        );
+        let reorder = chunk.clone().reorder_columns(&[2, 0]);
+        assert_eq!(
+            reorder,
+            DataChunk::from_pretty(
+                "I I
+             1 2
+             2 4
+             3 6",
+            )
+        );
+        let reorder = chunk.clone().reorder_columns(&[0, 1, 2]);
+        assert_eq!(reorder, chunk);
+        let reorder = chunk.reorder_columns(&[]);
+        assert_eq!(reorder.cardinality(), 3);
     }
 }

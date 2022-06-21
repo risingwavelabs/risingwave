@@ -293,7 +293,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                             sender.send(Some(data_chunk?)).await?;
                         }
                         None => {
-                            debug!("data chunk stream shuts down");
+                            trace!("data chunk stream shuts down");
                             sender.send(None).await?;
                             break;
                         }

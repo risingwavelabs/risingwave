@@ -16,7 +16,6 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -85,11 +84,6 @@ where
 
         Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
 
-        let table_fragments_list = table_fragments.values().collect_vec();
-        compaction_group_manager
-            .purge_stale_members(&table_fragments_list)
-            .await?;
-
         Ok(Self {
             meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
@@ -147,8 +141,7 @@ where
             )))),
             Entry::Vacant(v) => {
                 // Register to compaction group beforehand.
-                // If any following operation fails, the registration will be eventually reverted by
-                // CompactionGroupManager::purge_stale_members.
+                // If any following operation fails, the registration will be eventually reverted.
                 self.compaction_group_manager
                     .register_table_fragments(&table_fragment)
                     .await?;
@@ -174,7 +167,11 @@ where
                     .unregister_table_fragments(&table_fragments)
                     .await
                 {
-                    tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
+                    tracing::warn!(
+                        "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                        table_id,
+                        e
+                    );
                 }
                 Ok(())
             }
@@ -288,7 +285,11 @@ where
                 .unregister_table_fragments(&table_fragments)
                 .await
             {
-                tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
+                tracing::warn!(
+                    "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                    table_id,
+                    e
+                );
             }
             Ok(())
         } else {
