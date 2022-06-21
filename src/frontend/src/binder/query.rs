@@ -47,6 +47,10 @@ impl BoundQuery {
 
     pub fn is_correlated(&self) -> bool {
         self.body.is_correlated()
+            || self
+                .extra_order_exprs
+                .iter()
+                .any(|e| e.has_correlated_input_ref())
     }
 }
 
@@ -136,11 +140,7 @@ impl Binder {
                 }
             },
             expr => {
-                let order_expr = self.bind_expr(expr.clone())?;
-                if order_expr.has_correlated_input_ref() {
-                    return Err(ErrorCode::BindError(format!("ORDER BY expression \"{}\" has correlated input reference", expr)).into());
-                }
-                extra_order_exprs.push(order_expr);
+                extra_order_exprs.push(self.bind_expr(expr)?);
                 visible_output_num + extra_order_exprs.len() - 1
             }
         };
