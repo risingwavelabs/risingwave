@@ -14,14 +14,14 @@
 
 use std::sync::{Arc, Mutex};
 
-use futures::channel::mpsc::channel;
-use futures::{SinkExt, StreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
+use tokio::sync::mpsc::channel;
 
 use super::*;
 use crate::executor::actor::ActorContext;
@@ -103,7 +103,7 @@ async fn test_merger_sum_aggr() {
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
-    let (mut input, rx) = channel(16);
+    let (input, rx) = channel(16);
     let schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
