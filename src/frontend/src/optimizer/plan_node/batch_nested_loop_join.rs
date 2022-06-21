@@ -38,7 +38,7 @@ impl BatchNestedLoopJoin {
             logical.left().distribution(),
             logical.right().distribution(),
         );
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         Self { base, logical }
     }
 
@@ -92,10 +92,10 @@ impl ToDistributedBatch for BatchNestedLoopJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
         let left = self
             .left()
-            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+            .to_distributed_with_required(&Order::any(), &RequiredDist::single())?;
         let right = self
             .right()
-            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+            .to_distributed_with_required(&Order::any(), &RequiredDist::single())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }
@@ -119,10 +119,10 @@ impl ToBatchProst for BatchNestedLoopJoin {
 impl ToLocalBatch for BatchNestedLoopJoin {
     fn to_local(&self) -> Result<PlanRef> {
         let left = RequiredDist::single()
-            .enforce_if_not_satisfies(self.left().to_local()?, Order::any())?;
+            .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
 
         let right = RequiredDist::single()
-            .enforce_if_not_satisfies(self.right().to_local()?, Order::any())?;
+            .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }
