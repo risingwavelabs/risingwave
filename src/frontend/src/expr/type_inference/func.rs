@@ -26,40 +26,39 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
-    let ret_type = infer_type_name(func_type, &inputs)?.into();
+    let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &inputs)?;
+    let ret_type = sig.ret_type.into();
     Ok((inputs, ret_type))
 }
 
 /// Infer the return type name without parameters like length or precision.
-fn infer_type_name(func_type: ExprType, inputs: &[ExprImpl]) -> Result<DataTypeName> {
-    let inputs_type = inputs.iter().map(|e| e.return_type().into()).collect_vec();
-    FUNC_SIG_MAP
-        .0
-        .get(&FuncSign {
-            func: func_type,
-            inputs_type: inputs_type.clone(),
-        })
-        .cloned()
-        .ok_or_else(|| {
-            ErrorCode::NotImplemented(format!("{:?}{:?}", func_type, inputs_type), 112.into())
-                .into()
-        })
+fn infer_type_name<'a, 'b>(
+    sig_map: &'a FuncSigMap,
+    func_type: ExprType,
+    inputs: &'b [ExprImpl],
+) -> Result<&'a FuncSign> {
+    Err(ErrorCode::NotImplemented("".into(), 112.into()).into())
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct FuncSign {
     pub func: ExprType,
     pub inputs_type: Vec<DataTypeName>,
+    pub ret_type: DataTypeName,
 }
 
 #[derive(Default)]
-pub struct FuncSigMap(HashMap<FuncSign, DataTypeName>);
+pub struct FuncSigMap(HashMap<(ExprType, usize), Vec<FuncSign>>);
 impl FuncSigMap {
     fn insert(&mut self, func: ExprType, param_types: Vec<DataTypeName>, ret_type: DataTypeName) {
+        let arity = param_types.len();
         let inputs_type = param_types.into_iter().map(Into::into).collect();
-        self.0
-            .try_insert(FuncSign { func, inputs_type }, ret_type)
-            .unwrap();
+        let sig = FuncSign {
+            func,
+            inputs_type,
+            ret_type,
+        };
+        self.0.entry((func, arity)).or_default().push(sig)
     }
 }
 
@@ -279,8 +278,8 @@ lazy_static::lazy_static! {
 }
 
 /// The table of function signatures.
-pub fn func_sig_map() -> &'static HashMap<FuncSign, DataTypeName> {
-    &FUNC_SIG_MAP.0
+pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {
+    FUNC_SIG_MAP.0.values().flatten()
 }
 
 #[cfg(test)]
