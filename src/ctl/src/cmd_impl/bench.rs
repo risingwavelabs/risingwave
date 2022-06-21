@@ -95,7 +95,6 @@ pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
                             next_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             item?;
                         }
-                        tokio::task::yield_now().await;
                     }
                 });
                 handlers.push(handler);
