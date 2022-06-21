@@ -140,6 +140,7 @@ impl CompactionPicker for ManualCompactionPicker {
             },
             split_ranges: vec![],
             target_file_size: 0,
+            compression_algorithm: "".to_string(),
         })
     }
 }

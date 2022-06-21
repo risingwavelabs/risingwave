@@ -232,6 +232,12 @@ impl DynamicLevelSelector {
             ret.target_file_size = self.config.target_file_size_base
                 << (ret.target_level.level_idx as usize - base_level);
         }
+        if ret.target_level.level_idx == 0 {
+            ret.compression_algorithm = self.config.compression_algorithm[0].clone();
+        } else {
+            let idx = ret.target_level.level_idx as usize - base_level + 1;
+            ret.compression_algorithm = self.config.compression_algorithm[idx].clone();
+        }
         ret
     }
 }
