@@ -22,9 +22,8 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::hummock::iterator::{
     DirectionEnum, HummockIterator, HummockIteratorDirection, ReadOptions,
 };
-use crate::hummock::table_accessor::TableAccessor;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, InMemoryTableIterator, SSTableIteratorType};
+use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
@@ -38,7 +37,7 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// All non-overlapping tables.
     tables: Vec<SstableInfo>,
 
-    sstable_store: TI::Accessor,
+    sstable_store: SstableStoreRef,
 
     stats: StoreLocalStatistic,
     read_options: Arc<ReadOptions>,
@@ -50,7 +49,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// and arranged in descending order when it serves as a backward iterator.
     pub fn new(
         tables: Vec<SstableInfo>,
-        sstable_store: TI::Accessor,
+        sstable_store: SstableStoreRef,
         read_options: Arc<ReadOptions>,
     ) -> Self {
         Self {
@@ -70,10 +69,15 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
                 old_iter.collect_local_statistic(&mut self.stats);
             }
         } else {
-            let table = self
-                .sstable_store
-                .sstable(self.tables[idx].id, &mut self.stats)
-                .await?;
+            let table = if self.read_options.prefetch {
+                self.sstable_store
+                    .load_table(self.tables[idx].id, &mut self.stats, true)
+                    .await?
+            } else {
+                self.sstable_store
+                    .sstable(self.tables[idx].id, &mut self.stats)
+                    .await?
+            };
             let mut sstable_iter =
                 TI::create(table, self.sstable_store.clone(), self.read_options.clone());
 
@@ -159,4 +163,3 @@ impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         stats.add(&self.stats)
     }
 }
-pub type ForwardMemoryConcatIterator = ConcatIteratorInner<InMemoryTableIterator>;

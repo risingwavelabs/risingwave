@@ -20,8 +20,6 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use crate::assert_bytes_eq;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::iterator::{HummockIterator, ReadOptions};
-#[cfg(feature = "failpoints")]
-use crate::hummock::table_accessor::TableAccessor;
 use crate::hummock::test_utils::{
     default_builder_opt_for_test, gen_test_sstable_data, test_key_of, test_value_of,
     TEST_KEYS_COUNT,

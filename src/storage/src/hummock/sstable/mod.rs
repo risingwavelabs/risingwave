@@ -28,7 +28,7 @@ pub mod builder;
 pub use builder::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
@@ -37,8 +37,6 @@ use risingwave_hummock_sdk::HummockSSTableId;
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
-mod in_memory_iterator;
-pub use in_memory_iterator::InMemoryTableIterator;
 pub mod group_builder;
 mod utils;
 
@@ -75,6 +73,16 @@ impl Sstable {
             meta,
             blocks: vec![],
         }
+    }
+
+    pub fn new_with_data(id: HummockSSTableId, meta: SstableMeta, data: Bytes) -> Self {
+        let mut blocks = vec![];
+        for block_meta in &meta.block_metas {
+            let end_offset = (block_meta.offset + block_meta.len) as usize;
+            let block = Block::decode(data.slice(block_meta.offset as usize..end_offset))?;
+            blocks.push(Box::new(block));
+        }
+        Self { id, meta, blocks }
     }
 
     pub fn has_bloom_filter(&self) -> bool {

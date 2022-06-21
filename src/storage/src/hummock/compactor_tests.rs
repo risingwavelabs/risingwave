@@ -30,7 +30,6 @@ mod tests {
 
     use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::table_accessor::TableAccessor;
     use crate::hummock::HummockStorage;
     use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use crate::storage_value::StorageValue;

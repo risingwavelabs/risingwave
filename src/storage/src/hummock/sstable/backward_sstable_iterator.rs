@@ -150,8 +150,6 @@ impl HummockIterator for BackwardSSTableIterator {
 }
 
 impl SSTableIteratorType for BackwardSSTableIterator {
-    type Accessor = SstableStoreRef;
-
     fn create(table: TableHolder, sstable_store: SstableStoreRef, _: Arc<ReadOptions>) -> Self {
         BackwardSSTableIterator::new(table, sstable_store)
     }

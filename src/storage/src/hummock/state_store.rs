@@ -20,8 +20,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
@@ -38,7 +37,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
 };
-use crate::hummock::table_accessor::TableAccessor;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
@@ -76,7 +74,6 @@ impl HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
-        acessor: <<T as HummockIteratorType>::SstableIteratorType as SSTableIteratorType>::Accessor,
     ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
@@ -98,7 +95,7 @@ impl HummockStorage {
             overlapped_iters.push(
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
-                    acessor.clone(),
+                    self.sstable_store.clone(),
                     self.stats.clone(),
                     &mut stats,
                     read_options.clone(),
@@ -140,15 +137,18 @@ impl HummockStorage {
 
                 overlapped_iters.push(Box::new(ConcatIteratorInner::<T::SstableIteratorType>::new(
                     tables,
-                    acessor.clone(),
+                    self.sstable_store(),
                     read_options.clone(),
                 )) as BoxedHummockIterator<T::Direction>);
             } else {
                 for table_info in table_infos.into_iter().rev() {
-                    let table = acessor.sstable(table_info.id, &mut stats).await?;
+                    let table = self
+                        .sstable_store
+                        .sstable(table_info.id, &mut stats)
+                        .await?;
                     overlapped_iters.push(Box::new(T::SstableIteratorType::create(
                         table,
-                        acessor.clone(),
+                        self.sstable_store(),
                         read_options.clone(),
                     )));
                 }
@@ -217,7 +217,7 @@ impl HummockStorage {
                                 return Ok(v);
                             }
                         }
-                        UncommittedData::Sst(table_info) => {
+                        UncommittedData::Sst((_, table_info)) => {
                             let table = self
                                 .sstable_store
                                 .sstable(table_info.id, &mut stats)
@@ -383,7 +383,7 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, ForwardIter>(key_range, epoch, self.sstable_store())
+        self.iter_inner::<R, B, ForwardIter>(key_range, epoch)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -397,7 +397,7 @@ impl StateStore for HummockStorage {
             key_range.end_bound().map(|v| v.as_ref().to_vec()),
             key_range.start_bound().map(|v| v.as_ref().to_vec()),
         );
-        self.iter_inner::<_, _, BackwardIter>(key_range, epoch, self.sstable_store())
+        self.iter_inner::<_, _, BackwardIter>(key_range, epoch)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
@@ -413,7 +413,7 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.local_version_manager.get_uncommitted_ssts(epoch)
     }
 }

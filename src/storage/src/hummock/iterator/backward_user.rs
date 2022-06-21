@@ -1087,7 +1087,6 @@ mod tests {
         Sstable {
             id: sst.id,
             meta: sst.meta.clone(),
-            blocks: vec![],
         }
     }
 }

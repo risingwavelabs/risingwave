@@ -46,7 +46,6 @@ pub mod sstable_store;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
-pub mod table_accessor;
 #[cfg(test)]
 pub(crate) mod test_utils;
 mod utils;
