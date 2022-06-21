@@ -143,7 +143,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .map_err(tonic_err)?;
         let version = self
             .user_manager
-            .grant_privilege(&req.users, &new_privileges, req.grantor)
+            .grant_privilege(&req.users, &new_privileges, req.granted_by)
             .await
             .map_err(tonic_err)?;
 

@@ -85,11 +85,11 @@ impl UserInfoWriter for UserInfoWriterImpl {
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        grantor: UserName,
+        granted_by: UserName,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .grant_privilege(users, privileges, with_grant_option, grantor)
+            .grant_privilege(users, privileges, with_grant_option, granted_by)
             .await?;
         self.wait_version(version).await
     }

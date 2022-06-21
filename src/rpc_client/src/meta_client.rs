@@ -232,13 +232,13 @@ impl MetaClient {
         users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        grantor: String,
+        granted_by: String,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
             users,
             privileges,
             with_grant_option,
-            grantor,
+            granted_by,
         };
         let resp = self.inner.grant_privilege(request).await?;
         Ok(resp.version)

@@ -165,7 +165,7 @@ fn make_prost_privilege(
             };
             ActionWithGrantOption {
                 action: prost_action as i32,
-                grantor: session.user_name().to_string(),
+                granted_by: session.user_name().to_string(),
                 ..Default::default()
             }
         })
@@ -316,12 +316,12 @@ mod tests {
                         ActionWithGrantOption {
                             action: ProstAction::Connect as i32,
                             with_grant_option: true,
-                            grantor: DEFAULT_SUPPER_USER.to_string(),
+                            granted_by: DEFAULT_SUPPER_USER.to_string(),
                         },
                         ActionWithGrantOption {
                             action: ProstAction::Create as i32,
                             with_grant_option: true,
-                            grantor: DEFAULT_SUPPER_USER.to_string(),
+                            granted_by: DEFAULT_SUPPER_USER.to_string(),
                         }
                     ],
                     object: Some(ProstObject::DatabaseId(database_id)),

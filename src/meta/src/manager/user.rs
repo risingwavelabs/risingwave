@@ -57,9 +57,11 @@ fn get_relation(
         for grant_privilege_item in &user_info_item.1.grant_privileges {
             for option in &grant_privilege_item.action_with_opts {
                 user_grant_relation
-                    .entry(option.get_grantor().to_string())
+                    .entry(option.get_granted_by().to_string())
                     .or_insert_with(HashMap::new);
-                let realtion_item = user_grant_relation.get_mut(option.get_grantor()).unwrap();
+                let realtion_item = user_grant_relation
+                    .get_mut(option.get_granted_by())
+                    .unwrap();
                 if !realtion_item.contains_key(user_info_item.0) {
                     realtion_item.insert(user_info_item.0.clone(), Vec::new());
                 }
@@ -209,13 +211,13 @@ impl<S: MetaStore> UserManager<S> {
             origin_privilege
                 .action_with_opts
                 .iter()
-                .map(|ao| (ao.action, (ao.with_grant_option, ao.grantor.clone()))),
+                .map(|ao| (ao.action, (ao.with_grant_option, ao.granted_by.clone()))),
         );
         for nao in &new_privilege.action_with_opts {
             if let Some(o) = action_map.get_mut(&nao.action) {
                 (*o).0 |= nao.with_grant_option;
             } else {
-                action_map.insert(nao.action, (nao.with_grant_option, nao.grantor.clone()));
+                action_map.insert(nao.action, (nao.with_grant_option, nao.granted_by.clone()));
             }
         }
         origin_privilege.action_with_opts = action_map
@@ -223,7 +225,7 @@ impl<S: MetaStore> UserManager<S> {
             .map(|(action, with_grant_option_tuple)| ActionWithGrantOption {
                 action,
                 with_grant_option: with_grant_option_tuple.0,
-                grantor: with_grant_option_tuple.1,
+                granted_by: with_grant_option_tuple.1,
             })
             .collect();
     }
@@ -462,7 +464,7 @@ mod tests {
                 .map(|&action| ActionWithGrantOption {
                     action: action as i32,
                     with_grant_option,
-                    grantor: DEFAULT_SUPPER_USER.to_string(),
+                    granted_by: DEFAULT_SUPPER_USER.to_string(),
                 })
                 .collect(),
         }
