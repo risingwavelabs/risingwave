@@ -50,7 +50,6 @@ impl From<&StorageConfig> for SSTableBuilderOptions {
             block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
-            // TODO: Make this configurable.
             compression_algorithm: CompressionAlgorithm::None,
         }
     }
