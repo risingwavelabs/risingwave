@@ -636,8 +636,10 @@ fn parse_not_precedence() {
 
     // NOT has lower precedence than LIKE, so the following parses as NOT ('a' NOT LIKE 'b')
     let sql = "NOT 'a' NOT LIKE 'b'";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("NOT ('a' NOT LIKE 'b')", &ast.to_string());
     assert_eq!(
-        verified_expr(sql),
+        ast,
         Expr::UnaryOp {
             op: UnaryOperator::Not,
             expr: Box::new(Expr::BinaryOp {

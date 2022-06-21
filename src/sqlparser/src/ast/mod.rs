@@ -487,32 +487,19 @@ impl fmt::Display for Expr {
     }
 }
 
-/// Wrap complex expressions with parentheses.
+/// Wrap complex expressions with necessary parentheses.
+/// For example, `a > b LIKE c` becomes `a > (b LIKE c)`.
 fn fmt_expr_with_paren(e: &Expr) -> String {
-    use BinaryOperator as B;
+    use Expr as E;
     match e {
-        Expr::BinaryOp { op, .. } => match op {
-            B::Plus
-            | B::Multiply
-            | B::Modulo
-            | B::Minus
-            | B::LtEq
-            | B::GtEq
-            | B::Eq
-            | B::Gt
-            | B::Lt
-            | B::Xor
-            | B::NotEq
-            | B::Divide
-            | B::BitwiseAnd
-            | B::BitwiseOr
-            | B::BitwiseXor
-            | B::PGBitwiseXor
-            | B::PGBitwiseShiftLeft
-            | B::PGBitwiseShiftRight => return format!("({})", e),
-            _ => {}
-        },
-        Expr::UnaryOp { .. } => return format!("({})", e),
+        E::BinaryOp { .. }
+        | E::UnaryOp { .. }
+        | E::IsNull(_)
+        | E::IsNotNull(_)
+        | E::IsFalse(_)
+        | E::IsTrue(_)
+        | E::IsNotTrue(_)
+        | E::IsNotFalse(_) => return format!("({})", e),
         _ => {}
     };
     format!("{}", e)

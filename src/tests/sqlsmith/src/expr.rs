@@ -40,12 +40,17 @@ fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
 
 impl<'a> SqlGenerator<'a> {
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName) -> Expr {
+        if !self.can_recurse() {
+            // Stop recursion with a simple scalar or column.
+            return match self.rng.gen_bool(0.5) {
+                true => self.gen_simple_scalar(typ),
+                false => self.gen_col(typ),
+            };
+        }
         match self.rng.gen_range(0..=99) {
-            0..=49 => self.gen_func(typ),
+            0..=99 => self.gen_func(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
-            50..=79 => self.gen_col(typ),
-            80..=99 => self.gen_simple_scalar(typ),
             _ => unreachable!(),
         }
     }
@@ -85,6 +90,10 @@ impl<'a> SqlGenerator<'a> {
         expr.or_else(|| make_general_expr(func.func, exprs))
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
+
+    fn can_recurse(&mut self) -> bool {
+        self.rng.gen_bool(0.3)
+    }
 }
 
 fn make_unary_op(func: ExprType, expr: &Expr) -> Option<Expr> {
@@ -105,18 +114,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
     use ExprType as E;
 
     match func {
-        E::Trim => Some(Expr::Trim {
-            expr: Box::new(exprs[0].clone()),
-            trim_where: Some((TrimWhereField::Both, Box::new(exprs[1].clone()))),
-        }),
-        E::Ltrim => Some(Expr::Trim {
-            expr: Box::new(exprs[0].clone()),
-            trim_where: Some((TrimWhereField::Leading, Box::new(exprs[1].clone()))),
-        }),
-        E::Rtrim => Some(Expr::Trim {
-            expr: Box::new(exprs[0].clone()),
-            trim_where: Some((TrimWhereField::Trailing, Box::new(exprs[1].clone()))),
-        }),
+        E::Trim | E::Ltrim | E::Rtrim => Some(make_trim(func, exprs)),
         E::IsNull => Some(Expr::IsNull(Box::new(exprs[0].clone()))),
         E::IsNotNull => Some(Expr::IsNotNull(Box::new(exprs[0].clone()))),
         E::IsTrue => Some(Expr::IsTrue(Box::new(exprs[0].clone()))),
@@ -135,6 +133,26 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Md5 => Some(Expr::Function(make_func("md5", &exprs))),
         E::ToChar => Some(Expr::Function(make_func("to_char", &exprs))),
         _ => None,
+    }
+}
+
+fn make_trim(func: ExprType, exprs: Vec<Expr>) -> Expr {
+    use ExprType as E;
+
+    let trim_type = match func {
+        E::Trim => TrimWhereField::Both,
+        E::Ltrim => TrimWhereField::Leading,
+        E::Rtrim => TrimWhereField::Trailing,
+        _ => unreachable!(),
+    };
+    let trim_where = if exprs.len() > 1 {
+        Some((trim_type, Box::new(exprs[1].clone())))
+    } else {
+        None
+    };
+    Expr::Trim {
+        expr: Box::new(exprs[0].clone()),
+        trim_where,
     }
 }
 
