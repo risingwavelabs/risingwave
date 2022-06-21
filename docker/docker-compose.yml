@@ -32,7 +32,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - printf > /dev/tcp/127.0.0.1/6660
+        - "printf \"\" > /dev/tcp/127.0.0.1/6660"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -69,7 +69,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - printf > /dev/tcp/127.0.0.1/5688
+        - "printf \"\" > /dev/tcp/127.0.0.1/5688"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -110,7 +110,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - printf > /dev/tcp/127.0.0.1/2388
+        - "printf \"\" > /dev/tcp/127.0.0.1/2388"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -135,7 +135,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - printf > /dev/tcp/127.0.0.1/4566
+        - "printf \"\" > /dev/tcp/127.0.0.1/4566"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -158,7 +158,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - printf > /dev/tcp/127.0.0.1/3001
+        - "printf \"\" > /dev/tcp/127.0.0.1/3001"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -194,7 +194,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - printf > /dev/tcp/127.0.0.1/5690
+        - "printf \"\" > /dev/tcp/127.0.0.1/5690"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -227,7 +227,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - printf > /dev/tcp/127.0.0.1/9301
+        - "printf \"\" > /dev/tcp/127.0.0.1/9301"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -253,7 +253,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - printf > /dev/tcp/127.0.0.1/9500
+        - "printf \"\" > /dev/tcp/127.0.0.1/9500"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -290,7 +290,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - printf > /dev/tcp/127.0.0.1/9092
+        - "printf \"\" > /dev/tcp/127.0.0.1/9092"
       interval: 10s
       timeout: 5s
       retries: 5
