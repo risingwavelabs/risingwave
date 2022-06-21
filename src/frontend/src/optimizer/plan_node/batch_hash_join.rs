@@ -50,7 +50,7 @@ impl BatchHashJoin {
                 .l2i_col_mapping()
                 .composite(&logical.i2o_col_mapping()),
         );
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
 
         Self {
             base,
@@ -123,7 +123,7 @@ impl_plan_tree_node_for_binary! { BatchHashJoin }
 impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
         let right = self.right().to_distributed_with_required(
-            Order::any(),
+            &Order::any(),
             &RequiredDist::shard_by_key(
                 self.right().schema().len(),
                 &self.eq_join_predicate().right_eq_indexes(),
@@ -137,7 +137,7 @@ impl ToDistributedBatch for BatchHashJoin {
         ));
         let left = self
             .left()
-            .to_distributed_with_required(Order::any(), &left_dist)?;
+            .to_distributed_with_required(&Order::any(), &left_dist)?;
         Ok(self.clone_with_left_right(left, right).into())
     }
 }
@@ -176,9 +176,9 @@ impl ToBatchProst for BatchHashJoin {
 impl ToLocalBatch for BatchHashJoin {
     fn to_local(&self) -> Result<PlanRef> {
         let right = RequiredDist::single()
-            .enforce_if_not_satisfies(self.right().to_local()?, Order::any())?;
+            .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
         let left = RequiredDist::single()
-            .enforce_if_not_satisfies(self.left().to_local()?, Order::any())?;
+            .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }

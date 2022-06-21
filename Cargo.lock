@@ -4518,6 +4518,7 @@ dependencies = [
  "log",
  "madsim",
  "madsim-tokio",
+ "paste",
  "rand 0.8.5",
  "risingwave_frontend",
  "risingwave_sqlparser",
