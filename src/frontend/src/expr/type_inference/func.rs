@@ -50,7 +50,11 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<Dat
 /// Infer the return type name without parameters like length or precision.
 fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Result<DataTypeName> {
     FUNC_SIG_MAP
-        .get(&FuncSign::new(func_type, inputs_type.clone()))
+        .0
+        .get(&FuncSign {
+            func: func_type,
+            inputs_type: inputs_type.clone(),
+        })
         .cloned()
         .ok_or_else(|| {
             ErrorCode::NotImplemented(format!("{:?}{:?}", func_type, inputs_type), 112.into())
@@ -58,75 +62,60 @@ fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Resul
         })
 }
 
-#[derive(PartialEq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct FuncSign {
     pub func: ExprType,
     pub inputs_type: Vec<DataTypeName>,
 }
 
-impl Eq for FuncSign {}
-
-impl FuncSign {
-    pub fn new(func: ExprType, inputs_type: Vec<DataTypeName>) -> Self {
-        FuncSign { func, inputs_type }
+#[derive(Default)]
+pub struct FuncSigMap(HashMap<FuncSign, DataTypeName>);
+impl FuncSigMap {
+    fn insert(&mut self, func: ExprType, param_types: Vec<DataTypeName>, ret_type: DataTypeName) {
+        let inputs_type = param_types.into_iter().map(Into::into).collect();
+        self.0
+            .try_insert(FuncSign { func, inputs_type }, ret_type)
+            .unwrap();
     }
 }
 
-fn build_binary_cmp_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
-    exprs: &[ExprType],
-    args: &[DataTypeName],
-) {
+fn build_binary_cmp_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
     for (e, lt, rt) in iproduct!(exprs, args, args) {
-        map.insert(FuncSign::new(*e, vec![*lt, *rt]), DataTypeName::Boolean);
+        map.insert(*e, vec![*lt, *rt], DataTypeName::Boolean);
     }
 }
 
-fn build_binary_atm_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
-    exprs: &[ExprType],
-    args: &[DataTypeName],
-) {
+fn build_binary_atm_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
     for e in exprs {
         for (li, lt) in args.iter().enumerate() {
             for (ri, rt) in args.iter().enumerate() {
                 let ret = if li <= ri { rt } else { lt };
-                map.insert(FuncSign::new(*e, vec![*lt, *rt]), *ret);
+                map.insert(*e, vec![*lt, *rt], *ret);
             }
         }
     }
 }
 
-fn build_unary_atm_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
-    exprs: &[ExprType],
-    args: &[DataTypeName],
-) {
+fn build_unary_atm_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
     for (e, arg) in iproduct!(exprs, args) {
-        map.insert(FuncSign::new(*e, vec![*arg]), *arg);
+        map.insert(*e, vec![*arg], *arg);
     }
 }
 
 fn build_commutative_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
+    map: &mut FuncSigMap,
     expr: ExprType,
     arg0: DataTypeName,
     arg1: DataTypeName,
     ret: DataTypeName,
 ) {
-    map.insert(FuncSign::new(expr, vec![arg0, arg1]), ret);
-    map.insert(FuncSign::new(expr, vec![arg1, arg0]), ret);
+    map.insert(expr, vec![arg0, arg1], ret);
+    map.insert(expr, vec![arg1, arg0], ret);
 }
 
-fn build_round_funcs(map: &mut HashMap<FuncSign, DataTypeName>, expr: ExprType) {
-    map.insert(
-        FuncSign::new(expr, vec![DataTypeName::Float64]),
-        DataTypeName::Float64,
-    );
-    map.insert(
-        FuncSign::new(expr, vec![DataTypeName::Decimal]),
-        DataTypeName::Decimal,
-    );
+fn build_round_funcs(map: &mut FuncSigMap, expr: ExprType) {
+    map.insert(expr, vec![DataTypeName::Float64], DataTypeName::Float64);
+    map.insert(expr, vec![DataTypeName::Decimal], DataTypeName::Decimal);
 }
 
 /// This function builds type derived map for all built-in functions that take a fixed number
@@ -134,9 +123,9 @@ fn build_round_funcs(map: &mut HashMap<FuncSign, DataTypeName>, expr: ExprType) 
 /// compatible with more than one type.
 /// Type signatures and arities of variadic functions are checked
 /// [elsewhere](crate::expr::FunctionCall::new).
-fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
+fn build_type_derive_map() -> FuncSigMap {
     use {DataTypeName as T, ExprType as E};
-    let mut map = HashMap::new();
+    let mut map = FuncSigMap::default();
     let all_types = [
         T::Boolean,
         T::Int16,
@@ -163,17 +152,17 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
 
     // logical expressions
     for e in [E::Not, E::IsTrue, E::IsNotTrue, E::IsFalse, E::IsNotFalse] {
-        map.insert(FuncSign::new(e, vec![T::Boolean]), T::Boolean);
+        map.insert(e, vec![T::Boolean], T::Boolean);
     }
     for e in [E::And, E::Or] {
-        map.insert(FuncSign::new(e, vec![T::Boolean, T::Boolean]), T::Boolean);
+        map.insert(e, vec![T::Boolean, T::Boolean], T::Boolean);
     }
-    map.insert(FuncSign::new(E::BoolOut, vec![T::Boolean]), T::Varchar);
+    map.insert(E::BoolOut, vec![T::Boolean], T::Varchar);
 
     // comparison expressions
     for e in [E::IsNull, E::IsNotNull] {
         for t in all_types {
-            map.insert(FuncSign::new(e, vec![t]), T::Boolean);
+            map.insert(e, vec![t], T::Boolean);
         }
     }
     let cmp_exprs = &[
@@ -191,7 +180,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
     for e in cmp_exprs {
         for t in [T::Boolean, T::Varchar] {
-            map.insert(FuncSign::new(*e, vec![t, t]), T::Boolean);
+            map.insert(*e, vec![t, t], T::Boolean);
         }
     }
 
@@ -208,10 +197,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &[E::Modulus],
         &[T::Int16, T::Int32, T::Int64, T::Decimal],
     );
-    map.insert(
-        FuncSign::new(E::RoundDigit, vec![T::Decimal, T::Int32]),
-        T::Decimal,
-    );
+    map.insert(E::RoundDigit, vec![T::Decimal, T::Int32], T::Decimal);
 
     // build bitwise operator
     // bitwise operator
@@ -231,7 +217,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &integral_types,
         &[T::Int16, T::Int32]
     ) {
-        map.insert(FuncSign::new(*e, vec![*lt, *rt]), *lt);
+        map.insert(*e, vec![*lt, *rt], *lt);
     }
 
     build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
@@ -246,90 +232,71 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         (T::Timestamp, T::Interval),
         (T::Timestampz, T::Interval),
         (T::Time, T::Interval),
-        (T::Interval, T::Interval),
     ] {
         build_commutative_funcs(&mut map, E::Add, base, delta, base);
-        map.insert(FuncSign::new(E::Subtract, vec![base, delta]), base);
-        map.insert(FuncSign::new(E::Subtract, vec![base, base]), delta);
+        map.insert(E::Subtract, vec![base, delta], base);
+        map.insert(E::Subtract, vec![base, base], delta);
     }
+    map.insert(E::Add, vec![T::Interval, T::Interval], T::Interval);
+    map.insert(E::Subtract, vec![T::Interval, T::Interval], T::Interval);
 
     // date + interval = timestamp, date - interval = timestamp
     build_commutative_funcs(&mut map, E::Add, T::Date, T::Interval, T::Timestamp);
-    map.insert(
-        FuncSign::new(E::Subtract, vec![T::Date, T::Interval]),
-        T::Timestamp,
-    );
+    map.insert(E::Subtract, vec![T::Date, T::Interval], T::Timestamp);
     // date + time = timestamp
     build_commutative_funcs(&mut map, E::Add, T::Date, T::Time, T::Timestamp);
     // interval * float8 = interval, interval / float8 = interval
     for t in num_types {
         build_commutative_funcs(&mut map, E::Multiply, T::Interval, t, T::Interval);
-        map.insert(FuncSign::new(E::Divide, vec![T::Interval, t]), T::Interval);
+        map.insert(E::Divide, vec![T::Interval, t], T::Interval);
     }
 
     for t in [T::Timestamp, T::Time, T::Date] {
-        map.insert(FuncSign::new(E::Extract, vec![T::Varchar, t]), T::Decimal);
+        map.insert(E::Extract, vec![T::Varchar, t], T::Decimal);
     }
     for t in [T::Timestamp, T::Date] {
-        map.insert(
-            FuncSign::new(E::TumbleStart, vec![t, T::Interval]),
-            T::Timestamp,
-        );
+        map.insert(E::TumbleStart, vec![t, T::Interval], T::Timestamp);
     }
 
     // string expressions
     for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {
-        map.insert(FuncSign::new(e, vec![T::Varchar]), T::Varchar);
+        map.insert(e, vec![T::Varchar], T::Varchar);
     }
     for e in [E::Trim, E::Ltrim, E::Rtrim] {
-        map.insert(FuncSign::new(e, vec![T::Varchar, T::Varchar]), T::Varchar);
+        map.insert(e, vec![T::Varchar, T::Varchar], T::Varchar);
     }
     for e in [E::Repeat, E::Substr] {
-        map.insert(FuncSign::new(e, vec![T::Varchar, T::Int32]), T::Varchar);
+        map.insert(e, vec![T::Varchar, T::Int32], T::Varchar);
     }
-    map.insert(
-        FuncSign::new(E::Substr, vec![T::Varchar, T::Int32, T::Int32]),
-        T::Varchar,
-    );
+    map.insert(E::Substr, vec![T::Varchar, T::Int32, T::Int32], T::Varchar);
     for e in [E::Replace, E::Translate] {
-        map.insert(
-            FuncSign::new(e, vec![T::Varchar, T::Varchar, T::Varchar]),
-            T::Varchar,
-        );
+        map.insert(e, vec![T::Varchar, T::Varchar, T::Varchar], T::Varchar);
     }
     for e in [E::Length, E::Ascii, E::CharLength] {
-        map.insert(FuncSign::new(e, vec![T::Varchar]), T::Int32);
+        map.insert(e, vec![T::Varchar], T::Int32);
     }
+    map.insert(E::Position, vec![T::Varchar, T::Varchar], T::Int32);
+    map.insert(E::Like, vec![T::Varchar, T::Varchar], T::Boolean);
     map.insert(
-        FuncSign::new(E::Position, vec![T::Varchar, T::Varchar]),
-        T::Int32,
-    );
-    map.insert(
-        FuncSign::new(E::Like, vec![T::Varchar, T::Varchar]),
-        T::Boolean,
-    );
-    map.insert(
-        FuncSign::new(E::SplitPart, vec![T::Varchar, T::Varchar, T::Int32]),
+        E::SplitPart,
+        vec![T::Varchar, T::Varchar, T::Int32],
         T::Varchar,
     );
     // TODO: Support more `to_char` types.
-    map.insert(
-        FuncSign::new(E::ToChar, vec![T::Timestamp, T::Varchar]),
-        T::Varchar,
-    );
+    map.insert(E::ToChar, vec![T::Timestamp, T::Varchar], T::Varchar);
 
     map
 }
 
 lazy_static::lazy_static! {
-    static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
+    static ref FUNC_SIG_MAP: FuncSigMap = {
         build_type_derive_map()
     };
 }
 
 /// The table of function signatures.
 pub fn func_sig_map() -> &'static HashMap<FuncSign, DataTypeName> {
-    &*FUNC_SIG_MAP
+    &FUNC_SIG_MAP.0
 }
 
 #[cfg(test)]
