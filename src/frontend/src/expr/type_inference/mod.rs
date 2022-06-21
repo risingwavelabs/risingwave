@@ -18,7 +18,7 @@ use risingwave_common::types::DataType;
 
 mod cast;
 mod func;
-pub use cast::{align_types, cast_ok, least_restrictive, CastContext};
+pub use cast::{align_types, cast_ok, cast_ok_base, least_restrictive, CastContext};
 pub use func::{func_sig_map, infer_type, FuncSign};
 
 /// `DataTypeName` is designed for type derivation here. In other scenarios,

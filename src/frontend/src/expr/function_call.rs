@@ -178,7 +178,7 @@ impl FunctionCall {
             Ok(Literal::new(None, target).into())
         } else if source == target {
             Ok(child)
-        } else if cast_ok(&source, &target, &allows) {
+        } else if cast_ok(&source, &target, allows) {
             Ok(Self {
                 func_type: ExprType::Cast,
                 return_type: target,
