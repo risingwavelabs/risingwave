@@ -19,14 +19,14 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName, SqlOption, Value};
+use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName, SqlOption};
 
 use super::create_source::make_prost_source;
+use super::util::handle_with_properties;
 use crate::binder::expr::{bind_data_type, bind_struct_field};
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
@@ -135,20 +135,6 @@ pub(crate) fn gen_materialized_source_plan(
     Ok((materialize.into(), table))
 }
 
-fn handle_create_table_with_properties(options: Vec<SqlOption>) -> Result<HashMap<String, String>> {
-    options
-        .into_iter()
-        .map(|x| match x.value {
-            Value::SingleQuotedString(s) => Ok((x.name.value, s)),
-            Value::Number(n, _) => Ok((x.name.value, n)),
-            Value::Boolean(b) => Ok((x.name.value, b.to_string())),
-            _ => Err(RwError::from(ProtocolError(
-                "create_table with properties only support single quoted string value".to_string(),
-            ))),
-        })
-        .collect()
-}
-
 pub async fn handle_create_table(
     context: OptimizerContext,
     table_name: ObjectName,
@@ -163,7 +149,7 @@ pub async fn handle_create_table(
             context.into(),
             table_name.clone(),
             columns,
-            handle_create_table_with_properties(with_options)?,
+            handle_with_properties("create_table", with_options)?,
         )?;
         let plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(plan);

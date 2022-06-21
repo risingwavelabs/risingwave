@@ -15,11 +15,11 @@
 use std::collections::HashMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_sqlparser::ast::{ObjectName, Query, SqlOption, Value, WithProperties};
+use risingwave_sqlparser::ast::{ObjectName, Query, WithProperties};
 
+use super::util::handle_with_properties;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
@@ -72,20 +72,6 @@ pub fn gen_create_mv_plan(
     Ok((plan, table))
 }
 
-fn handle_create_mv_with_properties(options: Vec<SqlOption>) -> Result<HashMap<String, String>> {
-    // TODO: distinguish x.name
-    options
-        .into_iter()
-        .map(|x| match x.value {
-            Value::SingleQuotedString(s) => Ok((x.name.value, s)),
-            Value::Number(n, _) => Ok((x.name.value, n)),
-            _ => Err(RwError::from(ProtocolError(
-                "create_mv with properties only support single quoted string value".to_string(),
-            ))),
-        })
-        .collect()
-}
-
 pub async fn handle_create_mv(
     context: OptimizerContext,
     name: ObjectName,
@@ -100,7 +86,7 @@ pub async fn handle_create_mv(
             context.into(),
             query,
             name,
-            handle_create_mv_with_properties(with_options.0)?,
+            handle_with_properties("create_mv", with_options.0)?,
         )?;
         let stream_plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(stream_plan);
