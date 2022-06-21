@@ -23,6 +23,7 @@ use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::hummock::HummockStorage;
 use crate::storage_value::StorageValue;
+use crate::store::{ReadOptions, WriteOptions};
 use crate::StateStore;
 
 #[tokio::test]

@@ -28,7 +28,17 @@ pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
     }
     let scan_result = match table_id {
         None => {
-            unimplemented!("list across tables is not supported yet")
+            tracing::info!("using .. as range");
+            hummock
+                .scan::<_, Vec<u8>>(
+                    ..,
+                    None,
+                    ReadOptions {
+                        epoch: u64::MAX,
+                        table_id: None,
+                    },
+                )
+                .await?
         }
         Some(table_id) => {
             let mut buf = BytesMut::with_capacity(5);
@@ -41,7 +51,7 @@ pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
                     None,
                     ReadOptions {
                         epoch: u64::MAX,
-                        table_id: TableId { table_id },
+                        table_id: Some(TableId { table_id }),
                     },
                 )
                 .await?

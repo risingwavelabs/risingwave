@@ -106,7 +106,7 @@ impl Operations {
                             &key,
                             ReadOptions {
                                 epoch: u64::MAX,
-                                table_id: Default::default(),
+                                table_id: None,
                             },
                         )
                         .await

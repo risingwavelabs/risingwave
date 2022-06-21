@@ -91,7 +91,7 @@ impl<S: StateStore> Keyspace<S> {
                 &self.prefix,
                 ReadOptions {
                     epoch,
-                    table_id: self.table_id,
+                    table_id: Some(self.table_id),
                 },
             )
             .await
@@ -110,7 +110,7 @@ impl<S: StateStore> Keyspace<S> {
                 &self.prefixed_key(key),
                 ReadOptions {
                     epoch,
-                    table_id: self.table_id,
+                    table_id: Some(self.table_id),
                 },
             )
             .await
@@ -150,7 +150,7 @@ impl<S: StateStore> Keyspace<S> {
                 limit,
                 ReadOptions {
                     epoch,
-                    table_id: self.table_id,
+                    table_id: Some(self.table_id),
                 },
             )
             .await?;
@@ -186,7 +186,7 @@ impl<S: StateStore> Keyspace<S> {
                 range,
                 ReadOptions {
                     epoch,
-                    table_id: self.table_id,
+                    table_id: Some(self.table_id),
                 },
             )
             .await?;
