@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::VersionedComparator;
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator, ReadOptions};
 use crate::hummock::table_accessor::TableAccessor;
-use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockHolder, BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SSTableIteratorType: HummockIterator + 'static {
@@ -74,15 +74,19 @@ impl SSTableIterator {
         if idx >= self.sst.value().block_count() {
             self.block_iter = None;
         } else {
-            let block = self
-                .sstable_store
-                .get(
-                    self.sst.value(),
-                    idx as u64,
-                    crate::hummock::CachePolicy::Fill,
-                    &mut self.stats,
-                )
-                .await?;
+            let block = if idx < self.sst.value().blocks.len() {
+                BlockHolder::from_ref_block(&self.sst.value().blocks[idx])
+            } else {
+                block = self
+                    .sstable_store
+                    .get(
+                        self.sst.value(),
+                        idx as u64,
+                        crate::hummock::CachePolicy::Fill,
+                        &mut self.stats,
+                    )
+                    .await?
+            };
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
                 block_iter.seek(key);
