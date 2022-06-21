@@ -77,9 +77,6 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// Schema from input
     input_schema: Schema,
 
-    /// The executor operates on this keyspace.
-    keyspace: Vec<Keyspace<S>>,
-
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
 
@@ -140,7 +137,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 identity: format!("HashAggExecutor-{:X}", executor_id),
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
-                keyspace,
                 agg_calls,
                 key_indices,
                 state_tables: Arc::new(RwLock::new(state_tables)),
@@ -206,7 +202,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref agg_calls,
             ref input_pk_indices,
             ref input_schema,
-            ref keyspace,
             ref schema,
             ref mut state_tables,
             ..
@@ -276,7 +271,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                         .map_err(StreamExecutorError::eval_error)?,
                                 ),
                                 agg_calls,
-                                keyspace,
                                 input_pk_data_types.clone(),
                                 epoch,
                                 Some(hash_code),
@@ -323,7 +317,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     async fn flush_data<'a>(
         &mut HashAggExecutorExtra::<S> {
             ref key_indices,
-            ref keyspace,
             ref schema,
             ref mut state_tables,
             ..
@@ -331,13 +324,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         state_map: &'a mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         epoch: u64,
     ) {
-        // The state store of each keyspace is the same so just need the first.
-        let store = keyspace[0].state_store();
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been
         // fully flushed.
         let dirty_cnt = {
-            let mut write_batch = store.start_write_batch();
             let mut dirty_cnt = 0;
             let mut state_tables = state_tables.write().await;
             for states in state_map.values_mut() {
@@ -350,7 +340,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .iter_mut()
                         .zip_eq(state_tables.iter_mut())
                     {
-                        state.flush(&mut write_batch, state_table).await?;
+                        state.flush(state_table).await?;
                     }
                 }
             }

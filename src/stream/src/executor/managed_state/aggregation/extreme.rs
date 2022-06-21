@@ -25,10 +25,9 @@ use risingwave_common::hash::HashCode;
 use risingwave_common::types::*;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::write_batch::WriteBatch;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
+use smallvec::SmallVec;
 
-use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkDataTypes;
@@ -36,6 +35,15 @@ use crate::executor::PkDataTypes;
 pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
 pub type ManagedMaxState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MAX }>;
 
+type ExtremePkItem = Datum;
+
+pub type ExtremePk = SmallVec<[ExtremePkItem; 1]>;
+
+/// All possible extreme types.
+pub mod variants {
+    pub const EXTREME_MIN: usize = 0;
+    pub const EXTREME_MAX: usize = 1;
+}
 /// Manages a `BTreeMap` in memory for top N entries, and the state store for remaining entries.
 ///
 /// There are several prerequisites for using the `MinState`.
@@ -75,9 +83,8 @@ where
     // TODO: Remove this phantom to get rid of S: StateStore.
     _phantom_data: PhantomData<S>,
 
-    /// The sort key serializer
-    /// TODO: Remove this soon.
-    serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
+    /// The upstream pks. Assembled as pk of relational table.
+    upstream_pk_len: usize,
 
     /// Primary key to look up in relational table. For value state, there is only one row.
     /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
@@ -112,11 +119,7 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
     fn is_dirty(&self) -> bool;
 
     /// Flush the internal state to a write batch.
-    fn flush(
-        &mut self,
-        write_batch: &mut WriteBatch<S>,
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()>;
+    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()>;
 }
 
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
@@ -124,12 +127,10 @@ where
     A::OwnedItem: Ord,
     for<'a> &'a A: From<&'a ArrayImpl>,
 {
-    /// Create a managed min state based on `Keyspace`. When `top_n_count` is `None`, the cache will
+    /// Create a managed min state. When `top_n_count` is `None`, the cache will
     /// always be retained when flushing the managed state. Otherwise, we will only retain n entries
     /// after each flush.
     pub async fn new(
-        _keyspace: Keyspace<S>,
-        data_type: DataType,
         top_n_count: Option<usize>,
         row_count: usize,
         pk_data_types: PkDataTypes,
@@ -141,18 +142,14 @@ where
             top_n: BTreeMap::new(),
             total_count: row_count,
             _phantom_data: PhantomData::default(),
+            upstream_pk_len: pk_data_types.len(),
             top_n_count,
-            serializer: ExtremeSerializer::new(data_type, pk_data_types),
             group_key: group_key.cloned(),
         })
     }
 
-    fn pk_data_types(&self) -> &[DataType] {
-        self.serializer.pk_data_types.as_slice()
-    }
-
     fn pk_length(&self) -> usize {
-        self.pk_data_types().len()
+        self.upstream_pk_len
     }
 
     /// Retain only top n elements in the cache
@@ -345,8 +342,8 @@ where
         }
     }
 
-    /// Flush the internal state to a write batch.
-    /// TODO: Revisit all `.flush` and remove if necessary.
+    /// TODO: Revisit all `.flush` and remove if necessary. Because now the state table flush is
+    /// controlled by executor, the `.flush_inner` of agg states do not persist.
     fn flush_inner(&mut self) -> StreamExecutorResult<()> {
         self.retain_top_n();
         Ok(())
@@ -400,18 +397,13 @@ where
         unreachable!("Should not call this function anymore, check state table for dirty data");
     }
 
-    fn flush(
-        &mut self,
-        _write_batch: &mut WriteBatch<S>,
-        _state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()> {
+    fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         self.flush_inner()
     }
 }
 
 pub async fn create_streaming_extreme_state<S: StateStore>(
     agg_call: AggCall,
-    keyspace: Keyspace<S>,
     row_count: usize,
     top_n_count: Option<usize>,
     pk_data_types: PkDataTypes,
@@ -439,8 +431,6 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
                 $(
                     (AggKind::Max, $( $kind )|+) => Ok(Box::new(
                         ManagedMaxState::<_, $array>::new(
-                            keyspace,
-                            agg_call.return_type.clone(),
                             top_n_count,
                             row_count,
                             pk_data_types,
@@ -450,8 +440,6 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
                         ManagedMinState::<_, $array>::new(
-                            keyspace,
-                            agg_call.return_type.clone(),
                             top_n_count,
                             row_count,
                             pk_data_types,
@@ -493,6 +481,7 @@ mod tests {
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::Keyspace;
     use smallvec::smallvec;
 
     use super::*;
@@ -504,8 +493,6 @@ mod tests {
         let mut state_table = state_table_create_helper(keyspace.clone(), 2, OrderType::Ascending);
 
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            keyspace.clone(),
-            DataType::Int64,
             Some(5),
             0,
             PkDataTypes::new(),
@@ -533,12 +520,7 @@ mod tests {
         assert!(state_table.is_dirty());
 
         // flush to write batch and write to state store
-        let mut write_batch = store.start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
-        state_table.commit(epoch).await.unwrap();
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // The minimum should be 0
         assert_eq!(
@@ -565,12 +547,7 @@ mod tests {
 
         // flush to write batch and write to state store
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
-        state_table.commit(epoch).await.unwrap();
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // The minimum should be 0
         assert_eq!(
@@ -596,12 +573,7 @@ mod tests {
 
         // flush to write batch and write to state store
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
-        state_table.commit(epoch).await.unwrap();
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // The minimum should be 20
         assert_eq!(
@@ -623,12 +595,7 @@ mod tests {
 
         // flush to write batch and write to state store
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
-        state_table.commit(epoch).await.unwrap();
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // The minimum should be 25
         assert_eq!(
@@ -650,12 +617,7 @@ mod tests {
 
         // flush to write batch and write to state store
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
-        state_table.commit(epoch).await.unwrap();
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // The minimum should be 30
         assert_eq!(
@@ -666,10 +628,7 @@ mod tests {
         let row_count = managed_state.total_count;
 
         // test recovery
-        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            keyspace,
-            DataType::Int64,
             Some(5),
             row_count,
             PkDataTypes::new(),
@@ -739,8 +698,6 @@ mod tests {
         let mut state_table = state_table_create_helper(keyspace.clone(), 3, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
-            keyspace.clone(),
-            DataType::Int64,
             Some(3),
             0,
             smallvec![DataType::Int64],
@@ -805,11 +762,7 @@ mod tests {
             .unwrap();
 
         // flush
-        let mut write_batch = store.start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // The minimum should be 1, or the maximum should be 5
         assert_eq!(
@@ -831,11 +784,7 @@ mod tests {
 
         // flush
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // The minimum should still be 1, or the maximum should still be 5
         assert_eq!(
@@ -855,8 +804,6 @@ mod tests {
         let mut state_table = state_table_create_helper(keyspace.clone(), 3, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
-            keyspace.clone(),
-            DataType::Int64,
             Some(3),
             0,
             smallvec![DataType::Int64],
@@ -938,11 +885,7 @@ mod tests {
             .unwrap();
 
         // flush
-        let mut write_batch = store.start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // The minimum should be None, or the maximum should be 5
         assert_eq!(
@@ -964,11 +907,7 @@ mod tests {
 
         // flush
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // The minimum should still be None, or the maximum should still be 5
         assert_eq!(
@@ -982,8 +921,6 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            keyspace.clone(),
-            DataType::Int64,
             Some(3),
             0,
             PkDataTypes::new(),
@@ -1029,11 +966,7 @@ mod tests {
                 // only ingest after insert in some cases
                 // flush to write batch and write to state store
                 epoch += 1;
-                let mut write_batch = store.start_write_batch();
-                managed_state
-                    .flush(&mut write_batch, &mut state_table)
-                    .unwrap();
-                write_batch.ingest(epoch).await.unwrap();
+                helper_flush(&mut managed_state, epoch, &mut state_table).await;
             }
 
             managed_state
@@ -1049,11 +982,7 @@ mod tests {
 
             // flush to write batch and write to state store
             epoch += 1;
-            let mut write_batch = store.start_write_batch();
-            managed_state
-                .flush(&mut write_batch, &mut state_table)
-                .unwrap();
-            write_batch.ingest(epoch).await.unwrap();
+            helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
             // The minimum should be 6
             assert_eq!(
@@ -1081,13 +1010,6 @@ mod tests {
 
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
-        // let mut state_table = StateTable::new(
-        //     keyspace.clone(),
-        //     vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
-        //     vec![],
-        //     None,
-        //     vec![],
-        // );
         let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
             OrderType::Descending
         } else {
@@ -1096,8 +1018,6 @@ mod tests {
         let mut state_table = state_table_create_helper(keyspace.clone(), 2, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
-            keyspace.clone(),
-            DataType::Int64,
             Some(3),
             0,
             PkDataTypes::new(),
@@ -1157,12 +1077,7 @@ mod tests {
                 .unwrap();
 
             // flush to write batch and write to state store
-            let mut write_batch = store.start_write_batch();
-            managed_state
-                .flush(&mut write_batch, &mut state_table)
-                .unwrap();
-            write_batch.ingest(epoch).await.unwrap();
-            state_table.commit(epoch).await.unwrap();
+            helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
             let value = managed_state
                 .get_output(epoch, &state_table)
@@ -1180,13 +1095,11 @@ mod tests {
 
     async fn helper_flush<S: StateStore>(
         managed_state: &mut impl ManagedTableState<S>,
-        keyspace: &Keyspace<S>,
         epoch: u64,
         state_table: &mut StateTable<S>,
     ) {
-        let mut write_batch = keyspace.state_store().start_write_batch();
-        managed_state.flush(&mut write_batch, state_table).unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        managed_state.flush(state_table).unwrap();
+        state_table.commit(epoch).await.unwrap();
     }
 
     #[tokio::test]
@@ -1199,8 +1112,6 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            keyspace.clone(),
-            DataType::Int64,
             Some(3),
             0,
             PkDataTypes::new(),
@@ -1242,7 +1153,7 @@ mod tests {
             .unwrap();
 
         // Now we have 1 to 7 in the state store.
-        helper_flush(&mut managed_state, &keyspace, epoch, &mut state_table).await;
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         // Delete 6, insert 6, delete 6
         managed_state
@@ -1259,7 +1170,7 @@ mod tests {
             .unwrap();
 
         // 6 should be deleted by now
-        helper_flush(&mut managed_state, &keyspace, epoch, &mut state_table).await;
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         let value_buffer = I64Array::from_slice(&[Some(1), Some(2), Some(3), Some(4), Some(5)])
             .unwrap()
@@ -1277,7 +1188,7 @@ mod tests {
             .await
             .unwrap();
 
-        helper_flush(&mut managed_state, &keyspace, epoch, &mut state_table).await;
+        helper_flush(&mut managed_state, epoch, &mut state_table).await;
 
         assert_eq!(
             managed_state.get_output(epoch, &state_table).await.unwrap(),
