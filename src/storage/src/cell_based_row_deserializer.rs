@@ -49,10 +49,10 @@ impl ColumnDescMapping {
     }
 
     /// Create a mapping with given `table_columns` projected on the `column_ids`.
-    pub fn new_partial(table_columns: Vec<ColumnDesc>, column_ids: &[ColumnId]) -> Arc<Self> {
+    pub fn new_partial(table_columns: &[ColumnDesc], column_ids: &[ColumnId]) -> Arc<Self> {
         let mut table_columns = table_columns
-            .into_iter()
-            .map(|c| (c.column_id, c))
+            .iter()
+            .map(|c| (c.column_id, c.clone()))
             .collect::<HashMap<_, _>>();
 
         let output_columns = column_ids

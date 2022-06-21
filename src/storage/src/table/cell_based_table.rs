@@ -47,7 +47,13 @@ pub struct CellBasedTable<S: StateStore> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
-    /// The schema of this table viewed by some source executor, e.g. RowSeqScanExecutor.
+    /// All columns of this table. Note that this is different from the output columns in
+    /// `mapping.output_columns`.
+    #[allow(dead_code)]
+    table_columns: Vec<ColumnDesc>,
+
+    /// The schema of the output columns, i.e., this table VIEWED BY some executor like
+    /// RowSeqScanExecutor.
     schema: Schema,
 
     /// Used for serializing the primary key.
@@ -60,11 +66,13 @@ pub struct CellBasedTable<S: StateStore> {
     mapping: Arc<ColumnDescMapping>,
 
     /// Indices of primary keys.
-    /// Note that the index is based on the full row of the TABLE, instead of the output columns.
+    /// Note that the index is based on the all columns of the table, instead of the output ones.
+    // FIXME: revisit constructions and usages.
     pk_indices: Vec<usize>,
 
     /// Indices of distribution keys for computing value meta. None if value meta is not required.
-    /// Note that the index is based on the full row of the TABLE, instead of the output columns.
+    /// Note that the index is based on the all columns of the table, instead of the output ones.
+    // FIXME: revisit constructions and usages.
     dist_key_indices: Option<Vec<usize>>,
 }
 
@@ -109,12 +117,13 @@ impl<S: StateStore> CellBasedTable<S> {
         pk_indices: Vec<usize>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        let mapping = ColumnDescMapping::new_partial(table_columns, &column_ids);
+        let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
         let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
         Self {
             keyspace,
+            table_columns,
             schema,
             pk_serializer,
             cell_based_row_serializer: CellBasedRowSerializer::new(column_ids),
