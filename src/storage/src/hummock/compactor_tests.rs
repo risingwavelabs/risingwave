@@ -34,6 +34,7 @@ mod tests {
     use crate::hummock::HummockStorage;
     use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use crate::storage_value::StorageValue;
+    use crate::store::{ReadOptions, WriteOptions};
     use crate::{Keyspace, StateStore};
 
     async fn get_hummock_storage(
@@ -96,7 +97,10 @@ mod tests {
             storage
                 .ingest_batch(
                     vec![(key.clone(), StorageValue::new_default_put(val.clone()))],
-                    epoch,
+                    WriteOptions {
+                        epoch,
+                        table_id: Default::default(),
+                    },
                 )
                 .await
                 .unwrap();
@@ -158,7 +162,17 @@ mod tests {
         storage
             .local_version_manager()
             .try_update_pinned_version(version);
-        let get_val = storage.get(&key, epoch).await.unwrap().unwrap();
+        let get_val = storage
+            .get(
+                &key,
+                ReadOptions {
+                    epoch,
+                    table_id: Default::default(),
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(get_val, val);
 
         // 6. get compact task and there should be none
@@ -196,13 +210,16 @@ mod tests {
         let kv_count = 128;
         let mut epoch: u64 = 1;
         for _ in 0..kv_count {
-            let mut write_batch = keyspace.state_store().start_write_batch();
-            let mut local = write_batch.prefixify(&keyspace);
             epoch += 1;
+            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+                epoch,
+                table_id: Default::default(),
+            });
+            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest(epoch).await.unwrap();
+            write_batch.ingest().await.unwrap();
 
             storage.sync(Some(epoch)).await.unwrap();
             hummock_meta_client
@@ -284,13 +301,16 @@ mod tests {
                 existing_table_ids
             };
             let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
-            let mut write_batch = keyspace.state_store().start_write_batch();
-            let mut local = write_batch.prefixify(&keyspace);
             epoch += 1;
+            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+                epoch,
+                table_id: Default::default(),
+            });
+            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest(epoch).await.unwrap();
+            write_batch.ingest().await.unwrap();
 
             storage.sync(Some(epoch)).await.unwrap();
             hummock_meta_client
@@ -360,7 +380,17 @@ mod tests {
             .try_update_pinned_version(version);
 
         // 6. scan kv to check key table_id
-        let scan_result = storage.scan::<_, Vec<u8>>(.., None, epoch).await.unwrap();
+        let scan_result = storage
+            .scan::<_, Vec<u8>>(
+                ..,
+                None,
+                ReadOptions {
+                    epoch,
+                    table_id: Default::default(),
+                },
+            )
+            .await
+            .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
             let table_id = get_table_id(&k).unwrap();

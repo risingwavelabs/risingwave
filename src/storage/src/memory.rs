@@ -283,7 +283,10 @@ mod tests {
                         StorageValue::new_default_put(b"v1".to_vec()),
                     ),
                 ],
-                0,
+                WriteOptions {
+                    epoch: 0,
+                    table_id: Default::default(),
+                },
             )
             .await
             .unwrap();
@@ -296,39 +299,135 @@ mod tests {
                     ),
                     (b"b".to_vec().into(), StorageValue::new_default_delete()),
                 ],
-                1,
+                WriteOptions {
+                    epoch: 1,
+                    table_id: Default::default(),
+                },
             )
             .await
             .unwrap();
         assert_eq!(
-            state_store.scan("a"..="b", None, 0).await.unwrap(),
+            state_store
+                .scan(
+                    "a"..="b",
+                    None,
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default()
+                    }
+                )
+                .await
+                .unwrap(),
             vec![
                 (b"a".to_vec().into(), b"v1".to_vec().into()),
                 (b"b".to_vec().into(), b"v1".to_vec().into())
             ]
         );
         assert_eq!(
-            state_store.scan("a"..="b", Some(1), 0).await.unwrap(),
+            state_store
+                .scan(
+                    "a"..="b",
+                    Some(1),
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default()
+                    }
+                )
+                .await
+                .unwrap(),
             vec![(b"a".to_vec().into(), b"v1".to_vec().into())]
         );
         assert_eq!(
-            state_store.scan("a"..="b", None, 1).await.unwrap(),
+            state_store
+                .scan(
+                    "a"..="b",
+                    None,
+                    ReadOptions {
+                        epoch: 1,
+                        table_id: Default::default()
+                    }
+                )
+                .await
+                .unwrap(),
             vec![(b"a".to_vec().into(), b"v2".to_vec().into())]
         );
         assert_eq!(
-            state_store.get(b"a", 0).await.unwrap(),
+            state_store
+                .get(
+                    b"a",
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default()
+                    }
+                )
+                .await
+                .unwrap(),
             Some(b"v1".to_vec().into())
         );
         assert_eq!(
-            state_store.get(b"b", 0).await.unwrap(),
+            state_store
+                .get(
+                    b"b",
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default()
+                    }
+                )
+                .await
+                .unwrap(),
             Some(b"v1".to_vec().into())
         );
-        assert_eq!(state_store.get(b"c", 0).await.unwrap(), None);
         assert_eq!(
-            state_store.get(b"a", 1).await.unwrap(),
+            state_store
+                .get(
+                    b"c",
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default()
+                    }
+                )
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            state_store
+                .get(
+                    b"a",
+                    ReadOptions {
+                        epoch: 1,
+                        table_id: Default::default()
+                    }
+                )
+                .await
+                .unwrap(),
             Some(b"v2".to_vec().into())
         );
-        assert_eq!(state_store.get(b"b", 1).await.unwrap(), None);
-        assert_eq!(state_store.get(b"c", 1).await.unwrap(), None);
+        assert_eq!(
+            state_store
+                .get(
+                    b"b",
+                    ReadOptions {
+                        epoch: 1,
+                        table_id: Default::default()
+                    }
+                )
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            state_store
+                .get(
+                    b"c",
+                    ReadOptions {
+                        epoch: 1,
+                        table_id: Default::default()
+                    }
+                )
+                .await
+                .unwrap(),
+            None
+        );
     }
 }

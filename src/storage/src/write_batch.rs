@@ -169,12 +169,19 @@ mod tests {
     use super::WriteBatch;
     use crate::memory::MemoryStateStore;
     use crate::storage_value::StorageValue;
+    use crate::store::WriteOptions;
     use crate::Keyspace;
 
     #[tokio::test]
     async fn test_invalid_write_batch() {
         let state_store = MemoryStateStore::new();
-        let mut write_batch = WriteBatch::new(state_store.clone());
+        let mut write_batch = WriteBatch::new(
+            state_store.clone(),
+            WriteOptions {
+                epoch: 1,
+                table_id: Default::default(),
+            },
+        );
         let key_space = Keyspace::table_root(state_store, &TableId::from(0x118));
 
         assert!(write_batch.is_empty());
@@ -185,7 +192,7 @@ mod tests {
         key_space_batch.delete(Bytes::from("aa"));
 
         write_batch
-            .ingest(1)
+            .ingest()
             .await
             .expect_err("Should panic here because of duplicate key.");
     }
