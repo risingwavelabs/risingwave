@@ -28,7 +28,6 @@ message UserInfo {
 
   /// Granted privileges will be only updated through the command of GRANT/REVOKE.
   repeated GrantPrivilege grant_privileges = 6;
-
 }
 
 /// GrantPrivilege defines a privilege granted to a user.
