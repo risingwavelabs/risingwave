@@ -21,8 +21,8 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{CompactionConfig, KeyRange, Level, LevelType, SstableInfo};
 
 use super::SearchResult;
-use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
+use crate::hummock::compaction::CompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 
 const MIN_COMPACTION_BYTES: u64 = 2 * 1024 * 1024; // 1MB
@@ -384,7 +384,7 @@ pub mod tests {
                 inf: false,
             }),
             file_size: (right - left + 1) as u64,
-            vnode_bitmaps: vec![],
+            table_ids: vec![],
             unit_id: u64::MAX,
         }
     }

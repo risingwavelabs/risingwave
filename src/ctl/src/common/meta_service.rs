@@ -14,7 +14,7 @@
 
 use std::env;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 
@@ -29,14 +29,15 @@ impl MetaServiceOpts {
     ///
     /// * `RW_META_ADDR`: meta service address
     pub fn from_env() -> Result<Self> {
-        let meta_addr = env::var("RW_META_ADDR").unwrap_or_else(|_| {
-            const DEFAULT_ADDR: &str = "http://127.0.0.1:5690";
-            tracing::warn!(
-                "`RW_META_ADDR` not found, using default meta address {}",
-                DEFAULT_ADDR
-            );
-            DEFAULT_ADDR.to_string()
-        });
+        let meta_addr = match env::var("RW_META_ADDR") {
+            Ok(url) => {
+                tracing::info!("using meta addr from `RW_META_ADDR`: {}", url);
+                url
+            }
+            Err(_) => {
+                bail!("env variable `RW_META_ADDR` not found, please do one of the following:\n* use `./risedev ctl` to start risectl.\n* `source .risingwave/config/risectl-env` or `source ~/risingwave-deploy/risectl-env` before running risectl.\n* manually set `RW_META_ADDR` in env variable.\nrisectl requires a full persistent cluster to operate, so please also remember to add `use: minio` to risedev config.");
+            }
+        };
         Ok(Self { meta_addr })
     }
 

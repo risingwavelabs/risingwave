@@ -30,7 +30,7 @@ pub struct Order {
 }
 
 impl Order {
-    pub fn new(field_order: Vec<FieldOrder>) -> Self {
+    pub const fn new(field_order: Vec<FieldOrder>) -> Self {
         Self { field_order }
     }
 
@@ -153,11 +153,9 @@ impl Direction {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref ANY_ORDER: Order = Order {
-        field_order: vec![],
-    };
-}
+const ANY_ORDER: Order = Order {
+    field_order: vec![],
+};
 
 impl Order {
     pub fn enforce_if_not_satisfies(&self, plan: PlanRef) -> Result<PlanRef> {
@@ -186,10 +184,12 @@ impl Order {
         true
     }
 
-    pub fn any() -> &'static Self {
-        &ANY_ORDER
+    #[inline(always)]
+    pub const fn any() -> Self {
+        ANY_ORDER
     }
 
+    #[inline(always)]
     pub fn is_any(&self) -> bool {
         self.field_order.is_empty()
     }

@@ -65,7 +65,6 @@ pub type ParallelUnitId = u32;
 pub type VirtualNode = u16;
 pub const VNODE_BITS: usize = 11;
 pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
-pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;

@@ -851,6 +851,9 @@ mod tests {
                 meta_metrics.clone(),
             ));
 
+            let compaction_group_manager =
+                Arc::new(CompactionGroupManager::new(env.clone()).await?);
+
             let source_manager = Arc::new(
                 SourceManager::new(
                     env.clone(),
@@ -858,6 +861,7 @@ mod tests {
                     barrier_manager.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
+                    compaction_group_manager.clone(),
                 )
                 .await?,
             );
@@ -952,8 +956,7 @@ mod tests {
                 .cloned()
                 .unwrap()
                 .clone();
-            assert!(!scheduled_actor.vnode_bitmap.is_empty());
-            scheduled_actor.vnode_bitmap.clear();
+            scheduled_actor.vnode_bitmap.take().unwrap();
             assert_eq!(scheduled_actor, actor);
             assert!(services
                 .state
@@ -1053,8 +1056,7 @@ mod tests {
                 .get(&actor.get_actor_id())
                 .cloned()
                 .unwrap();
-            assert!(!scheduled_actor.vnode_bitmap.is_empty());
-            scheduled_actor.vnode_bitmap.clear();
+            scheduled_actor.vnode_bitmap.take().unwrap();
             assert_eq!(scheduled_actor, actor);
             assert!(services
                 .state
