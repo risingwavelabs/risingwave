@@ -96,7 +96,7 @@ pub(crate) fn gen_create_table_plan(
     Ok((plan, source, table))
 }
 
-/// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it ressembles a
+/// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it resembles a
 /// `CREATE MATERIALIZED VIEW AS SELECT * FROM <source>`.
 pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
@@ -116,7 +116,7 @@ pub(crate) fn gen_materialized_source_plan(
         PlanRoot::new(
             source_node,
             RequiredDist::Any,
-            Order::any().clone(),
+            Order::any(),
             required_cols,
             out_names,
         )

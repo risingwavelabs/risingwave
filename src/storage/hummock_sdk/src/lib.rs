@@ -13,6 +13,8 @@
 // limitations under the License.
 
 mod version_cmp;
+
+use risingwave_pb::hummock::SstableInfo;
 pub use version_cmp::*;
 pub mod compact;
 pub mod compaction_group;
@@ -32,6 +34,8 @@ pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
 pub const LOCAL_SST_ID_MASK: HummockSSTableId = 1 << (HummockSSTableId::BITS - 1);
 pub const REMOTE_SST_ID_MASK: HummockSSTableId = !LOCAL_SST_ID_MASK;
+
+pub type LocalSstableInfo = (CompactionGroupId, SstableInfo);
 
 pub fn get_remote_sst_id(id: HummockSSTableId) -> HummockSSTableId {
     id & REMOTE_SST_ID_MASK

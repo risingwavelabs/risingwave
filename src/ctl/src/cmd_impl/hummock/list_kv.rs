@@ -20,17 +20,17 @@ use risingwave_storage::StateStore;
 
 use crate::common::HummockServiceOpts;
 
-pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
+pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
     let hummock_opts = HummockServiceOpts::from_env()?;
-    let hummock = hummock_opts.create_hummock_store().await?;
+    let (_, hummock) = hummock_opts.create_hummock_store().await?;
     if epoch == u64::MAX {
         tracing::info!("using u64::MAX as epoch");
     }
     let scan_result = match table_id {
-        u32::MAX => {
+        None => {
             unimplemented!("list across tables is not supported yet")
         }
-        _ => {
+        Some(table_id) => {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
             buf.put_u32(table_id);
@@ -51,19 +51,19 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
         let print_string = match k[0] {
             b't' => {
                 let mut buf = &k[1..];
-                format!("table_id:{:?}", buf.get_u32())
+                format!("[t{}]", buf.get_u32()) // table id
             }
             b's' => {
                 let mut buf = &k[1..];
-                format!("shared_executor_id:{:?}", buf.get_u64())
+                format!("[s{}]", buf.get_u64()) // shared executor root
             }
             b'e' => {
                 let mut buf = &k[1..];
-                format!("executor_id:{:?}", buf.get_u64())
+                format!("[e{}]", buf.get_u64()) // executor id
             }
             _ => "no title".to_string(),
         };
-        println!("{}\n key : {:?} ====> value : {:?}", print_string, k, v)
+        println!("{} {:?} => {:?}", print_string, k, v)
     }
 
     Ok(())

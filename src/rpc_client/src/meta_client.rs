@@ -18,48 +18,23 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
-use risingwave_pb::ddl_service::{
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
-    CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
-    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
-    CreateSourceResponse, DropDatabaseRequest, DropDatabaseResponse, DropMaterializedSourceRequest,
-    DropMaterializedSourceResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
-    DropSchemaRequest, DropSchemaResponse, DropSourceRequest, DropSourceResponse,
-};
+use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
-use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, GetCompactionGroupsRequest, GetCompactionGroupsResponse,
-    GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot, HummockVersion,
-    PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
-    ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
-    ReportVacuumTaskResponse, SstableInfo, SubscribeCompactTasksRequest,
-    SubscribeCompactTasksResponse, TriggerManualCompactionRequest, TriggerManualCompactionResponse,
-    UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse, UnpinSnapshotRequest,
-    UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse, VacuumTask,
-};
+use risingwave_pb::hummock::*;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
-use risingwave_pb::meta::{
-    ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, FlushRequest,
-    FlushResponse, HeartbeatRequest, HeartbeatResponse, ListAllNodesRequest, ListAllNodesResponse,
-    SubscribeRequest, SubscribeResponse,
-};
+use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::user_service_client::UserServiceClient;
-use risingwave_pb::user::{
-    CreateUserRequest, CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilege,
-    GrantPrivilegeRequest, GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse,
-    UserInfo,
-};
+use risingwave_pb::user::*;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -349,6 +324,12 @@ impl MetaClient {
         (join_handle, shutdown_tx)
     }
 
+    pub async fn list_materialize_view(&self) -> Result<Vec<ProstTable>> {
+        let request = ListMaterializedViewRequest {};
+        let resp = self.inner.list_materialized_view(request).await?;
+        Ok(resp.tables)
+    }
+
     pub async fn flush(&self) -> Result<()> {
         let request = FlushRequest::default();
         self.inner.flush(request).await?;
@@ -424,7 +405,11 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch, _sstables: Vec<SstableInfo>) -> Result<()> {
+    async fn commit_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _sstables: Vec<LocalSstableInfo>,
+    ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 
@@ -449,13 +434,29 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.compaction_groups)
     }
 
-    async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()> {
+    async fn trigger_manual_compaction(
+        &self,
+        compaction_group_id: u64,
+        table_id: u32,
+        level: u32,
+    ) -> Result<()> {
+        // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
             compaction_group_id,
+            table_id, /* if table_id not exist, manual_compaction will include all the sst
+                       * without check internal_table_id */
+            level,
+            ..Default::default()
         };
 
         self.inner.trigger_manual_compaction(req).await?;
         Ok(())
+    }
+
+    async fn list_sstable_id_infos(&self, version_id: u64) -> Result<Vec<SstableIdInfo>> {
+        let req = ListSstableIdInfosRequest { version_id };
+        let resp = self.inner.list_sstable_id_infos(req).await?;
+        Ok(resp.sstable_id_infos)
     }
 }
 
@@ -555,6 +556,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
+            ,{ ddl_client, list_materialized_view, ListMaterializedViewRequest, ListMaterializedViewResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
@@ -566,6 +568,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
+            ,{ hummock_client, list_sstable_id_infos, ListSstableIdInfosRequest, ListSstableIdInfosResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }

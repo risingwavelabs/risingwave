@@ -19,12 +19,12 @@ use risingwave_common::types::DataType;
 mod cast;
 mod func;
 pub use cast::{align_types, cast_ok, least_restrictive, CastContext};
-pub use func::infer_type;
+pub use func::{func_sig_map, infer_type, FuncSign};
 
 /// `DataTypeName` is designed for type derivation here. In other scenarios,
 /// use `DataType` instead.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
-enum DataTypeName {
+pub enum DataTypeName {
     Boolean,
     Int16,
     Int32,
@@ -42,22 +42,30 @@ enum DataTypeName {
     List,
 }
 
-fn name_of(ty: &DataType) -> DataTypeName {
-    match ty {
-        DataType::Boolean => DataTypeName::Boolean,
-        DataType::Int16 => DataTypeName::Int16,
-        DataType::Int32 => DataTypeName::Int32,
-        DataType::Int64 => DataTypeName::Int64,
-        DataType::Decimal => DataTypeName::Decimal,
-        DataType::Float32 => DataTypeName::Float32,
-        DataType::Float64 => DataTypeName::Float64,
-        DataType::Varchar => DataTypeName::Varchar,
-        DataType::Date => DataTypeName::Date,
-        DataType::Timestamp => DataTypeName::Timestamp,
-        DataType::Timestampz => DataTypeName::Timestampz,
-        DataType::Time => DataTypeName::Time,
-        DataType::Interval => DataTypeName::Interval,
-        DataType::Struct { .. } => DataTypeName::Struct,
-        DataType::List { .. } => DataTypeName::List,
+impl From<&DataType> for DataTypeName {
+    fn from(ty: &DataType) -> Self {
+        match ty {
+            DataType::Boolean => DataTypeName::Boolean,
+            DataType::Int16 => DataTypeName::Int16,
+            DataType::Int32 => DataTypeName::Int32,
+            DataType::Int64 => DataTypeName::Int64,
+            DataType::Decimal => DataTypeName::Decimal,
+            DataType::Float32 => DataTypeName::Float32,
+            DataType::Float64 => DataTypeName::Float64,
+            DataType::Varchar => DataTypeName::Varchar,
+            DataType::Date => DataTypeName::Date,
+            DataType::Timestamp => DataTypeName::Timestamp,
+            DataType::Timestampz => DataTypeName::Timestampz,
+            DataType::Time => DataTypeName::Time,
+            DataType::Interval => DataTypeName::Interval,
+            DataType::Struct { .. } => DataTypeName::Struct,
+            DataType::List { .. } => DataTypeName::List,
+        }
+    }
+}
+
+impl From<DataType> for DataTypeName {
+    fn from(ty: DataType) -> Self {
+        (&ty).into()
     }
 }

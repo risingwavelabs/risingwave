@@ -17,8 +17,9 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::mem::size_of;
 
-use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
+use risingwave_pb::common::buffer::CompressionType;
+use risingwave_pb::common::Buffer;
+use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};

@@ -461,6 +461,25 @@
               returnType:
                 typeName: INT64
                 isNullable: true
+          internalTables:
+            - id: 4294967294
+              schemaId: 2147483646
+              databaseId: 2147483646
+              columns:
+                - columnDesc:
+                    columnType:
+                      typeName: INT64
+                      isNullable: true
+              owner: root
+            - id: 4294967294
+              schemaId: 2147483646
+              databaseId: 2147483646
+              columns:
+                - columnDesc:
+                    columnType:
+                      typeName: INT64
+                      isNullable: true
+              owner: root
     fields:
       - dataType:
           typeName: INT64
@@ -656,6 +675,55 @@
                   returnType:
                     typeName: INT64
                     isNullable: true
+              internalTables:
+                - id: 4294967294
+                  schemaId: 2147483646
+                  databaseId: 2147483646
+                  columns:
+                    - columnDesc:
+                        columnType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v2
+                    - columnDesc:
+                        columnType:
+                          typeName: INT64
+                          isNullable: true
+                        columnId: 1
+                  orderColumnIds:
+                    - 0
+                  orders:
+                    - ASCENDING
+                  distributionKeys:
+                    - 0
+                  pk:
+                    - 0
+                  owner: root
+                - id: 4294967294
+                  schemaId: 2147483646
+                  databaseId: 2147483646
+                  columns:
+                    - columnDesc:
+                        columnType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v2
+                    - columnDesc:
+                        columnType:
+                          typeName: INT64
+                          isNullable: true
+                        columnId: 1
+                  orderColumnIds:
+                    - 0
+                  orders:
+                    - ASCENDING
+                  distributionKeys:
+                    - 0
+                  pk:
+                    - 0
+                  owner: root
+              columnMapping:
+                0: 0
         pkIndices:
           - 1
         fields:

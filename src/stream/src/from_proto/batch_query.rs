@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc};
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -35,7 +33,11 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let table_id = node.table_desc.as_ref().unwrap().table_id.into();
 
         let pk_descs_proto = &node.table_desc.as_ref().unwrap().order_key;
-        let pk_descs = pk_descs_proto.iter().map(|d| d.into()).collect();
+        let pk_descs = pk_descs_proto
+            .iter()
+            .map(OrderedColumnDesc::from)
+            .collect_vec();
+        let order_types = pk_descs.iter().map(|desc| desc.order).collect_vec();
 
         let column_descs = node
             .column_descs
@@ -43,15 +45,14 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new(keyspace, column_descs, None, None);
+        let table = CellBasedTable::new(keyspace, column_descs, order_types, None);
         let key_indices = node
             .get_distribution_keys()
             .iter()
             .map(|key| *key as usize)
             .collect_vec();
 
-        let mapping = (*params.vnode_bitmap).clone();
-        let hash_filter = Bitmap::from_bytes_with_num_bits(mapping.into(), VIRTUAL_NODE_COUNT);
+        let hash_filter = params.vnode_bitmap.expect("no vnode bitmap");
 
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
