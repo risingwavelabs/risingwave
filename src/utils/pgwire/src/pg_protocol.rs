@@ -258,14 +258,16 @@ where
             FeMessage::Execute(m) => {
                 // 1. Get portal.
                 let portal_name = cstr_to_str(&m.portal_name).unwrap().to_string();
-                let _portal = if m.portal_name.is_empty() {
+                let portal = if m.portal_name.is_empty() {
                     unnamed_portal
                 } else {
                     // NOTE Error handle need modify later.
-                    named_portals.get(&portal_name).expect("statement_name managed by client_driver, hence assume statement name always valid")
+                    named_portals.get_mut(&portal_name).expect("statement_name managed by client_driver, hence assume statement name always valid")
                 };
 
                 // 2. Execute instance statement using portal.
+                self.process_query_msg_extended(portal, m.max_rows.try_into().unwrap())
+                    .await?;
 
                 // NOTE there is no ReadyForQuery message.
             }
@@ -372,6 +374,18 @@ where
 
     fn process_terminate(&mut self) {
         self.is_terminate = true;
+    }
+
+    async fn process_query_msg_extended(
+        &mut self,
+        portal: &mut PgPortal,
+        row_limit: usize,
+    ) -> Result<()> {
+        let session = self.session.clone().unwrap();
+        // execute query
+        let process_res = portal.execute::<SM>(session, row_limit).await;
+        self.process_query_response(process_res, true).await?;
+        Ok(())
     }
 
     async fn process_query_msg_simple(&mut self, query_string: Result<&str>) -> Result<()> {
