@@ -281,8 +281,11 @@ impl LocalVersionManager {
 
         // New a shared buffer with version write lock if shared buffer of the corresponding epoch
         // does not exist before
-        let shared_buffer =
-            shared_buffer.unwrap_or_else(|| self.local_version.write().new_shared_buffer(epoch));
+        let shared_buffer = shared_buffer.unwrap_or_else(|| {
+            self.local_version
+                .write()
+                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone())
+        });
 
         // Write into shared buffer
         if is_remote_batch {
@@ -294,8 +297,7 @@ impl LocalVersionManager {
         }
 
         // Notify the buffer tracker after the batch has been added to shared buffer.
-        self.buffer_tracker
-            .send_event(SharedBufferEvent::BatchAdded);
+        self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
         Ok(batch_size)
     }
 
@@ -304,12 +306,12 @@ impl LocalVersionManager {
     /// This method should only be called in the buffer tracker worker.
     ///
     /// Return:
-    ///   - Some(task buffer size, task join handle) when there is new upload task
+    ///   - Some(task join handle) when there is new upload task
     ///   - None when there is no new task
     pub fn flush_shared_buffer(
         self: Arc<Self>,
         syncing_epoch: &HashSet<HummockEpoch>,
-    ) -> Option<(usize, HummockEpoch, JoinHandle<()>)> {
+    ) -> Option<(HummockEpoch, JoinHandle<()>)> {
         // The current implementation is a trivial one, which issue only one flush task and wait for
         // the task to finish.
         let mut task = None;
@@ -323,7 +325,7 @@ impl LocalVersionManager {
                 break;
             }
         }
-        let (epoch, (order_index, payload, task_write_batch_size)) = match task {
+        let (epoch, (order_index, payload)) = match task {
             Some(task) => task,
             None => return None,
         };
@@ -331,7 +333,7 @@ impl LocalVersionManager {
         let join_handle = tokio::spawn(async move {
             // TODO: may apply different `is_local` according to whether local spill is enabled.
             let _ = self
-                .run_upload_task(order_index, epoch, payload, true, task_write_batch_size)
+                .run_upload_task(order_index, epoch, payload, true)
                 .await
                 .inspect_err(|err| {
                     error!(
@@ -340,7 +342,7 @@ impl LocalVersionManager {
                     );
                 });
         });
-        Some((task_write_batch_size, epoch, join_handle))
+        Some((epoch, join_handle))
     }
 
     pub async fn sync_shared_buffer(&self, epoch: Option<HummockEpoch>) -> HummockResult<()> {
@@ -367,7 +369,7 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        let (order_index, task_payload, task_write_batch_size) = match self
+        let (order_index, task_payload) = match self
             .local_version
             .read()
             .get_shared_buffer(epoch)
@@ -379,18 +381,8 @@ impl LocalVersionManager {
             }
         };
 
-        self.buffer_tracker
-            .global_upload_task_size
-            .fetch_add(task_write_batch_size, Relaxed);
-
         let ret = self
-            .run_upload_task(
-                order_index,
-                epoch,
-                task_payload,
-                false,
-                task_write_batch_size,
-            )
+            .run_upload_task(order_index, epoch, task_payload, false)
             .await;
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.archive_epoch(epoch);
@@ -406,7 +398,6 @@ impl LocalVersionManager {
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
         is_local: bool,
-        task_write_batch_size: usize,
     ) -> HummockResult<()> {
         let task_result = self
             .shared_buffer_uploader
@@ -429,8 +420,7 @@ impl LocalVersionManager {
                 Err(e)
             }
         };
-        self.buffer_tracker
-            .send_event(SharedBufferEvent::UploadTaskFinish(task_write_batch_size));
+        self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
         ret
     }
 
@@ -619,14 +609,10 @@ impl LocalVersionManager {
                 // Keep issuing new flush task until flush is not needed or we can issue
                 // no more task
                 while local_version_manager.buffer_tracker.need_more_flush() {
-                    if let Some((size, epoch, join_handle)) = local_version_manager
+                    if let Some((epoch, join_handle)) = local_version_manager
                         .clone()
                         .flush_shared_buffer(syncing_epoch)
                     {
-                        local_version_manager
-                            .buffer_tracker
-                            .global_upload_task_size
-                            .fetch_add(size, Relaxed);
                         epoch_join_handle
                             .entry(epoch)
                             .or_insert_with(Vec::new)
@@ -660,7 +646,7 @@ impl LocalVersionManager {
                             pending_write_requests.push_back((size, sender));
                         }
                     }
-                    SharedBufferEvent::BatchAdded => {
+                    SharedBufferEvent::MayFlush => {
                         // Only check and flush shared buffer after batch has been added to shared
                         // buffer.
                         try_flush_shared_buffer(&syncing_epoch, &mut epoch_join_handle);
@@ -676,15 +662,6 @@ impl LocalVersionManager {
                             let (size, sender) = pending_write_requests.pop_front().unwrap();
                             grant_write_request(size, sender);
                         }
-                    }
-                    SharedBufferEvent::UploadTaskFinish(size) => {
-                        local_version_manager
-                            .buffer_tracker
-                            .global_upload_task_size
-                            .fetch_sub(size, Relaxed);
-                        // An upload task has finished. There may be possibility that we need a new
-                        // upload task.
-                        try_flush_shared_buffer(&syncing_epoch, &mut epoch_join_handle);
                     }
                     SharedBufferEvent::SyncEpoch(epoch, join_handle_sender) => {
                         assert!(
@@ -902,13 +879,11 @@ mod tests {
                 .get_shared_buffer(epochs[0])
                 .unwrap()
                 .write();
-            let (task_id, payload, task_write_batch_size) =
-                shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
+            let (task_id, payload) = shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
             {
                 assert_eq!(1, payload.len());
                 assert_eq!(1, payload[0].len());
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[0].clone()));
-                assert_eq!(batches[0].size(), task_write_batch_size);
             }
             shared_buffer_guard.succeed_upload_task(
                 task_id,
@@ -958,13 +933,11 @@ mod tests {
                 .get_shared_buffer(epochs[1])
                 .unwrap()
                 .write();
-            let (task_id, payload, task_write_batch_size) =
-                shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
+            let (task_id, payload) = shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
             {
                 assert_eq!(1, payload.len());
                 assert_eq!(1, payload[0].len());
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[1].clone()));
-                assert_eq!(batches[1].size(), task_write_batch_size);
             }
             shared_buffer_guard.succeed_upload_task(
                 task_id,

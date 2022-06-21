@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
@@ -54,10 +55,14 @@ impl LocalVersion {
         self.shared_buffer.iter()
     }
 
-    pub fn new_shared_buffer(&mut self, epoch: HummockEpoch) -> Arc<RwLock<SharedBuffer>> {
+    pub fn new_shared_buffer(
+        &mut self,
+        epoch: HummockEpoch,
+        global_upload_task_size: Arc<AtomicUsize>,
+    ) -> Arc<RwLock<SharedBuffer>> {
         self.shared_buffer
             .entry(epoch)
-            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::default())))
+            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::new(global_upload_task_size))))
             .clone()
     }
 
