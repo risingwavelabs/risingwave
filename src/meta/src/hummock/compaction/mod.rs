@@ -114,18 +114,11 @@ impl CompactStatus {
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
-        let ret;
-        if let Some(manual_compaction_option) = manual_compaction_option {
-            ret = match self.manual_pick_compaction(levels, task_id, manual_compaction_option) {
-                Some(ret) => ret,
-                None => return None,
-            };
+        let ret = if let Some(manual_compaction_option) = manual_compaction_option {
+            self.manual_pick_compaction(levels, task_id, manual_compaction_option)?
         } else {
-            ret = match self.pick_compaction(levels, task_id) {
-                Some(ret) => ret,
-                None => return None,
-            };
-        }
+            self.pick_compaction(levels, task_id)?
+        };
 
         let select_level_id = ret.select_level.level_idx;
         let target_level_id = ret.target_level.level_idx;
