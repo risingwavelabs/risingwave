@@ -217,7 +217,7 @@ impl PgPortal {
         // Consume row_limit row.
         let mut data_set = vec![];
         let mut row_end = false;
-        for _i in 0..row_limit {
+        for _ in 0..row_limit {
             let data = self.result_cache.as_mut().unwrap().next();
             match data {
                 Some(d) => {

@@ -450,6 +450,13 @@ where
             rows_cnt += 1;
         }
 
+        // If has rows limit, it must be extended mode.
+        // If Execute terminates before completing the execution of a portal (due to reaching a
+        // nonzero result-row count), it will send a PortalSuspended message; the appearance of this
+        // message tells the frontend that another Execute should be issued against the same portal
+        // to complete the operation. The CommandComplete message indicating completion of the
+        // source SQL command is not sent until the portal's execution is completed.
+        // Quote from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended
         if !extended || res.is_row_end() {
             self.write_message_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: res.get_stmt_type(),
