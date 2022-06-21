@@ -15,7 +15,8 @@
 use async_trait::async_trait;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, SstableIdInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use tonic::Streaming;
 
@@ -45,4 +46,5 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         table_id: u32,
         level: u32,
     ) -> Result<()>;
+    async fn list_sstable_id_infos(&self, version_id: u64) -> Result<Vec<SstableIdInfo>>;
 }

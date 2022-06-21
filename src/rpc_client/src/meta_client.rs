@@ -452,6 +452,12 @@ impl HummockMetaClient for MetaClient {
         self.inner.trigger_manual_compaction(req).await?;
         Ok(())
     }
+
+    async fn list_sstable_id_infos(&self, version_id: u64) -> Result<Vec<SstableIdInfo>> {
+        let req = ListSstableIdInfosRequest { version_id };
+        let resp = self.inner.list_sstable_id_infos(req).await?;
+        Ok(resp.sstable_id_infos)
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -562,6 +568,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
+            ,{ hummock_client, list_sstable_id_infos, ListSstableIdInfosRequest, ListSstableIdInfosResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
