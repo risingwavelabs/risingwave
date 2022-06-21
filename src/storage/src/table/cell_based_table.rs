@@ -53,7 +53,7 @@ impl<S: StateStore> DedupPkCellBasedTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let column_ids = column_descs.iter().map(|d| d.column_id).collect();
+        let column_ids = column_descs.iter().map(|d| d.column_id).collect_vec();
         let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         let pk_serializer = OrderedRowSerializer::new(order_types);
         let cell_based_row_serializer =
