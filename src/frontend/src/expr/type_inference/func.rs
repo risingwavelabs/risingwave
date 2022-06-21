@@ -14,20 +14,19 @@
 
 use std::collections::HashMap;
 
-use itertools::iproduct;
+use itertools::{iproduct, Itertools as _};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use super::DataTypeName;
-use crate::expr::ExprType;
+use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
-pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
+pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
-    let input_type_names = inputs_type.iter().map(DataTypeName::from).collect();
-    infer_type_name(func_type, input_type_names).map(|type_name| match type_name {
+    let ret_type = infer_type_name(func_type, &inputs).map(|type_name| match type_name {
         DataTypeName::Boolean => DataType::Boolean,
         DataTypeName::Int16 => DataType::Int16,
         DataTypeName::Int32 => DataType::Int32,
@@ -44,11 +43,13 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<Dat
         DataTypeName::Struct | DataTypeName::List => {
             panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
         }
-    })
+    })?;
+    Ok((inputs, ret_type))
 }
 
 /// Infer the return type name without parameters like length or precision.
-fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Result<DataTypeName> {
+fn infer_type_name(func_type: ExprType, inputs: &[ExprImpl]) -> Result<DataTypeName> {
+    let inputs_type = inputs.iter().map(|e| e.return_type().into()).collect_vec();
     FUNC_SIG_MAP
         .0
         .get(&FuncSign {
@@ -303,17 +304,41 @@ pub fn func_sig_map() -> &'static HashMap<FuncSign, DataTypeName> {
 mod tests {
     use super::*;
 
+    fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
+        let inputs = inputs_type
+            .into_iter()
+            .map(|t| {
+                crate::expr::Literal::new(
+                    Some(match t {
+                        DataType::Boolean => true.into(),
+                        DataType::Int16 => 1i16.into(),
+                        DataType::Int32 => 1i32.into(),
+                        DataType::Int64 => 1i64.into(),
+                        DataType::Float32 => 1f32.into(),
+                        DataType::Float64 => 1f64.into(),
+                        DataType::Decimal => risingwave_common::types::Decimal::NaN.into(),
+                        _ => unimplemented!(),
+                    }),
+                    t,
+                )
+                .into()
+            })
+            .collect();
+        let (_, ret) = infer_type(func_type, inputs)?;
+        Ok(ret)
+    }
+
     fn test_simple_infer_type(
         func_type: ExprType,
         inputs_type: Vec<DataType>,
         expected_type_name: DataType,
     ) {
-        let ret = infer_type(func_type, inputs_type).unwrap();
+        let ret = infer_type_v0(func_type, inputs_type).unwrap();
         assert_eq!(ret, expected_type_name);
     }
 
     fn test_infer_type_not_exist(func_type: ExprType, inputs_type: Vec<DataType>) {
-        let ret = infer_type(func_type, inputs_type);
+        let ret = infer_type_v0(func_type, inputs_type);
         assert!(ret.is_err());
     }
 
