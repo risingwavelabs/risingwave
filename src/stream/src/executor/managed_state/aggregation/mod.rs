@@ -22,8 +22,7 @@ use risingwave_common::hash::HashCode;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::write_batch::WriteBatch;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 pub use value::*;
 
 use crate::executor::aggregation::AggCall;
@@ -31,7 +30,8 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::PkDataTypes;
 
 mod extreme;
-mod extreme_serializer;
+
+#[allow(dead_code)]
 mod string_agg;
 mod value;
 
@@ -68,18 +68,27 @@ impl<S: StateStore> ManagedStateImpl<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_batch(ops, visibility, data).await,
-            Self::Table(state) => state.apply_batch(ops, visibility, data, epoch).await,
+            Self::Table(state) => {
+                state
+                    .apply_batch(ops, visibility, data, epoch, state_table)
+                    .await
+            }
         }
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(&mut self, epoch: u64) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(
+        &mut self,
+        epoch: u64,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output().await,
-            Self::Table(state) => state.get_output(epoch).await,
+            Self::Table(state) => state.get_output(epoch, state_table).await,
         }
     }
 
@@ -92,14 +101,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub async fn flush(
-        &mut self,
-        write_batch: &mut WriteBatch<S>,
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()> {
+    pub async fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.flush(write_batch, state_table).await,
-            Self::Table(state) => state.flush(write_batch),
+            Self::Value(state) => state.flush(state_table).await,
+            Self::Table(state) => state.flush(state_table),
         }
     }
 
@@ -107,7 +112,6 @@ impl<S: StateStore> ManagedStateImpl<S> {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_managed_state(
         agg_call: AggCall,
-        keyspace: Keyspace<S>,
         row_count: Option<usize>,
         pk_data_types: PkDataTypes,
         is_row_count: bool,
@@ -131,12 +135,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     Ok(Self::Table(
                         create_streaming_extreme_state(
                             agg_call,
-                            keyspace,
                             row_count.unwrap(),
                             // TODO: estimate a good cache size instead of hard-coding
                             Some(1024),
                             pk_data_types,
                             key_hash_code,
+                            pk,
                         )
                         .await?,
                     ))

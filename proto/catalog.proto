@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package catalog;
 
+import "common.proto";
 import "plan_common.proto";
 
 option optimize_for = SPEED;
@@ -58,6 +59,7 @@ message Table {
   repeated int32 pk = 13;
   bool appendonly = 14;
   string owner = 15;
+  common.ParallelUnitMapping mapping = 16;
 }
 
 message Schema {

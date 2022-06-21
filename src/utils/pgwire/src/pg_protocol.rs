@@ -272,9 +272,6 @@ where
                 // NOTE there is no ReadyForQuery message.
             }
             FeMessage::Describe(m) => {
-                // FIXME: Introduce parser to analyze statements and bind data type. Here just
-                // hard-code a VARCHAR.
-
                 // 1. Get statement.
                 let name = cstr_to_str(&m.query_name).unwrap().to_string();
                 let statement = if name.is_empty() {

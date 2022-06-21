@@ -14,9 +14,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::vec;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::error::Result;
+use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -24,7 +26,8 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
 use risingwave_pb::plan_common::{
-    ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId,
+    ColumnCatalog, ColumnDesc, ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId,
+    TableRefId,
 };
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -99,6 +102,38 @@ fn make_column_order(idx: i32) -> ColumnOrder {
     }
 }
 
+fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
+    ColumnCatalog {
+        column_desc: Some(ColumnDesc {
+            column_type: Some(DataType {
+                type_name: column_type as i32,
+                ..Default::default()
+            }),
+            column_id,
+            ..Default::default()
+        }),
+        is_hidden: false,
+    }
+}
+
+fn make_internal_table(is_agg_value: bool) -> ProstTable {
+    let mut columns = vec![make_column(TypeName::Int64, 0)];
+    if !is_agg_value {
+        columns.push(make_column(TypeName::Int32, 1));
+    }
+    ProstTable {
+        id: TableId::placeholder().table_id,
+        schema_id: SchemaId::placeholder() as u32,
+        database_id: DatabaseId::placeholder() as u32,
+        name: String::new(),
+        columns,
+        order_column_ids: vec![0],
+        orders: vec![2],
+        pk: vec![2],
+        ..Default::default()
+    }
+}
+
 /// [`make_stream_node`] build a plan represent in `StreamNode` for SQL as follow:
 /// ```sql
 /// create table t (v1 int, v2 int);
@@ -165,7 +200,8 @@ fn make_stream_node() -> StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
-            table_ids: vec![],
+            internal_tables: vec![make_internal_table(true), make_internal_table(false)],
+            column_mapping: HashMap::new(),
             is_append_only: false,
         })),
         input: vec![filter_node],
@@ -197,7 +233,8 @@ fn make_stream_node() -> StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
-            table_ids: vec![],
+            internal_tables: vec![make_internal_table(true), make_internal_table(false)],
+            column_mapping: HashMap::new(),
             is_append_only: false,
         })),
         fields: vec![], // TODO: fill this later
@@ -260,6 +297,8 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     use risingwave_frontend::stream_fragmenter::StreamFragmenter;
 
+    use crate::model::FragmentId;
+
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let compaction_group_manager = Arc::new(CompactionGroupManager::new(env.clone()).await?);
@@ -268,14 +307,31 @@ async fn test_fragmenter() -> Result<()> {
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = StreamFragmenter::build_graph(stream_node);
-    let graph = ActorGraphBuilder::generate_graph(
-        env.id_gen_manager_ref(),
-        fragment_manager,
-        parallel_degree,
-        &graph,
-        &mut ctx,
-    )
-    .await?;
+
+    let mut actor_graph_builder =
+        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, &mut ctx).await?;
+
+    let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
+        .list_fragment_ids()
+        .into_iter()
+        .map(|(fragment_id, is_singleton)| {
+            if is_singleton {
+                (fragment_id, 1)
+            } else {
+                (fragment_id, parallel_degree as u32)
+            }
+        })
+        .collect();
+
+    let graph = actor_graph_builder
+        .generate_graph(
+            env.id_gen_manager_ref(),
+            fragment_manager,
+            parallelisms.clone(),
+            &mut ctx,
+        )
+        .await?;
+
     let table_fragments =
         TableFragments::new(TableId::default(), graph, ctx.internal_table_id_set.clone());
     let actors = table_fragments.actors();

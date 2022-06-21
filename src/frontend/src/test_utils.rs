@@ -28,6 +28,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
+use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
@@ -91,7 +92,8 @@ impl LocalFrontend {
 
     /// Convert a sql (must be an `Query`) into an unoptimized batch plan.
     pub async fn to_batch_plan(&self, sql: impl Into<String>) -> Result<PlanRef> {
-        let statements = Parser::parse_sql(&sql.into()).unwrap();
+        let raw_sql = &sql.into();
+        let statements = Parser::parse_sql(raw_sql).unwrap();
         let statement = statements.get(0).unwrap();
         if let Statement::Query(query) = statement {
             let session = self.session_ref();
@@ -103,7 +105,7 @@ impl LocalFrontend {
                 );
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Planner::new(OptimizerContext::new(session).into())
+            Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
                 .plan(bound)
                 .unwrap()
                 .gen_batch_query_plan()
@@ -163,6 +165,11 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
         table.id = self.gen_id();
+        table.mapping = Some(ParallelUnitMapping {
+            table_id: table.id,
+            original_indices: [0, 10, 20].to_vec(),
+            data: [1, 2, 3].to_vec(),
+        });
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
         Ok(())
