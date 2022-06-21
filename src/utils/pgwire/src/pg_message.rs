@@ -173,10 +173,6 @@ impl FeExecuteMessage {
         let portal_name = read_null_terminated(&mut buf)?;
         let max_rows = buf.get_i32();
 
-        if max_rows != 0 {
-            unimplemented!("row limit in Execute message not supported");
-        }
-
         Ok(FeMessage::Execute(FeExecuteMessage {
             portal_name,
             max_rows,

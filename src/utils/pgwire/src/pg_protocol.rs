@@ -457,6 +457,7 @@ where
                 rows_cnt,
             }))?;
         } else {
+            self.write_message(&BeMessage::PortalSuspended).await?;
         }
         Ok(())
     }
