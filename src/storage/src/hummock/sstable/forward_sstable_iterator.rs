@@ -192,11 +192,6 @@ mod tests {
     async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
-        assert!(table.meta.block_metas.len() > 10);
-
-        let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(table));
-
         let mut sstable_iter =
             SSTableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut cnt = 0;

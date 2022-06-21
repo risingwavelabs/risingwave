@@ -30,7 +30,7 @@ use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_ssta
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    Block, CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
+    CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
     SSTableBuilderOptions, Sstable, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;

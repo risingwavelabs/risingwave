@@ -545,6 +545,11 @@ impl Compactor {
         };
 
         let get_id_time = Arc::new(AtomicU64::new(0));
+        let cache_policy = if self.compact_task.target_level == 0 {
+            CachePolicy::Fill
+        } else {
+            CachePolicy::NotFill
+        };
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = GroupedSstableBuilder::new(
@@ -572,7 +577,7 @@ impl Compactor {
                 Ok(builder)
             },
             VirtualNodeGrouping::new(vnode2unit),
-            CachePolicy::NotFill,
+            cache_policy,
             self.context.sstable_store.clone(),
         );
 
