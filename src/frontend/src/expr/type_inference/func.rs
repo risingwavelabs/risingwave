@@ -18,7 +18,7 @@ use itertools::{iproduct, Itertools as _};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::DataTypeName;
+use super::{cast_ok_base, CastContext, DataTypeName};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -37,7 +37,214 @@ fn infer_type_name<'a, 'b>(
     func_type: ExprType,
     inputs: &'b [ExprImpl],
 ) -> Result<&'a FuncSign> {
-    Err(ErrorCode::NotImplemented("".into(), 112.into()).into())
+    let candidates = sig_map
+        .0
+        .get(&(func_type, inputs.len()))
+        .map(std::ops::Deref::deref)
+        .unwrap_or_default();
+
+    // Binary operators have a special unknown rule for exact match.
+    // ~~But it is just speed up and does not affect correctness.~~
+    // Exact match has to be prioritized here over rule `f`, which allows casting
+    // and resolves `int < unknown` to {`int < float8`, `int < int`, etc}
+    if inputs.len() == 2 {
+        let t = match (inputs[0].is_null(), inputs[1].is_null()) {
+            (true, true) => None,
+            (true, false) => Some(inputs[1].return_type().into()),
+            (false, true) => Some(inputs[0].return_type().into()),
+            (false, false) => None,
+        };
+        if let Some(t) = t {
+            let exact = candidates
+                .iter()
+                .find(|sig| sig.inputs_type[0] == t && sig.inputs_type[1] == t);
+            if let Some(sig) = exact {
+                return Ok(sig);
+            }
+        }
+    }
+
+    let mut candidates = exact_n_prefer(candidates, inputs);
+
+    if candidates.is_empty() {
+        return Err(ErrorCode::NotImplemented(
+            format!(
+                "{:?}{:?}",
+                func_type,
+                inputs.iter().map(|e| e.return_type()).collect_vec()
+            ),
+            112.into(),
+        )
+        .into());
+    }
+
+    candidates = rule_e(candidates, inputs);
+
+    if candidates.len() > 1 {
+        candidates = rule_f(candidates, inputs);
+    }
+
+    match &candidates[..] {
+        [] => unreachable!(),
+        [sig] => Ok(sig),
+        _ => Err(ErrorCode::BindError(format!(
+            "multi func match: {:?} {:?}",
+            func_type,
+            inputs.iter().map(|e| e.return_type()).collect_vec(),
+        ))
+        .into()),
+    }
+}
+
+fn is_preferred(t: DataTypeName) -> bool {
+    matches!(
+        t,
+        DataTypeName::Float64
+            | DataTypeName::Boolean
+            | DataTypeName::Varchar
+            | DataTypeName::Timestampz
+            | DataTypeName::Interval
+    )
+}
+
+fn exact_n_prefer<'a, 'b>(candidates: &'a [FuncSign], inputs: &'b [ExprImpl]) -> Vec<&'a FuncSign> {
+    let mut best_exact = 0;
+    let mut best_preferred = 0;
+    let mut best_candidate = Vec::new();
+
+    for sig in candidates {
+        let mut n_exact = 0;
+        let mut n_preferred = 0;
+        let mut castable = true;
+        for (a, p) in inputs.iter().zip_eq(&sig.inputs_type) {
+            if !a.is_null() {
+                let at = a.return_type().into();
+                if at == *p {
+                    n_exact += 1;
+                } else if !cast_ok_base(at, *p, CastContext::Implicit) {
+                    castable = false;
+                    break;
+                }
+                // Only count non-nulls. Example:
+                // ```
+                // create function xxx(text, int, int) returns text language sql return 1;
+                // create function xxx(int, text, int) returns text language sql return 2;
+                // create function xxx(int, int, int) returns text language sql return 3;
+                // select xxx(null, null, null);
+                // select xxx(null, null, 1::smallint);  -- 3
+                // ```
+                // If we count null positions, the first 2 wins because text is preferred.
+                if is_preferred(*p) {
+                    n_preferred += 1;
+                }
+            }
+        }
+        if !castable {
+            continue;
+        }
+        if n_exact > best_exact || n_exact == best_exact && n_preferred > best_preferred {
+            best_exact = n_exact;
+            best_preferred = n_preferred;
+            best_candidate.clear();
+        }
+        if n_exact == best_exact && n_preferred == best_preferred {
+            best_candidate.push(sig);
+        }
+    }
+    best_candidate
+}
+
+fn rule_e<'a, 'b>(best_candidate: Vec<&'a FuncSign>, inputs: &'b [ExprImpl]) -> Vec<&'a FuncSign> {
+    let mut ets = Vec::new();
+    for (i, arg) in inputs.iter().enumerate() {
+        if !arg.is_null() {
+            continue;
+        }
+        let mut t = Some(best_candidate[0].inputs_type[i]);
+        for sig in &best_candidate[1..] {
+            let tc = sig.inputs_type[i];
+            if tc == DataTypeName::Varchar {
+                t = Some(DataTypeName::Varchar);
+            } else if let Some(tt) = t {
+                if tt == DataTypeName::Varchar
+                    || tc == tt
+                    || cast_ok_base(tc, tt, CastContext::Implicit)
+                {
+                } else if cast_ok_base(tt, tc, CastContext::Implicit) {
+                    t = Some(tc);
+                } else {
+                    t = None;
+                }
+            }
+        }
+        if let Some(t) = t {
+            ets.push(t);
+        } else {
+            break;
+        }
+    }
+    let cands_temp = best_candidate
+        .iter()
+        .filter(|sig| {
+            let mut ets_iter = ets.iter();
+            for (i, p) in sig.inputs_type.iter().enumerate() {
+                if !inputs[i].is_null() {
+                    continue;
+                }
+                let Some(t) = ets_iter.next() else {return false};
+                if is_preferred(*t) {
+                    if *p != *t {
+                        return false;
+                    }
+                } else if !cast_ok_base(*p, *t, CastContext::Implicit) {
+                    return false;
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect_vec();
+    if !cands_temp.is_empty() {
+        cands_temp
+    } else {
+        best_candidate
+    }
+}
+
+fn rule_f<'a, 'b>(best_candidate: Vec<&'a FuncSign>, inputs: &'b [ExprImpl]) -> Vec<&'a FuncSign> {
+    let mut t = None;
+    for e in inputs {
+        if e.is_null() {
+            continue;
+        }
+        let tc = e.return_type().into();
+        match t {
+            None => {
+                t = Some(tc);
+            }
+            Some(tt) => {
+                if tt != tc {
+                    t = None;
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(t) = t {
+        let cand_temp = best_candidate
+            .iter()
+            .filter(|sig| {
+                sig.inputs_type
+                    .iter()
+                    .all(|p| cast_ok_base(t, *p, CastContext::Implicit))
+            })
+            .cloned()
+            .collect_vec();
+        if !cand_temp.is_empty() {
+            return cand_temp;
+        }
+    }
+    best_candidate
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
