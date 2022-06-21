@@ -392,6 +392,16 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_actor_latency("Actor Input Row", [
+                panels.target(
+                    "rate(stream_actor_in_record_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_actor_latency("Actor Output Row", [
+                panels.target(
+                    "rate(stream_actor_out_record_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
             panels.timeseries_actor_latency_small("Tokio: Actor Fast Poll Time", [
                 panels.target(
                     "rate(stream_actor_fast_poll_duration[1m]) > 0", "{{actor_id}}"
