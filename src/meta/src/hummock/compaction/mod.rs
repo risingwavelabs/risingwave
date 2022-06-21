@@ -76,6 +76,7 @@ pub struct SearchResult {
     select_level: Level,
     target_level: Level,
     split_ranges: Vec<KeyRange>,
+    compression_algorithm: String,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -114,18 +115,11 @@ impl CompactStatus {
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
-        let ret;
-        if let Some(manual_compaction_option) = manual_compaction_option {
-            ret = match self.manual_pick_compaction(levels, task_id, manual_compaction_option) {
-                Some(ret) => ret,
-                None => return None,
-            };
+        let ret = if let Some(manual_compaction_option) = manual_compaction_option {
+            self.manual_pick_compaction(levels, task_id, manual_compaction_option)?
         } else {
-            ret = match self.pick_compaction(levels, task_id) {
-                Some(ret) => ret,
-                None => return None,
-            };
-        }
+            self.pick_compaction(levels, task_id)?
+        };
 
         let select_level_id = ret.select_level.level_idx;
         let target_level_id = ret.target_level.level_idx;
@@ -134,6 +128,12 @@ impl CompactStatus {
             vec![KeyRange::inf()]
         } else {
             ret.split_ranges
+        };
+
+        let compression_algorithm = match ret.compression_algorithm.as_str() {
+            "Lz4" => 1,
+            "Zstd" => 2,
+            _ => 0,
         };
 
         let compact_task = CompactTask {
@@ -150,6 +150,7 @@ impl CompactStatus {
             vnode_mappings: vec![],
             compaction_group_id,
             existing_table_ids: vec![],
+            compression_algorithm,
         };
         Some(compact_task)
     }

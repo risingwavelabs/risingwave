@@ -39,6 +39,15 @@ impl CompactionConfigBuilder {
                 level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
                 level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
                 compaction_mode: CompactionMode::Range as i32,
+                compression_algorithm: vec![
+                    "None".to_string(),
+                    "None".to_string(),
+                    "Lz4".to_string(),
+                    "Lz4".to_string(),
+                    "Lz4".to_string(),
+                    "Zstd".to_string(),
+                    "Zstd".to_string(),
+                ],
             },
         }
     }
@@ -62,13 +71,9 @@ macro_rules! builder_field {
     ($( $name:ident: $type:ty ),* ,) => {
         impl CompactionConfigBuilder {
             $(
-                pub fn $name(&self, v:$type) -> Self {
-                    Self {
-                        config: CompactionConfig {
-                            $name: v,
-                            ..self.config
-                        },
-                    }
+                pub fn $name(mut self, v:$type) -> Self {
+                    self.config.$name = v;
+                    self
                 }
             )*
         }
@@ -84,4 +89,5 @@ builder_field! {
     level0_tigger_file_numer: u64,
     level0_tier_compact_file_number: u64,
     compaction_mode: i32,
+    compression_algorithm: Vec<String>,
 }

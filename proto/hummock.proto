@@ -134,6 +134,7 @@ message CompactTask {
   uint64 compaction_group_id = 12;
   // existing_table_ids for compaction drop key
   repeated uint32 existing_table_ids = 13;
+  uint32 compression_algorithm = 14;
 }
 
 message LevelHandler {
@@ -279,4 +280,5 @@ message CompactionConfig {
   uint64 level0_tigger_file_numer = 6;
   uint64 level0_tier_compact_file_number = 7;
   CompactionMode compaction_mode = 8;
+  repeated string compression_algorithm = 9;
 }
