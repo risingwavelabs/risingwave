@@ -21,6 +21,7 @@ mod tests {
     use rand::Rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::config::StorageConfig;
+    use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::get_table_id;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -131,7 +132,7 @@ mod tests {
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
         let output_table_id = version
-            .get_levels()
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .last()
             .unwrap()
             .table_infos
@@ -169,8 +170,6 @@ mod tests {
     }
 
     #[tokio::test]
-    // TODO #2065: re-enable it after all states are registered correctly.
-    #[ignore]
     async fn test_compaction_drop_all_key() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -236,7 +235,10 @@ mod tests {
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
-        let output_level_info = version.get_levels().last().unwrap();
+        let output_level_info = version
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .last()
+            .unwrap();
         assert_eq!(0, output_level_info.total_file_size);
 
         // 5. get compact task and there should be none
@@ -249,8 +251,6 @@ mod tests {
     }
 
     #[tokio::test]
-    // TODO #2065: re-enable it after all states are registered correctly.
-    #[ignore]
     async fn test_compaction_drop_key_by_existing_table_id() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -326,7 +326,7 @@ mod tests {
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
         let table_ids_from_version: Vec<_> = version
-            .get_levels()
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|table_info| table_info.id)

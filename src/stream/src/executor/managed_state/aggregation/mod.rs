@@ -68,18 +68,27 @@ impl<S: StateStore> ManagedStateImpl<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_batch(ops, visibility, data).await,
-            Self::Table(state) => state.apply_batch(ops, visibility, data, epoch).await,
+            Self::Table(state) => {
+                state
+                    .apply_batch(ops, visibility, data, epoch, state_table)
+                    .await
+            }
         }
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(&mut self, epoch: u64) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(
+        &mut self,
+        epoch: u64,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output().await,
-            Self::Table(state) => state.get_output(epoch).await,
+            Self::Table(state) => state.get_output(epoch, state_table).await,
         }
     }
 
@@ -99,7 +108,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.flush(write_batch, state_table).await,
-            Self::Table(state) => state.flush(write_batch),
+            Self::Table(state) => state.flush(write_batch, state_table),
         }
     }
 
@@ -137,6 +146,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                             Some(1024),
                             pk_data_types,
                             key_hash_code,
+                            pk,
                         )
                         .await?,
                     ))

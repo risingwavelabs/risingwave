@@ -86,7 +86,11 @@ message BarrierCompleteResponse {
   string request_id = 1;
   common.Status status = 2;
   repeated CreateMviewProgress create_mview_progress = 3;
-  repeated hummock.SstableInfo sycned_sstables = 4;
+  message GroupedSstableInfo {
+    uint64 compaction_group_id = 1;
+    hummock.SstableInfo sst = 2;
+  }
+  repeated GroupedSstableInfo sycned_sstables = 4;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.

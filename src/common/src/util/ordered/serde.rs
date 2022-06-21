@@ -75,6 +75,7 @@ impl OrderedRowSerializer {
         Self { order_types }
     }
 
+    #[must_use]
     pub fn prefix(&self, len: usize) -> Self {
         Self {
             order_types: self.order_types[..len].to_vec(),
@@ -113,10 +114,6 @@ impl OrderedRowSerializer {
             serialize_datum_ref_into(&datum, &mut serializer).unwrap();
             append_to.extend(serializer.into_inner());
         }
-    }
-
-    pub fn into_order_types(self) -> Vec<OrderType> {
-        self.order_types
     }
 }
 

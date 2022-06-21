@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -24,7 +25,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::cluster::{ParallelUnitId, WorkerId};
+use crate::cluster::WorkerId;
 use crate::manager::SourceId;
 use crate::model::MetadataModel;
 

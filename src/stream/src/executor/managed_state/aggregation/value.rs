@@ -92,7 +92,7 @@ impl ManagedValueState {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    pub async fn get_output(&mut self) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(&self) -> StreamExecutorResult<Datum> {
         debug_assert!(!self.is_dirty());
         self.state.get_output()
     }
@@ -191,7 +191,7 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state =
+        let managed_state =
             ManagedValueState::new(create_test_count_state(), None, None, &state_table)
                 .await
                 .unwrap();
@@ -262,7 +262,7 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state =
+        let managed_state =
             ManagedValueState::new(create_test_max_agg_append_only(), None, None, &state_table)
                 .await
                 .unwrap();

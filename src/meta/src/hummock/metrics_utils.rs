@@ -17,6 +17,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::enumerate;
 use prost::Message;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_pb::hummock::HummockVersion;
 
 use crate::hummock::compaction::CompactStatus;
@@ -36,9 +38,11 @@ pub fn trigger_sst_stat(
     compact_status: &CompactStatus,
     current_version: &HummockVersion,
 ) {
-    let level_sst_cnt = |level_idx: usize| current_version.levels[level_idx].table_infos.len();
-    let level_sst_size =
-        |level_idx: usize| current_version.levels[level_idx].total_file_size / 1024;
+    // TODO #2065: add metrics for all compaction groups
+    let levels =
+        current_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
+    let level_sst_cnt = |level_idx: usize| levels[level_idx].table_infos.len();
+    let level_sst_size = |level_idx: usize| levels[level_idx].total_file_size / 1024;
     for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
         let sst_num = level_sst_cnt(idx);
         let compact_cnt = level_handler.get_pending_file_count();
