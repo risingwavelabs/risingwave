@@ -937,6 +937,8 @@ mod tests {
             rx,
             ActorContext::create(),
             0,
+            0,
+            Arc::new(StreamingMetrics::unused()),
         ));
         let data_sink = Arc::new(Mutex::new(vec![]));
         let actor_id = 233;

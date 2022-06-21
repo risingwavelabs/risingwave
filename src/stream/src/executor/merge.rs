@@ -106,6 +106,9 @@ pub struct MergeExecutor {
 
     /// Actor operator context
     status: OperatorInfoStatus,
+
+    /// Metrics
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl MergeExecutor {
@@ -116,6 +119,7 @@ impl MergeExecutor {
         inputs: Vec<Receiver<Message>>,
         actor_context: ActorContextRef,
         receiver_id: u64,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
             upstreams: inputs,
@@ -126,6 +130,7 @@ impl MergeExecutor {
                 identity: "MergeExecutor".to_string(),
             },
             status: OperatorInfoStatus::new(actor_context, receiver_id),
+            metrics,
         }
     }
 }
@@ -136,8 +141,10 @@ impl Executor for MergeExecutor {
         let upstreams = self.upstreams;
         // Futures of all active upstreams.
         let status = self.status;
-        let select_all = SelectReceivers::new(self.actor_id, status, upstreams);
+        let select_all =
+            SelectReceivers::new(self.actor_id, status, upstreams, self.metrics.clone());
         // Channels that're blocked by the barrier to align.
+
         select_all.boxed()
     }
 
@@ -161,10 +168,16 @@ pub struct SelectReceivers {
     last_base: usize,
     status: OperatorInfoStatus,
     actor_id: u32,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Receiver<Message>>) -> Self {
+    fn new(
+        actor_id: u32,
+        status: OperatorInfoStatus,
+        upstreams: Vec<Receiver<Message>>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
             upstreams: upstreams.into_iter().map(ReceiverStream::new).collect(),
@@ -172,6 +185,7 @@ impl SelectReceivers {
             actor_id,
             status,
             barrier: None,
+            metrics,
         }
     }
 }
@@ -213,7 +227,12 @@ impl Stream for SelectReceivers {
                             poll_count = 0;
                         }
                         Message::Chunk(chunk) => {
+                            self.metrics
+                                .actor_in_record_cnt
+                                .with_label_values(&[&self.actor_id.to_string()])
+                                .inc_by(chunk.cardinality().try_into().unwrap());
                             let message = Message::Chunk(chunk);
+
                             self.status.next_message(&message);
                             self.last_base = (idx + 1) % self.upstreams.len();
                             return Poll::Ready(Some(Ok(message)));
@@ -284,8 +303,16 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger =
-            MergeExecutor::new(Schema::default(), vec![], 0, rxs, ActorContext::create(), 0);
+        let metrics = Arc::new(StreamingMetrics::unused());
+        let merger = MergeExecutor::new(
+            Schema::default(),
+            vec![],
+            0,
+            rxs,
+            ActorContext::create(),
+            0,
+            metrics,
+        );
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
