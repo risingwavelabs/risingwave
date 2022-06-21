@@ -46,6 +46,7 @@ mod tests {
             bloom_false_positive: 0.1,
             data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
+            enable_compression: false,
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
@@ -87,7 +88,7 @@ mod tests {
 
         // 1. add sstables
         let key = Bytes::from(&b"same_key"[..]);
-        let val = Bytes::from(b"0"[..].repeat(4 << 20)); // 4MB value
+        let val = Bytes::from(b"0"[..].repeat(1 << 20)); // 1MB value
         let kv_count = 128;
         let mut epoch: u64 = 1;
         for _ in 0..kv_count {
@@ -189,7 +190,7 @@ mod tests {
         };
 
         // 1. add sstables
-        let val = Bytes::from(b"0"[..].repeat(4 << 20)); // 4MB value
+        let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
 
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(1));
         let kv_count = 128;
@@ -270,7 +271,7 @@ mod tests {
         };
 
         // 1. add sstables
-        let val = Bytes::from(b"0"[..].repeat(4 << 20)); // 4MB value
+        let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
 
         let drop_table_id = 1;
         let existing_table_ids = 2;
