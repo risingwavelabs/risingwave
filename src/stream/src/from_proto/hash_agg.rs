@@ -74,9 +74,9 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
         let keyspace = node
-            .get_table_ids()
+            .internal_tables
             .iter()
-            .map(|&table_id| Keyspace::table_root(store.clone(), &TableId::new(table_id)))
+            .map(|table| Keyspace::table_root(store.clone(), &TableId::new(table.id)))
             .collect();
         let input = params.input.remove(0);
         let keys = key_indices

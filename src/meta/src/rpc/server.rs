@@ -406,6 +406,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         compactor_manager.clone(),
         vacuum_trigger.clone(),
         compaction_group_manager.clone(),
+        fragment_manager.clone(),
     );
     let notification_manager = env.notification_manager_ref();
     let notification_srv =

@@ -23,12 +23,15 @@ use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::{CompactionConfig, Level};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction::compaction_picker::{CompactionPicker, MinOverlappingPicker};
+use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
+use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::tier_compaction_picker::{
     LevelCompactionPicker, TierCompactionPicker,
 };
-use crate::hummock::compaction::{create_overlap_strategy, SearchResult};
+use crate::hummock::compaction::{
+    create_overlap_strategy, CompactionPicker, ManualCompactionOption, SearchResult,
+};
 use crate::hummock::level_handler::LevelHandler;
 
 const SCORE_BASE: u64 = 100;
@@ -41,6 +44,14 @@ pub trait LevelSelector: Sync + Send {
         task_id: HummockCompactionTaskId,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
+    ) -> Option<SearchResult>;
+
+    fn manual_pick_compaction(
+        &self,
+        task_id: HummockCompactionTaskId,
+        levels: &[Level],
+        level_handlers: &mut [LevelHandler],
+        option: ManualCompactionOption,
     ) -> Option<SearchResult>;
 
     fn name(&self) -> &'static str;
@@ -237,6 +248,30 @@ impl LevelSelector for DynamicLevelSelector {
             }
         }
         None
+    }
+
+    fn manual_pick_compaction(
+        &self,
+        task_id: HummockCompactionTaskId,
+        levels: &[Level],
+        level_handlers: &mut [LevelHandler],
+        option: ManualCompactionOption,
+    ) -> Option<SearchResult> {
+        let ctx = self.get_priority_levels(levels, level_handlers);
+        let target_level = if option.level == 0 {
+            ctx.base_level
+        } else {
+            option.level + 1
+        };
+
+        let picker = ManualCompactionPicker::new(
+            task_id,
+            self.overlap_strategy.clone(),
+            option,
+            target_level,
+        );
+
+        picker.pick_compaction(levels, level_handlers)
     }
 
     fn name(&self) -> &'static str {

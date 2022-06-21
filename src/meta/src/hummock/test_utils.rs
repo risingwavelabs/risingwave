@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, LocalSstableInfo};
-use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
@@ -106,16 +106,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
                 inf: false,
             }),
             file_size: 1,
-            vnode_bitmaps: vec![
-                VNodeBitmap {
-                    table_id: (i + 1) as u32,
-                    bitmap: None,
-                },
-                VNodeBitmap {
-                    table_id: (i + 2) as u32,
-                    bitmap: None,
-                },
-            ],
+            table_ids: vec![(i + 1) as u32, (i + 2) as u32],
             unit_id: 0,
         });
     }

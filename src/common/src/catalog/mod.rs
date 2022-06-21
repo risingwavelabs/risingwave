@@ -45,6 +45,10 @@ impl DatabaseId {
     pub fn new(database_id: i32) -> Self {
         DatabaseId { database_id }
     }
+
+    pub fn placeholder() -> i32 {
+        i32::MAX - 1
+    }
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
@@ -59,6 +63,10 @@ impl SchemaId {
             database_ref_id,
             schema_id,
         }
+    }
+
+    pub fn placeholder() -> i32 {
+        i32::MAX - 1
     }
 }
 

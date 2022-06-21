@@ -167,8 +167,8 @@ pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct AddOutput {
-    map: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
-    splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub map: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
+    pub splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

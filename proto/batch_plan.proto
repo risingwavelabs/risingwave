@@ -96,6 +96,7 @@ message LimitNode {
 message NestedLoopJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode join_cond = 2;
+  repeated uint32 output_indices = 3;
 }
 
 message HashAggNode {
@@ -113,6 +114,7 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
+  repeated uint32 output_indices = 5;
 }
 
 message SortMergeJoinNode {
@@ -120,6 +122,7 @@ message SortMergeJoinNode {
   repeated int32 left_keys = 2;
   repeated int32 right_keys = 3;
   plan_common.OrderType direction = 4;
+  repeated uint32 output_indices = 5;
 }
 
 message HopWindowNode {
