@@ -58,7 +58,7 @@ fn get_relation(
             for option in &grant_privilege_item.action_with_opts {
                 user_grant_relation
                     .entry(option.get_grantor().to_string())
-                    .or_insert_with(|| HashMap::new());
+                    .or_insert_with(HashMap::new);
                 let realtion_item = user_grant_relation.get_mut(option.get_grantor()).unwrap();
                 if !realtion_item.contains_key(user_info_item.0) {
                     realtion_item.insert(user_info_item.0.clone(), Vec::new());
