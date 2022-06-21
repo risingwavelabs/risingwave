@@ -83,12 +83,12 @@ where
     // TODO: Remove this phantom to get rid of S: StateStore.
     _phantom_data: PhantomData<S>,
 
+    /// The upstream pks. Assembled as pk of relational table.
+    upstream_pk_len: usize,
+
     /// Primary key to look up in relational table. For value state, there is only one row.
     /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
     group_key: Option<Row>,
-
-    /// The upstream pks. Assembled as pk of relational table.
-    upstream_pk_len: usize,
 }
 
 /// A trait over all table-structured states.
