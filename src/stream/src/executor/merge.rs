@@ -17,7 +17,7 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
-use futures_async_stream::{for_await, stream};
+use futures_async_stream::for_await;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
