@@ -611,8 +611,10 @@ fn parse_not_precedence() {
     // But NOT has lower precedence than comparison operators, so the following parses as NOT (a IS
     // NULL)
     let sql = "NOT a IS NULL";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("NOT (a IS NULL)", &ast.to_string());
     assert_matches!(
-        verified_expr(sql),
+        ast,
         Expr::UnaryOp {
             op: UnaryOperator::Not,
             ..
@@ -1553,7 +1555,7 @@ fn parse_alter_table_constraints() {
     check_one("PRIMARY KEY (foo, bar)");
     check_one("UNIQUE (id)");
     check_one("FOREIGN KEY (foo, bar) REFERENCES AnotherTable(foo, bar)");
-    check_one("CHECK ((end_date > start_date) OR end_date IS NULL)");
+    check_one("CHECK ((end_date > start_date) OR (end_date IS NULL))");
 
     fn check_one(constraint_text: &str) {
         match verified_stmt(&format!("ALTER TABLE tab ADD {}", constraint_text)) {
