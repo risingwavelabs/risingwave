@@ -386,7 +386,7 @@ impl TestCase {
                 context,
                 Box::new(q),
                 ObjectName(vec!["test".into()]),
-                HashMap::from([(String::from("ttl"), String::from("300"))]),
+                HashMap::new(),
             )?;
 
             // Only generate stream_plan if it is specified in test case
