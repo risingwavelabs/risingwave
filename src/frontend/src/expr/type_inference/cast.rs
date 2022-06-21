@@ -75,6 +75,16 @@ pub enum CastContext {
     Explicit,
 }
 
+impl From<&CastContext> for String {
+    fn from(c: &CastContext) -> Self {
+        match c {
+            CastContext::Implicit => "IMPLICIT".to_string(),
+            CastContext::Assign => "ASSIGN".to_string(),
+            CastContext::Explicit => "EXPLICIT".to_string(),
+        }
+    }
+}
+
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
 pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     cast_ok_base(source.into(), target.into(), allows)
@@ -157,6 +167,13 @@ fn insert_cast_seq(
             m.insert((*source_type, *target_type), cast_context);
         }
     }
+}
+
+pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
+    CAST_MAP
+        .iter()
+        .map(|((src, target), ctx)| (*src, *target, ctx.clone()))
+        .collect_vec()
 }
 
 lazy_static::lazy_static! {

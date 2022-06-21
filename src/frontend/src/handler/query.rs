@@ -148,6 +148,12 @@ fn local_execute(
     let front_env = session.env();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(query, front_env.clone(), "");
+    let execution = LocalQueryExecution::new(
+        query,
+        front_env.clone(),
+        "",
+        session.database(),
+        session.user_name(),
+    );
     Ok((Box::pin(execution.run()), pg_descs))
 }

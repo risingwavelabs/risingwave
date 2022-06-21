@@ -18,7 +18,7 @@ use std::ops::Bound;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::RowSeqScanNode;
+use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc};
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
@@ -66,7 +66,11 @@ impl BatchSeqScan {
     pub fn clone_with_dist(&self) -> Self {
         Self::new_inner(
             self.logical.clone(),
-            Distribution::SomeShard,
+            if self.logical.is_sys_table() {
+                Distribution::Single
+            } else {
+                Distribution::SomeShard
+            },
             self.scan_range.clone(),
         )
     }
@@ -157,20 +161,41 @@ impl ToBatchProst for BatchSeqScan {
             .map(ProstColumnDesc::from)
             .collect();
 
-        NodeBody::RowSeqScan(RowSeqScanNode {
-            table_desc: Some(CellBasedTableDesc {
-                table_id: self.logical.table_desc().table_id.into(),
-                order_key: self
-                    .logical
-                    .table_desc()
-                    .order_desc
-                    .iter()
-                    .map(|v| v.into())
-                    .collect(),
-            }),
-            column_descs,
-            scan_range: Some(self.scan_range.to_protobuf()),
-        })
+        if self.logical.is_sys_table() {
+            let reader = self
+                .base
+                .ctx
+                .inner()
+                .session_ctx
+                .env()
+                .catalog_reader()
+                .read_guard();
+            let _databases = reader.get_all_database_names();
+            // convert databases to rows.
+            // match table_name {
+            // "pg_types" => ,
+            // }
+
+            NodeBody::SysRowSeqScan(SysRowSeqScanNode {
+                table_name: self.logical.table_name().to_string(),
+                column_descs,
+            })
+        } else {
+            NodeBody::RowSeqScan(RowSeqScanNode {
+                table_desc: Some(CellBasedTableDesc {
+                    table_id: self.logical.table_desc().table_id.into(),
+                    order_key: self
+                        .logical
+                        .table_desc()
+                        .order_desc
+                        .iter()
+                        .map(|v| v.into())
+                        .collect(),
+                }),
+                column_descs,
+                scan_range: Some(self.scan_range.to_protobuf()),
+            })
+        }
     }
 }
 

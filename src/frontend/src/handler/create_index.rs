@@ -103,6 +103,7 @@ pub(crate) fn gen_create_index_plan(
 
         let scan_node = StreamTableScan::new(LogicalScan::create(
             table_name,
+            false,
             table_desc,
             // indexes are only used by DeltaJoin rule, and we don't need to provide them here.
             vec![],

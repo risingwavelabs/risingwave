@@ -16,17 +16,33 @@ mod column;
 mod physical_table;
 mod schema;
 pub mod test_utils;
-use core::fmt;
 
+use core::fmt;
+use std::sync::Arc;
+
+use async_trait::async_trait;
 pub use column::*;
 pub use physical_table::*;
 pub use schema::{test_utils as schema_test_utils, Field, Schema};
 
+use crate::array::Row;
+use crate::error::Result;
+
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
+pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
+pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPPER_USER: &str = "root";
 // This is for compatibility with customized utils for PostgreSQL.
 pub const DEFAULT_SUPPER_USER_FOR_PG: &str = "postgres";
+
+/// The local system catalog reader in the frontend node.
+#[async_trait]
+pub trait SysCatalogReader: Sync + Send + 'static {
+    async fn read_table(&self, table_name: &str) -> Result<Vec<Row>>;
+}
+
+pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
 pub type CatalogVersion = u64;
 

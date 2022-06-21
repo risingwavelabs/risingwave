@@ -19,7 +19,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
     BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
@@ -35,6 +35,7 @@ use crate::utils::{ColIndexMapping, Condition, ScanRange};
 pub struct LogicalScan {
     pub base: PlanBase,
     table_name: String, // explain-only
+    is_sys_table: bool,
     /// Include `output_col_idx` and columns required in `predicate`
     required_col_idx: Vec<usize>,
     output_col_idx: Vec<usize>,
@@ -49,7 +50,8 @@ pub struct LogicalScan {
 impl LogicalScan {
     /// Create a `LogicalScan` node. Used internally by optimizer.
     fn new(
-        table_name: String,         // explain-only
+        table_name: String, // explain-only
+        is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         indexes: Vec<(String, Rc<TableDesc>)>,
@@ -100,6 +102,7 @@ impl LogicalScan {
         Self {
             base,
             table_name,
+            is_sys_table,
             required_col_idx,
             output_col_idx,
             table_desc,
@@ -111,12 +114,14 @@ impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
+        is_sys_table: bool,
         table_desc: Rc<TableDesc>,
         indexes: Vec<(String, Rc<TableDesc>)>,
         ctx: OptimizerContextRef,
     ) -> Self {
         Self::new(
             table_name,
+            is_sys_table,
             (0..table_desc.columns.len()).into_iter().collect(),
             table_desc,
             indexes,
@@ -142,6 +147,10 @@ impl LogicalScan {
 
     pub fn table_name(&self) -> &str {
         &self.table_name
+    }
+
+    pub fn is_sys_table(&self) -> bool {
+        self.is_sys_table
     }
 
     /// Get a reference to the logical scan's table desc.
@@ -198,6 +207,7 @@ impl LogicalScan {
 
         Self::new(
             index_name.to_string(),
+            false,
             new_required_col_idx,
             index.clone(),
             vec![],
@@ -233,6 +243,7 @@ impl LogicalScan {
 
         let scan_without_predicate = Self::new(
             self.table_name.clone(),
+            self.is_sys_table,
             self.required_col_idx.clone(),
             self.table_desc.clone(),
             self.indexes.clone(),
@@ -250,6 +261,7 @@ impl LogicalScan {
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         Self::new(
             self.table_name.clone(),
+            self.is_sys_table,
             self.required_col_idx.clone(),
             self.table_desc.clone(),
             self.indexes.clone(),
@@ -261,6 +273,7 @@ impl LogicalScan {
     fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         Self::new(
             self.table_name.clone(),
+            self.is_sys_table,
             output_col_idx,
             self.table_desc.clone(),
             self.indexes.clone(),
@@ -353,6 +366,12 @@ impl ToBatch for LogicalScan {
 
 impl ToStream for LogicalScan {
     fn to_stream(&self) -> Result<PlanRef> {
+        if self.is_sys_table {
+            return Err(RwError::from(ErrorCode::NotImplemented(
+                "streaming on system table is not allowed".to_string(),
+                None.into(),
+            )));
+        }
         if self.predicate.always_true() {
             Ok(StreamTableScan::new(self.clone()).into())
         } else {
@@ -366,6 +385,12 @@ impl ToStream for LogicalScan {
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        if self.is_sys_table {
+            return Err(RwError::from(ErrorCode::NotImplemented(
+                "streaming on system table is not allowed".to_string(),
+                None.into(),
+            )));
+        }
         match self.base.pk_indices.is_empty() {
             true => {
                 let mut col_ids = HashSet::new();

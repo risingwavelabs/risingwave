@@ -19,6 +19,7 @@ use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
+
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
@@ -47,6 +48,19 @@ impl DatabaseCatalog {
 
     pub fn get_all_schema_names(&self) -> Vec<String> {
         self.schema_by_name.keys().cloned().collect_vec()
+    }
+
+    pub fn get_all_schema_info(&self) -> Vec<ProstSchema> {
+        self.schema_by_name
+            .values()
+            .cloned()
+            .map(|schema| ProstSchema {
+                id: schema.id(),
+                database_id: self.id,
+                name: schema.name(),
+                owner: schema.owner(),
+            })
+            .collect_vec()
     }
 
     pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {

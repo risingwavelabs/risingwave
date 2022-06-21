@@ -42,15 +42,26 @@ pub struct LocalQueryExecution {
     query: Query,
     front_env: FrontendEnv,
     epoch: Option<u64>,
+
+    current_database: String,
+    current_user: String,
 }
 
 impl LocalQueryExecution {
-    pub fn new<S: Into<String>>(query: Query, front_env: FrontendEnv, sql: S) -> Self {
+    pub fn new<S: Into<String>>(
+        query: Query,
+        front_env: FrontendEnv,
+        sql: S,
+        current_database: &str,
+        current_user: &str,
+    ) -> Self {
         Self {
             sql: sql.into(),
             query,
             front_env,
             epoch: None,
+            current_database: current_database.to_string(),
+            current_user: current_user.to_string(),
         }
     }
 
@@ -61,7 +72,11 @@ impl LocalQueryExecution {
             self.query.query_id, self.sql
         );
 
-        let context = FrontendBatchTaskContext::new(self.front_env.clone());
+        let context = FrontendBatchTaskContext::new(
+            self.front_env.clone(),
+            &self.current_database,
+            &self.current_user,
+        );
 
         let query_id = self.query.query_id().clone();
 
