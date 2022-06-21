@@ -116,7 +116,7 @@ pub(crate) fn gen_materialized_source_plan(
         PlanRoot::new(
             source_node,
             RequiredDist::Any,
-            Order::any().clone(),
+            Order::any(),
             required_cols,
             out_names,
         )

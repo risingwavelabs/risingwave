@@ -38,7 +38,7 @@ impl BatchInsert {
             ctx,
             logical.schema().clone(),
             Distribution::Single,
-            Order::any().clone(),
+            Order::any(),
         );
         BatchInsert { base, logical }
     }

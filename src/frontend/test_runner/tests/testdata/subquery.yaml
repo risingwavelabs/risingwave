@@ -87,4 +87,12 @@
 - sql: |
     create table t(x int);
     select * from t, (select * from t as t2 order by t.x desc) as t3;
-  binder_error: 'Bind error: ORDER BY expression "t.x" has correlated input reference'
+  binder_error: 'Bind error: Join table "(SELECT * FROM t AS t2 ORDER BY t.x DESC) AS t3" has correlated input reference'
+- sql: |
+    create table t(x int);
+    select * from t, (select t.x) as t1;
+  binder_error: 'Bind error: Join table "(SELECT t.x) AS t1" has correlated input reference'
+- sql: |
+    create table t(x int);
+    select * from t JOIN (select t.x) as t1;
+  binder_error: 'Bind error: Join table "(SELECT t.x) AS t1" has correlated input reference'
