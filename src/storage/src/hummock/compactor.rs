@@ -37,8 +37,8 @@ use tokio::task::JoinHandle;
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
 use super::{
-    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType,
-    Sstable,
+    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, SSTableIterator,
+    SSTableIteratorType, Sstable,
 };
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::group_builder::KeyValueGrouping;
@@ -50,7 +50,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::{HummockError, SSTableBuilderOptions};
+use crate::hummock::HummockError;
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
