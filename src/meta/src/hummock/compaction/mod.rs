@@ -305,32 +305,3 @@ pub trait CompactionPicker {
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult>;
 }
-
-#[derive(Clone, Debug)]
-pub struct ManualCompactionOption {
-    pub key_range: KeyRange,
-    pub internal_table_id: HashSet<u32>,
-    pub level: usize,
-}
-
-impl Default for ManualCompactionOption {
-    fn default() -> Self {
-        Self {
-            key_range: KeyRange {
-                left: vec![],
-                right: vec![],
-                inf: true,
-            },
-            internal_table_id: HashSet::default(),
-            level: 1,
-        }
-    }
-}
-
-pub trait CompactionPicker {
-    fn pick_compaction(
-        &self,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult>;
-}
