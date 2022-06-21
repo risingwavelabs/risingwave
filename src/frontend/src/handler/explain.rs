@@ -40,8 +40,18 @@ pub(super) fn handle_explain(
             materialized: true,
             query,
             name,
+            with_options,
             ..
-        } => gen_create_mv_plan(&*session, planner.ctx(), query, name)?.0,
+        } => {
+            gen_create_mv_plan(
+                &*session,
+                planner.ctx(),
+                query,
+                name,
+                WithProperties(with_options).into(),
+            )?
+            .0
+        }
 
         Statement::CreateTable {
             name,
@@ -54,7 +64,7 @@ pub(super) fn handle_explain(
                 planner.ctx(),
                 name,
                 columns,
-                WithProperties(with_options),
+                WithProperties(with_options).into(),
             )?
             .0
         }

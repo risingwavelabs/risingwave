@@ -74,8 +74,9 @@ fn handle_source_with_properties(options: Vec<SqlOption>) -> Result<HashMap<Stri
         .into_iter()
         .map(|x| match x.value {
             Value::SingleQuotedString(s) => Ok((x.name.value, s)),
+            Value::Number(n, _) => Ok((x.name.value, n)),
             _ => Err(RwError::from(ProtocolError(
-                "with properties only support single quoted string value".to_string(),
+                "source with properties only support single quoted string value".to_string(),
             ))),
         })
         .collect()
@@ -91,7 +92,7 @@ pub async fn handle_create_source(
             let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
             columns.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
             StreamSourceInfo {
-                properties: handle_source_with_properties(stmt.with_properties.0)?,
+                properties: handle_source_with_properties(stmt.with_properties.0.clone())?,
                 row_format: RowFormatType::Protobuf as i32,
                 row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                 row_id_index: 0,
@@ -100,7 +101,7 @@ pub async fn handle_create_source(
             }
         }
         SourceSchema::Json => StreamSourceInfo {
-            properties: handle_source_with_properties(stmt.with_properties.0)?,
+            properties: handle_source_with_properties(stmt.with_properties.0.clone())?,
             row_format: RowFormatType::Json as i32,
             row_schema_location: "".to_string(),
             row_id_index: 0,
@@ -118,6 +119,7 @@ pub async fn handle_create_source(
                 context.into(),
                 source.clone(),
                 session.user_name().to_string(),
+                handle_source_with_properties(stmt.with_properties.0.clone())?,
             )?;
             let plan = plan.to_stream_prost();
             let graph = StreamFragmenter::build_graph(plan);

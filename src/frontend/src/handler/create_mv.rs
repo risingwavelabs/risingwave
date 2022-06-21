@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_sqlparser::ast::{ObjectName, Query};
+use risingwave_sqlparser::ast::{ObjectName, Query, SqlOption, Value, WithProperties};
 
 use crate::binder::{Binder, BoundSetExpr};
 use crate::optimizer::property::RequiredDist;
@@ -30,6 +33,7 @@ pub fn gen_create_mv_plan(
     context: OptimizerContextRef,
     query: Box<Query>,
     name: ObjectName,
+    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(name)?;
     let (database_id, schema_id) = session
@@ -63,19 +67,41 @@ pub fn gen_create_mv_plan(
     let mut table = materialize.table().to_prost(schema_id, database_id);
     let plan: PlanRef = materialize.into();
     table.owner = session.user_name().to_string();
+    table.properties = properties;
 
     Ok((plan, table))
+}
+
+fn handle_create_mv_with_properties(options: Vec<SqlOption>) -> Result<HashMap<String, String>> {
+    // TODO: distinguish x.name
+    options
+        .into_iter()
+        .map(|x| match x.value {
+            Value::SingleQuotedString(s) => Ok((x.name.value, s)),
+            Value::Number(n, _) => Ok((x.name.value, n)),
+            _ => Err(RwError::from(ProtocolError(
+                "create_mv with properties only support single quoted string value".to_string(),
+            ))),
+        })
+        .collect()
 }
 
 pub async fn handle_create_mv(
     context: OptimizerContext,
     name: ObjectName,
     query: Box<Query>,
+    with_options: WithProperties,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
     let (table, graph) = {
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
+        let (plan, table) = gen_create_mv_plan(
+            &session,
+            context.into(),
+            query,
+            name,
+            handle_create_mv_with_properties(with_options.0)?,
+        )?;
         let stream_plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(stream_plan);
 
@@ -115,7 +141,7 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "create materialized view mv1 as select t1.country from t1";
+        let sql = "create materialized view mv1 with ('ttl' = 300) as select t1.country from t1";
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();

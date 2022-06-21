@@ -18,7 +18,7 @@
 
 mod resolve_id;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -32,7 +32,7 @@ use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
 use risingwave_frontend::FrontendOpts;
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{ObjectName, Statement, WithProperties};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -291,9 +291,11 @@ impl TestCase {
                     or_replace: false,
                     name,
                     query,
+                    with_options,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, query).await?;
+                    create_mv::handle_create_mv(context, name, query, WithProperties(with_options))
+                        .await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
@@ -384,6 +386,7 @@ impl TestCase {
                 context,
                 Box::new(q),
                 ObjectName(vec!["test".into()]),
+                HashMap::from([(String::from("ttl"), String::from("300"))]),
             )?;
 
             // Only generate stream_plan if it is specified in test case

@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{
-    ColumnDef, DataType as AstDataType, ObjectName, SqlOption, WithProperties,
-};
+use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName, SqlOption, Value};
 
 use super::create_source::make_prost_source;
 use crate::binder::expr::{bind_data_type, bind_struct_field};
@@ -81,18 +81,22 @@ pub(crate) fn gen_create_table_plan(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
-    with_options: WithProperties,
+    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let source = make_prost_source(
         session,
         table_name,
         Info::TableSource(TableSourceInfo {
             columns: bind_sql_columns(columns)?,
-            properties: with_options.into(),
+            properties: properties.clone(),
         }),
     )?;
-    let (plan, table) =
-        gen_materialized_source_plan(context, source.clone(), session.user_name().to_string())?;
+    let (plan, table) = gen_materialized_source_plan(
+        context,
+        source.clone(),
+        session.user_name().to_string(),
+        properties,
+    )?;
     Ok((plan, source, table))
 }
 
@@ -102,6 +106,7 @@ pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
     source: ProstSource,
     owner: String,
+    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
@@ -126,7 +131,22 @@ pub(crate) fn gen_materialized_source_plan(
         .table()
         .to_prost(source.schema_id, source.database_id);
     table.owner = owner;
+    table.properties = properties;
     Ok((materialize.into(), table))
+}
+
+fn handle_create_table_with_properties(options: Vec<SqlOption>) -> Result<HashMap<String, String>> {
+    options
+        .into_iter()
+        .map(|x| match x.value {
+            Value::SingleQuotedString(s) => Ok((x.name.value, s)),
+            Value::Number(n, _) => Ok((x.name.value, n)),
+            Value::Boolean(b) => Ok((x.name.value, b.to_string())),
+            _ => Err(RwError::from(ProtocolError(
+                "create_table with properties only support single quoted string value".to_string(),
+            ))),
+        })
+        .collect()
 }
 
 pub async fn handle_create_table(
@@ -143,7 +163,7 @@ pub async fn handle_create_table(
             context.into(),
             table_name.clone(),
             columns,
-            WithProperties(with_options),
+            handle_create_table_with_properties(with_options)?,
         )?;
         let plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(plan);
