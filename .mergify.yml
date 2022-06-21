@@ -2,7 +2,7 @@ queue_rules:
   - name: default
     conditions:
       - "check-success=buildkite/pull-request"
-      - "check-success=buildkite/docker"
+      - "check-failure!=buildkite/docker"
       - "check-success=license/cla"
       - "check-success=task-list-completed"
       - "label=mergify/can-merge"
@@ -14,7 +14,7 @@ pull_request_rules:
       - "#approved-reviews-by>=1"
       - "#changes-requested-reviews-by=0"
       - "check-success=buildkite/pull-request"
-      - "check-success=buildkite/docker"
+      - "check-failure!=buildkite/docker"
       - "check-success=license/cla"
       - "check-success=task-list-completed"
       - "label=mergify/can-merge"
@@ -31,7 +31,7 @@ pull_request_rules:
       - "#approved-reviews-by>=1"
       - "#changes-requested-reviews-by=0"
       - "check-success=buildkite/pull-request"
-      - "check-success=buildkite/docker"
+      - "check-failure!=buildkite/docker"
       - "check-success=license/cla"
       - "check-success=task-list-completed"
       - "label=mergify/can-merge"
