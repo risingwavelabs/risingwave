@@ -2,7 +2,8 @@
 
 - [Storing State Using Relational Table](#an-overview-of-risingwave-state-store)
   - [Overview](#overview)
-  - [Relational Table](#Relational-table)
+  - [Cell-Based Encoding](#Relational-table)
+  - [Relational Table Layer](#Relational-table)
     - [Write Path](#relational-table-write-path)
     - [Read Path](#relational-table-read-path)
 
@@ -12,13 +13,33 @@
 
 ## Overview
 
-In RisingWave, all streaming executors store their data into a state store. This KV state store is backed by a service called Hummock, a cloud-native LSM-Tree-based storage engine. Hummock provides key-value API, and stores all data on S3-compatible service. However, it is not a KV store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
+RisingWave adapts a relational data model. Relational tables, including tables and materialized views, consist of a list of named, strong-typed columns. And all streaming executors store their data into a KV state store, which is backed by a service called Hummock. There are two choices to save a relational row into key-value pairs: cell-based format and row-based format. We choose cell-based format for these two reasons:
 
-As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. We implement a relational table layer as the bridge between stateful executors and KV state store, which provides the interfaces accessing KV data in relational semantic.
+1. **Simplify the encoding of some operators**.
+Cell-based encoding can significantly reduce write amplification since we can partially update some fields in a row. Considering the following streaming aggregation query: 
+```
+select sum(a), count(b), min(c), string_agg(d order by e) from t
+```
+- `sum(a)`, `count(b)` are trivial
+- `min(c)` is a little difficult. To get the next minimum once the current minimum is deleted, we have to keep all the `c` values, which would be a long list in the row-based format and it performs badly for inserts or deletes.
+- `string_agg(d order by e)` is more difficult. we must keep all the `d` as well as their sort key `e`, and support random inserts or deletes. Again, a flatten list saved in a row would be a bad choice.
 
 
+2. **Better support Semi-structured Data**. RisingWave may support semi-structured data in the future. Semi-structured data consists of nested structures and arrays, which are hard to flatten into row format, but much more simple under cell-based format, simply replace the `column id` to the JSONPath to such field.
 
-## Relational Table
+As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. We implement a relational table layer as the bridge between stateful executors and KV state store, which provides the interfaces accessing KV data in relational semantic. 
+
+
+## Cell-based Encoding
+
+In current design of state store, we used Cell-based key value format. In short, a cell instead of a whole row is stored as a key-value pair. Some stateful executors 
+| state | key | value |
+| ------ | --------------------- | ------ |
+| mv     | table_id \| sort key \| pk \| col_id| materialized value |
+| top n | table_id \| sort key \| pk \| col_id | materialized value |
+| join     | table_id \| join_key \| pk \| col_id| materialized value |
+| agg | table_id \| group_key \| col_id| agg_value |
+## Relational Table Layer
 [source code](https://github.com/singularity-data/risingwave/blob/main/src/storage/src/table/state_table.rs)
 
 In this part, we will introduce how stateful executors interact with KV state store through the relational table layer.
@@ -31,7 +52,9 @@ Relational table layer consists of State Table, Mem Table and Cell-based Table. 
 Executors perform operations on relational table, and these operations will first be cached in Mem Table. Once an executor wants to write these operations to state store, cell-based table will covert these operations into kv pairs and write to state store with specific epoch. 
 
 ### Read Path
-Executors should be able to read the just written data, which means uncommited data is visible. The data in Mem Table(memory) is fresher than that in shared storage(state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table. For example, let's assume that the first column is the pk of relational table, and the following operations are performed.
+Executors should be able to read the just written data, which means uncommited data is visible. The data in Mem Table(memory) is fresher than that in shared storage(state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table. 
+#### Get
+For example, let's assume that the first column is the pk of relational table, and the following operations are performed.
 ```
 insert [1, 11, 111]
 insert [2, 22, 222]
@@ -43,9 +66,14 @@ commit
 insert [3, 3333, 3333]
 ```
 
-After commit, a new record is inserted. The read results with corresponding pk are:
+After commit, a new record is inserted again. Then the `Get` results with corresponding pk are:
 ```
-Read pk = 1: [1, 11, 111]
-Read pk = 2:  None
-Read pk = 3: [3, 3333, 3333]
+Get(pk = 1): [1, 11, 111]
+Get(pk = 2):  None
+Get(pk = 3): [3, 3333, 3333]
 ```
+
+#### Scan
+Scan on relational table is implemented by `StateTableIter`, which is a merge iterator of `MemTableIter` and `CellBasedTableIter`. If a pk exist in both KV state store(CellBasedTable) and memory(MemTable), result of `MemTableIter` is returned. For example, in the  following figure, `StateTableIter` will generate `1->4->5->6` in order.
+
+![Scan example](images/relational-table-layer/relational-table-02.svg)
