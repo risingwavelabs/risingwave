@@ -156,7 +156,7 @@ fn make_trim(func: ExprType, exprs: Vec<Expr>) -> Expr {
     }
 }
 
-fn make_func(func_name: &str, exprs: &Vec<Expr>) -> Function {
+fn make_func(func_name: &str, exprs: &[Expr]) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
@@ -169,7 +169,7 @@ fn make_func(func_name: &str, exprs: &Vec<Expr>) -> Function {
     }
 }
 
-fn make_bin_op(func: ExprType, exprs: &Vec<Expr>) -> Option<Expr> {
+fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
     use {BinaryOperator as B, ExprType as E};
     let bin_op = match func {
         E::Add => B::Plus,
