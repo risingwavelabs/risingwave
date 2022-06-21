@@ -38,7 +38,7 @@ fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     funcs
 }
 
-impl<'a> SqlGenerator<'a> {
+impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName) -> Expr {
         match self.rng.gen_range(0..=99) {
             0..=49 => self

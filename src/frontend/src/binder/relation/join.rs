@@ -42,7 +42,16 @@ impl Binder {
         };
         let mut root = self.bind_table_with_joins(first)?;
         for t in from_iter {
-            let right = self.bind_table_with_joins(t)?;
+            let right = self.bind_table_with_joins(t.clone())?;
+            if let Relation::Subquery(subquery) = &right {
+                if subquery.query.is_correlated() {
+                    return Err(ErrorCode::BindError(format!(
+                        "Join table \"{}\" has correlated input reference",
+                        t
+                    ))
+                    .into());
+                }
+            }
             root = Relation::Join(Box::new(BoundJoin {
                 join_type: JoinType::Inner,
                 left: root,
@@ -71,7 +80,16 @@ impl Binder {
                 (cond, option_rel) = self.bind_join_constraint(constraint, Some(join.relation))?;
                 right = option_rel.unwrap();
             } else {
-                right = self.bind_table_factor(join.relation)?;
+                right = self.bind_table_factor(join.relation.clone())?;
+                if let Relation::Subquery(subquery) = &right {
+                    if subquery.query.is_correlated() {
+                        return Err(ErrorCode::BindError(format!(
+                            "Join table \"{}\" has correlated input reference",
+                            join.relation
+                        ))
+                        .into());
+                    }
+                }
                 (cond, _) = self.bind_join_constraint(constraint, None)?;
             }
             let join = BoundJoin {
