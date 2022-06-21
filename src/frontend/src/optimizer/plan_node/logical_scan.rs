@@ -25,6 +25,7 @@ use super::{
     BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
     ToBatch, ToStream,
 };
+use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
 use crate::session::OptimizerContextRef;
@@ -156,6 +157,13 @@ impl LogicalScan {
         self.output_col_idx
             .iter()
             .map(|i| self.table_desc.columns[*i].clone())
+            .collect()
+    }
+
+    pub fn output_column_ids(&self) -> Vec<ColumnId> {
+        self.output_col_idx
+            .iter()
+            .map(|i| self.table_desc.columns[*i].column_id)
             .collect()
     }
 
