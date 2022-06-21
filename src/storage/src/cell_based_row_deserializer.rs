@@ -30,6 +30,7 @@ pub struct ColumnDescMapping {
     pub id_to_column_index: HashMap<ColumnId, usize>,
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl ColumnDescMapping {
     pub fn new(table_column_descs: Vec<ColumnDesc>) -> Arc<Self> {
         let id_to_column_index = table_column_descs

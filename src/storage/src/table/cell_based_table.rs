@@ -162,7 +162,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
         let mut row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
         for column_id in &self.column_ids {
-            let key = serialize_pk_and_column_id(&serialized_pk, &column_id).map_err(err)?;
+            let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
             if let Some(value) = self.keyspace.get(&key, epoch).await? {
                 let deserialize_res = row_deserializer.deserialize(&key, &value).map_err(err)?;
                 assert!(deserialize_res.is_none());
