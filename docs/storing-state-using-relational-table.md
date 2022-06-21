@@ -45,7 +45,7 @@ Relational table layer consists of State Table, Mem Table and Cell-based Table. 
 ### Write Path
 To write into KV state store, executors first perform operations on State Table, and these operations will be cached in Mem Table. Once a barrier flows through one executor, executor will flush the cached operations into state store. At this moment, Cell-Based Table will covert these operations into kv pairs and write to state store with specific epoch. 
 
-For example, an executor performs `insert(a, b, c)` and `delete(d, e, f)` through the State Table APIs, Mem Table first caches these two operations in memory. After receiving new barrier, Cell Based Table converts these two operations into KV operations by cell-based format, and write these KV operations into state store(Hummock).
+For example, an executor performs `insert(a, b, c)` and `delete(d, e, f)` through the State Table APIs, Mem Table first caches these two operations in memory. After receiving new barrier, Cell Based Table converts these two operations into KV operations by cell-based format, and write these KV operations into state store (Hummock).
 
 ![write example](images/relational-table-layer/relational-table-03.svg)
 ### Read Path
@@ -71,6 +71,6 @@ Get(pk = 3): [3, 3333, 3333]
 ```
 
 #### Scan
-Scan on relational table is implemented by `StateTableIter`, which is a merge iterator of `MemTableIter` and `CellBasedTableIter`. If a pk exist in both KV state store(CellBasedTable) and memory(MemTable), result of `MemTableIter` is returned. For example, in the  following figure, `StateTableIter` will generate `1->4->5->6` in order.
+Scan on relational table is implemented by `StateTableIter`, which is a merge iterator of `MemTableIter` and `CellBasedTableIter`. If a pk exist in both KV state store  (CellBasedTable) and memory (MemTable), result of `MemTableIter` is returned. For example, in the  following figure, `StateTableIter` will generate `1->4->5->6` in order.
 
 ![Scan example](images/relational-table-layer/relational-table-02.svg)
