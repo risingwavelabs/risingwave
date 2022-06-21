@@ -1,8 +1,7 @@
 # An Overview of RisingWave State Store
 
 - [Storing State Using Relational Table](#an-overview-of-risingwave-state-store)
-  - [Overview](#overview)
-  - [Cell-Based Encoding](#Relational-table)
+  - [Cell-Based Encoding](#cell-based-encoding)
   - [Relational Table Layer](#Relational-table)
     - [Write Path](#relational-table-write-path)
     - [Read Path](#relational-table-read-path)
@@ -20,7 +19,7 @@ Cell-based encoding can significantly reduce write amplification since we can pa
 ```
 select sum(a), count(b), min(c), string_agg(d order by e) from t
 ```
-- `sum(a)`, `count(b)` are trivial
+- `sum(a)`, `count(b)` are trivial.
 - `min(c)` is a little difficult. To get the next minimum once the current minimum is deleted, we have to keep all the `c` values, which would be a long list in the row-based format and it performs badly for inserts or deletes.
 - `string_agg(d order by e)` is more difficult. we must keep all the `d` as well as their sort key `e`, and support random inserts or deletes. Again, a flatten list saved in a row would be a bad choice.
 
@@ -46,7 +45,7 @@ Relational table layer consists of State Table, Mem Table and Cell-based Table. 
 ### Write Path
 To write into KV state store, executors first perform operations on State Table, and these operations will be cached in Mem Table. Once a barrier flows through one executor, executor will flush the cached operations into state store. At this moment, Cell-Based Table will covert these operations into kv pairs and write to state store with specific epoch. 
 
-For example, an executor performs `insert(a, b, c)` and `delete(d, e, f)` through the State Table APIs, Mem Table first caches these two operations in memory. After receiving new barrier, Cell Based Table converts these two operations into KV operations, and write these KV operations into KV state store(Hummock).
+For example, an executor performs `insert(a, b, c)` and `delete(d, e, f)` through the State Table APIs, Mem Table first caches these two operations in memory. After receiving new barrier, Cell Based Table converts these two operations into KV operations by cell-based format, and write these KV operations into state store(Hummock).
 
 ![write example](images/relational-table-layer/relational-table-03.svg)
 ### Read Path
