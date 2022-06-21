@@ -50,19 +50,21 @@ pub struct CellBasedTable<S: StateStore> {
     /// The schema of this table viewed by some source executor, e.g. RowSeqScanExecutor.
     schema: Schema,
 
-    /// Mapping from column id to column index
+    /// Used for serializing the primary key.
     pk_serializer: OrderedRowSerializer,
 
     /// Used for serializing the row.
     cell_based_row_serializer: CellBasedRowSerializer,
 
-    /// Used for deserializing the row.
+    /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
 
+    /// Indices of primary keys.
+    /// Note that the index is based on the full row of the TABLE, instead of the output columns.
     pk_indices: Vec<usize>,
 
-    /// Indices of distribution keys in full row for computing value meta. None if value meta is
-    /// not required.
+    /// Indices of distribution keys for computing value meta. None if value meta is not required.
+    /// Note that the index is based on the full row of the TABLE, instead of the output columns.
     dist_key_indices: Option<Vec<usize>>,
 }
 
@@ -77,18 +79,19 @@ fn err(rw: impl Into<RwError>) -> StorageError {
 }
 
 impl<S: StateStore> CellBasedTable<S> {
+    /// Create a [`CellBasedTable`] with given a complete set of `columns`.
     pub fn new(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        let column_ids = column_descs.iter().map(|c| c.column_id).collect();
+        let column_ids = columns.iter().map(|c| c.column_id).collect();
 
         Self::new_partial(
             keyspace,
-            column_descs,
+            columns,
             column_ids,
             order_types,
             pk_indices,
@@ -96,15 +99,17 @@ impl<S: StateStore> CellBasedTable<S> {
         )
     }
 
+    /// Create a [`CellBasedTable`] with given a complete set of `columns` and a partial set of
+    /// `column_ids`. The output will only contains columns with the given ids in the same order.
     pub fn new_partial(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        table_columns: Vec<ColumnDesc>,
         column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        let mapping = ColumnDescMapping::new_partial(column_descs, &column_ids);
+        let mapping = ColumnDescMapping::new_partial(table_columns, &column_ids);
         let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
 

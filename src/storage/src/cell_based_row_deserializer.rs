@@ -24,6 +24,7 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
+/// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
 pub struct ColumnDescMapping {
     pub output_columns: Vec<ColumnDesc>,
 
@@ -32,6 +33,7 @@ pub struct ColumnDescMapping {
 
 #[allow(clippy::len_without_is_empty)]
 impl ColumnDescMapping {
+    /// Create a mapping with given `output_columns`.
     pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
         let id_to_column_index = output_columns
             .iter()
@@ -46,6 +48,7 @@ impl ColumnDescMapping {
         .into()
     }
 
+    /// Create a mapping with given `table_columns` projected on the `column_ids`.
     pub fn new_partial(table_columns: Vec<ColumnDesc>, column_ids: &[ColumnId]) -> Arc<Self> {
         let mut table_columns = table_columns
             .into_iter()
@@ -60,12 +63,14 @@ impl ColumnDescMapping {
         Self::new(output_columns)
     }
 
+    /// Get the [`ColumnDesc`] and its index in the output with given `id`.
     pub fn get(&self, id: ColumnId) -> Option<(&ColumnDesc, usize)> {
         self.id_to_column_index
             .get(&id)
             .map(|&index| (&self.output_columns[index], index))
     }
 
+    /// Get the length of output columns.
     pub fn len(&self) -> usize {
         self.output_columns.len()
     }

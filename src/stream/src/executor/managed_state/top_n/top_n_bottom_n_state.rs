@@ -231,8 +231,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         while let Some(next_res) = state_table_iter.next().await {
             let row = next_res.unwrap().into_owned();
             let mut datums = vec![];
-            for pk_indice in self.state_table.pk_indices() {
-                datums.push(row.index(*pk_indice).clone());
+            for pk_index in self.state_table.pk_indices() {
+                datums.push(row.index(*pk_index).clone());
             }
             let pk = Row::new(datums);
             let pk_ordered = OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());
@@ -267,8 +267,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
             let mut datums = vec![];
-            for pk_indice in self.state_table.pk_indices() {
-                datums.push(row.index(*pk_indice).clone());
+            for pk_index in self.state_table.pk_indices() {
+                datums.push(row.index(*pk_index).clone());
             }
             let pk = Row::new(datums);
             let pk_ordered = OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());

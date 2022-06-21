@@ -23,7 +23,7 @@ use risingwave_storage::Keyspace;
 
 pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();
-    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
+
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![0.into(), 1.into(), 2.into()];
