@@ -24,7 +24,7 @@ use crate::cell_serializer::{CellSerializer, KeyBytes, ValueBytes};
 
 /// `DedupPkCellBasedRowSerializer` is identical to `CellBasedRowSerializer`.
 /// Difference is that before serializing a row, pk datums are filtered out.
-pub struct DedupPkCellBasedRowSerializer<'a> {
+pub struct DedupPkCellBasedRowSerializer {
     /// Row indices of datums are already in pk,
     /// or have to be stored regardless (e.g. if memcomparable not equal to value encoding)
     dedup_datum_indices: HashSet<usize>,
@@ -32,59 +32,58 @@ pub struct DedupPkCellBasedRowSerializer<'a> {
     /// Serializing of row after filtering pk datums
     /// should be same as `CellBasedRowSerializer`.
     /// Hence we reuse its functionality.
-    inner: CellBasedRowSerializer<'a>,
+    inner: CellBasedRowSerializer,
 }
 
-impl DedupPkCellBasedRowSerializer<'_> {
-    pub fn new(pk_indices: &[usize], column_descs: &Vec<ColumnDesc>) -> Self {
+impl DedupPkCellBasedRowSerializer {
+    pub fn new(pk_indices: &[usize], column_descs: &Vec<ColumnDesc>, column_ids: &Vec<ColumnId>) -> Self {
         let pk_indices = pk_indices.iter().cloned().collect::<HashSet<_>>();
         let dedup_datum_indices = (0..column_descs.len())
             .filter(|i| {
                 !pk_indices.contains(i) || !column_descs[*i].data_type.mem_cmp_eq_value_enc()
             })
             .collect();
-        let column_ids = remove_dup_pk_column_ids(dedup_datum_indices, column_ids);
-        let inner = CellBasedRowSerializer::new(column_ids);
+        let dedupped_column_ids = Self::remove_dup_pk_column_ids(&dedup_datum_indices, column_ids);
+        let inner = CellBasedRowSerializer::new(dedupped_column_ids);
         Self {
             dedup_datum_indices,
             inner,
         }
     }
 
-    fn filter_by_dedup_datum_indices<'a, I>(
-        dedup_datum_indices: &HashSet<usize>,
-        iter: impl Iterator<Item = I> + 'a,
-    ) -> impl Iterator<Item = I> + 'a {
+    fn filter_by_dedup_datum_indices<'b, I>(
+        dedup_datum_indices: &'b HashSet<usize>,
+        iter: impl Iterator<Item = I> + 'b,
+    ) -> impl Iterator<Item = I> + 'b {
         iter.enumerate()
             .filter(|(i, _)| dedup_datum_indices.contains(i))
             .map(|(_, d)| d)
     }
 
     fn remove_dup_pk_datums_by_ref(&self, row: &Row) -> Row {
-        Row(filter_by_dedup_datum_indices(self.dedup_datum_indices, row.0.iter())
+        Row(Self::filter_by_dedup_datum_indices(&self.dedup_datum_indices, row.0.iter())
             .cloned()
             .collect())
     }
 
     fn remove_dup_pk_datums(&self, row: Row) -> Row {
-        Row(filter_by_dedup_datum_indices(self.dedup_datum_indices, row.0.into_iter())
+        Row(Self::filter_by_dedup_datum_indices(&self.dedup_datum_indices, row.0.into_iter())
             .collect())
     }
 
     fn remove_dup_pk_column_ids(dedup_datum_indices: &HashSet<usize>, column_ids: &[ColumnId]) -> Vec<ColumnId> {
-        self.filter_by_dedup_datum_indices(column_ids.iter())
+        Self::filter_by_dedup_datum_indices(dedup_datum_indices, column_ids.iter())
             .cloned()
             .collect()
     }
 }
 
-impl CellSerializer for DedupPkCellBasedRowSerializer<'_> {
+impl CellSerializer for DedupPkCellBasedRowSerializer {
     /// Serialize key and value.
     fn serialize(
         &mut self,
         pk: &[u8],
         row: Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
         let row = self.remove_dup_pk_datums(row);
         self.inner.serialize(pk, row)
@@ -97,7 +96,6 @@ impl CellSerializer for DedupPkCellBasedRowSerializer<'_> {
         &mut self,
         pk: &[u8],
         row: Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
         let row = self.remove_dup_pk_datums(row);
         self.inner.serialize_without_filter(pk, row)
@@ -109,7 +107,6 @@ impl CellSerializer for DedupPkCellBasedRowSerializer<'_> {
         &mut self,
         pk: &[u8],
         row: &Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<KeyBytes>> {
         let row = self.remove_dup_pk_datums_by_ref(row);
         self.inner.serialize_cell_key(pk, &row)

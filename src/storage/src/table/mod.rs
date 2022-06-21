@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod cell_based_table;
-pub mod dedup_pk_state_table;
 pub mod mem_table;
 pub mod state_table;
 

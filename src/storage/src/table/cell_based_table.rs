@@ -36,28 +36,65 @@ use crate::cell_based_row_deserializer::{
     make_column_desc_index, CellBasedRowDeserializer, ColumnDescMapping,
 };
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::cell_serializer::CellSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
-pub type CellBasedTable<'a, S> = CellBasedTableExtended<S, CellBasedRowSerializer<'a>>;
+pub type DedupPkCellBasedTable<S> = CellBasedTableExtended<S, DedupPkCellBasedRowSerializer>;
 
-impl<S: StateStore> CellBasedTable<'_, S> {
+impl<S: StateStore> DedupPkCellBasedTable<S> {
+    pub fn new_dedup_pk_cell_based_table(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        dist_key_indices: Option<Vec<usize>>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        let column_ids = column_descs.iter().map(|d| d.column_id).collect();
+        let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
+        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let cell_based_row_serializer = DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs, &column_ids);
+
+        Self {
+            keyspace,
+            schema,
+            mapping: Arc::new(make_column_desc_index(column_descs.clone())),
+            column_descs,
+            pk_serializer,
+            cell_based_row_serializer,
+            column_ids,
+            dist_key_indices,
+        }
+    }
+}
+
+pub type CellBasedTable<S> = CellBasedTableExtended<S, CellBasedRowSerializer>;
+
+impl<S: StateStore> CellBasedTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        CellBasedTableExtended::new_extended(
+        let column_ids = column_descs.iter().map(|d| d.column_id).collect_vec();
+        let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
+        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let cell_based_row_serializer = CellBasedRowSerializer::new(column_ids.clone());
+
+        Self {
             keyspace,
+            schema,
+            mapping: Arc::new(make_column_desc_index(column_descs.clone())),
             column_descs,
-            order_types,
+            pk_serializer,
+            cell_based_row_serializer,
+            column_ids,
             dist_key_indices,
-            CellBasedRowSerializer::new(),
-        )
+        }
     }
 
     pub fn new_for_test(
@@ -124,8 +161,8 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
         dist_key_indices: Option<Vec<usize>>,
         cell_based_row_serializer: SER,
     ) -> Self {
-        let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         let column_ids = column_descs.iter().map(|d| d.column_id).collect();
+        let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
         Self {
@@ -248,7 +285,7 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
                     };
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&pk, row, &self.column_ids)
+                        .serialize(&pk, row)
                         .map_err(err)?;
                     for (key, value) in bytes {
                         local.put(key, StorageValue::new_put(value_meta, value))
@@ -263,7 +300,7 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
                     };
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&pk, old_row, &self.column_ids)
+                        .serialize(&pk, old_row)
                         .map_err(err)?;
                     for (key, _) in bytes {
                         local.delete_with_value_meta(key, value_meta);
@@ -277,11 +314,11 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
                     };
                     let delete_bytes = self
                         .cell_based_row_serializer
-                        .serialize_without_filter(&pk, old_row, &self.column_ids)
+                        .serialize_without_filter(&pk, old_row)
                         .map_err(err)?;
                     let insert_bytes = self
                         .cell_based_row_serializer
-                        .serialize_without_filter(&pk, new_row, &self.column_ids)
+                        .serialize_without_filter(&pk, new_row)
                         .map_err(err)?;
                     for (delete, insert) in
                         delete_bytes.into_iter().zip_eq(insert_bytes.into_iter())
@@ -347,7 +384,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore> CellBasedTable<'_, S> {
+impl<S: StateStore> CellBasedTable<S> {
     /// Get a [`StreamingIter`] with given `encoded_key_range`.
     pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
         &self,

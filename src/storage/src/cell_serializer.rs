@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 
 pub type KeyBytes = Vec<u8>;

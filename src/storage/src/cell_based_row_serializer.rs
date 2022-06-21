@@ -23,24 +23,24 @@ use risingwave_common::util::ordered::{
 use crate::cell_serializer::{CellSerializer, KeyBytes, ValueBytes};
 
 #[derive(Clone)]
-pub struct CellBasedRowSerializer<'a> {
-    column_ids: &'a [ColumnId]
+pub struct CellBasedRowSerializer {
+    column_ids: Vec<ColumnId>,
 }
 
-impl CellBasedRowSerializer<'_> {
-    pub fn new(column_ids: &[ColumnId]) -> Self {
+impl CellBasedRowSerializer {
+    pub fn new(column_ids: Vec<ColumnId>) -> Self {
         Self { column_ids }
     }
 }
 
-impl CellSerializer for CellBasedRowSerializer<'_> {
+impl CellSerializer for CellBasedRowSerializer {
     /// Serialize key and value.
     fn serialize(
         &mut self,
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
-        let res = serialize_pk_and_row(pk, &row, self.column_ids)?
+        let res = serialize_pk_and_row(pk, &row, &self.column_ids)?
             .into_iter()
             .flatten()
             .collect_vec();
@@ -55,7 +55,7 @@ impl CellSerializer for CellBasedRowSerializer<'_> {
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
-        let res = serialize_pk_and_row(pk, &row, self.column_ids)?;
+        let res = serialize_pk_and_row(pk, &row, &self.column_ids)?;
         Ok(res)
     }
 

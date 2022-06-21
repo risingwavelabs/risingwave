@@ -25,17 +25,48 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::CellBasedTableExtended;
+use super::cell_based_table::{CellBasedTable, CellBasedTableExtended, DedupPkCellBasedTable};
 use super::mem_table::{MemTable, RowOp};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::cell_serializer::CellSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
-pub type StateTable<'a, S> = StateTableExtended<S, CellBasedRowSerializer<'a>>;
+/// Identical to `StateTable`. Used when we want to
+/// rows to have dedup pk cell encoding.
+pub type DedupPkStateTable<S> = StateTableExtended<S, DedupPkCellBasedRowSerializer>;
 
-impl<S: StateStore> StateTable<'_, S> {
+/// Constructor for `DedupPkStateTable`.
+/// We instantiate `DedupPkCellBasedRowSerializer` with `pk_indices`
+/// and `column_descs` here. These are used to determine which
+/// pk datums to filter out.
+impl<S: StateStore> DedupPkStateTable<S> {
+    pub fn new_dedup_pk_state_table(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        dist_key_indices: Option<Vec<usize>>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self {
+            mem_table: MemTable::new(),
+            cell_based_table: DedupPkCellBasedTable::new_dedup_pk_cell_based_table(
+                keyspace,
+                column_descs,
+                order_types,
+                dist_key_indices,
+                pk_indices.clone(),
+            ),
+            pk_indices,
+        }
+    }
+}
+
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
+pub type StateTable<S> = StateTableExtended<S, CellBasedRowSerializer>;
+
+impl<S: StateStore> StateTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
@@ -43,15 +74,16 @@ impl<S: StateStore> StateTable<'_, S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let column_ids = column_descs.iter().map(|d| d.column_id).collect();
-        StateTableExtended::new_extended(
-            keyspace,
-            column_descs,
-            order_types,
-            dist_key_indices,
+        Self {
+            mem_table: MemTable::new(),
+            cell_based_table: CellBasedTable::new(
+                keyspace,
+                column_descs,
+                order_types,
+                dist_key_indices,
+            ),
             pk_indices,
-            CellBasedRowSerializer::new(&column_ids),
-        )
+        }
     }
 }
 
@@ -180,7 +212,7 @@ impl<S: StateStore, SER: CellSerializer> StateTableExtended<S, SER> {
 }
 
 /// Iterator functions.
-impl<S: StateStore> StateTable<'_, S> {
+impl<S: StateStore> StateTable<S> {
     async fn iter_with_encoded_key_range<'a, R>(
         &'a self,
         encoded_key_range: R,
