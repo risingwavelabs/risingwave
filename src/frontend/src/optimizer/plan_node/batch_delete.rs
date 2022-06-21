@@ -39,7 +39,7 @@ impl BatchDelete {
             ctx,
             logical.schema().clone(),
             Distribution::Single,
-            Order::any().clone(),
+            Order::any(),
         );
         Self { base, logical }
     }

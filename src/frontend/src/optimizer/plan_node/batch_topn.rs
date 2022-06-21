@@ -71,7 +71,7 @@ impl ToDistributedBatch for BatchTopN {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self
             .input()
-            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+            .to_distributed_with_required(&Order::any(), &RequiredDist::single())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
