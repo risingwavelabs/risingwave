@@ -70,7 +70,7 @@ pub struct CellBasedTable<S: StateStore> {
     // FIXME: revisit constructions and usages.
     pk_indices: Vec<usize>,
 
-    /// Indices of distribution keys for computing value meta. None if value meta is not required.
+    /// Indices of distribution keys for computing vnode. None if vnode falls to default value.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
     dist_key_indices: Option<Vec<usize>>,
@@ -87,7 +87,7 @@ fn err(rw: impl Into<RwError>) -> StorageError {
 }
 
 impl<S: StateStore> CellBasedTable<S> {
-    /// Create a [`CellBasedTable`] with given a complete set of `columns`.
+    /// Create a [`CellBasedTable`] given a complete set of `columns`.
     pub fn new(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,
@@ -107,7 +107,7 @@ impl<S: StateStore> CellBasedTable<S> {
         )
     }
 
-    /// Create a [`CellBasedTable`] with given a complete set of `columns` and a partial set of
+    /// Create a [`CellBasedTable`] given a complete set of `columns` and a partial set of
     /// `column_ids`. The output will only contains columns with the given ids in the same order.
     pub fn new_partial(
         keyspace: Keyspace<S>,
