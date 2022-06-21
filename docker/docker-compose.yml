@@ -31,9 +31,9 @@ services:
     container_name: compactor-0
     healthcheck:
       test:
-        - CMD-SHELL
+        - CMD
         - "printf \"\" > /dev/tcp/127.0.0.1/6660"
-      interval: 10s
+      interval: 1s
       timeout: 5s
       retries: 5
   compute-node-0:
@@ -68,9 +68,9 @@ services:
     container_name: compute-node-0
     healthcheck:
       test:
-        - CMD-SHELL
+        - CMD
         - "printf \"\" > /dev/tcp/127.0.0.1/5688"
-      interval: 10s
+      interval: 1s
       timeout: 5s
       retries: 5
   etcd-0:
@@ -109,9 +109,9 @@ services:
     container_name: etcd-0
     healthcheck:
       test:
-        - CMD-SHELL
+        - CMD
         - "printf \"\" > /dev/tcp/127.0.0.1/2388"
-      interval: 10s
+      interval: 1s
       timeout: 5s
       retries: 5
   frontend-node-0:
@@ -134,9 +134,9 @@ services:
     container_name: frontend-node-0
     healthcheck:
       test:
-        - CMD-SHELL
+        - CMD
         - "printf \"\" > /dev/tcp/127.0.0.1/4566"
-      interval: 10s
+      interval: 1s
       timeout: 5s
       retries: 5
   grafana-0:
@@ -157,9 +157,9 @@ services:
     container_name: grafana-0
     healthcheck:
       test:
-        - CMD-SHELL
+        - CMD
         - "printf \"\" > /dev/tcp/127.0.0.1/3001"
-      interval: 10s
+      interval: 1s
       timeout: 5s
       retries: 5
   meta-node-0:
@@ -193,9 +193,9 @@ services:
     container_name: meta-node-0
     healthcheck:
       test:
-        - CMD-SHELL
+        - CMD
         - "printf \"\" > /dev/tcp/127.0.0.1/5690"
-      interval: 10s
+      interval: 1s
       timeout: 5s
       retries: 5
   minio-0:
@@ -226,9 +226,9 @@ services:
     container_name: minio-0
     healthcheck:
       test:
-        - CMD-SHELL
+        - CMD
         - "printf \"\" > /dev/tcp/127.0.0.1/9301"
-      interval: 10s
+      interval: 1s
       timeout: 5s
       retries: 5
   prometheus-0:
@@ -252,9 +252,9 @@ services:
     container_name: prometheus-0
     healthcheck:
       test:
-        - CMD-SHELL
+        - CMD
         - "printf \"\" > /dev/tcp/127.0.0.1/9500"
-      interval: 10s
+      interval: 1s
       timeout: 5s
       retries: 5
   redpanda:
@@ -289,9 +289,9 @@ services:
     container_name: redpanda
     healthcheck:
       test:
-        - CMD-SHELL
+        - CMD
         - "printf \"\" > /dev/tcp/127.0.0.1/9092"
-      interval: 10s
+      interval: 1s
       timeout: 5s
       retries: 5
 volumes:
