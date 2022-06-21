@@ -251,45 +251,6 @@ async fn test_merger_sum_aggr() {
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 
-/// simple stream agg executor's
-/// integration with storage
-/// TODO: Test simple stream agg executor's integration with plan?
-#[tokio::test]
-async fn test_simple_stream_agg_storage_repr() {
-    // ------------ 1. instantiate input executor
-    let buffer_size = 16; // arbitrary
-    let (sender, receiver) = channel(buffer_size);
-    let schema = Schema {
-        fields: vec![Field::unnamed(DataType::Int64)],
-    };
-    let input_executor = ReceiverExecutor::new(schema, vec![], receiver, ActorContext::create(), 0);
-    // ------------ 2. instantiate stream simple agg
-    let append_only = false;
-    let pk_indices = vec![];
-    let executor_id = 2; // arbitary
-    let key_indices = vec![];
-
-    let aggregator = SimpleAggExecutor::new(
-        input_executor.boxed(),
-        vec![
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                append_only,
-            },
-        ],
-        create_in_memory_keyspace_agg(2),
-        pk_indices,
-        executor_id,
-        key_indices,
-    );
-    // ------------ 3. instantiate consumer from second simple agg
-    // ------------ 4. insert chunks
-    // ------------ 5. insert barrier to commit
-    // ------------ 6. lock and read results from consumer.
-}
-
 struct MockConsumer {
     input: BoxedExecutor,
     data: Arc<Mutex<Vec<StreamChunk>>>,
