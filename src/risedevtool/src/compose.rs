@@ -137,7 +137,9 @@ fn health_check_port(port: u16) -> HealthCheck {
     HealthCheck {
         test: vec![
             "CMD".into(),
-            format!("printf \"\" > /dev/tcp/127.0.0.1/{}", port),
+            "printf".into(),
+            "".into(),
+            format!("/dev/tcp/127.0.0.1/{}", port),
         ],
         interval: "1s".to_string(),
         timeout: "5s".to_string(),
