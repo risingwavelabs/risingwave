@@ -482,6 +482,7 @@ impl StreamGraphBuilder {
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
+    #[allow(clippy::type_complexity)]
     pub fn build(
         mut self,
         ctx: &mut CreateMaterializedViewContext,
@@ -535,7 +536,7 @@ impl StreamGraphBuilder {
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
     ) -> Result<(StreamNode, Vec<Table>)> {
         fn generate_intertable_name(mview_name: &String, table_id: u32) -> String {
-            return format!("__INTERNAL_{}_{}", mview_name, table_id);
+            format!("__INTERNAL_{}_{}", mview_name, table_id)
         }
 
         let table_id_offset = ctx.table_id_offset;

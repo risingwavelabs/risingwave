@@ -35,7 +35,7 @@ use uuid::Uuid;
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
-use crate::manager::{HashMappingManagerRef, MetaSrvEnv, SchemaId, DatabaseId};
+use crate::manager::{DatabaseId, HashMappingManagerRef, MetaSrvEnv, SchemaId};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
