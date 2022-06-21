@@ -35,11 +35,7 @@ impl CellBasedRowSerializer {
 
 impl CellSerializer for CellBasedRowSerializer {
     /// Serialize key and value.
-    fn serialize(
-        &mut self,
-        pk: &[u8],
-        row: Row,
-    ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
+    fn serialize(&mut self, pk: &[u8], row: Row) -> Result<Vec<(KeyBytes, ValueBytes)>> {
         let res = serialize_pk_and_row(pk, &row, &self.column_ids)?
             .into_iter()
             .flatten()
@@ -61,11 +57,7 @@ impl CellSerializer for CellBasedRowSerializer {
 
     /// Different from [`CellBasedRowSerializer::serialize`], only serialize key into cell key (With
     /// column id appended).
-    fn serialize_cell_key(
-        &mut self,
-        pk: &[u8],
-        row: &Row,
-    ) -> Result<Vec<KeyBytes>> {
+    fn serialize_cell_key(&mut self, pk: &[u8], row: &Row) -> Result<Vec<KeyBytes>> {
         let mut results = Vec::with_capacity(self.column_ids.len());
         for (index, col_id) in self.column_ids.iter().enumerate() {
             if row[index].is_none() {

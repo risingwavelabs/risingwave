@@ -36,8 +36,8 @@ use crate::cell_based_row_deserializer::{
     make_column_desc_index, CellBasedRowDeserializer, ColumnDescMapping,
 };
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::cell_serializer::CellSerializer;
+use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::{StorageValue, ValueMeta};
@@ -56,7 +56,8 @@ impl<S: StateStore> DedupPkCellBasedTable<S> {
         let column_ids = column_descs.iter().map(|d| d.column_id).collect();
         let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         let pk_serializer = OrderedRowSerializer::new(order_types);
-        let cell_based_row_serializer = DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs, &column_ids);
+        let cell_based_row_serializer =
+            DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs, &column_ids);
 
         Self {
             keyspace,
@@ -102,12 +103,7 @@ impl<S: StateStore> CellBasedTable<S> {
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
     ) -> Self {
-        CellBasedTable::new(
-            keyspace,
-            column_descs,
-            order_types,
-            None,
-        )
+        CellBasedTable::new(keyspace, column_descs, order_types, None)
     }
 }
 

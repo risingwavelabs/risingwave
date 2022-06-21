@@ -20,11 +20,7 @@ pub type ValueBytes = Vec<u8>;
 
 pub trait CellSerializer {
     /// Serialize key and value.
-    fn serialize(
-        &mut self,
-        pk: &[u8],
-        row: Row,
-    ) -> Result<Vec<(KeyBytes, ValueBytes)>>;
+    fn serialize(&mut self, pk: &[u8], row: Row) -> Result<Vec<(KeyBytes, ValueBytes)>>;
 
     /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
     /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
@@ -37,9 +33,5 @@ pub trait CellSerializer {
 
     /// Different from [`CellSerializer::serialize`], only serialize key into cell key (With
     /// column id appended).
-    fn serialize_cell_key(
-        &mut self,
-        pk: &[u8],
-        row: &Row,
-    ) -> Result<Vec<KeyBytes>>;
+    fn serialize_cell_key(&mut self, pk: &[u8], row: &Row) -> Result<Vec<KeyBytes>>;
 }

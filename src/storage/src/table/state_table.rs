@@ -28,8 +28,8 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 use super::cell_based_table::{CellBasedTable, CellBasedTableExtended, DedupPkCellBasedTable};
 use super::mem_table::{MemTable, RowOp};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::cell_serializer::CellSerializer;
+use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 
