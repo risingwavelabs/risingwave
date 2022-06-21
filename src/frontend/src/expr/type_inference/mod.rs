@@ -25,7 +25,7 @@ pub use func::{func_sig_map, infer_type, FuncSign};
 
 /// `DataTypeName` is designed for type derivation here. In other scenarios,
 /// use `DataType` instead.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[derive(Debug, Ord, PartialOrd, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum DataTypeName {
     Boolean,
     Int16,

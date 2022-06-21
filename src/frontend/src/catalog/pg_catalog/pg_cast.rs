@@ -31,7 +31,9 @@ pub const PG_CAST_COLUMNS: &[PgCatalogColumnsDef] = &[
 ];
 
 fn build_pg_cast_rows() -> Vec<Row> {
-    cast_map_array()
+    let mut cast_array = cast_map_array();
+    cast_array.sort();
+    cast_array
         .iter()
         .enumerate()
         .map(|(idx, (src, target, ctx))| {

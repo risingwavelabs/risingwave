@@ -1,0 +1,5 @@
+query IT rowsort
+SELECT nspname, nspowner FROM pg_catalog.pg_namespace;
+----
+pg_catalog root
+public root
