@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -73,7 +74,7 @@ impl DatabaseCatalog {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.schema_by_name.is_empty()
+        self.schema_by_name.len() == 1 && self.schema_by_name.contains_key(PG_CATALOG_SCHEMA_NAME)
     }
 
     pub fn id(&self) -> DatabaseId {

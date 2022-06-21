@@ -36,6 +36,8 @@ pub const DEFAULT_SUPPER_USER: &str = "root";
 // This is for compatibility with customized utils for PostgreSQL.
 pub const DEFAULT_SUPPER_USER_FOR_PG: &str = "postgres";
 
+pub const RESERVED_PG_CATALOG_TABLE_ID: i32 = 1000;
+
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {

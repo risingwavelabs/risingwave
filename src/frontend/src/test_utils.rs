@@ -22,6 +22,7 @@ use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
     TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER,
+    PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -134,11 +135,16 @@ pub struct MockCatalogWriter {
 #[async_trait::async_trait]
 impl CatalogWriter for MockCatalogWriter {
     async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
+        let database_id = self.gen_id();
         self.catalog.write().create_database(ProstDatabase {
             name: db_name.to_string(),
-            id: self.gen_id(),
-            owner,
+            id: database_id,
+            owner: owner.to_string(),
         });
+        self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner.clone())
+            .await?;
+        self.create_schema(database_id, PG_CATALOG_SCHEMA_NAME, owner)
+            .await?;
         Ok(())
     }
 
