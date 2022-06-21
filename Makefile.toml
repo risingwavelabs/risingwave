@@ -607,3 +607,13 @@ echo "Deploy finished!"
 
 cat .risingwave/rw-docker/_message.partial.sh
 '''
+
+[tasks.apply-compose-docker]
+category = "RiseDev - Compose"
+description = "Run deploy.sh"
+script = '''
+#!@shell
+set -e
+
+cp -a .risingwave/rw-docker/* docker
+'''
