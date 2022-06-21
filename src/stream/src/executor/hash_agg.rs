@@ -286,27 +286,28 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     .may_mark_as_dirty(epoch, &*state_tables.read().await)
                     .await?;
 
-                let mut state_tables = state_tables.write().await;
-                // 3. Apply batch to each of the state (per agg_call)
-                for ((agg_state, data), state_table) in states
-                    .managed_states
-                    .iter_mut()
-                    .zip_eq(all_agg_data.iter())
-                    .zip_eq(state_tables.iter_mut())
-                {
-                    let data = data.iter().map(|d| &**d).collect_vec();
-                    agg_state
-                        .apply_batch(&ops, Some(&vis_map), &data, epoch, state_table)
-                        .await?;
-                }
-
-                Ok::<(_, Box<AggState<S>>), StreamExecutorError>((key, states))
+                Ok::<(_, Box<AggState<S>>, Bitmap), StreamExecutorError>((key, states, vis_map))
             });
         }
 
         let mut buffered = stream::iter(futures).buffer_unordered(10);
         while let Some(result) = buffered.next().await {
-            let (key, state) = result?;
+            let (key, mut state, vis_map) = result?;
+
+            let mut state_tables = state_tables.write().await;
+            // 3. Apply batch to each of the state (per agg_call)
+            for ((agg_state, data), state_table) in state
+                .managed_states
+                .iter_mut()
+                .zip_eq(all_agg_data.iter())
+                .zip_eq(state_tables.iter_mut())
+            {
+                let data = data.iter().map(|d| &**d).collect_vec();
+                agg_state
+                    .apply_batch(&ops, Some(&vis_map), &data, epoch, state_table)
+                    .await?;
+            }
+
             state_map.put(key, Some(state));
         }
 
