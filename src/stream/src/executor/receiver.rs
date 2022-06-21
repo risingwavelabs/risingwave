@@ -17,7 +17,6 @@ use risingwave_common::catalog::Schema;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::merge::cooperative_scheduling;
 use super::{ActorContextRef, OperatorInfoStatus};
 use crate::executor::{
     BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
@@ -68,11 +67,12 @@ impl ReceiverExecutor {
 impl Executor for ReceiverExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let mut status = self.status;
-        cooperative_scheduling(ReceiverStream::new(self.receiver).map(move |msg| {
-            status.next_message(&msg);
-            Ok(msg)
-        }))
-        .boxed()
+        ReceiverStream::new(self.receiver)
+            .map(move |msg| {
+                status.next_message(&msg);
+                Ok(msg)
+            })
+            .boxed()
     }
 
     fn schema(&self) -> &Schema {
