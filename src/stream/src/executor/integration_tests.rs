@@ -92,6 +92,7 @@ async fn test_merger_sum_aggr() {
     let mut outputs = vec![];
 
     let ctx = Arc::new(SharedContext::for_test());
+    let metrics = Arc::new(StreamingMetrics::unused());
 
     // create 17 local aggregation actors
     for _ in 0..17 {
@@ -121,6 +122,7 @@ async fn test_merger_sum_aggr() {
         ))],
         0,
         ctx,
+        metrics,
     );
     let context = SharedContext::for_test().into();
     let actor = Actor::new(

@@ -458,6 +458,7 @@ impl LocalStreamManagerCore {
             dispatcher_impls,
             actor_id,
             self.context.clone(),
+            self.streaming_metrics.clone(),
         ))
     }
 
