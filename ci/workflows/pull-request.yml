@@ -85,7 +85,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 30 # TODO(TaoWu): Decrease the timeout when we switch to larger memory instances.
+    timeout_in_minutes: 15
 
   - label: "pre unit test"
     command: "ci/scripts/pre-unit-test.sh"
