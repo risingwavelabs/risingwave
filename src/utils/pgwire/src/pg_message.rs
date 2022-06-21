@@ -325,6 +325,7 @@ pub enum BeMessage<'a> {
     EmptyQueryResponse,
     ParseComplete,
     BindComplete,
+    PortalSuspended,
     ParameterDescription(&'a [TypeOid]),
     NoData,
     DataRow(&'a Row),
@@ -533,6 +534,11 @@ impl<'a> BeMessage<'a> {
 
             BeMessage::CloseComplete => {
                 buf.put_u8(b'3');
+                write_body(buf, |_| Ok(()))?;
+            }
+
+            BeMessage::PortalSuspended => {
+                buf.put_u8(b's');
                 write_body(buf, |_| Ok(()))?;
             }
             // ParameterDescription
