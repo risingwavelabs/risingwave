@@ -172,7 +172,7 @@ fn insert_cast_seq(
 pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
     CAST_MAP
         .iter()
-        .map(|((src, target), ctx)| (*src, *target, ctx.clone()))
+        .map(|((src, target), ctx)| (*src, *target, *ctx))
         .collect_vec()
 }
 

@@ -162,20 +162,6 @@ impl ToBatchProst for BatchSeqScan {
             .collect();
 
         if self.logical.is_sys_table() {
-            let reader = self
-                .base
-                .ctx
-                .inner()
-                .session_ctx
-                .env()
-                .catalog_reader()
-                .read_guard();
-            let _databases = reader.get_all_database_names();
-            // convert databases to rows.
-            // match table_name {
-            // "pg_types" => ,
-            // }
-
             NodeBody::SysRowSeqScan(SysRowSeqScanNode {
                 table_name: self.logical.table_name().to_string(),
                 column_descs,

@@ -16,9 +16,9 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::pg_catalog::PgCatalogColumnsDef;
 
-/// The catalog pg_namespace stores namespaces. A namespace is the structure underlying SQL schemas:
+/// The catalog `pg_namespace` stores namespaces. A namespace is the structure underlying SQL schemas:
 /// each namespace can have a separate collection of relations, types, etc. without name conflicts.
-/// Ref: https://www.postgresql.org/docs/current/catalog-pg-namespace.html
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-namespace.html`]
 pub const PG_NAMESPACE_TABLE_NAME: &str = "pg_namespace";
 pub const PG_NAMESPACE_COLUMNS: &[PgCatalogColumnsDef] = &[
     (DataType::Int32, "oid"),
