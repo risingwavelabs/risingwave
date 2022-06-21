@@ -45,7 +45,7 @@ pub struct UserManagerInner {
 
 impl UserManagerInner {
     pub fn get_user_info(&self) -> &HashMap<UserName, UserInfo> {
-        return &self.user_info;
+        &self.user_info
     }
 }
 
@@ -56,9 +56,9 @@ fn get_relation(
     for user_info_item in user_info {
         for grant_privilege_item in &user_info_item.1.grant_privileges {
             for option in &grant_privilege_item.action_with_opts {
-                if !user_grant_relation.contains_key(&option.get_grantor().to_string()) {
-                    user_grant_relation.insert(option.get_grantor().to_string(), HashMap::new());
-                }
+                user_grant_relation
+                    .entry(option.get_grantor().to_string())
+                    .or_insert_with(|| HashMap::new());
                 let realtion_item = user_grant_relation.get_mut(option.get_grantor()).unwrap();
                 if !realtion_item.contains_key(user_info_item.0) {
                     realtion_item.insert(user_info_item.0.clone(), Vec::new());
@@ -70,7 +70,7 @@ fn get_relation(
             }
         }
     }
-    return user_grant_relation;
+    user_grant_relation
 }
 
 pub type UserInfoManagerRef<S> = Arc<UserManager<S>>;
@@ -377,13 +377,11 @@ impl<S: MetaStore> UserManager<S> {
                                 relation
                                     .1
                                     .retain(|o| !(o == privilege.get_object().unwrap()));
-                            } else {
-                                if relation.1.contains(privilege.get_object().unwrap()) {
-                                    return Err(RwError::from(InternalError(format!(
-                                        "Cannot revoke privilege from user {} for restrict",
-                                        user_name
-                                    ))));
-                                }
+                            } else if relation.1.contains(privilege.get_object().unwrap()) {
+                                return Err(RwError::from(InternalError(format!(
+                                    "Cannot revoke privilege from user {} for restrict",
+                                    user_name
+                                ))));
                             }
                         }
                     }
