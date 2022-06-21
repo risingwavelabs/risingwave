@@ -39,7 +39,7 @@ impl DedupPkCellBasedRowSerializer {
     pub fn new(
         pk_indices: &[usize],
         column_descs: &Vec<ColumnDesc>,
-        column_ids: &Vec<ColumnId>,
+        column_ids: &[ColumnId],
     ) -> Self {
         let pk_indices = pk_indices.iter().cloned().collect::<HashSet<_>>();
         let dedup_datum_indices = (0..column_descs.len())
