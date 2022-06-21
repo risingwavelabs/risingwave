@@ -59,8 +59,6 @@ pub struct CellBasedTable<S: StateStore> {
     /// Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
 
-    column_ids: Vec<ColumnId>,
-
     pk_indices: Vec<usize>,
 
     /// Indices of distribution keys in full row for computing value meta. None if value meta is
@@ -114,9 +112,8 @@ impl<S: StateStore> CellBasedTable<S> {
             keyspace,
             schema,
             pk_serializer,
-            cell_based_row_serializer: CellBasedRowSerializer::new(),
+            cell_based_row_serializer: CellBasedRowSerializer::new(column_ids),
             mapping,
-            column_ids,
             pk_indices,
             dist_key_indices,
         }
@@ -142,6 +139,10 @@ impl<S: StateStore> CellBasedTable<S> {
     pub(super) fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
     }
+
+    pub(super) fn column_ids(&self) -> &[ColumnId] {
+        &self.cell_based_row_serializer.column_ids
+    }
 }
 
 /// Get & Write
@@ -161,7 +162,7 @@ impl<S: StateStore> CellBasedTable<S> {
         };
 
         let mut row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
-        for column_id in &self.column_ids {
+        for column_id in self.column_ids() {
             let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
             if let Some(value) = self.keyspace.get(&key, epoch).await? {
                 let deserialize_res = row_deserializer.deserialize(&key, &value).map_err(err)?;
@@ -228,7 +229,7 @@ impl<S: StateStore> CellBasedTable<S> {
                     };
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&pk, row, &self.column_ids)
+                        .serialize(&pk, row)
                         .map_err(err)?;
                     for (key, value) in bytes {
                         local.put(key, StorageValue::new_put(value_meta, value))
@@ -243,7 +244,7 @@ impl<S: StateStore> CellBasedTable<S> {
                     };
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&pk, old_row, &self.column_ids)
+                        .serialize(&pk, old_row)
                         .map_err(err)?;
                     for (key, _) in bytes {
                         local.delete_with_value_meta(key, value_meta);
@@ -257,11 +258,11 @@ impl<S: StateStore> CellBasedTable<S> {
                     };
                     let delete_bytes = self
                         .cell_based_row_serializer
-                        .serialize_without_filter(&pk, old_row, &self.column_ids)
+                        .serialize_without_filter(&pk, old_row)
                         .map_err(err)?;
                     let insert_bytes = self
                         .cell_based_row_serializer
-                        .serialize_without_filter(&pk, new_row, &self.column_ids)
+                        .serialize_without_filter(&pk, new_row)
                         .map_err(err)?;
                     for (delete, insert) in
                         delete_bytes.into_iter().zip_eq(insert_bytes.into_iter())

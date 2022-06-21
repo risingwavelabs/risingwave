@@ -1218,7 +1218,7 @@ async fn test_dedup_cell_based_table_iter_with(
     let mut local = batch.prefixify(&keyspace);
 
     // ---------- Init write serializer
-    let mut cell_based_row_serializer = CellBasedRowSerializer::new();
+    let mut cell_based_row_serializer = CellBasedRowSerializer::new(partial_row_col_ids);
     let ordered_row_serializer = OrderedRowSerializer::new(order_types.clone());
 
     // ---------- Init table for writes
@@ -1241,7 +1241,7 @@ async fn test_dedup_cell_based_table_iter_with(
             .collect_vec());
 
         let bytes = cell_based_row_serializer
-            .serialize(&pk_bytes, partial_row, &partial_row_col_ids)
+            .serialize(&pk_bytes, partial_row)
             .unwrap();
 
         // ---------- Batch-write
