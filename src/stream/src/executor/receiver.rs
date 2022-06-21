@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
 use risingwave_common::catalog::Schema;
+use tokio::sync::mpsc::Receiver;
+use tokio_stream::wrappers::ReceiverStream;
 
 use super::merge::cooperative_scheduling;
 use super::{ActorContextRef, OperatorInfoStatus};
@@ -67,7 +68,7 @@ impl ReceiverExecutor {
 impl Executor for ReceiverExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let mut status = self.status;
-        cooperative_scheduling(self.receiver.map(move |msg| {
+        cooperative_scheduling(ReceiverStream::new(self.receiver).map(move |msg| {
             status.next_message(&msg);
             Ok(msg)
         }))
