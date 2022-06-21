@@ -75,8 +75,7 @@ impl SSTableIterator {
             let block = if idx < self.sst.value().blocks.len() {
                 BlockHolder::from_ref_block(&self.sst.value().blocks[idx])
             } else {
-                block = self
-                    .sstable_store
+                self.sstable_store
                     .get(
                         self.sst.value(),
                         idx as u64,
@@ -233,7 +232,7 @@ mod tests {
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
         let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        let table = Sstable::new_with_data(0, meta, data);
+        let table = Sstable::new_with_data(0, meta, data).unwrap();
         let handle = cache.insert(0, 0, 1, Box::new(table));
         inner_test_forward_iterator(sstable_store, handle).await;
     }

@@ -146,22 +146,6 @@ impl SstableStore {
         Ok(())
     }
 
-    async fn load_data(&self, sst_id: u64, metas: &[BlockMeta]) -> HummockResult<Vec<Box<Block>>> {
-        let data_path = self.get_sst_data_path(sst_id);
-        let block_data = self
-            .store
-            .read(&data_path, None)
-            .await
-            .map_err(HummockError::object_io_error)?;
-        let mut blocks = vec![];
-        for block_meta in metas {
-            let end_offset = (block_meta.offset + block_meta.len) as usize;
-            let block = Block::decode(block_data.slice(block_meta.offset as usize..end_offset))?;
-            blocks.push(Box::new(block));
-        }
-        Ok(blocks)
-    }
-
     pub async fn get(
         &self,
         sst: &Sstable,
@@ -269,18 +253,19 @@ impl SstableStore {
                         .map_err(HummockError::object_io_error)?;
                     let mut size = buf.len();
                     let meta = SstableMeta::decode(&mut &buf[..])?;
-                    let blocks = if load_data {
+                    let sst = if load_data {
                         size = meta.estimated_size as usize;
-                        self.load_data(sst_id, &meta.block_metas).await?
+                        let data_path = self.get_sst_data_path(sst_id);
+                        let block_data = self
+                            .store
+                            .read(&data_path, None)
+                            .await
+                            .map_err(HummockError::object_io_error)?;
+                        Sstable::new_with_data(sst_id, meta, block_data)?
                     } else {
-                        vec![]
+                        Sstable::new(sst_id, meta)
                     };
-                    let sst = Box::new(Sstable {
-                        id: sst_id,
-                        meta,
-                        blocks,
-                    });
-                    Ok((sst, size))
+                    Ok((Box::new(sst), size))
                 })
                 .await
                 .map_err(|e| {

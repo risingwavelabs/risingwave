@@ -19,7 +19,7 @@ pub use forward_concat::*;
 mod backward_concat;
 mod concat_inner;
 pub use backward_concat::*;
-pub use concat_inner::{ConcatIteratorInner, ForwardMemoryConcatIterator};
+pub use concat_inner::ConcatIteratorInner;
 mod backward_merge;
 pub use backward_merge::*;
 mod backward_user;

@@ -151,7 +151,6 @@ where
         let entry = self.builders.entry(group_id).or_insert_with(|| {
             CapacitySplitTableBuilder::new(
                 self.get_id_and_builder.clone(),
-                self.policy,
                 self.sstable_store.clone(),
             )
         });

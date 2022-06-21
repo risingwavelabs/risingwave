@@ -75,14 +75,18 @@ impl Sstable {
         }
     }
 
-    pub fn new_with_data(id: HummockSSTableId, meta: SstableMeta, data: Bytes) -> Self {
+    pub fn new_with_data(
+        id: HummockSSTableId,
+        meta: SstableMeta,
+        data: Bytes,
+    ) -> HummockResult<Self> {
         let mut blocks = vec![];
         for block_meta in &meta.block_metas {
             let end_offset = (block_meta.offset + block_meta.len) as usize;
             let block = Block::decode(data.slice(block_meta.offset as usize..end_offset))?;
             blocks.push(Box::new(block));
         }
-        Self { id, meta, blocks }
+        Ok(Self { id, meta, blocks })
     }
 
     pub fn has_bloom_filter(&self) -> bool {

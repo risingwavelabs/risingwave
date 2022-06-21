@@ -50,7 +50,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::HummockError;
+use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
@@ -420,24 +420,6 @@ impl Compactor {
                 })
                 .collect(),
         );
-        let tables = compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| table.id)
-            .collect_vec();
-        if let Err(e) = compactor
-            .context
-            .sstable_store
-            .prefetch_sstables(tables)
-            .await
-        {
-            tracing::warn!(
-                "Compaction task {} prefetch failed with error: {:#?}",
-                compact_task.task_id,
-                e
-            );
-        }
 
         let compaction_filter =
             StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
@@ -590,6 +572,7 @@ impl Compactor {
                 Ok(builder)
             },
             VirtualNodeGrouping::new(vnode2unit),
+            CachePolicy::NotFill,
             self.context.sstable_store.clone(),
         );
 
@@ -624,13 +607,9 @@ impl Compactor {
             unit_id,
         } in sealed_builders
         {
-            let sst = Sstable {
-                id: table_id,
-                meta,
-                blocks: vec![],
-            };
+            let sst = Sstable::new(table_id, meta);
             let len = data_len;
-            ssts.push((sst.clone(), unit_id, table_ids));
+            ssts.push((sst, unit_id, table_ids));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {

@@ -130,14 +130,7 @@ where
             let meta_clone = meta.clone();
             let upload_join_handle = tokio::spawn(async move {
                 sstable_store
-                    .put(
-                        Sstable {
-                            id: table_id,
-                            meta: meta_clone,
-                        },
-                        data,
-                        CachePolicy::Fill,
-                    )
+                    .put(Sstable::new(table_id, meta_clone), data, CachePolicy::Fill)
                     .await
             });
             self.sealed_builders.push(SealedSstableBuilder {
