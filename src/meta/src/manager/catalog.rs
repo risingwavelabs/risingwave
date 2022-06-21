@@ -208,21 +208,33 @@ where
 
     pub async fn finish_create_table_procedure(
         &self,
+        internal_tables: Vec<Table>,
         table: &Table,
     ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
-            table.insert(self.env.meta_store()).await?;
-            core.add_table(table);
+            let mut transaction = Transaction::default();
+            for table in &internal_tables {
+                table.upsert_in_transaction(&mut transaction)?;
+            }
+            table.upsert_in_transaction(&mut transaction)?;
+            core.env.meta_store().txn(transaction).await?;
 
+            for internal_table in internal_tables {
+                core.add_table(&internal_table);
+                self.env
+                    .notification_manager()
+                    .notify_frontend(Operation::Add, Info::Table(internal_table))
+                    .await;
+            }
+            core.add_table(table);
             let version = self
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
-
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -440,6 +452,7 @@ where
         &self,
         source: &Source,
         mview: &Table,
+        tables: Vec<Table>,
     ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
@@ -455,10 +468,21 @@ where
             let mut transaction = Transaction::default();
             source.upsert_in_transaction(&mut transaction)?;
             mview.upsert_in_transaction(&mut transaction)?;
+            for table in &tables {
+                table.upsert_in_transaction(&mut transaction)?;
+            }
             core.env.meta_store().txn(transaction).await?;
+
             core.add_source(source);
             core.add_table(mview);
 
+            for table in tables {
+                core.add_table(&table);
+                self.env
+                    .notification_manager()
+                    .notify_frontend(Operation::Add, Info::Table(table))
+                    .await;
+            }
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Table(mview.to_owned()))

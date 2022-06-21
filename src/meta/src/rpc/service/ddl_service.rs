@@ -28,7 +28,9 @@ use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableId};
+use crate::manager::{
+    CatalogManagerRef, DatabaseId, IdCategory, MetaSrvEnv, SchemaId, SourceId, TableId,
+};
 use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
@@ -232,7 +234,6 @@ where
         let req = request.into_inner();
         let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
         let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
-
         // 0. Generate an id from mview.
         let id = self
             .env
@@ -286,23 +287,33 @@ where
             .map_err(tonic_err)?;
 
         // 3. Create mview in stream manager. The id in stream node will be filled.
-        if let Err(e) = self
-            .create_mview_on_compute_node(fragment_graph, id, None)
+        let internal_tables = match self
+            .create_mview_on_compute_node(
+                fragment_graph,
+                id,
+                mview.schema_id,
+                mview.database_id,
+                mview.name.clone(),
+                None,
+            )
             .await
         {
-            self.catalog_manager
-                .cancel_create_table_procedure(&mview)
-                .await
-                .map_err(tonic_err)?;
-            return Err(e.into());
-        } else {
-            self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
-        }
-
+            Err(e) => {
+                self.catalog_manager
+                    .cancel_create_table_procedure(&mview)
+                    .await
+                    .map_err(tonic_err)?;
+                return Err(e.into());
+            }
+            Ok(inner_internal_tables) => {
+                self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
+                inner_internal_tables
+            }
+        };
         // 4. Finally, update the catalog.
         let version = self
             .catalog_manager
-            .finish_create_table_procedure(&mview)
+            .finish_create_table_procedure(internal_tables, &mview)
             .await
             .map_err(tonic_err)?;
 
@@ -400,8 +411,11 @@ where
         &self,
         mut fragment_graph: StreamFragmentGraph,
         id: TableId,
+        schema_id: SchemaId,
+        database_id: DatabaseId,
+        table_name: String,
         affiliated_source: Option<Source>,
-    ) -> RwResult<()> {
+    ) -> RwResult<Vec<Table>> {
         use risingwave_common::catalog::TableId;
 
         use crate::stream::CreateMaterializedViewContext;
@@ -438,6 +452,9 @@ where
             .await;
         let mut ctx = CreateMaterializedViewContext {
             affiliated_source,
+            schema_id,
+            database_id,
+            mview_name: table_name,
             ..Default::default()
         };
 
@@ -458,7 +475,7 @@ where
             })
             .collect();
 
-        let graph = actor_graph_builder
+        let (graph, internal_tables) = actor_graph_builder
             .generate_graph(
                 self.env.id_gen_manager_ref(),
                 self.fragment_manager.clone(),
@@ -479,7 +496,7 @@ where
             .create_materialized_view(table_fragments, ctx)
             .await?;
 
-        Ok(())
+        Ok(internal_tables)
     }
 
     async fn create_materialized_source_inner(
@@ -546,24 +563,35 @@ where
 
         // Create mview on compute node.
         // Noted that this progress relies on the source just created, so we pass it here.
-        if let Err(e) = self
-            .create_mview_on_compute_node(fragment_graph, mview_id, Some(source.clone()))
+        let internal_tables = match self
+            .create_mview_on_compute_node(
+                fragment_graph,
+                mview_id,
+                source.schema_id,
+                source.database_id,
+                source.name.clone(),
+                Some(source.clone()),
+            )
             .await
         {
-            self.catalog_manager
-                .cancel_create_materialized_source_procedure(&source, &mview)
-                .await?;
-            // drop previously created source
-            self.source_manager.drop_source(source_id).await?;
-            return Err(e);
-        } else {
-            self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
-        }
+            Err(e) => {
+                self.catalog_manager
+                    .cancel_create_materialized_source_procedure(&source, &mview)
+                    .await?;
+                // drop previously created source
+                self.source_manager.drop_source(source_id).await?;
+                return Err(e);
+            }
+            Ok(inner_internal_tables) => {
+                self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
+                inner_internal_tables
+            }
+        };
 
         // Finally, update the catalog.
         let version = self
             .catalog_manager
-            .finish_create_materialized_source_procedure(&source, &mview)
+            .finish_create_materialized_source_procedure(&source, &mview, internal_tables)
             .await?;
 
         Ok((source_id, mview_id, version))

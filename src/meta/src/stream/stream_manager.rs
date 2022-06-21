@@ -35,7 +35,7 @@ use uuid::Uuid;
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
-use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
+use crate::manager::{HashMappingManagerRef, MetaSrvEnv, SchemaId, DatabaseId};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
@@ -59,6 +59,12 @@ pub struct CreateMaterializedViewContext {
     pub table_id_offset: u32,
     /// Internal TableID for MaterializedView.
     pub internal_table_id_set: HashSet<u32>,
+    /// SchemaId of mview
+    pub schema_id: SchemaId,
+    /// DatabaseId of mview
+    pub database_id: DatabaseId,
+    /// Name of mview, for internal table name generation.
+    pub mview_name: String,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -270,9 +276,7 @@ where
             mut upstream_node_actors,
             table_sink_map,
             dependent_table_ids,
-            affiliated_source: _,
-            table_id_offset: _,
-            internal_table_id_set: _,
+            ..
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
         let nodes = self

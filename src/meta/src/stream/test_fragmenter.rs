@@ -332,8 +332,11 @@ async fn test_fragmenter() -> Result<()> {
         )
         .await?;
 
-    let table_fragments =
-        TableFragments::new(TableId::default(), graph, ctx.internal_table_id_set.clone());
+    let table_fragments = TableFragments::new(
+        TableId::default(),
+        graph.0,
+        ctx.internal_table_id_set.clone(),
+    );
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();

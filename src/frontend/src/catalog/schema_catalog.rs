@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 
+use lazy_static::lazy_static;
+use regex::Regex;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -80,9 +82,17 @@ impl SchemaCatalog {
 
     /// Iterate all materialized views, excluding the indexs.
     pub fn iter_mv(&self) -> impl Iterator<Item = &TableCatalog> {
+        lazy_static! {
+            static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__INTERNAL_.*_\d+").unwrap();
+        }
+        // let internal_table_name =
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_none())
+            .filter(|(_, v)| {
+                v.associated_source_id.is_none()
+                    && v.is_index_on.is_none()
+                    && !INTERNAL_TABLE_NAME.is_match(&v.name)
+            })
             .map(|(_, v)| v)
     }
 
