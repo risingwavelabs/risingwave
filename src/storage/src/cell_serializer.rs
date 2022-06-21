@@ -25,7 +25,6 @@ pub trait CellSerializer {
         &mut self,
         pk: &[u8],
         row: Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<(KeyBytes, ValueBytes)>>;
 
     /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
@@ -35,7 +34,6 @@ pub trait CellSerializer {
         &mut self,
         pk: &[u8],
         row: Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>>;
 
     /// Different from [`CellSerializer::serialize`], only serialize key into cell key (With
@@ -44,6 +42,5 @@ pub trait CellSerializer {
         &mut self,
         pk: &[u8],
         row: &Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<KeyBytes>>;
 }

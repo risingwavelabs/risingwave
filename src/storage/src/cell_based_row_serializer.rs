@@ -23,27 +23,24 @@ use risingwave_common::util::ordered::{
 use crate::cell_serializer::{CellSerializer, KeyBytes, ValueBytes};
 
 #[derive(Clone)]
-pub struct CellBasedRowSerializer {}
-impl Default for CellBasedRowSerializer {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct CellBasedRowSerializer<'a> {
+    column_ids: &'a [ColumnId]
 }
-impl CellBasedRowSerializer {
-    pub fn new() -> Self {
-        Self {}
+
+impl CellBasedRowSerializer<'_> {
+    pub fn new(column_ids: &[ColumnId]) -> Self {
+        Self { column_ids }
     }
 }
 
-impl CellSerializer for CellBasedRowSerializer {
+impl CellSerializer for CellBasedRowSerializer<'_> {
     /// Serialize key and value.
     fn serialize(
         &mut self,
         pk: &[u8],
         row: Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
-        let res = serialize_pk_and_row(pk, &row, column_ids)?
+        let res = serialize_pk_and_row(pk, &row, self.column_ids)?
             .into_iter()
             .flatten()
             .collect_vec();
@@ -57,9 +54,8 @@ impl CellSerializer for CellBasedRowSerializer {
         &mut self,
         pk: &[u8],
         row: Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
-        let res = serialize_pk_and_row(pk, &row, column_ids)?;
+        let res = serialize_pk_and_row(pk, &row, self.column_ids)?;
         Ok(res)
     }
 
@@ -69,10 +65,9 @@ impl CellSerializer for CellBasedRowSerializer {
         &mut self,
         pk: &[u8],
         row: &Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<KeyBytes>> {
-        let mut results = Vec::with_capacity(column_ids.len());
-        for (index, col_id) in column_ids.iter().enumerate() {
+        let mut results = Vec::with_capacity(self.column_ids.len());
+        for (index, col_id) in self.column_ids.iter().enumerate() {
             if row[index].is_none() {
                 continue;
             }

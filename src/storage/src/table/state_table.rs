@@ -33,9 +33,9 @@ use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
-pub type StateTable<S> = StateTableExtended<S, CellBasedRowSerializer>;
+pub type StateTable<'a, S> = StateTableExtended<S, CellBasedRowSerializer<'a>>;
 
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore> StateTable<'_, S> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
@@ -43,13 +43,14 @@ impl<S: StateStore> StateTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        let column_ids = column_descs.iter().map(|d| d.column_id).collect();
         StateTableExtended::new_extended(
             keyspace,
             column_descs,
             order_types,
             dist_key_indices,
             pk_indices,
-            CellBasedRowSerializer::new(),
+            CellBasedRowSerializer::new(&column_ids),
         )
     }
 }
@@ -179,7 +180,7 @@ impl<S: StateStore, SER: CellSerializer> StateTableExtended<S, SER> {
 }
 
 /// Iterator functions.
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore> StateTable<'_, S> {
     async fn iter_with_encoded_key_range<'a, R>(
         &'a self,
         encoded_key_range: R,

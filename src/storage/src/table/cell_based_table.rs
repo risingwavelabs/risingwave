@@ -42,9 +42,9 @@ use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
-pub type CellBasedTable<S> = CellBasedTableExtended<S, CellBasedRowSerializer>;
+pub type CellBasedTable<'a, S> = CellBasedTableExtended<S, CellBasedRowSerializer<'a>>;
 
-impl<S: StateStore> CellBasedTable<S> {
+impl<S: StateStore> CellBasedTable<'_, S> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
@@ -347,7 +347,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore> CellBasedTable<S> {
+impl<S: StateStore> CellBasedTable<'_, S> {
     /// Get a [`StreamingIter`] with given `encoded_key_range`.
     pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
         &self,
