@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
 use risingwave_common::catalog::Schema;
+use tokio::sync::mpsc::Receiver;
+use tokio_stream::wrappers::ReceiverStream;
 
 use super::{ActorContextRef, OperatorInfoStatus};
 use crate::executor::{
@@ -66,7 +67,7 @@ impl ReceiverExecutor {
 impl Executor for ReceiverExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let mut status = self.status;
-        self.receiver
+        ReceiverStream::new(self.receiver)
             .map(move |msg| {
                 status.next_message(&msg);
                 Ok(msg)

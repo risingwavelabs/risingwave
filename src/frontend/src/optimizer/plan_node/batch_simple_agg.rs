@@ -41,7 +41,7 @@ impl BatchSimpleAgg {
             ctx,
             logical.schema().clone(),
             input_dist.clone(),
-            Order::any().clone(),
+            Order::any(),
         );
         BatchSimpleAgg { base, logical }
     }
@@ -82,7 +82,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
 
             // insert exchange
             let exchange =
-                BatchExchange::new(partial_agg, Order::any().clone(), Distribution::Single).into();
+                BatchExchange::new(partial_agg, Order::any(), Distribution::Single).into();
 
             // insert total agg
             let total_agg_types = self
@@ -103,7 +103,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
         } else {
             let new_input = self
                 .input()
-                .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+                .to_distributed_with_required(&Order::any(), &RequiredDist::single())?;
             Ok(self.clone_with_input(new_input).into())
         }
     }
@@ -127,7 +127,8 @@ impl ToLocalBatch for BatchSimpleAgg {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
 
-        let new_input = RequiredDist::single().enforce_if_not_satisfies(new_input, Order::any())?;
+        let new_input =
+            RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
     }

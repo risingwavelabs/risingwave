@@ -16,13 +16,14 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use async_trait::async_trait;
-use futures::channel::mpsc::{Receiver, Sender};
-use futures::{SinkExt, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use futures_async_stream::for_await;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::Streaming;
 
 use super::error::StreamExecutorError;
@@ -56,7 +57,7 @@ impl RemoteInput {
         })
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(self) {
         let up_actor_id = self.up_down_ids.0.to_string();
         let down_actor_id = self.up_down_ids.1.to_string();
         #[for_await]
@@ -154,8 +155,8 @@ impl Executor for MergeExecutor {
 }
 
 pub struct SelectReceivers {
-    blocks: Vec<Receiver<Message>>,
-    upstreams: Vec<Receiver<Message>>,
+    blocks: Vec<ReceiverStream<Message>>,
+    upstreams: Vec<ReceiverStream<Message>>,
     barrier: Option<Barrier>,
     last_base: usize,
     status: OperatorInfoStatus,
@@ -166,7 +167,7 @@ impl SelectReceivers {
     fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Receiver<Message>>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
-            upstreams,
+            upstreams: upstreams.into_iter().map(ReceiverStream::new).collect(),
             last_base: 0,
             actor_id,
             status,
@@ -247,8 +248,6 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
-    use futures::channel::mpsc::channel;
-    use futures::SinkExt;
     use itertools::Itertools;
     use madsim::collections::HashSet;
     use risingwave_common::array::{Op, StreamChunk};
@@ -260,6 +259,7 @@ mod tests {
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
     };
     use risingwave_rpc_client::ComputeClient;
+    use tokio::sync::mpsc::channel;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
@@ -280,7 +280,7 @@ mod tests {
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         for _i in 0..CHANNEL_NUMBER {
-            let (tx, rx) = futures::channel::mpsc::channel(16);
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
             txs.push(tx);
             rxs.push(rx);
         }
@@ -290,7 +290,7 @@ mod tests {
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
 
-        for mut tx in txs {
+        for tx in txs {
             let epochs = epochs.clone();
             let handle = tokio::spawn(async move {
                 for epoch in epochs {
@@ -427,13 +427,13 @@ mod tests {
             .unwrap();
             remote_input.run().await
         });
-        assert_matches!(rx.next().await.unwrap(), Message::Chunk(chunk) => {
+        assert_matches!(rx.recv().await.unwrap(), Message::Chunk(chunk) => {
             let (ops, columns, visibility) = chunk.into_inner();
             assert_eq!(ops.len() as u64, 0);
             assert_eq!(columns.len() as u64, 0);
             assert_eq!(visibility, None);
         });
-        assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+        assert_matches!(rx.recv().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
             assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));

@@ -35,17 +35,21 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
+use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
+use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::test_utils::MockUserInfoWriter;
@@ -58,6 +62,8 @@ pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
+    /// For debugging purposes, store the SQL string in Context
+    pub sql: Arc<str>,
 }
 
 #[derive(Clone, Debug)]
@@ -89,10 +95,11 @@ impl OptimizerContextRef {
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
+            sql,
         }
     }
 
@@ -102,6 +109,7 @@ impl OptimizerContext {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
+            sql: Arc::from(""),
         }
         .into()
     }
@@ -213,7 +221,7 @@ impl FrontendEnv {
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
-        let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
+        let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
@@ -534,18 +542,19 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
-        // With pgwire, there would be at most 1 statement in the vec.
-        assert!(stmts.len() <= 1);
         if stmts.is_empty() {
-            return Ok(PgResponse::new(
+            return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
-                0,
-                vec![],
-                vec![],
+            ));
+        }
+        if stmts.len() > 1 {
+            return Ok(PgResponse::empty_result_with_notice(
+                pgwire::pg_response::StatementType::EMPTY,
+                "cannot insert multiple commands into statement".to_string(),
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt).await.map_err(|e| {
+        let rsp = handle(self, stmt, sql).await.map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
@@ -561,22 +570,51 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
-        // With pgwire, there would be at most 1 statement in the vec.
-        assert!(stmts.len() <= 1);
         if stmts.is_empty() {
             return Ok(vec![]);
         }
+        if stmts.len() > 1 {
+            return Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "cannot insert multiple commands into statement",
+            )));
+        }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt).await.map_err(|e| {
+        let rsp = infer(self, stmt, sql).map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
-        Ok(rsp.get_row_desc())
+        Ok(rsp)
     }
 
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
     }
+}
+
+/// Returns row description of the statement
+fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
+    let context = OptimizerContext::new(session, Arc::from(sql));
+    let session = context.session_ctx.clone();
+
+    let bound = {
+        let mut binder = Binder::new(
+            session.env().catalog_reader().read_guard(),
+            session.database().to_string(),
+        );
+        binder.bind(stmt)?
+    };
+
+    let root = Planner::new(context.into()).plan(bound)?;
+
+    let pg_descs = root
+        .schema()
+        .fields()
+        .iter()
+        .map(to_pg_field)
+        .collect::<Vec<PgFieldDescriptor>>();
+
+    Ok(pg_descs)
 }
 
 #[cfg(test)]

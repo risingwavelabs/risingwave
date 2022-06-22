@@ -18,7 +18,7 @@
 
 mod resolve_id;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -32,7 +32,7 @@ use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
 use risingwave_frontend::FrontendOpts;
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{ObjectName, Statement, WithProperties};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -258,7 +258,7 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(session.clone());
+            let context = OptimizerContext::new(session.clone(), Arc::from(sql));
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -324,9 +324,11 @@ impl TestCase {
                     or_replace: false,
                     name,
                     query,
+                    with_options,
                     ..
                 } => {
-                    if let Err(err) = create_mv::handle_create_mv(context, name, query).await {
+                    if let Err(err) = create_mv::handle_create_mv(context, name, query, WithProperties(with_options))
+                    .await {
                         let ret = TestCaseResult {
                             catalog_error: Some(err.to_string()),
                             ..Default::default()
@@ -336,6 +338,7 @@ impl TestCase {
                         }
                         result = Some(ret);
                     };
+
                 }
                 Statement::Drop(drop_statement) => {
                     if let Err(err) =
@@ -437,6 +440,7 @@ impl TestCase {
                 context,
                 Box::new(q),
                 ObjectName(vec!["test".into()]),
+                HashMap::new(),
             )?;
 
             // Only generate stream_plan if it is specified in test case

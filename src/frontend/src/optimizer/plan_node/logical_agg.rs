@@ -17,9 +17,10 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
@@ -27,6 +28,8 @@ use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
 };
+use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
 use crate::optimizer::property::RequiredDist;
@@ -118,6 +121,79 @@ pub struct LogicalAgg {
     agg_calls: Vec<PlanAggCall>,
     group_keys: Vec<usize>,
     input: PlanRef,
+}
+
+impl LogicalAgg {
+    pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, HashMap<usize, i32>) {
+        let mut table_catalogs = vec![];
+        let mut column_mapping = HashMap::new();
+        let base = self.input.plan_base();
+        let schema = &base.schema;
+        let fields = schema.fields();
+        for agg_call in &self.agg_calls {
+            let mut internal_pk_indices = vec![];
+            let mut columns = vec![];
+            let mut order_desc = vec![];
+            for &idx in &self.group_keys {
+                let column_id = columns.len() as i32;
+                internal_pk_indices.push(column_id as usize); // Currently our column index is same as column id
+                column_mapping.insert(idx, column_id);
+                let column_desc = ColumnDesc::from_field_with_column_id(&fields[idx], column_id);
+                columns.push(ColumnCatalog {
+                    column_desc: column_desc.clone(),
+                    is_hidden: false,
+                });
+                order_desc.push(OrderedColumnDesc {
+                    column_desc,
+                    order: OrderType::Ascending,
+                })
+            }
+            match agg_call.agg_kind {
+                AggKind::Min | AggKind::Max | AggKind::StringAgg => {
+                    for input in &agg_call.inputs {
+                        let column_id = columns.len() as i32;
+                        column_mapping.insert(input.index, column_id);
+                        columns.push(ColumnCatalog {
+                            column_desc: ColumnDesc::from_field_with_column_id(
+                                &fields[input.index],
+                                column_id,
+                            ),
+                            is_hidden: false,
+                        });
+                    }
+                }
+                AggKind::Sum
+                | AggKind::Count
+                | AggKind::RowCount
+                | AggKind::Avg
+                | AggKind::SingleValue
+                | AggKind::ApproxCountDistinct => {
+                    columns.push(ColumnCatalog {
+                        column_desc: ColumnDesc::unnamed(
+                            ColumnId::new(columns.len() as i32),
+                            agg_call.return_type.clone(),
+                        ),
+                        is_hidden: false,
+                    });
+                }
+            }
+            table_catalogs.push(TableCatalog {
+                id: TableId::placeholder(),
+                associated_source_id: None,
+                name: String::new(),
+                columns,
+                order_desc,
+                pks: internal_pk_indices,
+                is_index_on: None,
+                distribution_keys: base.dist.dist_column_indices().to_vec(),
+                appendonly: false,
+                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+                vnode_mapping: None,
+                properties: HashMap::default(),
+            });
+        }
+        (table_catalogs, column_mapping)
+    }
 }
 
 /// `ExprHandler` extracts agg calls and references to group columns from select list, in

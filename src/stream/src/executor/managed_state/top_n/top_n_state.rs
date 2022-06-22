@@ -100,7 +100,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     }
 
     pub fn is_dirty(&self) -> bool {
-        !self.state_table.get_mem_table().buffer.is_empty()
+        self.state_table.is_dirty()
     }
 
     pub fn retain_top_n(&mut self) {
@@ -213,8 +213,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 Some(next_res) => {
                     let row = next_res.unwrap().into_owned();
                     let mut datums = vec![];
-                    for pk_indice in self.state_table.get_pk_indices() {
-                        datums.push(row.index(*pk_indice).clone());
+                    for pk_index in self.state_table.pk_indices() {
+                        datums.push(row.index(*pk_index).clone());
                     }
                     let pk = Row::new(datums);
                     let pk_ordered =
@@ -260,8 +260,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
             let mut datums = vec![];
-            for pk_indice in self.state_table.get_pk_indices() {
-                datums.push(row.index(*pk_indice).clone());
+            for pk_index in self.state_table.pk_indices() {
+                datums.push(row.index(*pk_index).clone());
             }
             let pk = Row::new(datums);
             let pk_ordered = OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());

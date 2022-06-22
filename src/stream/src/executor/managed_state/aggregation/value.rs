@@ -17,7 +17,6 @@ use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
@@ -54,7 +53,7 @@ impl ManagedValueState {
             // View the state table as single-value table, and get the value via empty primary key
             // or group key.
             let raw_data = state_table
-                .get_row(pk.unwrap_or(&Row(vec![])), epoch)
+                .get_row(pk.unwrap_or_else(Row::empty), epoch)
                 .await?;
 
             // According to row layout, the last field of the row is value and we sure the row is
@@ -92,7 +91,7 @@ impl ManagedValueState {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    pub async fn get_output(&mut self) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(&self) -> StreamExecutorResult<Datum> {
         debug_assert!(!self.is_dirty());
         self.state.get_output()
     }
@@ -102,10 +101,8 @@ impl ManagedValueState {
         self.is_dirty
     }
 
-    /// Flush the internal state to a write batch.
     pub async fn flush<S: StateStore>(
         &mut self,
-        _write_batch: &mut WriteBatch<S>,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
@@ -116,7 +113,7 @@ impl ManagedValueState {
         // front of value). In this case, the pk is just group key.
 
         let mut v = vec![];
-        v.extend_from_slice(&self.pk.as_ref().unwrap_or(&Row(vec![])).0);
+        v.extend_from_slice(&self.pk.as_ref().unwrap_or_else(Row::empty).0);
         v.push(self.state.get_output()?);
 
         state_table.insert(Row::new(v))?;
@@ -175,13 +172,9 @@ mod tests {
             .unwrap();
         assert!(managed_state.is_dirty());
 
-        // flush to write batch and write to state store
+        // write to state store
         let epoch: u64 = 0;
-        let mut write_batch = keyspace.state_store().start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .await
-            .unwrap();
+        managed_state.flush(&mut state_table).await.unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output
@@ -191,7 +184,7 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state =
+        let managed_state =
             ManagedValueState::new(create_test_count_state(), None, None, &state_table)
                 .await
                 .unwrap();
@@ -246,13 +239,9 @@ mod tests {
             .unwrap();
         assert!(managed_state.is_dirty());
 
-        // flush to write batch and write to state store
+        // write to state store
         let epoch: u64 = 0;
-        let mut write_batch = keyspace.state_store().start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .await
-            .unwrap();
+        managed_state.flush(&mut state_table).await.unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output
@@ -262,7 +251,7 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state =
+        let managed_state =
             ManagedValueState::new(create_test_max_agg_append_only(), None, None, &state_table)
                 .await
                 .unwrap();

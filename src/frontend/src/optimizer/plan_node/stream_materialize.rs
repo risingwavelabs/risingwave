@@ -91,7 +91,7 @@ impl StreamMaterialize {
             }
         };
 
-        let input = required_dist.enforce_if_not_satisfies(input, Order::any())?;
+        let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
@@ -164,6 +164,8 @@ impl StreamMaterialize {
             distribution_keys: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            vnode_mapping: None,
+            properties: HashMap::default(),
         };
 
         Ok(Self { base, input, table })

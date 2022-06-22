@@ -27,6 +27,7 @@ lz4 = "1.23.1"
 madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.8", features = ["future"] }
+nix = { version = "0.24.1", features = ["fs"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -58,6 +59,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+tokio-metrics = "0.1.0"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }

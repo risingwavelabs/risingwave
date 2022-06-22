@@ -14,8 +14,7 @@
 
 use std::collections::HashSet;
 
-use futures::pin_mut;
-use futures::stream::StreamExt;
+use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
@@ -28,7 +27,7 @@ use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::StateStore;
-use crate::table::cell_based_table::{CellBasedTable, CellTableChunkIter};
+use crate::table::cell_based_table::CellBasedTable;
 use crate::table::state_table::StateTable;
 use crate::table::TableIter;
 use crate::Keyspace;
@@ -78,7 +77,7 @@ async fn test_state_table() -> StorageResult<()> {
 
     // test read visibility
     let row1 = state_table
-        .get_row(&Row(vec![Some(1_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(1_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -91,7 +90,7 @@ async fn test_state_table() -> StorageResult<()> {
     );
 
     let row2 = state_table
-        .get_row(&Row(vec![Some(2_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(2_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -112,7 +111,7 @@ async fn test_state_table() -> StorageResult<()> {
         .unwrap();
 
     let row2_delete = state_table
-        .get_row(&Row(vec![Some(2_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(2_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(row2_delete, None);
@@ -120,7 +119,7 @@ async fn test_state_table() -> StorageResult<()> {
     state_table.commit(epoch).await.unwrap();
 
     let row2_delete_commit = state_table
-        .get_row(&Row(vec![Some(2_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(2_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(row2_delete_commit, None);
@@ -138,13 +137,13 @@ async fn test_state_table() -> StorageResult<()> {
         .insert(Row(vec![Some(4_i32.into()), None, None]))
         .unwrap();
     let row4 = state_table
-        .get_row(&Row(vec![Some(4_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(4_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(row4, Some(Row(vec![Some(4_i32.into()), None, None])));
 
     let non_exist_row = state_table
-        .get_row(&Row(vec![Some(0_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(0_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(non_exist_row, None);
@@ -156,13 +155,13 @@ async fn test_state_table() -> StorageResult<()> {
     state_table.commit(epoch).await.unwrap();
 
     let row3_delete = state_table
-        .get_row(&Row(vec![Some(3_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(3_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(row3_delete, None);
 
     let row4_delete = state_table
-        .get_row(&Row(vec![Some(4_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(4_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(row4_delete, None);
@@ -239,7 +238,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         ]))
         .unwrap();
     let row6 = state_table
-        .get_row(&Row(vec![Some(6_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(6_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -253,7 +252,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     );
 
     let row7 = state_table
-        .get_row(&Row(vec![Some(7_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(7_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -269,7 +268,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     state_table.commit(epoch).await.unwrap();
 
     let row6_commit = state_table
-        .get_row(&Row(vec![Some(6_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(6_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -282,7 +281,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         ]))
     );
     let row7_commit = state_table
-        .get_row(&Row(vec![Some(7_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(7_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -333,14 +332,14 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         .unwrap();
 
     let row1 = state_table
-        .get_row(&Row(vec![Some(1_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(1_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(row1, None);
     state_table.commit(epoch).await.unwrap();
 
     let row1_commit = state_table
-        .get_row(&Row(vec![Some(1_i32.into())]), epoch)
+        .get_owned_row(&Row(vec![Some(1_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(row1_commit, None);
@@ -718,7 +717,7 @@ async fn test_cell_based_get_row_by_scan() {
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let mut state = StateTable::new(
@@ -726,9 +725,9 @@ async fn test_cell_based_get_row_by_scan() {
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices.clone(),
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -789,7 +788,7 @@ async fn test_cell_based_get_row_by_multi_get() {
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let mut state = StateTable::new(
@@ -797,9 +796,9 @@ async fn test_cell_based_get_row_by_multi_get() {
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -861,15 +860,15 @@ async fn test_cell_based_get_row_for_string() {
         ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -940,15 +939,15 @@ async fn test_shuffled_column_id_for_get_row() {
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1010,15 +1009,15 @@ async fn test_cell_based_table_iter() {
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1045,9 +1044,10 @@ async fn test_cell_based_table_iter() {
     state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
-    let mut iter = table.iter(epoch).await.unwrap();
+    let iter = table.batch_iter(epoch).await.unwrap();
+    pin_mut!(iter);
 
-    let res = iter.next().await.unwrap();
+    let res = iter.next_row().await.unwrap();
     assert!(res.is_some());
     assert_eq!(
         Row(vec![
@@ -1058,7 +1058,7 @@ async fn test_cell_based_table_iter() {
         res.unwrap()
     );
 
-    let res = iter.next().await.unwrap();
+    let res = iter.next_row().await.unwrap();
     assert!(res.is_none());
 }
 
@@ -1083,25 +1083,24 @@ async fn test_multi_cell_based_table_iter() {
         ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state_1 = StateTable::new(
         keyspace_1.clone(),
         column_descs_1.clone(),
         order_types.clone(),
         None,
-        pk_index.clone(),
+        pk_indices.clone(),
     );
     let mut state_2 = StateTable::new(
         keyspace_2.clone(),
         column_descs_2.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
 
-    let table_1 =
-        CellBasedTable::new_for_test(keyspace_1.clone(), column_descs_1, order_types.clone());
-    let table_2 = CellBasedTable::new_for_test(keyspace_2.clone(), column_descs_2, order_types);
+    let table_1 = state_1.cell_based_table().clone();
+    let table_2 = state_2.cell_based_table().clone();
 
     state_1
         .insert(Row(vec![
@@ -1150,10 +1149,12 @@ async fn test_multi_cell_based_table_iter() {
     state_1.commit(epoch).await.unwrap();
     state_2.commit(epoch).await.unwrap();
 
-    let mut iter_1 = table_1.iter(epoch).await.unwrap();
-    let mut iter_2 = table_2.iter(epoch).await.unwrap();
+    let iter_1 = table_1.batch_iter(epoch).await.unwrap();
+    let iter_2 = table_2.batch_iter(epoch).await.unwrap();
+    pin_mut!(iter_1);
+    pin_mut!(iter_2);
 
-    let res_1_1 = iter_1.next().await.unwrap();
+    let res_1_1 = iter_1.next_row().await.unwrap();
     assert!(res_1_1.is_some());
     assert_eq!(
         Row(vec![
@@ -1163,10 +1164,10 @@ async fn test_multi_cell_based_table_iter() {
         ]),
         res_1_1.unwrap()
     );
-    let res_1_2 = iter_1.next().await.unwrap();
+    let res_1_2 = iter_1.next_row().await.unwrap();
     assert!(res_1_2.is_none());
 
-    let res_2_1 = iter_2.next().await.unwrap();
+    let res_2_1 = iter_2.next_row().await.unwrap();
     assert!(res_2_1.is_some());
     assert_eq!(
         Row(vec![
@@ -1176,7 +1177,7 @@ async fn test_multi_cell_based_table_iter() {
         ]),
         res_2_1.unwrap()
     );
-    let res_2_2 = iter_2.next().await.unwrap();
+    let res_2_2 = iter_2.next_row().await.unwrap();
     assert!(res_2_2.is_none());
 }
 
@@ -1217,11 +1218,12 @@ async fn test_dedup_cell_based_table_iter_with(
     let mut local = batch.prefixify(&keyspace);
 
     // ---------- Init write serializer
-    let mut cell_based_row_serializer = CellBasedRowSerializer::new();
+    let mut cell_based_row_serializer = CellBasedRowSerializer::new(partial_row_col_ids);
     let ordered_row_serializer = OrderedRowSerializer::new(order_types.clone());
 
     // ---------- Init table for writes
-    let table = CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types);
+    let table =
+        CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types, pk_indices.clone());
 
     for Row(row) in rows.clone() {
         // ---------- Serialize to cell repr
@@ -1239,7 +1241,7 @@ async fn test_dedup_cell_based_table_iter_with(
             .collect_vec());
 
         let bytes = cell_based_row_serializer
-            .serialize(&pk_bytes, partial_row, &partial_row_col_ids)
+            .serialize(&pk_bytes, partial_row)
             .unwrap();
 
         // ---------- Batch-write
@@ -1254,10 +1256,15 @@ async fn test_dedup_cell_based_table_iter_with(
     let mut actual_rows = vec![];
 
     // ---------- Init reader
-    let mut iter = table.dedup_pk_iter(epoch, &pk_ordered_descs).await.unwrap();
+    let iter = table
+        .batch_dedup_pk_iter(epoch, &pk_ordered_descs)
+        .await
+        .unwrap();
+    pin_mut!(iter);
+
     for _ in 0..rows.len() {
         // ---------- Read + Deserialize from storage
-        let actual = iter.next().await.unwrap();
+        let actual = iter.next_row().await.unwrap();
         assert!(actual.is_some());
         actual_rows.push(actual.unwrap());
     }
@@ -1330,15 +1337,15 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1358,7 +1365,8 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
     state.commit(epoch).await.unwrap();
 
     let chunk = {
-        let mut iter = table.iter(u64::MAX).await.unwrap();
+        let iter = table.batch_iter(u64::MAX).await.unwrap();
+        pin_mut!(iter);
         iter.collect_data_chunk(table.schema(), None)
             .await
             .unwrap()
@@ -1716,11 +1724,7 @@ async fn test_state_table_iter_with_prefix() {
         .unwrap();
     let epoch = u64::MAX;
     let pk_prefix = Row(vec![Some(1_i32.into())]);
-    let prefix_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
-    let iter = state
-        .iter_with_pk_prefix(&pk_prefix, prefix_serializer, epoch)
-        .await
-        .unwrap();
+    let iter = state.iter_with_pk_prefix(&pk_prefix, epoch).await.unwrap();
     pin_mut!(iter);
 
     // this row exists in both mem_table and cell_based_table

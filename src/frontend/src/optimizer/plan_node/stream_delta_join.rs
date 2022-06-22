@@ -80,9 +80,20 @@ impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamDeltaJoin {{ type: {:?}, predicate: {} }}",
+            "StreamDeltaJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
             self.logical.join_type(),
-            self.eq_join_predicate()
+            self.eq_join_predicate(),
+            if self
+                .logical
+                .output_indices()
+                .iter()
+                .copied()
+                .eq(0..self.logical.internal_column_num())
+            {
+                "all".to_string()
+            } else {
+                format!("{:?}", self.logical.output_indices())
+            }
         )
     }
 }
@@ -156,6 +167,12 @@ impl ToStreamProst for StreamDeltaJoin {
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
             }),
+            output_indices: self
+                .logical
+                .output_indices()
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
         })
     }
 }

@@ -20,12 +20,13 @@ use risingwave_pb::batch_plan::exchange_info::DistributionMode as ShuffleDistrib
 use risingwave_pb::batch_plan::ExchangeInfo;
 
 use crate::task::broadcast_channel::{new_broadcast_channel, BroadcastReceiver, BroadcastSender};
+use crate::task::data_chunk_in_channel::DataChunkInChannel;
 use crate::task::fifo_channel::{new_fifo_channel, FifoReceiver, FifoSender};
 use crate::task::hash_shuffle_channel::{
     new_hash_shuffle_channel, HashShuffleReceiver, HashShuffleSender,
 };
 
-pub trait ChanSender: Send {
+pub(super) trait ChanSender: Send {
     type SendFuture<'a>: Future<Output = Result<()>> + Send
     where
         Self: 'a;
@@ -42,7 +43,7 @@ pub enum ChanSenderImpl {
 }
 
 impl ChanSenderImpl {
-    pub async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()> {
+    pub(super) async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()> {
         match self {
             Self::HashShuffle(sender) => sender.send(chunk).await,
             Self::Fifo(sender) => sender.send(chunk).await,
@@ -51,8 +52,8 @@ impl ChanSenderImpl {
     }
 }
 
-pub trait ChanReceiver: Send {
-    type RecvFuture<'a>: Future<Output = Result<Option<DataChunk>>> + Send
+pub(super) trait ChanReceiver: Send {
+    type RecvFuture<'a>: Future<Output = Result<Option<DataChunkInChannel>>> + Send
     where
         Self: 'a;
     /// Returns `None` if there's no more data to read.
@@ -67,7 +68,7 @@ pub enum ChanReceiverImpl {
 }
 
 impl ChanReceiverImpl {
-    pub async fn recv(&mut self) -> Result<Option<DataChunk>> {
+    pub(super) async fn recv(&mut self) -> Result<Option<DataChunkInChannel>> {
         match self {
             Self::HashShuffle(receiver) => receiver.recv().await,
             Self::Broadcast(receiver) => receiver.recv().await,

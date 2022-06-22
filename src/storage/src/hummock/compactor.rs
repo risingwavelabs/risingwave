@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
 use futures::future::{try_join_all, BoxFuture};
-use futures::{stream, FutureExt, StreamExt};
+use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
@@ -28,8 +28,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
-use risingwave_pb::common::VNodeBitmap;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
 use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
@@ -37,7 +36,10 @@ use tokio::task::JoinHandle;
 
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
-use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
+use super::{
+    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, SSTableIterator,
+    SSTableIteratorType, Sstable,
+};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::group_builder::KeyValueGrouping;
 use crate::hummock::iterator::ReadOptions;
@@ -98,7 +100,6 @@ trait CompactionFilter {
     }
 }
 
-#[derive(Clone, Default)]
 pub struct DummyCompactionFilter;
 impl CompactionFilter for DummyCompactionFilter {}
 
@@ -108,7 +109,6 @@ pub struct StateCleanUpCompactionFilter {
 }
 
 impl StateCleanUpCompactionFilter {
-    #[expect(dead_code)]
     fn new(table_id_set: HashSet<u32>) -> Self {
         StateCleanUpCompactionFilter {
             existing_table_ids: table_id_set,
@@ -138,7 +138,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<VNodeBitmap>)>);
+pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<u32>)>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -149,11 +149,58 @@ impl Compactor {
         }
     }
 
+    /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
+    pub async fn compact_shared_buffer_by_compaction_group(
+        context: Arc<CompactorContext>,
+        payload: UploadTaskPayload,
+    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, u64, Vec<u32>)>> {
+        let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
+        for uncommitted_list in payload {
+            let mut next_inner = HashSet::new();
+            for uncommitted in uncommitted_list {
+                let compaction_group_id = match &uncommitted {
+                    UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
+                    UncommittedData::Batch(batch) => batch.compaction_group_id(),
+                };
+                let group = grouped_payload
+                    .entry(compaction_group_id)
+                    .or_insert_with(std::vec::Vec::new);
+                if !next_inner.contains(&compaction_group_id) {
+                    group.push(vec![]);
+                    next_inner.insert(compaction_group_id);
+                }
+                group.last_mut().unwrap().push(uncommitted);
+            }
+        }
+
+        let mut futures = vec![];
+        for (id, group_payload) in grouped_payload {
+            let id_copy = id;
+            futures.push(
+                Compactor::compact_shared_buffer(context.clone(), group_payload).map_ok(
+                    move |results| {
+                        results
+                            .into_iter()
+                            .map(move |result| (id_copy, result.0, result.1, result.2))
+                            .collect_vec()
+                    },
+                ),
+            );
+        }
+        // Note that the output is reordered compared with input `payload`.
+        let result = try_join_all(futures)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect_vec();
+        Ok(result)
+    }
+
     /// For compaction from shared buffer to level 0, this is the only function gets called.
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
-        payload: &UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, u64, Vec<VNodeBitmap>)>> {
+        payload: UploadTaskPayload,
+    ) -> HummockResult<Vec<(Sstable, u64, Vec<u32>)>> {
         let mut start_user_keys = payload
             .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
@@ -212,7 +259,7 @@ impl Compactor {
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let iter = build_ordered_merge_iter::<ForwardIter>(
-                payload,
+                &payload,
                 sstable_store.clone(),
                 stats.clone(),
                 &mut local_stats,
@@ -392,11 +439,8 @@ impl Compactor {
             );
         }
 
-        // TODO #2065: re-enable it after all states are registered correctly.
-        let compaction_filter = DummyCompactionFilter::default();
-        // let compaction_filter =
-        //     StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.
-        // existing_table_ids));
+        let compaction_filter =
+            StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
@@ -458,7 +502,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, unit_id, vnode_bitmaps) in ssts {
+            for (sst, unit_id, table_ids) in ssts {
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -467,7 +511,7 @@ impl Compactor {
                         inf: false,
                     }),
                     file_size: sst.meta.estimated_size as u64,
-                    vnode_bitmaps,
+                    table_ids,
                     unit_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
@@ -526,7 +570,22 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let builder = SSTableBuilder::new(table_id, self.context.options.as_ref().into());
+                let options = {
+                    let mut options: SSTableBuilderOptions = self.context.options.as_ref().into();
+
+                    if self.context.options.enable_compression {
+                        // support compression setting per level
+                        // L0 and L1 do not use compression algorithms
+                        // L2 - L4 use Lz4, else use Zstd
+                        options.compression_algorithm = match self.compact_task.target_level {
+                            0 | 1 => CompressionAlgorithm::None,
+                            2 | 3 | 4 => CompressionAlgorithm::Lz4,
+                            _ => CompressionAlgorithm::Zstd,
+                        }
+                    };
+                    options
+                };
+                let builder = SSTableBuilder::new(table_id, options);
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
                 Ok(builder)
             },
@@ -559,7 +618,7 @@ impl Compactor {
         for SealedSstableBuilder {
             id: table_id,
             meta,
-            vnode_bitmaps,
+            table_ids,
             upload_join_handle,
             data_len,
             unit_id,
@@ -567,7 +626,7 @@ impl Compactor {
         {
             let sst = Sstable { id: table_id, meta };
             let len = data_len;
-            ssts.push((sst.clone(), unit_id, vnode_bitmaps));
+            ssts.push((sst.clone(), unit_id, table_ids));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
