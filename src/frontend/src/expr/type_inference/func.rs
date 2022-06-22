@@ -27,6 +27,16 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
     let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &inputs)?;
+    let inputs = inputs
+        .into_iter()
+        .zip_eq(&sig.inputs_type)
+        .map(|(expr, t)| {
+            if DataTypeName::from(expr.return_type()) != *t {
+                return expr.cast_implicit((*t).into());
+            }
+            Ok(expr)
+        })
+        .try_collect()?;
     let ret_type = sig.ret_type.into();
     Ok((inputs, ret_type))
 }
