@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -33,7 +33,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::jitter;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::local_version::{LocalVersion, PinnedVersion, ReadVersion};
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -43,7 +43,7 @@ use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
-use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent};
+use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, INVALID_VERSION_ID,
@@ -73,33 +73,30 @@ impl BufferTracker {
         self.global_upload_task_size.load(Relaxed)
     }
 
-    /// Requesting to write data with `size`. The request will be blocked until we have enough
-    /// memory space to write the data.
-    pub async fn request_write(&self, size: usize) {
-        if self.can_direct_write() {
-            self.global_buffer_size.fetch_add(size, Relaxed);
-        } else {
-            let (tx, rx) = oneshot::channel();
-            self.send_event(SharedBufferEvent::WriteRequest(size, tx));
-            // global buffer size will have been added when the request is granted. So we shouldn't
-            // add to global buffer size
-            rx.await
-                .expect("should be able to recv write request response");
-        }
-    }
-
     pub fn can_write(&self) -> bool {
         self.get_buffer_size() <= self.block_write_threshold
     }
 
-    pub fn can_direct_write(&self) -> bool {
-        self.get_buffer_size() <= self.flush_threshold
+    pub fn try_write(&self, size: usize) -> bool {
+        loop {
+            let current_size = self.global_buffer_size.load(Acquire);
+            if current_size > self.block_write_threshold {
+                return false;
+            }
+            if self
+                .global_buffer_size
+                .compare_exchange(current_size, current_size + size, Acquire, Acquire)
+                .is_ok()
+            {
+                break true;
+            }
+        }
     }
 
     /// Return true when the buffer size minus current upload task size is still greater than the
-    /// capacity
+    /// flush threshold.
     pub fn need_more_flush(&self) -> bool {
-        self.get_buffer_size() - self.get_upload_task_size() > self.flush_threshold
+        self.get_buffer_size() > self.flush_threshold + self.get_upload_task_size()
     }
 
     pub fn send_event(&self, event: SharedBufferEvent) {
@@ -276,8 +273,29 @@ impl LocalVersionManager {
             StaticCompactionGroupId::StateDefault.into(),
         );
         let batch_size = batch.size();
-        self.buffer_tracker.request_write(batch_size).await;
+        if self.buffer_tracker.try_write(batch_size) {
+            self.write_shared_buffer_inner(epoch, batch, is_remote_batch);
+            self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
+        } else {
+            let (tx, rx) = oneshot::channel();
+            self.buffer_tracker
+                .send_event(SharedBufferEvent::WriteRequest(WriteRequest {
+                    batch,
+                    epoch,
+                    is_remote_batch,
+                    grant_sender: tx,
+                }));
+            rx.await.unwrap();
+        }
+        Ok(batch_size)
+    }
 
+    fn write_shared_buffer_inner(
+        &self,
+        epoch: HummockEpoch,
+        batch: SharedBufferBatch,
+        is_remote_batch: bool,
+    ) {
         // Try get shared buffer with version read lock
         let shared_buffer = self.local_version.read().get_shared_buffer(epoch).cloned();
 
@@ -300,7 +318,6 @@ impl LocalVersionManager {
 
         // Notify the buffer tracker after the batch has been added to shared buffer.
         self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
-        Ok(batch_size)
     }
 
     /// Issue a concurrent upload task to flush some local shared buffer batch to object store.
@@ -625,7 +642,15 @@ impl LocalVersionManager {
                 }
             };
 
-        let grant_write_request = |size, sender: oneshot::Sender<()>| {
+        let grant_write_request = |request| {
+            let WriteRequest {
+                batch,
+                epoch,
+                is_remote_batch,
+                grant_sender: sender,
+            } = request;
+            let size = batch.size();
+            local_version_manager.write_shared_buffer_inner(epoch, batch, is_remote_batch);
             local_version_manager
                 .buffer_tracker
                 .global_buffer_size
@@ -635,17 +660,18 @@ impl LocalVersionManager {
             });
         };
 
-        let mut pending_write_requests: VecDeque<(usize, oneshot::Sender<()>)> = VecDeque::new();
+        let mut pending_write_requests: VecDeque<_> = VecDeque::new();
 
         // While the current Arc is not the only strong reference to the local version manager
         while Arc::strong_count(&local_version_manager) > 1 {
             if let Some(event) = buffer_size_change_receiver.recv().await {
                 match event {
-                    SharedBufferEvent::WriteRequest(size, sender) => {
+                    SharedBufferEvent::WriteRequest(request) => {
                         if local_version_manager.buffer_tracker.can_write() {
-                            grant_write_request(size, sender);
+                            grant_write_request(request);
+                            try_flush_shared_buffer(&syncing_epoch, &mut epoch_join_handle);
                         } else {
-                            pending_write_requests.push_back((size, sender));
+                            pending_write_requests.push_back(request);
                         }
                     }
                     SharedBufferEvent::MayFlush => {
@@ -661,8 +687,9 @@ impl LocalVersionManager {
                         while !pending_write_requests.is_empty()
                             && local_version_manager.buffer_tracker.can_write()
                         {
-                            let (size, sender) = pending_write_requests.pop_front().unwrap();
-                            grant_write_request(size, sender);
+                            let request = pending_write_requests.pop_front().unwrap();
+                            grant_write_request(request);
+                            try_flush_shared_buffer(&syncing_epoch, &mut epoch_join_handle);
                         }
                     }
                     SharedBufferEvent::SyncEpoch(epoch, join_handle_sender) => {

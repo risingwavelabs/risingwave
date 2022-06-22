@@ -165,11 +165,19 @@ pub enum UploadTaskType {
 }
 
 #[derive(Debug)]
+pub struct WriteRequest {
+    pub batch: SharedBufferBatch,
+    pub epoch: HummockEpoch,
+    pub is_remote_batch: bool,
+    pub grant_sender: oneshot::Sender<()>,
+}
+
+#[derive(Debug)]
 pub enum SharedBufferEvent {
     /// Write request to shared buffer. The first parameter is the batch size and the second is the
     /// request permission notifier. After the write request is granted and notified, the size is
     /// already tracked.
-    WriteRequest(usize, oneshot::Sender<()>),
+    WriteRequest(WriteRequest),
 
     /// Notify that we may flush the shared buffer.
     MayFlush,
