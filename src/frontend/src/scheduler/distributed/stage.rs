@@ -294,6 +294,11 @@ impl StageRunner {
         let mut futures = vec![];
 
         if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() {
+            // If the stage has table scan nodes, we create tasks according to the data distribution
+            // and partition of the table.
+            // We let each task read one partition by setting the `vnode_ranges` of the scan node in
+            // the task.
+            // We schedule the task to the worker node that owns the data partition.
             let vnode_ranges_mapping = &table_scan_info.vnode_ranges_mapping;
 
             let parallel_unit_ids = vnode_ranges_mapping.keys().cloned().collect_vec();

@@ -208,7 +208,7 @@ struct QueryStageBuilder {
     exchange_info: ExchangeInfo,
 
     children_stages: Vec<QueryStageRef>,
-
+    /// See also [`QueryStage::table_scan_info`].
     table_scan_info: Option<TableScanInfo>,
 }
 

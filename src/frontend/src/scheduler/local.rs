@@ -176,6 +176,9 @@ impl LocalQueryExecution {
                 assert!(sources.is_empty());
 
                 if let Some(table_scan_info) = second_stage.table_scan_info.clone() {
+                    // Similar to the distributed case (StageRunner::schedule_tasks).
+                    // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
+                    // `exchange_source`.
                     let (parallel_unit_ids, vnode_ranges_mapping): (Vec<_>, Vec<_>) =
                         table_scan_info.vnode_ranges_mapping.into_iter().unzip();
                     let workers = self
