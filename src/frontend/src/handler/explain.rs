@@ -49,7 +49,7 @@ pub(super) fn handle_explain(
                 planner.ctx(),
                 query,
                 name,
-                handle_with_properties("explain", with_options)?,
+                handle_with_properties("explain create_mv", with_options)?,
             )?
             .0
         }
@@ -65,7 +65,7 @@ pub(super) fn handle_explain(
                 planner.ctx(),
                 name,
                 columns,
-                handle_with_properties("explain", with_options)?,
+                handle_with_properties("explain create_table", with_options)?,
             )?
             .0
         }
