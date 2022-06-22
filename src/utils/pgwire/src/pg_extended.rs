@@ -132,20 +132,24 @@ impl PgStatement {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
         if params.is_empty() {
-            match session.infer_return_type(statement.as_str()).await {
-                Ok(row_description) => {
-                    return Ok(PgPortal {
-                        name: portal_name,
-                        query_string: self.query_string.clone(),
-                        result_cache: None,
-                        stmt_type: None,
-                        row_description,
-                    });
-                }
-                Err(_) => {
-                    return Err(());
-                }
-            }
+            let row_description =
+                if statement.starts_with("select") || statement.starts_with("SELECT") {
+                    if let Ok(rows) = session.infer_return_type(statement.as_str()).await {
+                        rows
+                    } else {
+                        return Err(());
+                    }
+                } else {
+                    vec![]
+                };
+
+            return Ok(PgPortal {
+                name: portal_name,
+                query_string: self.query_string.clone(),
+                result_cache: None,
+                stmt_type: None,
+                row_description,
+            });
         }
 
         // 1. Identify all the $n. For example, "SELECT $3, $2, $1" -> [3, 2, 1].
@@ -169,23 +173,28 @@ impl PgStatement {
         let instance_query_string = replace_params(statement, &generic_params, &params);
 
         // 4. Get row_description and return portal.
-        match session
-            .infer_return_type(instance_query_string.as_str())
-            .await
+        let row_description = if instance_query_string.starts_with("select")
+            || instance_query_string.starts_with("SELECT")
         {
-            Ok(row_description) => {
-                return Ok(PgPortal {
-                    name: portal_name,
-                    query_string: Bytes::from(instance_query_string),
-                    result_cache: None,
-                    stmt_type: None,
-                    row_description,
-                });
-            }
-            Err(_) => {
+            if let Ok(rows) = session
+                .infer_return_type(instance_query_string.as_str())
+                .await
+            {
+                rows
+            } else {
                 return Err(());
             }
-        }
+        } else {
+            vec![]
+        };
+
+        return Ok(PgPortal {
+            name: portal_name,
+            query_string: Bytes::from(instance_query_string),
+            result_cache: None,
+            stmt_type: None,
+            row_description,
+        });
     }
 }
 
