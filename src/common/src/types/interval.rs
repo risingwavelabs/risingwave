@@ -183,6 +183,42 @@ impl IntervalUnit {
         Some(IntervalUnit { months, days, ms })
     }
 
+    /// Divides [`IntervalUnit`] by a integer with overflow, underflow, and zero check.
+    pub fn checked_div_int<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<i32>,
+    {
+        let rhs = rhs.try_into().ok()?;
+
+        let months = self.months.checked_div(rhs)?;
+        let days = self.days.checked_div(rhs)?;
+        let ms = self.ms.checked_div(rhs as i64)?;
+
+        Some(IntervalUnit { months, days, ms })
+    }
+
+    pub fn div_float<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+
+        if rhs == 0.0 {
+            return None;
+        }
+
+        let months = (self.months as f64) / rhs;
+        let days = (self.days as f64) / rhs;
+        let ms = (self.ms as f64) / rhs;
+
+        Some(IntervalUnit {
+            months: (months as i32),
+            days: (days as i32),
+            ms: (ms as i64),
+        })
+    }
+
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
     pub fn exact_div(&self, rhs: &Self) -> Option<i64> {
         let mut res = None;
