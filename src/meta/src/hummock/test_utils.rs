@@ -16,10 +16,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, LocalSstableInfo};
-use risingwave_pb::common::{HostAddress, VNodeBitmap, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
@@ -105,16 +106,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
                 inf: false,
             }),
             file_size: 1,
-            vnode_bitmaps: vec![
-                VNodeBitmap {
-                    table_id: (i + 1) as u32,
-                    bitmap: vec![],
-                },
-                VNodeBitmap {
-                    table_id: (i + 2) as u32,
-                    bitmap: vec![],
-                },
-            ],
+            table_ids: vec![(i + 1) as u32, (i + 2) as u32],
             unit_id: 0,
         });
     }
@@ -142,7 +134,7 @@ pub fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSSTableId>
 
 pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec<HummockSSTableId> {
     hummock_version
-        .levels
+        .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
         .iter()
         .flat_map(|level| level.table_infos.iter().map(|info| info.id))
         .sorted()

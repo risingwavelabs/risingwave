@@ -21,8 +21,8 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{CompactionConfig, KeyRange, Level, LevelType, SstableInfo};
 
 use super::SearchResult;
-use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
+use crate::hummock::compaction::CompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 
 const MIN_COMPACTION_BYTES: u64 = 2 * 1024 * 1024; // 1MB
@@ -113,6 +113,7 @@ impl CompactionPicker for TierCompactionPicker {
                     total_file_size: 0,
                 },
                 split_ranges: vec![],
+                compression_algorithm: "".to_string(),
             });
         }
         None
@@ -199,17 +200,23 @@ impl CompactionPicker for LevelCompactionPicker {
             select_level: Level {
                 level_idx: select_level as u32,
                 level_type: LevelType::Overlapping as i32,
+                total_file_size: select_level_inputs
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum(),
                 table_infos: select_level_inputs,
-                // no use
-                total_file_size: 0,
             },
             target_level: Level {
                 level_idx: target_level as u32,
                 level_type: LevelType::Nonoverlapping as i32,
+                total_file_size: target_level_inputs
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum(),
                 table_infos: target_level_inputs,
-                total_file_size: 0,
             },
             split_ranges: splits,
+            compression_algorithm: "".to_string(),
         })
     }
 }
@@ -379,7 +386,7 @@ pub mod tests {
                 inf: false,
             }),
             file_size: (right - left + 1) as u64,
-            vnode_bitmaps: vec![],
+            table_ids: vec![],
             unit_id: u64::MAX,
         }
     }

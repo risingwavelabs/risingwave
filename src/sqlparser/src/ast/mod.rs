@@ -345,12 +345,18 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
+            Expr::BinaryOp { left, op, right } => write!(
+                f,
+                "{} {} {}",
+                fmt_expr_with_paren(left),
+                op,
+                fmt_expr_with_paren(right)
+            ),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
                 } else {
-                    write!(f, "{} {}", op, expr)
+                    write!(f, "{} {}", op, fmt_expr_with_paren(expr))
                 }
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
@@ -479,6 +485,24 @@ impl fmt::Display for Expr {
             ),
         }
     }
+}
+
+/// Wrap complex expressions with necessary parentheses.
+/// For example, `a > b LIKE c` becomes `a > (b LIKE c)`.
+fn fmt_expr_with_paren(e: &Expr) -> String {
+    use Expr as E;
+    match e {
+        E::BinaryOp { .. }
+        | E::UnaryOp { .. }
+        | E::IsNull(_)
+        | E::IsNotNull(_)
+        | E::IsFalse(_)
+        | E::IsTrue(_)
+        | E::IsNotTrue(_)
+        | E::IsNotFalse(_) => return format!("({})", e),
+        _ => {}
+    };
+    format!("{}", e)
 }
 
 /// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`)

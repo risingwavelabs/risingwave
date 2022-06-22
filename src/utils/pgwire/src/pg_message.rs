@@ -173,10 +173,6 @@ impl FeExecuteMessage {
         let portal_name = read_null_terminated(&mut buf)?;
         let max_rows = buf.get_i32();
 
-        if max_rows != 0 {
-            unimplemented!("row limit in Execute message not supported");
-        }
-
         Ok(FeMessage::Execute(FeExecuteMessage {
             portal_name,
             max_rows,
@@ -325,6 +321,7 @@ pub enum BeMessage<'a> {
     EmptyQueryResponse,
     ParseComplete,
     BindComplete,
+    PortalSuspended,
     ParameterDescription(&'a [TypeOid]),
     NoData,
     DataRow(&'a Row),
@@ -533,6 +530,11 @@ impl<'a> BeMessage<'a> {
 
             BeMessage::CloseComplete => {
                 buf.put_u8(b'3');
+                write_body(buf, |_| Ok(()))?;
+            }
+
+            BeMessage::PortalSuspended => {
+                buf.put_u8(b's');
                 write_body(buf, |_| Ok(()))?;
             }
             // ParameterDescription

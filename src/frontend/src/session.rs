@@ -221,7 +221,7 @@ impl FrontendEnv {
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
-        let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
+        let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
@@ -542,14 +542,15 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
-        // With pgwire, there would be at most 1 statement in the vec.
-        assert!(stmts.len() <= 1);
         if stmts.is_empty() {
-            return Ok(PgResponse::new(
+            return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
-                0,
-                vec![],
-                vec![],
+            ));
+        }
+        if stmts.len() > 1 {
+            return Ok(PgResponse::empty_result_with_notice(
+                pgwire::pg_response::StatementType::EMPTY,
+                "cannot insert multiple commands into statement".to_string(),
             ));
         }
         let stmt = stmts.swap_remove(0);
@@ -569,10 +570,14 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
-        // With pgwire, there would be at most 1 statement in the vec.
-        assert!(stmts.len() <= 1);
         if stmts.is_empty() {
             return Ok(vec![]);
+        }
+        if stmts.len() > 1 {
+            return Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "cannot insert multiple commands into statement",
+            )));
         }
         let stmt = stmts.swap_remove(0);
         let rsp = infer(self, stmt, sql).map_err(|e| {

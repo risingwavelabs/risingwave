@@ -91,8 +91,8 @@
         A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$3, $4, $5, $0] }
-        BatchHashJoin { type: Inner, predicate: $1 = $2 }
+      BatchProject { exprs: [$1, $2, $3, $0] }
+        BatchHashJoin { type: Inner, predicate: $1 = $2, output_indices: [0, 3, 4, 5] }
           BatchExchange { order: [], dist: HashShard([1]) }
             BatchProject { exprs: [$0, $1] }
               BatchFilter { predicate: ($2 = 10:Int32) }
@@ -103,8 +103,8 @@
   stream_plan: |
     StreamMaterialize { columns: [name, city, state, id, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
       StreamExchange { dist: HashShard([4, 5]) }
-        StreamProject { exprs: [$4, $5, $6, $0, $2, $7] }
-          StreamHashJoin { type: Inner, predicate: $1 = $3 }
+        StreamProject { exprs: [$1, $2, $3, $0, $4, $5] }
+          StreamHashJoin { type: Inner, predicate: $1 = $3, output_indices: [0, 4, 5, 6, 2, 7] }
             StreamExchange { dist: HashShard([1]) }
               StreamProject { exprs: [$0, $1, $2] }
                 StreamFilter { predicate: ($3 = 10:Int32) }
@@ -135,7 +135,7 @@
               BatchHashAgg { group_keys: [$0, $1], aggs: [max($2)] }
                 BatchProject { exprs: [$0, $3, $5] }
                   BatchFilter { predicate: ($6 >= $1) AND ($6 <= $2) }
-                    BatchHashJoin { type: Inner, predicate: $0 = $4 }
+                    BatchHashJoin { type: Inner, predicate: $0 = $4, output_indices: all }
                       BatchExchange { order: [], dist: HashShard([0]) }
                         BatchScan { table: auction, columns: [id, dateTime, expires, category] }
                       BatchExchange { order: [], dist: HashShard([0]) }
@@ -149,7 +149,7 @@
               StreamHashAgg { group_keys: [$0, $1], aggs: [count, max($2)] }
                 StreamProject { exprs: [$0, $3, $6, $4, $8] }
                   StreamFilter { predicate: ($7 >= $1) AND ($7 <= $2) }
-                    StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                    StreamHashJoin { type: Inner, predicate: $0 = $5, output_indices: all }
                       StreamExchange { dist: HashShard([0]) }
                         StreamTableScan { table: auction, columns: [id, dateTime, expires, category, _row_id], pk_indices: [4] }
                       StreamExchange { dist: HashShard([0]) }
@@ -162,7 +162,7 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, $1] }
         BatchFilter { predicate: ($1 >= $3) }
-          BatchHashJoin { type: Inner, predicate: $2 = $4 }
+          BatchHashJoin { type: Inner, predicate: $2 = $4, output_indices: all }
             BatchExchange { order: [], dist: HashShard([2]) }
               BatchProject { exprs: [$1, $2, $0] }
                 BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
@@ -182,7 +182,7 @@
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
       StreamProject { exprs: [$0, $1, $2, $4] }
         StreamFilter { predicate: ($1 >= $3) }
-          StreamHashJoin { type: Inner, predicate: $2 = $4 }
+          StreamHashJoin { type: Inner, predicate: $2 = $4, output_indices: all }
             StreamExchange { dist: HashShard([2]) }
               StreamProject { exprs: [$1, $3, $0] }
                 StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
@@ -241,7 +241,7 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, $2, $1, $3] }
         BatchFilter { predicate: ($3 >= ($5 - '00:00:10':Interval)) AND ($3 <= $5) }
-          BatchHashJoin { type: Inner, predicate: $2 = $4 }
+          BatchHashJoin { type: Inner, predicate: $2 = $4, output_indices: all }
             BatchExchange { order: [], dist: HashShard([2]) }
               BatchScan { table: bid, columns: [auction, bidder, price, dateTime] }
             BatchExchange { order: [], dist: HashShard([0]) }
@@ -255,7 +255,7 @@
       StreamExchange { dist: HashShard([4, 5]) }
         StreamProject { exprs: [$0, $2, $1, $3, $4, $6] }
           StreamFilter { predicate: ($3 >= ($6 - '00:00:10':Interval)) AND ($3 <= $6) }
-            StreamHashJoin { type: Inner, predicate: $2 = $5 }
+            StreamHashJoin { type: Inner, predicate: $2 = $5, output_indices: all }
               StreamExchange { dist: HashShard([2]) }
                 StreamTableScan { table: bid, columns: [auction, bidder, price, dateTime, _row_id], pk_indices: [4] }
               StreamExchange { dist: HashShard([0]) }
@@ -303,30 +303,28 @@
         AND P.endtime = A.endtime;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0, $1, $2] }
-        BatchHashJoin { type: Inner, predicate: $0 = $4 AND $2 = $5 AND $3 = $6 }
-          BatchExchange { order: [], dist: HashShard([0, 2, 3]) }
-            BatchHashAgg { group_keys: [$0, $1, $2, $3], aggs: [] }
-              BatchExchange { order: [], dist: HashShard([0, 1, 2, 3]) }
-                BatchProject { exprs: [$0, $1, TumbleStart($2, '00:00:10':Interval), (TumbleStart($2, '00:00:10':Interval) + '00:00:10':Interval)] }
-                  BatchScan { table: person, columns: [id, name, dateTime] }
-          BatchHashAgg { group_keys: [$0, $1, $2], aggs: [] }
-            BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
-              BatchProject { exprs: [$1, TumbleStart($0, '00:00:10':Interval), (TumbleStart($0, '00:00:10':Interval) + '00:00:10':Interval)] }
-                BatchScan { table: auction, columns: [dateTime, seller] }
+      BatchHashJoin { type: Inner, predicate: $0 = $4 AND $2 = $5 AND $3 = $6, output_indices: [0, 1, 2] }
+        BatchExchange { order: [], dist: HashShard([0, 2, 3]) }
+          BatchHashAgg { group_keys: [$0, $1, $2, $3], aggs: [] }
+            BatchExchange { order: [], dist: HashShard([0, 1, 2, 3]) }
+              BatchProject { exprs: [$0, $1, TumbleStart($2, '00:00:10':Interval), (TumbleStart($2, '00:00:10':Interval) + '00:00:10':Interval)] }
+                BatchScan { table: person, columns: [id, name, dateTime] }
+        BatchHashAgg { group_keys: [$0, $1, $2], aggs: [] }
+          BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
+            BatchProject { exprs: [$1, TumbleStart($0, '00:00:10':Interval), (TumbleStart($0, '00:00:10':Interval) + '00:00:10':Interval)] }
+              BatchScan { table: auction, columns: [dateTime, seller] }
   stream_plan: |
     StreamMaterialize { columns: [id, name, starttime, expr#3(hidden), seller(hidden), expr#1(hidden), expr#2(hidden)], pk_columns: [id, name, starttime, expr#3, seller, expr#1, expr#2] }
-      StreamProject { exprs: [$0, $1, $2, $3, $5, $6, $7] }
-        StreamHashJoin { type: Inner, predicate: $0 = $5 AND $2 = $6 AND $3 = $7 }
-          StreamExchange { dist: HashShard([0, 2, 3]) }
-            StreamHashAgg { group_keys: [$0, $1, $2, $3], aggs: [count] }
-              StreamExchange { dist: HashShard([0, 1, 2, 3]) }
-                StreamProject { exprs: [$0, $1, TumbleStart($2, '00:00:10':Interval), (TumbleStart($2, '00:00:10':Interval) + '00:00:10':Interval), $3] }
-                  StreamTableScan { table: person, columns: [id, name, dateTime, _row_id], pk_indices: [3] }
-          StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count] }
-            StreamExchange { dist: HashShard([0, 1, 2]) }
-              StreamProject { exprs: [$1, TumbleStart($0, '00:00:10':Interval), (TumbleStart($0, '00:00:10':Interval) + '00:00:10':Interval), $2] }
-                StreamTableScan { table: auction, columns: [dateTime, seller, _row_id], pk_indices: [2] }
+      StreamHashJoin { type: Inner, predicate: $0 = $5 AND $2 = $6 AND $3 = $7, output_indices: [0, 1, 2, 3, 5, 6, 7] }
+        StreamExchange { dist: HashShard([0, 2, 3]) }
+          StreamHashAgg { group_keys: [$0, $1, $2, $3], aggs: [count] }
+            StreamExchange { dist: HashShard([0, 1, 2, 3]) }
+              StreamProject { exprs: [$0, $1, TumbleStart($2, '00:00:10':Interval), (TumbleStart($2, '00:00:10':Interval) + '00:00:10':Interval), $3] }
+                StreamTableScan { table: person, columns: [id, name, dateTime, _row_id], pk_indices: [3] }
+        StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count] }
+          StreamExchange { dist: HashShard([0, 1, 2]) }
+            StreamProject { exprs: [$1, TumbleStart($0, '00:00:10':Interval), (TumbleStart($0, '00:00:10':Interval) + '00:00:10':Interval), $2] }
+              StreamTableScan { table: auction, columns: [dateTime, seller, _row_id], pk_indices: [2] }
 - id: nexmark_q9
   before:
     - create_tables

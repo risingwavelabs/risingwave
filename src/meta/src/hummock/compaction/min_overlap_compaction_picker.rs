@@ -17,17 +17,10 @@ use std::sync::Arc;
 
 use risingwave_pb::hummock::{Level, SstableInfo};
 
+use super::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::SearchResult;
 use crate::hummock::level_handler::LevelHandler;
-
-pub trait CompactionPicker {
-    fn pick_compaction(
-        &self,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult>;
-}
 
 pub struct MinOverlappingPicker {
     compact_task_id: u64,
@@ -175,23 +168,24 @@ impl CompactionPicker for MinOverlappingPicker {
             select_level: Level {
                 level_idx: self.level as u32,
                 level_type: levels[self.level].level_type,
+                total_file_size: select_input_ssts.iter().map(|table| table.file_size).sum(),
                 table_infos: select_input_ssts,
-                total_file_size: 0,
             },
             target_level: Level {
                 level_idx: target_level as u32,
                 level_type: levels[target_level].level_type,
+                total_file_size: target_input_ssts.iter().map(|table| table.file_size).sum(),
                 table_infos: target_input_ssts,
-                total_file_size: 0,
             },
             split_ranges: vec![],
+            compression_algorithm: "".to_string(),
         })
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_pb::hummock::LevelType;
+    pub use risingwave_pb::hummock::{KeyRange, LevelType};
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;

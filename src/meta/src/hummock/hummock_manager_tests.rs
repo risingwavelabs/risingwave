@@ -18,15 +18,18 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+// use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion, KeyRange,
 };
 
+use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::model::CurrentHummockVersionId;
 use crate::hummock::test_utils::*;
@@ -56,10 +59,12 @@ async fn test_hummock_pin_unpin() {
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap();
+        let levels = hummock_version
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
         assert_eq!(version_id, hummock_version.id);
-        assert_eq!(7, hummock_version.levels.len());
-        assert_eq!(0, hummock_version.levels[0].table_infos.len());
-        assert_eq!(0, hummock_version.levels[1].table_infos.len());
+        assert_eq!(7, levels.len());
+        assert_eq!(0, levels[0].table_infos.len());
+        assert_eq!(0, levels[1].table_infos.len());
 
         let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
         assert_eq!(pin_versions_sum(&pinned_versions), 1);
@@ -219,8 +224,8 @@ async fn test_hummock_compaction_task() {
     assert_eq!(compact_task.get_task_id(), 2);
     // In the test case, we assume that each SST contains data of 2 relational tables, and
     // one of them overlaps with the previous SST. So there will be one more relational tables
-    // (for vnode mapping) than SSTs.
-    assert_eq!(compact_task.get_vnode_mappings().len(), sst_num + 1);
+    // (for vnode mapping) than SSTs. but we now remove vnode mapping in compact task
+    assert_eq!(compact_task.get_vnode_mappings().len(), 0);
 
     // Cancel the task and succeed.
     compact_task.task_status = false;
@@ -306,7 +311,7 @@ async fn test_hummock_table() {
     assert_eq!(
         Ordering::Equal,
         pinned_version
-            .levels
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|info| info.id)
@@ -934,9 +939,10 @@ async fn test_trigger_manual_compaction() {
     }
 
     {
+        let option = ManualCompactionOption::default();
         // to check no compactor
         let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
 
         assert_eq!(
@@ -949,8 +955,9 @@ async fn test_trigger_manual_compaction() {
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
     let receiver = compactor_manager_ref.add_compactor(context_id);
     {
+        let option = ManualCompactionOption::default();
         let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
         assert_eq!("internal error: trigger_manual_compaction No compaction_task is available. compaction_group 2", result.err().unwrap().to_string());
     }
@@ -980,8 +987,9 @@ async fn test_trigger_manual_compaction() {
         // to check compactor send task fail
         drop(receiver);
         {
+            let option = ManualCompactionOption::default();
             let result = hummock_manager
-                .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+                .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
                 .await;
             assert!(result.is_err());
         }
@@ -991,8 +999,17 @@ async fn test_trigger_manual_compaction() {
     let _receiver = compactor_manager_ref.add_compactor(context_id);
 
     {
+        let option = ManualCompactionOption {
+            level: 0,
+            key_range: KeyRange {
+                inf: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
         let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
         assert!(result.is_ok());
     }
@@ -1007,9 +1024,10 @@ async fn test_trigger_manual_compaction() {
     assert_eq!(task_id, compact_task.task_id);
 
     {
+        let option = ManualCompactionOption::default();
         // all sst pending , test no compaction avail
         let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
         assert!(result.is_err());
     }

@@ -37,9 +37,9 @@
 extern crate core;
 
 pub mod base;
-mod datagen;
+pub mod datagen;
 mod filesystem;
-mod kafka;
+pub mod kafka;
 pub mod kinesis;
 mod nexmark;
 mod pulsar;

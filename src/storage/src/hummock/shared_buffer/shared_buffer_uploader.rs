@@ -111,7 +111,7 @@ impl SharedBufferUploader {
 
         let uploaded_sst_info = tables
             .into_iter()
-            .map(|(compaction_group_id, sst, unit_id, vnode_bitmaps)| {
+            .map(|(compaction_group_id, sst, unit_id, table_ids)| {
                 (
                     compaction_group_id,
                     SstableInfo {
@@ -122,7 +122,7 @@ impl SharedBufferUploader {
                             inf: false,
                         }),
                         file_size: sst.meta.estimated_size as u64,
-                        vnode_bitmaps,
+                        table_ids,
                         unit_id,
                     },
                 )

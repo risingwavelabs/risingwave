@@ -18,6 +18,8 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
@@ -80,19 +82,28 @@ impl LocalVersion {
         });
     }
 
-    pub fn read_version(&self, read_epoch: HummockEpoch) -> ReadVersion {
-        let smallest_uncommitted_epoch = self.pinned_version.max_committed_epoch() + 1;
+    pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
+        let (pinned_version, shared_buffer) = {
+            let guard = this.read();
+            let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
+            let pinned_version = guard.pinned_version.clone();
+            (
+                pinned_version,
+                if read_epoch >= smallest_uncommitted_epoch {
+                    guard
+                        .shared_buffer
+                        .range(smallest_uncommitted_epoch..=read_epoch)
+                        .rev() // Important: order by epoch descendingly
+                        .map(|(_, shared_buffer)| shared_buffer.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            )
+        };
         ReadVersion {
-            shared_buffer: if read_epoch >= smallest_uncommitted_epoch {
-                self.shared_buffer
-                    .range(smallest_uncommitted_epoch..=read_epoch)
-                    .rev() // Important: order by epoch descendingly
-                    .map(|(_, shared_buffer)| shared_buffer.read_arc())
-                    .collect()
-            } else {
-                Vec::new()
-            },
-            pinned_version: self.pinned_version.clone(),
+            shared_buffer: shared_buffer.into_iter().map(|x| x.read_arc()).collect(),
+            pinned_version,
         }
     }
 }
@@ -125,7 +136,9 @@ impl PinnedVersion {
     }
 
     pub fn levels(&self) -> &Vec<Level> {
-        &self.version.levels
+        // TODO #2065: use correct compaction group id
+        self.version
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
     }
 
     pub fn max_committed_epoch(&self) -> u64 {
