@@ -123,16 +123,29 @@ impl PgStatement {
         self.row_description.clone()
     }
 
-    pub fn instance(&self, portal_name: String, params: &[Bytes]) -> PgPortal {
+    pub async fn instance<SM: SessionManager>(
+        &self,
+        session: Arc<SM::Session>,
+        portal_name: String,
+        params: &[Bytes],
+    ) -> Result<PgPortal, ()> {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
         if params.is_empty() {
-            return PgPortal {
-                name: portal_name,
-                query_string: self.query_string.clone(),
-                result_cache: None,
-                stmt_type: None,
-            };
+            match session.infer_return_type(statement.as_str()).await {
+                Ok(row_description) => {
+                    return Ok(PgPortal {
+                        name: portal_name,
+                        query_string: self.query_string.clone(),
+                        result_cache: None,
+                        stmt_type: None,
+                        row_description,
+                    });
+                }
+                Err(_) => {
+                    return Err(());
+                }
+            }
         }
 
         // 1. Identify all the $n. For example, "SELECT $3, $2, $1" -> [3, 2, 1].
@@ -155,12 +168,23 @@ impl PgStatement {
         // "SELECT 'A', 'B', 'C'".
         let instance_query_string = replace_params(statement, &generic_params, &params);
 
-        // 4. Create a new portal.
-        PgPortal {
-            name: portal_name,
-            query_string: Bytes::from(instance_query_string),
-            result_cache: None,
-            stmt_type: None,
+        // 4. Get row_description and return portal.
+        match session
+            .infer_return_type(instance_query_string.as_str())
+            .await
+        {
+            Ok(row_description) => {
+                return Ok(PgPortal {
+                    name: portal_name,
+                    query_string: Bytes::from(instance_query_string),
+                    result_cache: None,
+                    stmt_type: None,
+                    row_description,
+                });
+            }
+            Err(_) => {
+                return Err(());
+            }
         }
     }
 }
@@ -171,15 +195,17 @@ pub struct PgPortal {
     query_string: Bytes,
     result_cache: Option<IntoIter<Row>>,
     stmt_type: Option<StatementType>,
+    row_description: Vec<PgFieldDescriptor>,
 }
 
 impl PgPortal {
-    pub fn new(name: String, query_string: Bytes) -> Self {
+    pub fn new(name: String, query_string: Bytes, row_description: Vec<PgFieldDescriptor>) -> Self {
         PgPortal {
             name,
             query_string,
             result_cache: None,
             stmt_type: None,
+            row_description,
         }
     }
 
@@ -189,6 +215,10 @@ impl PgPortal {
 
     pub fn query_string(&self) -> Bytes {
         self.query_string.clone()
+    }
+
+    pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
+        self.row_description.clone()
     }
 
     pub async fn execute<SM: SessionManager>(

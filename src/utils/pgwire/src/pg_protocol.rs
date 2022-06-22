@@ -245,7 +245,11 @@ where
 
                 // 2. Instance the statement to get the portal.
                 let portal_name = cstr_to_str(&m.portal_name).unwrap().to_string();
-                let portal = statement.instance(portal_name.clone(), &m.params);
+                let session = self.session.clone().unwrap();
+                let portal = statement
+                    .instance::<SM>(session, portal_name.clone(), &m.params)
+                    .await
+                    .unwrap();
 
                 // 3. Insert the Portal.
                 if portal_name.is_empty() {
