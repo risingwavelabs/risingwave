@@ -207,15 +207,6 @@ pub async fn handle_grant_privilege(
             let user = reader.get_user_by_name(&granted_by.value);
             if user.is_none() {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
-            } else if !reader
-                .get_user_by_name(session.user_name())
-                .unwrap()
-                .is_supper
-                && user.unwrap().get_name() != session.user_name()
-            {
-                return Err(
-                    ErrorCode::BindError("User does not match for granted by".to_string()).into(),
-                );
             }
         }
     }
