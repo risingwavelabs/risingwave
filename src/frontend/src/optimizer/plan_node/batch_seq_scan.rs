@@ -19,9 +19,10 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
-use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc};
+use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use crate::catalog::ColumnId;
 use crate::expr::Literal;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
@@ -168,17 +169,13 @@ impl ToBatchProst for BatchSeqScan {
             })
         } else {
             NodeBody::RowSeqScan(RowSeqScanNode {
-                table_desc: Some(CellBasedTableDesc {
-                    table_id: self.logical.table_desc().table_id.into(),
-                    order_key: self
-                        .logical
-                        .table_desc()
-                        .order_desc
-                        .iter()
-                        .map(|v| v.into())
-                        .collect(),
-                }),
-                column_descs,
+                table_desc: Some(self.logical.table_desc().to_protobuf()),
+                column_ids: self
+                    .logical
+                    .output_column_ids()
+                    .iter()
+                    .map(ColumnId::get_id)
+                    .collect(),
                 scan_range: Some(self.scan_range.to_protobuf()),
             })
         }

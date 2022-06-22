@@ -186,6 +186,7 @@ mod tests {
                 vec![Row::new(res)],
                 // NOTE: Extended mode don't need.
                 vec![],
+                true,
             ))
         }
 

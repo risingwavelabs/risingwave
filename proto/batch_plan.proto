@@ -11,7 +11,7 @@ option optimize_for = SPEED;
 
 message RowSeqScanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
-  repeated plan_common.ColumnDesc column_descs = 2;
+  repeated int32 column_ids = 2;
   ScanRange scan_range = 3;
 }
 

@@ -88,6 +88,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
             PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
         ],
+        true,
     ))
 }
 

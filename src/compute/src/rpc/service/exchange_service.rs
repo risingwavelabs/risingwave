@@ -15,8 +15,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use futures::channel::mpsc::Receiver;
-use futures::StreamExt;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
@@ -25,6 +23,7 @@ use risingwave_pb::task_service::{
 };
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::LocalStreamManager;
+use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -117,7 +116,7 @@ impl ExchangeServiceImpl {
             let up_actor_id = up_down_ids.0.to_string();
             let down_actor_id = up_down_ids.1.to_string();
             loop {
-                let msg = receiver.next().await;
+                let msg = receiver.recv().await;
                 match msg {
                     // the sender is closed, we close the receiver and stop forwarding message
                     None => break,

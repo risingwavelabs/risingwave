@@ -17,8 +17,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::channel::mpsc::Sender;
-use futures::{SinkExt, Stream};
+use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
@@ -27,6 +26,7 @@ use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use tokio::sync::mpsc::Sender;
 use tracing::event;
 
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
@@ -771,7 +771,6 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};
 
-    use futures::channel::mpsc::channel;
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
     use madsim::collections::HashMap;
@@ -781,6 +780,7 @@ mod tests {
     use risingwave_common::catalog::Schema;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
+    use tokio::sync::mpsc::channel;
 
     use super::*;
     use crate::executor::receiver::ReceiverExecutor;
@@ -921,7 +921,7 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
-        let (mut tx, rx) = channel(16);
+        let (tx, rx) = channel(16);
         let input = Box::new(ReceiverExecutor::new(
             schema.clone(),
             vec![],
