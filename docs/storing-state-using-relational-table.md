@@ -26,7 +26,7 @@ select sum(a), count(b), min(c), string_agg(d order by e) from t
 
 2. **Better support Semi-structured Data**. RisingWave may support semi-structured data in the future. Semi-structured data consists of nested structures and arrays, which are hard to flatten into row format, but much more simple under cell-based format, simply replace the `column id` to the JSONPath to such field.
 
-We implement a relational table layer as the bridge between stateful executors and KV state store, which provides the interfaces accessing KV data in relational semantic. As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. In short, a cell instead of a whole row is stored as a key-value pair. For example, encoding of some stateful executors in cell-based format are as follow:
+We implement a relational table layer as the bridge between stateful executors and KV state store, which provides the interfaces accessing KV data in relational semantics. As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. In short, a cell instead of a whole row is stored as a key-value pair. For example, encoding of some stateful executors in cell-based format is as follows:
 | state | key | value |
 | ------ | --------------------- | ------ |
 | mv     | table_id \| sort key \| pk \| col_id| materialized value |
