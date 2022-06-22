@@ -94,5 +94,6 @@ pub(super) fn handle_explain(
             "QUERY PLAN".to_owned(),
             TypeOid::Varchar,
         )],
+        true,
     ))
 }

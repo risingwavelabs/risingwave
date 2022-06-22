@@ -25,6 +25,7 @@ use super::{
     BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
     ToBatch, ToStream,
 };
+use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
 use crate::session::OptimizerContextRef;
@@ -145,13 +146,11 @@ impl LogicalScan {
     }
 
     /// Get a reference to the logical scan's table desc.
-    #[must_use]
     pub fn table_desc(&self) -> &TableDesc {
         self.table_desc.as_ref()
     }
 
-    /// Get a reference to the logical scan's table desc.
-    #[must_use]
+    /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
         self.output_col_idx
             .iter()
@@ -159,8 +158,15 @@ impl LogicalScan {
             .collect()
     }
 
+    /// Get the ids of the output columns.
+    pub fn output_column_ids(&self) -> Vec<ColumnId> {
+        self.output_col_idx
+            .iter()
+            .map(|i| self.table_desc.columns[*i].column_id)
+            .collect()
+    }
+
     /// Get all indexes on this table
-    #[must_use]
     pub fn indexes(&self) -> &[(String, Rc<TableDesc>)] {
         &self.indexes
     }
