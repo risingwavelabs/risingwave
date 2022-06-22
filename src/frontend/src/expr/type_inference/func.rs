@@ -24,8 +24,6 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
 pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
-    // With our current simplified type system, where all types are nullable and not parameterized
-    // by things like length or precision, the inference can be done with a map lookup.
     let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &inputs)?;
     let inputs = inputs
         .into_iter()
@@ -41,7 +39,25 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
     Ok((inputs, ret_type))
 }
 
-/// Infer the return type name without parameters like length or precision.
+/// From all available functions in `sig_map`, find and return the best matching `FuncSign` for the
+/// provided `func_type` and `inputs`. This not only support exact function signature match, but can
+/// also match `substr(varchar, smallint)` or even `substr(varchar, unknown)` to `substr(varchar,
+/// int)`.
+///
+/// This correponds to the `PostgreSQL` rules on operators and functions here:
+/// * <https://www.postgresql.org/docs/current/typeconv-oper.html>
+/// * <https://www.postgresql.org/docs/current/typeconv-func.html>
+///
+/// To summarize,
+/// 1. Find all functions with matching `func_type` and argument count.
+/// 2. For binary operator with unknown on exactly one side, try to find an exact match assuming
+///    both sides are same type.
+/// 3. Rank candidates based on most matching positions. This covers Rule 2, 4a, 4c and 4d in
+///    `PostgreSQL`. See [`top_matches`] for details.
+/// 4. Attempt to narrow down candidates by selecting type catagories for unknowns. This covers Rule
+///    4e in `PostgreSQL`. See [`narrow_category`] for details.
+/// 5. Attempt to narrow down candidates by assuming all arguments are same type. This covers Rule
+///    4f in `PostgreSQL`. See [`narrow_same_type`] for details.
 fn infer_type_name<'a, 'b>(
     sig_map: &'a FuncSigMap,
     func_type: ExprType,
@@ -74,7 +90,7 @@ fn infer_type_name<'a, 'b>(
         }
     }
 
-    let mut candidates = exact_n_prefer(candidates, inputs);
+    let mut candidates = top_matches(candidates, inputs);
 
     if candidates.is_empty() {
         return Err(ErrorCode::NotImplemented(
@@ -88,10 +104,10 @@ fn infer_type_name<'a, 'b>(
         .into());
     }
 
-    candidates = rule_e(candidates, inputs);
+    candidates = narrow_category(candidates, inputs);
 
     if candidates.len() > 1 {
-        candidates = rule_f(candidates, inputs);
+        candidates = narrow_same_type(candidates, inputs);
     }
 
     match &candidates[..] {
@@ -106,18 +122,43 @@ fn infer_type_name<'a, 'b>(
     }
 }
 
+/// Checks if `t` is a preferred type in any type category, as defined by `PostgreSQL`:
+/// <https://www.postgresql.org/docs/current/catalog-pg-type.html>.
 fn is_preferred(t: DataTypeName) -> bool {
+    use DataTypeName as T;
     matches!(
         t,
-        DataTypeName::Float64
-            | DataTypeName::Boolean
-            | DataTypeName::Varchar
-            | DataTypeName::Timestampz
-            | DataTypeName::Interval
+        T::Float64 | T::Boolean | T::Varchar | T::Timestampz | T::Interval
     )
 }
 
-fn exact_n_prefer<'a, 'b>(candidates: &'a [FuncSign], inputs: &'b [ExprImpl]) -> Vec<&'a FuncSign> {
+/// Find the top `candidates` that match `inputs` on most non-null positions. This covers Rule 2,
+/// 4a, 4c and 4d in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
+///
+/// * Rule 2 & 4c: Keep candidates that have most exact type matches. Exact match on all posistions
+///   is just a special case.
+/// * Rule 4d: Break ties by selecting those that accept preferred types at most positions.
+/// * Rule 4a: If the input cannot implicit cast to expected type at any position, this candidate is
+///   discarded.
+///
+/// Correponding implementation in `PostgreSQL`:
+/// * Rule 2 on operators: `OpernameGetOprid()` in `namespace.c` [14.0/86a4dc1][rule 2 oper src]
+///   * Note that unknown-handling logic of `binary_oper_exact()` in `parse_oper.c` is in
+///     [`infer_type_name`].
+/// * Rule 2 on functions: Line 1427 - Line 1439 of `func_get_detail()` in `parse_func.c`
+///   [14.0/86a4dc1][rule 2 func src]
+/// * Rule 4a: `func_match_argtypes()` in `parse_func.c` [14.0/86a4dc1][rule 4a src]
+/// * Rule 4c: Line 1062 - Line 1104 of `func_select_candidate()` in `parse_func.c`
+///   [14.0/86a4dc1][rule 4c src]
+/// * Rule 4d: Line 1106 - Line 1153 of `func_select_candidate()` in `parse_func.c`
+///   [14.0/86a4dc1][rule 4d src]
+///
+/// [rule 2 oper src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/catalog/namespace.c#L1516-L1611
+/// [rule 2 func src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1427-L1439
+/// [rule 4a src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L907-L947
+/// [rule 4c src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1062-L1104
+/// [rule 4d src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1106-L1153
+fn top_matches<'a, 'b>(candidates: &'a [FuncSign], inputs: &'b [ExprImpl]) -> Vec<&'a FuncSign> {
     let mut best_exact = 0;
     let mut best_preferred = 0;
     let mut best_candidate = Vec::new();
@@ -164,7 +205,31 @@ fn exact_n_prefer<'a, 'b>(candidates: &'a [FuncSign], inputs: &'b [ExprImpl]) ->
     best_candidate
 }
 
-fn rule_e<'a, 'b>(best_candidate: Vec<&'a FuncSign>, inputs: &'b [ExprImpl]) -> Vec<&'a FuncSign> {
+/// Attempt to narrow down candidates by selecting type catagories for unknowns. This covers Rule 4e
+/// in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
+///
+/// This is done in 2 phases:
+/// * First, chech each unknown position individually and try to find a type category for it.
+///   * If any candidate accept varchar, varchar is selected;
+///   * otherwise, if all candidate accept the same category, select this category.
+///     * Also record whether any candidate accept the preferred type within this category.
+/// * When all unknown positions are assigned their type categories, discard a candidate if at any
+///   position
+///   * it does not agree with the type category assignment;
+///   * the assigned type category contains a preferred type but the candidate is not preferred.
+///
+/// If the first phase fails or the second phase gives an empty set, this attempt preserves orginal
+/// list untouched.
+///
+/// Correponding implementation in `PostgreSQL`:
+/// * Line 1164 - Line 1298 of `func_select_candidate()` in `parse_func.c` [14.0/86a4dc1][rule 4e
+///   src]
+///
+/// [rule 4e src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1164-L1298
+fn narrow_category<'a, 'b>(
+    best_candidate: Vec<&'a FuncSign>,
+    inputs: &'b [ExprImpl],
+) -> Vec<&'a FuncSign> {
     let mut ets = Vec::new();
     for (i, arg) in inputs.iter().enumerate() {
         if !arg.is_null() {
@@ -221,7 +286,29 @@ fn rule_e<'a, 'b>(best_candidate: Vec<&'a FuncSign>, inputs: &'b [ExprImpl]) -> 
     }
 }
 
-fn rule_f<'a, 'b>(best_candidate: Vec<&'a FuncSign>, inputs: &'b [ExprImpl]) -> Vec<&'a FuncSign> {
+/// Attempt to narrow down candidates by assuming all arguments are same type. This covers Rule 4f
+/// in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
+///
+/// If all non-null arguments are same type, assume all unknown arguments are of this type as well.
+/// Discard a candidate if its paramater type cannot be casted from this type.
+///
+/// If the condition is not met or the result is empty, this attempt preserves orginal list
+/// untouched.
+///
+/// Note this rule cannot replace special treatment given to binary operators in [Rule 2], because
+/// this runs after varchar-biased Rule 4e ([`narrow_category`]), and has no preference between
+/// exact-match and castable-match.
+///
+/// Correponding implementation in `PostgreSQL`:
+/// * Line 1300 - Line 1355 of `func_select_candidate()` in `parse_func.c` [14.0/86a4dc1][rule 4f
+///   src]
+///
+/// [rule 4f src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1300-L1355
+/// [Rule 2]: https://www.postgresql.org/docs/current/typeconv-oper.html#:~:text=then%20assume%20it%20is%20the%20same%20type%20as%20the%20other%20argument%20for%20this%20check
+fn narrow_same_type<'a, 'b>(
+    best_candidate: Vec<&'a FuncSign>,
+    inputs: &'b [ExprImpl],
+) -> Vec<&'a FuncSign> {
     let mut t = None;
     for e in inputs {
         if e.is_null() {
