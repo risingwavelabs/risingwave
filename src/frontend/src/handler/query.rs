@@ -66,7 +66,7 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         _ => unreachable!(),
     };
 
-    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
+    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {
