@@ -177,12 +177,14 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
         column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        dist_key_indices: Option<Vec<usize>>,
+        #[allow(unused_assignments)] mut dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
         let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
+        // TODO: enable this when we implement concat/merge iterators of different vnode prefix
+        dist_key_indices = None;
         let dist_key_in_pk_indices = dist_key_indices.as_ref().map(|dist_key_indices| {
             dist_key_indices
                 .iter()
@@ -241,7 +243,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
                 .hash_by_indices(indices, &CRC32FastBuilder {})
                 .unwrap()
                 .to_vnode(),
-            None => DEFAULT_VNODE,
+            None => return DEFAULT_VNODE,
         };
         // This table should only to used to access entries with vnode specified in `self.vnodes`.
         assert!(self.vnodes.is_set(vnode as usize).unwrap());
@@ -321,7 +323,7 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
                 .hash_by_indices(indices, &CRC32FastBuilder {})
                 .unwrap()
                 .to_vnode(),
-            None => DEFAULT_VNODE,
+            None => return DEFAULT_VNODE,
         };
         // This table should only to used to access entries with vnode specified in `self.vnodes`.
         assert!(self.vnodes.is_set(vnode as usize).unwrap());
