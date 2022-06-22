@@ -24,6 +24,7 @@ use crate::vector_op::concat_op::concat_op;
 use crate::vector_op::repeat::repeat;
 use crate::vector_op::substr::*;
 use crate::vector_op::to_char::to_char_timestamp;
+use crate::vector_op::trim_characters::{ltrim_characters, rtrim_characters, trim_characters};
 
 pub fn new_substr_start(
     expr_ia1: BoxedExpression,
@@ -78,19 +79,36 @@ pub fn new_repeat(
         .boxed()
 }
 
-pub fn new_concat_op(
-    expr_ia1: BoxedExpression,
-    expr_ia2: BoxedExpression,
-    return_type: DataType,
-) -> BoxedExpression {
-    BinaryBytesExpression::<Utf8Array, Utf8Array, _>::new(
-        expr_ia1,
-        expr_ia2,
-        return_type,
-        concat_op,
-    )
-    .boxed()
+macro_rules! impl_utf8_utf8 {
+    ($({ $func_name:ident, $method:ident }),*) => {
+        $(pub fn $func_name(
+            expr_ia1: BoxedExpression,
+            expr_ia2: BoxedExpression,
+            return_type: DataType,
+        ) -> BoxedExpression {
+            BinaryBytesExpression::<Utf8Array, Utf8Array, _>::new(
+                expr_ia1,
+                expr_ia2,
+                return_type,
+                $method,
+            )
+            .boxed()
+        })*
+    };
 }
+
+macro_rules! for_all_utf8_utf8_op {
+    ($macro:ident) => {
+        $macro! {
+            { new_trim_characters, trim_characters },
+            { new_ltrim_characters, ltrim_characters },
+            { new_rtrim_characters, rtrim_characters },
+            { new_concat_op, concat_op }
+        }
+    };
+}
+
+for_all_utf8_utf8_op! { impl_utf8_utf8 }
 
 #[cfg(test)]
 mod tests {
