@@ -221,24 +221,23 @@ impl DynamicLevelSelector {
         ctx
     }
 
-    fn adjust_target_file_size(&self, mut ret: SearchResult, base_level: usize) -> SearchResult {
-        if ret.select_level.level_idx == 0 && ret.target_level.level_idx == 0 {
+    fn set_compaction_config_for_level(&self, input: &mut SearchResult, base_level: usize) {
+        if input.select_level.level_idx == 0 && input.target_level.level_idx == 0 {
             // TODO: reduce `target_file_size` after we implement sub-level.
-            ret.target_file_size = self.config.min_compaction_bytes;
-        } else if ret.select_level.level_idx == 0 {
-            ret.target_file_size = self.config.target_file_size_base;
+            input.target_file_size = self.config.min_compaction_bytes;
+        } else if input.select_level.level_idx == 0 {
+            input.target_file_size = self.config.target_file_size_base;
         } else {
-            assert!(ret.target_level.level_idx as usize >= base_level);
-            ret.target_file_size = self.config.target_file_size_base
-                << (ret.target_level.level_idx as usize - base_level);
+            assert!(input.target_level.level_idx as usize >= base_level);
+            input.target_file_size = self.config.target_file_size_base
+                << (input.target_level.level_idx as usize - base_level);
         }
-        if ret.target_level.level_idx == 0 {
-            ret.compression_algorithm = self.config.compression_algorithm[0].clone();
+        if input.target_level.level_idx == 0 {
+            input.compression_algorithm = self.config.compression_algorithm[0].clone();
         } else {
-            let idx = ret.target_level.level_idx as usize - base_level + 1;
-            ret.compression_algorithm = self.config.compression_algorithm[idx].clone();
+            let idx = input.target_level.level_idx as usize - base_level + 1;
+            input.compression_algorithm = self.config.compression_algorithm[idx].clone();
         }
-        ret
     }
 }
 
@@ -263,8 +262,9 @@ impl LevelSelector for DynamicLevelSelector {
                 return None;
             }
             let picker = self.create_compaction_picker(select_level, target_level, task_id);
-            if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
-                return Some(self.adjust_target_file_size(ret, ctx.base_level));
+            if let Some(mut ret) = picker.pick_compaction(levels, level_handlers) {
+                self.set_compaction_config_for_level(&mut ret, ctx.base_level);
+                return Some(ret);
             }
         }
         None
@@ -291,8 +291,9 @@ impl LevelSelector for DynamicLevelSelector {
             target_level,
         );
 
-        let ret = picker.pick_compaction(levels, level_handlers)?;
-        Some(self.adjust_target_file_size(ret, ctx.base_level))
+        let mut ret = picker.pick_compaction(levels, level_handlers)?;
+        self.set_compaction_config_for_level(&mut ret, ctx.base_level);
+        Some(ret)
     }
 
     fn name(&self) -> &'static str {

@@ -184,7 +184,7 @@ mod tests {
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
             target_file_size: 1,
-            compression_algorithm: 0
+            compression_algorithm: 0,
         }
     }
 
