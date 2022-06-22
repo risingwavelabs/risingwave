@@ -163,7 +163,7 @@ where
             }
             FeMessage::Parse(m) => {
                 let query = cstr_to_str(&m.query_string).unwrap();
-
+                tracing::trace!("(extended query)parse query: {}", query);
                 // 1. Create the types description.
                 let type_ids = m.type_ids;
                 let types: Vec<TypeOid> = type_ids
@@ -268,6 +268,11 @@ where
                     // NOTE Error handle need modify later.
                     named_portals.get_mut(&portal_name).expect("statement_name managed by client_driver, hence assume statement name always valid")
                 };
+
+                tracing::trace!(
+                    "(extended query)execute query: {}",
+                    cstr_to_str(&portal.query_string()).unwrap()
+                );
 
                 // 2. Execute instance statement using portal.
                 self.process_query_msg_extended(portal, m.max_rows.try_into().unwrap())
@@ -411,7 +416,7 @@ where
     async fn process_query_msg_simple(&mut self, query_string: Result<&str>) -> Result<()> {
         match query_string {
             Ok(sql) => {
-                tracing::trace!("receive query: {}", sql);
+                tracing::trace!("(simple query)receive query: {}", sql);
                 let session = self.session.clone().unwrap();
                 // execute query
                 let process_res = session.run_statement(sql).await;
