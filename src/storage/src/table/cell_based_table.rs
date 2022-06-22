@@ -39,11 +39,15 @@ use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
+pub type AccessType = bool;
+pub const READ_ONLY: AccessType = false;
+pub const READ_WRITE: AccessType = true;
+
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
 /// format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation
 #[derive(Clone)]
-pub struct CellBasedTable<S: StateStore> {
+pub struct CellBasedTable<S: StateStore, const T: AccessType> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
@@ -60,7 +64,7 @@ pub struct CellBasedTable<S: StateStore> {
     pk_serializer: OrderedRowSerializer,
 
     /// Used for serializing the row.
-    cell_based_row_serializer: CellBasedRowSerializer,
+    row_serializer: CellBasedRowSerializer,
 
     /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
@@ -76,7 +80,7 @@ pub struct CellBasedTable<S: StateStore> {
     dist_key_indices: Option<Vec<usize>>,
 }
 
-impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
+impl<S: StateStore, const T: AccessType> std::fmt::Debug for CellBasedTable<S, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CellBasedTable").finish_non_exhaustive()
     }
@@ -86,7 +90,29 @@ fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::CellBasedTable(rw.into())
 }
 
-impl<S: StateStore> CellBasedTable<S> {
+impl<S: StateStore> CellBasedTable<S, READ_ONLY> {
+    /// Create a [`CellBasedTable`] given a complete set of `columns` and a partial set of
+    /// `column_ids`. The output will only contains columns with the given ids in the same order.
+    pub fn new_partial(
+        keyspace: Keyspace<S>,
+        table_columns: Vec<ColumnDesc>,
+        column_ids: Vec<ColumnId>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        dist_key_indices: Option<Vec<usize>>,
+    ) -> Self {
+        Self::new_inner(
+            keyspace,
+            table_columns,
+            column_ids,
+            order_types,
+            pk_indices,
+            dist_key_indices,
+        )
+    }
+}
+
+impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
     /// Create a [`CellBasedTable`] given a complete set of `columns`.
     pub fn new(
         keyspace: Keyspace<S>,
@@ -97,7 +123,7 @@ impl<S: StateStore> CellBasedTable<S> {
     ) -> Self {
         let column_ids = columns.iter().map(|c| c.column_id).collect();
 
-        Self::new_partial(
+        Self::new_inner(
             keyspace,
             columns,
             column_ids,
@@ -107,9 +133,33 @@ impl<S: StateStore> CellBasedTable<S> {
         )
     }
 
-    /// Create a [`CellBasedTable`] given a complete set of `columns` and a partial set of
-    /// `column_ids`. The output will only contains columns with the given ids in the same order.
-    pub fn new_partial(
+    pub fn new_for_test(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new(keyspace, column_descs, order_types, pk_indices, None)
+    }
+}
+
+impl<S: StateStore> From<CellBasedTable<S, READ_WRITE>> for CellBasedTable<S, READ_ONLY> {
+    fn from(rw: CellBasedTable<S, READ_WRITE>) -> Self {
+        Self {
+            keyspace: rw.keyspace,
+            table_columns: rw.table_columns,
+            schema: rw.schema,
+            pk_serializer: rw.pk_serializer,
+            row_serializer: rw.row_serializer,
+            mapping: rw.mapping,
+            pk_indices: rw.pk_indices,
+            dist_key_indices: rw.dist_key_indices,
+        }
+    }
+}
+
+impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
+    fn new_inner(
         keyspace: Keyspace<S>,
         table_columns: Vec<ColumnDesc>,
         column_ids: Vec<ColumnId>,
@@ -126,20 +176,11 @@ impl<S: StateStore> CellBasedTable<S> {
             table_columns,
             schema,
             pk_serializer,
-            cell_based_row_serializer: CellBasedRowSerializer::new(column_ids),
+            row_serializer: CellBasedRowSerializer::new(column_ids),
             mapping,
             pk_indices,
             dist_key_indices,
         }
-    }
-
-    pub fn new_for_test(
-        keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new(keyspace, column_descs, order_types, pk_indices, None)
     }
 
     pub fn schema(&self) -> &Schema {
@@ -155,27 +196,12 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     pub(super) fn column_ids(&self) -> &[ColumnId] {
-        &self.cell_based_row_serializer.column_ids
-    }
-
-    /// Returns whether the output columns are a complete set of the table's.
-    fn is_complete(&self) -> bool {
-        use std::collections::HashSet;
-
-        let output: HashSet<_> = self
-            .mapping
-            .output_columns
-            .iter()
-            .map(|c| c.column_id)
-            .collect();
-        let table: HashSet<_> = self.table_columns.iter().map(|c| c.column_id).collect();
-
-        output == table
+        &self.row_serializer.column_ids
     }
 }
 
-/// Get & Write
-impl<S: StateStore> CellBasedTable<S> {
+/// Get
+impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
     /// Get a single row by point get
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: use multi-get for cell_based get_row
@@ -203,17 +229,6 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(pk_and_row.map(|(_pk, row)| row))
     }
 
-    /// Get vnode value. Should provide a full row (instead of pk).
-    fn compute_vnode_by_row(&self, value: &Row) -> u16 {
-        let dist_key_indices = self.dist_key_indices.as_ref().unwrap();
-
-        let hash_builder = CRC32FastBuilder {};
-        value
-            .hash_by_indices(dist_key_indices, &hash_builder)
-            .unwrap()
-            .to_vnode()
-    }
-
     /// Get a single row by range scan
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // get row by state_store scan
@@ -235,14 +250,26 @@ impl<S: StateStore> CellBasedTable<S> {
         let pk_and_row = deserializer.take();
         Ok(pk_and_row.map(|(_pk, row)| row))
     }
+}
+
+/// Write
+impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
+    /// Get vnode value. Should provide a full row (instead of pk).
+    fn compute_vnode_by_row(&self, value: &Row) -> u16 {
+        let dist_key_indices = self.dist_key_indices.as_ref().unwrap();
+
+        let hash_builder = CRC32FastBuilder {};
+        value
+            .hash_by_indices(dist_key_indices, &hash_builder)
+            .unwrap()
+            .to_vnode()
+    }
 
     async fn batch_write_rows_inner<const WITH_VALUE_META: bool>(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        debug_assert!(self.is_complete(), "cannot write to a partial table");
-
         // stateful executors need to compute vnode.
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
@@ -258,10 +285,7 @@ impl<S: StateStore> CellBasedTable<S> {
                     } else {
                         ValueMeta::default()
                     };
-                    let bytes = self
-                        .cell_based_row_serializer
-                        .serialize(&pk, row)
-                        .map_err(err)?;
+                    let bytes = self.row_serializer.serialize(&pk, row).map_err(err)?;
                     for (key, value) in bytes {
                         local.put(key, StorageValue::new_put(value_meta, value))
                     }
@@ -273,10 +297,7 @@ impl<S: StateStore> CellBasedTable<S> {
                     } else {
                         ValueMeta::default()
                     };
-                    let bytes = self
-                        .cell_based_row_serializer
-                        .serialize(&pk, old_row)
-                        .map_err(err)?;
+                    let bytes = self.row_serializer.serialize(&pk, old_row).map_err(err)?;
                     for (key, _) in bytes {
                         local.delete_with_value_meta(key, value_meta);
                     }
@@ -288,11 +309,11 @@ impl<S: StateStore> CellBasedTable<S> {
                         ValueMeta::default()
                     };
                     let delete_bytes = self
-                        .cell_based_row_serializer
+                        .row_serializer
                         .serialize_without_filter(&pk, old_row)
                         .map_err(err)?;
                     let insert_bytes = self
-                        .cell_based_row_serializer
+                        .row_serializer
                         .serialize_without_filter(&pk, new_row)
                         .map_err(err)?;
                     for (delete, insert) in
@@ -359,7 +380,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore> CellBasedTable<S> {
+impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
     /// Get a [`StreamingIter`] with given `encoded_key_range`.
     pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
         &self,

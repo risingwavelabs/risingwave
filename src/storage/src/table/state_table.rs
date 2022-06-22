@@ -25,7 +25,7 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::CellBasedTable;
+use super::cell_based_table::{CellBasedTable, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
@@ -37,7 +37,7 @@ pub struct StateTable<S: StateStore> {
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTable<S>,
+    cell_based_table: CellBasedTable<S, READ_WRITE>,
 }
 
 impl<S: StateStore> StateTable<S> {
@@ -61,7 +61,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Get the underlying [`CellBasedTable`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &CellBasedTable<S> {
+    pub fn cell_based_table(&self) -> &CellBasedTable<S, READ_WRITE> {
         &self.cell_based_table
     }
 
