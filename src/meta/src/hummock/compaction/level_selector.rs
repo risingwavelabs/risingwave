@@ -463,8 +463,10 @@ pub mod tests {
             .max_bytes_for_level_base(100)
             .level0_tigger_file_numer(8)
             .build();
-        let selector =
-            DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
+        let selector = DynamicLevelSelector::new(
+            Arc::new(config.clone()),
+            Arc::new(RangeOverlapStrategy::default()),
+        );
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers)
@@ -473,6 +475,7 @@ pub mod tests {
         assert_eq!(compaction.target_level.level_idx, 2);
         assert_eq!(compaction.select_level.table_infos.len(), 10);
         assert_eq!(compaction.target_level.table_infos.len(), 3);
+        assert_eq!(compaction.target_file_size, config.target_file_size_base);
 
         levels_handlers[0].remove_task(1);
         levels_handlers[2].remove_task(1);
@@ -485,7 +488,11 @@ pub mod tests {
         assert_eq!(compaction.target_level.level_idx, 4);
         assert_eq!(compaction.select_level.table_infos.len(), 1);
         assert_eq!(compaction.target_level.table_infos.len(), 1);
-
+        assert_eq!(
+            compaction.target_file_size,
+            config.target_file_size_base * 4
+        );
+        assert_eq!(compaction.compression_algorithm.as_str(), "Lz4",);
         // no compaction need to be scheduled because we do not calculate the size of pending files
         // to score.
         let compaction = selector.pick_compaction(2, &levels, &mut levels_handlers);
