@@ -91,8 +91,7 @@ impl Binder {
 `SHOW COLUMNS FROM [table]`
 "###,
                             table_name
-                        )
-                        .into(),
+                        ),
                         1695.into(),
                     )
                     .into());

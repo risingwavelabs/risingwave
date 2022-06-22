@@ -17,6 +17,7 @@ pub mod pg_namespace;
 pub mod pg_type;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -32,6 +33,7 @@ use crate::catalog::pg_catalog::pg_namespace::*;
 use crate::catalog::pg_catalog::pg_type::*;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::session::AuthContext;
 use crate::user::user_service::UserInfoReader;
 
 #[allow(dead_code)]
@@ -44,8 +46,7 @@ pub struct SysCatalogReaderImpl {
     worker_node_manager: WorkerNodeManagerRef,
     // TODO: Read from meta.
     // meta_client: MetaClient,
-    current_database: String,
-    current_user: String,
+    auth_context: Arc<AuthContext>,
 }
 
 impl SysCatalogReaderImpl {
@@ -53,15 +54,13 @@ impl SysCatalogReaderImpl {
         catalog_reader: CatalogReader,
         user_info_reader: UserInfoReader,
         worker_node_manager: WorkerNodeManagerRef,
-        current_database: &str,
-        current_user: &str,
+        auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
             catalog_reader,
             user_info_reader,
             worker_node_manager,
-            current_database: current_database.to_string(),
-            current_user: current_user.to_string(),
+            auth_context,
         }
     }
 }
@@ -85,7 +84,7 @@ impl SysCatalogReader for SysCatalogReaderImpl {
 impl SysCatalogReaderImpl {
     fn read_namespace(&self) -> Result<Vec<Row>> {
         let reader = self.catalog_reader.read_guard();
-        let schemas = reader.get_all_schema_info(&self.current_database)?;
+        let schemas = reader.get_all_schema_info(&self.auth_context.database)?;
         Ok(schemas
             .iter()
             .map(|schema| {

@@ -44,7 +44,7 @@ use crate::catalog::{DatabaseId, SchemaId};
 use crate::meta_client::FrontendMetaClient;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
-use crate::session::{FrontendEnv, OptimizerContext, SessionImpl};
+use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserName;
@@ -118,8 +118,10 @@ impl LocalFrontend {
     pub fn session_ref(&self) -> Arc<SessionImpl> {
         Arc::new(SessionImpl::new(
             self.env.clone(),
-            DEFAULT_DATABASE_NAME.to_string(),
-            DEFAULT_SUPPER_USER.to_string(),
+            Arc::new(AuthContext::new(
+                DEFAULT_DATABASE_NAME.to_string(),
+                DEFAULT_SUPPER_USER.to_string(),
+            )),
             UserAuthenticator::None,
         ))
     }

@@ -22,24 +22,18 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_source::SourceManagerRef;
 
 use crate::catalog::pg_catalog::SysCatalogReaderImpl;
-use crate::session::FrontendEnv;
+use crate::session::{AuthContext, FrontendEnv};
 
 /// Batch task execution context in frontend.
 #[derive(Clone)]
 pub struct FrontendBatchTaskContext {
     env: FrontendEnv,
-
-    current_database: String,
-    current_user: String,
+    auth_context: Arc<AuthContext>,
 }
 
 impl FrontendBatchTaskContext {
-    pub fn new(env: FrontendEnv, current_database: &str, current_user: &str) -> Self {
-        Self {
-            env,
-            current_database: current_database.to_string(),
-            current_user: current_user.to_string(),
-        }
+    pub fn new(env: FrontendEnv, auth_context: Arc<AuthContext>) -> Self {
+        Self { env, auth_context }
     }
 }
 
@@ -53,8 +47,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
             self.env.catalog_reader().clone(),
             self.env.user_info_reader().clone(),
             self.env.worker_node_manager_ref(),
-            &self.current_database,
-            &self.current_user,
+            self.auth_context.clone(),
         )))
     }
 
