@@ -41,7 +41,7 @@ impl CellBasedRowSerializer {
         row: Row,
     ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
         // TODO: avoid this allocation
-        let key = [vnode.to_be_bytes().as_slice(), &pk].concat();
+        let key = [vnode.to_be_bytes().as_slice(), pk].concat();
         let res = serialize_pk_and_row(&key, &row, &self.column_ids)?
             .into_iter()
             .flatten()
@@ -59,7 +59,7 @@ impl CellBasedRowSerializer {
         row: Row,
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
         // TODO: avoid this allocation
-        let key = [vnode.to_be_bytes().as_slice(), &pk].concat();
+        let key = [vnode.to_be_bytes().as_slice(), pk].concat();
         let res = serialize_pk_and_row(&key, &row, &self.column_ids)?;
         Ok(res)
     }

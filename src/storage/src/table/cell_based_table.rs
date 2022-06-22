@@ -238,7 +238,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
         let vnode = match self.dist_key_in_pk_indices.as_ref() {
             Some(indices) => pk
-                .hash_by_indices(&indices, &CRC32FastBuilder {})
+                .hash_by_indices(indices, &CRC32FastBuilder {})
                 .unwrap()
                 .to_vnode(),
             None => DEFAULT_VNODE,
@@ -318,7 +318,7 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
         // we can directly index into the row with indices to the table columns.
         let vnode = match self.dist_key_indices.as_ref() {
             Some(indices) => row
-                .hash_by_indices(&indices, &CRC32FastBuilder {})
+                .hash_by_indices(indices, &CRC32FastBuilder {})
                 .unwrap()
                 .to_vnode(),
             None => DEFAULT_VNODE,

@@ -6066,6 +6066,8 @@ name = "workspace-hack"
 version = "0.1.9"
 dependencies = [
  "anyhow",
+ "auto_enums",
+ "auto_enums_derive",
  "axum",
  "bstr",
  "bytes",
