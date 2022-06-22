@@ -33,6 +33,8 @@ We implement a relational table layer as the bridge between stateful executors a
 | top n | table_id \| sort key \| pk \| col_id | materialized value |
 | join     | table_id \| join_key \| pk \| col_id| materialized value |
 | agg | table_id \| group_key \| col_id| agg_value |
+
+<!-- Todo: link cconsistence hash doc and state table agg doc -->
 ## Relational Table Layer
 [source code](https://github.com/singularity-data/risingwave/blob/main/src/storage/src/table/state_table.rs)
 
