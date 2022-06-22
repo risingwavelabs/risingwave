@@ -39,6 +39,9 @@ impl CompactionConfigBuilder {
                 level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
                 level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
                 compaction_mode: CompactionMode::Range as i32,
+                // support compression setting per level
+                // L0 and L1 do not use compression algorithms
+                // L2 - L4 use Lz4, else use Zstd
                 compression_algorithm: vec![
                     "None".to_string(),
                     "None".to_string(),

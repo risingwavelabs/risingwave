@@ -573,9 +573,6 @@ impl Compactor {
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
                 let mut options: SSTableBuilderOptions = self.context.options.as_ref().into();
 
-                // support compression setting per level
-                // L0 and L1 do not use compression algorithms
-                // L2 - L4 use Lz4, else use Zstd
                 options.compression_algorithm = match self.compact_task.compression_algorithm {
                     0 => CompressionAlgorithm::None,
                     1 => CompressionAlgorithm::Lz4,
