@@ -118,6 +118,6 @@ impl CellSerializer for DedupPkCellBasedRowSerializer {
     /// Get column ids used by cell serializer to serialize.
     /// TODO: This should probably not be exposed to user.
     fn column_ids(&self) -> &[ColumnId] {
-        &self.inner.column_ids()
+        self.inner.column_ids()
     }
 }

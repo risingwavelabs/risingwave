@@ -229,7 +229,7 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
     }
 
     pub(super) fn column_ids(&self) -> &[ColumnId] {
-        &self.cell_based_row_serializer.column_ids()
+        self.cell_based_row_serializer.column_ids()
     }
 
     /// Returns whether the output columns are a complete set of the table's.
