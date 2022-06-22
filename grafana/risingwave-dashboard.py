@@ -98,6 +98,16 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="decbytes", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
+    def timeseries_row(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="row", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
+    def timeseries_row_per_sec(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="row/s", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
     def timeseries_kilobytes(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="deckbytes", fillOpacity=10,
@@ -392,14 +402,24 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_latency("Actor Input Row", [
+            panels.timeseries_row("Actor Input Row", [
                 panels.target(
                     "rate(stream_actor_in_record_cnt[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_actor_latency("Actor Output Row", [
+            panels.timeseries_row("Actor Output Row", [
                 panels.target(
                     "rate(stream_actor_out_record_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_row_per_sec("Actor True Input Rate", [
+                panels.target(
+                    "increase(stream_actor_in_record_cnt[1m]) / increase(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_row_per_sec("Actor True Output Rate", [
+                panels.target(
+                    "increase(stream_actor_out_record_cnt[1m]) / increase(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency_small("Tokio: Actor Fast Poll Time", [
