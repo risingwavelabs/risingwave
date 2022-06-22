@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use cmd_impl::bench::BenchCommands;
 mod cmd_impl;
 pub(crate) mod common;
 
@@ -37,9 +38,12 @@ enum Commands {
     /// Commands for Hummock
     #[clap(subcommand)]
     Hummock(HummockCommands),
-    /// Commands for Benchmarks
+    /// Commands for Tables
     #[clap(subcommand)]
     Table(TableCommands),
+    /// Commands for Benchmarks
+    #[clap(subcommand)]
+    Bench(BenchCommands),
 }
 
 #[derive(Subcommand)]
@@ -55,9 +59,16 @@ enum HummockCommands {
         table_id: Option<u32>,
     },
     SstDump,
+    /// trigger a targeted compaction through compaction_group_id
     TriggerManualCompaction {
         #[clap(short, long = "compaction-group-id", default_value_t = 2)]
         compaction_group_id: u64,
+
+        #[clap(short, long = "table-id", default_value_t = 0)]
+        table_id: u32,
+
+        #[clap(short, long = "level", default_value_t = 1)]
+        level: u32,
     },
 }
 
@@ -66,7 +77,6 @@ enum TableCommands {
     /// benchmark state table
     Scan {
         /// name of the materialized view to operate on
-        #[clap()]
         mv_name: String,
     },
 }
@@ -82,15 +92,20 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Hummock(HummockCommands::SstDump) => cmd_impl::hummock::sst_dump().await.unwrap(),
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
+            table_id,
+            level,
         }) => {
             tokio::spawn(cmd_impl::hummock::trigger_manual_compaction(
                 compaction_group_id,
+                table_id,
+                level,
             ))
             .await??
         }
         Commands::Table(TableCommands::Scan { mv_name }) => {
             tokio::spawn(cmd_impl::table::scan(mv_name)).await??
         }
+        Commands::Bench(cmd) => tokio::spawn(cmd_impl::bench::do_bench(cmd)).await??,
     }
     Ok(())
 }

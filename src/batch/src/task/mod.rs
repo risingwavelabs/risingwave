@@ -20,6 +20,7 @@ pub use task_manager::*;
 mod broadcast_channel;
 mod channel;
 mod context;
+mod data_chunk_in_channel;
 mod env;
 mod fifo_channel;
 mod hash_shuffle_channel;

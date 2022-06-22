@@ -15,7 +15,6 @@
 use std::cmp::Ordering;
 
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -166,16 +165,16 @@ fn check_key_vnode_overlap(info: &SstableInfo, table: &SstableInfo) -> bool {
     {
         return false;
     }
-    let text_len = info.get_vnode_bitmaps().len();
-    let other_len = table.get_vnode_bitmaps().len();
+    let text_len = info.get_table_ids().len();
+    let other_len = table.get_table_ids().len();
     if text_len == 0 || other_len == 0 {
         return true;
     }
     let (mut i, mut j) = (0, 0);
     while i < text_len && j < other_len {
-        let x = &info.get_vnode_bitmaps()[i];
-        let y = &table.get_vnode_bitmaps()[j];
-        match x.get_table_id().cmp(&y.get_table_id()) {
+        let x = &info.get_table_ids()[i];
+        let y = &table.get_table_ids()[j];
+        match x.cmp(y) {
             Ordering::Less => {
                 i += 1;
             }
@@ -183,14 +182,9 @@ fn check_key_vnode_overlap(info: &SstableInfo, table: &SstableInfo) -> bool {
                 j += 1;
             }
             Ordering::Equal => {
-                let x_bitmap: Bitmap = x.get_bitmap().unwrap().try_into().unwrap();
-                let y_bitmap: Bitmap = y.get_bitmap().unwrap().try_into().unwrap();
-                let overlapped = x_bitmap.iter().zip_eq(y_bitmap.iter()).any(|(x, y)| x && y);
-                if overlapped {
-                    return true;
-                }
-                i += 1;
-                j += 1;
+                return true;
+                // i += 1;
+                // j += 1;
             }
         }
     }

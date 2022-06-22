@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
 use madsim::collections::BTreeMap;
@@ -28,7 +27,6 @@ use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
-use super::ManagedTableState;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 
 pub struct ManagedStringAggState<S: StateStore> {
@@ -154,8 +152,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
     }
 }
 
-#[async_trait]
-impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
+impl<S: StateStore> ManagedStringAggState<S> {
     async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -287,7 +284,6 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::{Keyspace, StateStore};
 
-    use super::super::ManagedTableState;
     use super::*;
     use crate::executor::test_utils::create_in_memory_keyspace;
 

@@ -20,14 +20,16 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+// use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion, KeyRange,
 };
 
+use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::model::CurrentHummockVersionId;
 use crate::hummock::test_utils::*;
@@ -937,9 +939,10 @@ async fn test_trigger_manual_compaction() {
     }
 
     {
+        let option = ManualCompactionOption::default();
         // to check no compactor
         let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
 
         assert_eq!(
@@ -952,8 +955,9 @@ async fn test_trigger_manual_compaction() {
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
     let receiver = compactor_manager_ref.add_compactor(context_id);
     {
+        let option = ManualCompactionOption::default();
         let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
         assert_eq!("internal error: trigger_manual_compaction No compaction_task is available. compaction_group 2", result.err().unwrap().to_string());
     }
@@ -983,8 +987,9 @@ async fn test_trigger_manual_compaction() {
         // to check compactor send task fail
         drop(receiver);
         {
+            let option = ManualCompactionOption::default();
             let result = hummock_manager
-                .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+                .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
                 .await;
             assert!(result.is_err());
         }
@@ -994,8 +999,17 @@ async fn test_trigger_manual_compaction() {
     let _receiver = compactor_manager_ref.add_compactor(context_id);
 
     {
+        let option = ManualCompactionOption {
+            level: 0,
+            key_range: KeyRange {
+                inf: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
         let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
         assert!(result.is_ok());
     }
@@ -1010,9 +1024,10 @@ async fn test_trigger_manual_compaction() {
     assert_eq!(task_id, compact_task.task_id);
 
     {
+        let option = ManualCompactionOption::default();
         // all sst pending , test no compaction avail
         let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into())
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
         assert!(result.is_err());
     }

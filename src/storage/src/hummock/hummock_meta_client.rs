@@ -17,7 +17,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, SstableIdInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
@@ -112,9 +113,18 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.get_compaction_groups().await
     }
 
-    async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()> {
+    async fn trigger_manual_compaction(
+        &self,
+        compaction_group_id: u64,
+        table_id: u32,
+        level: u32,
+    ) -> Result<()> {
         self.meta_client
-            .trigger_manual_compaction(compaction_group_id)
+            .trigger_manual_compaction(compaction_group_id, table_id, level)
             .await
+    }
+
+    async fn list_sstable_id_infos(&self, _version_id: u64) -> Result<Vec<SstableIdInfo>> {
+        todo!()
     }
 }

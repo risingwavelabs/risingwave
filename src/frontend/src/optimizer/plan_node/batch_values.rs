@@ -40,7 +40,7 @@ impl BatchValues {
 
     pub fn with_dist(logical: LogicalValues, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchValues { base, logical }
     }
 
