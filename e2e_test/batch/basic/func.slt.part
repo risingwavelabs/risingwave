@@ -158,3 +158,13 @@ query I
 select repeat('hello', -1);
 ----
 (empty)
+
+query T
+select substr('hello', NULL);
+----
+NULL
+
+query T
+select substr(NULL, 1);
+----
+NULL
