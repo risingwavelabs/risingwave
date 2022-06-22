@@ -139,6 +139,7 @@ impl CompactionPicker for ManualCompactionPicker {
                 table_infos: target_input_ssts,
             },
             split_ranges: vec![],
+            compression_algorithm: "".to_string(),
         })
     }
 }
