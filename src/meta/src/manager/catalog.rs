@@ -18,6 +18,7 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER, PG_CATALOG_SCHEMA_NAME,
 };
@@ -163,7 +164,19 @@ where
         let mut core = self.core.lock().await;
         let database = Database::select(self.env.meta_store(), &database_id).await?;
         if let Some(database) = database {
-            Database::delete(self.env.meta_store(), &database_id).await?;
+            let schemas = Schema::list(self.env.meta_store()).await?;
+            let schemas = schemas
+                .iter()
+                .filter(|schema| {
+                    schema.database_id == database_id && schema.name == PG_CATALOG_SCHEMA_NAME
+                })
+                .collect_vec();
+            assert_eq!(1, schemas.len());
+            let mut transaction = Transaction::default();
+            database.delete_in_transaction(&mut transaction)?;
+            schemas[0].delete_in_transaction(&mut transaction)?;
+            self.env.meta_store().txn(transaction).await?;
+            core.drop_schema(schemas[0]);
             core.drop_database(&database);
 
             let version = self

@@ -18,6 +18,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use crate::binder::{Binder, BoundSetExpr};
+use crate::catalog::check_schema_writable;
 use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
@@ -32,6 +33,7 @@ pub fn gen_create_mv_plan(
     name: ObjectName,
 ) -> Result<(PlanRef, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(name)?;
+    check_schema_writable(&schema_name)?;
     let (database_id, schema_id) = session
         .env()
         .catalog_reader()

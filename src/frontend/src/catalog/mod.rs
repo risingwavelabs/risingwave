@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use thiserror::Error;
@@ -44,6 +44,18 @@ pub fn check_valid_column_name(column_name: &str) -> Result<()> {
             ROWID_PREFIX
         ))
         .into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Check if modifications happen to system catalog.
+pub fn check_schema_writable(schema: &str) -> Result<()> {
+    if schema == PG_CATALOG_SCHEMA_NAME {
+        Err(ErrorCode::ProtocolError(format!(
+            "permission denied to write on \"{}\", System catalog modifications are currently disallowed.",
+            schema
+        )).into())
     } else {
         Ok(())
     }

@@ -28,6 +28,7 @@ use risingwave_sqlparser::ast::{
 
 use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
 use crate::binder::Binder;
+use crate::catalog::check_schema_writable;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;
@@ -38,6 +39,7 @@ pub(crate) fn make_prost_source(
     source_info: Info,
 ) -> Result<ProstSource> {
     let (schema_name, name) = Binder::resolve_table_name(name)?;
+    check_schema_writable(&schema_name)?;
 
     let (database_id, schema_id) = session
         .env()
