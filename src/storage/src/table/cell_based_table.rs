@@ -452,11 +452,13 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             iterators.push(iter);
         }
 
-        match iterators.len() {
+        let iter = match iterators.len() {
             0 => unreachable!(),
-            1 => Ok(iterators.into_iter().next().unwrap()),
+            1 => iterators.into_iter().next().unwrap(),
             _ => todo!("merge multiple vnode ranges"),
-        }
+        };
+
+        Ok(iter)
     }
 
     /// Get a [`BatchIter`] with given `encoded_key_range`.
