@@ -6,7 +6,7 @@ risedev:
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
     # If you want to use the local s3 storage, enable the following line
-    # - use: minio
+    - use: minio
 
     # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
     # - use: aws-s3
@@ -23,11 +23,11 @@ risedev:
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-    # - use: compactor
+    - use: compactor
 
-    # If you want to enable metrics, uncomment those two lines.
-    # - use: prometheus
-    # - use: grafana
+    #If you want to enable metrics, uncomment those two lines.
+    - use: prometheus
+    - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
