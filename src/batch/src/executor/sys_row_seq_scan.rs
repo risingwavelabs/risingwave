@@ -67,7 +67,6 @@ impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::SysRowSeqScan
         )?;
-        // TODO: get system table data entry from BatchTaskContext.
         let sys_catalog_reader = source.context.sys_catalog_reader_ref();
 
         let table_name = seq_scan_node.table_name.clone();
@@ -78,7 +77,6 @@ impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
             .collect_vec();
 
         let column_ids = column_descs.iter().map(|d| d.column_id).collect_vec();
-
         let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         Ok(Box::new(SysRowSeqScanExecutor::new(
             table_name,

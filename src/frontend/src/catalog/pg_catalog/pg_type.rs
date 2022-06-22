@@ -24,6 +24,7 @@ pub const PG_TYPE_TABLE_NAME: &str = "pg_type";
 pub const PG_TYPE_COLUMNS: &[PgCatalogColumnsDef] =
     &[(DataType::Int32, "oid"), (DataType::Varchar, "typname")];
 
+// TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
 pub const PG_TYPE_DATA: &[(i32, &str)] = &[
     (16, "bool"),
     (20, "int8"),
