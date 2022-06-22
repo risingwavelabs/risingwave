@@ -245,9 +245,12 @@ where
 
                 // 2. Instance the statement to get the portal.
                 let portal_name = cstr_to_str(&m.portal_name).unwrap().to_string();
-                let session = self.session.clone().unwrap();
                 let portal = statement
-                    .instance::<SM>(session, portal_name.clone(), &m.params)
+                    .instance::<SM>(
+                        self.session.clone().unwrap(),
+                        portal_name.clone(),
+                        &m.params,
+                    )
                     .await
                     .unwrap();
 
@@ -281,7 +284,9 @@ where
                 // NOTE there is no ReadyForQuery message.
             }
             FeMessage::Describe(m) => {
-                // 1. Get statement.
+                // m.kind indicates the Describe type:
+                //  b'S' => Statement
+                //  b'P' => Portal
                 if m.kind == b'S' {
                     let name = cstr_to_str(&m.query_name).unwrap().to_string();
                     let statement = if name.is_empty() {
@@ -291,11 +296,11 @@ where
                         named_statements.get(&name).unwrap()
                     };
 
-                    // 2. Send parameter description.
+                    // 1. Send parameter description.
                     self.write_message(&BeMessage::ParameterDescription(&statement.type_desc()))
                         .await?;
 
-                    // 3. Send row description.
+                    // 2. Send row description.
                     self.write_message(&BeMessage::RowDescription(&statement.row_desc()))
                         .await?;
                 } else if m.kind == b'P' {
@@ -307,10 +312,11 @@ where
                         named_portals.get(&name).unwrap()
                     };
 
+                    // 1. Send row description.
                     self.write_message(&BeMessage::RowDescription(&portal.row_desc()))
                         .await?;
                 } else {
-                    // TODO: Error Handle
+                    // TODO: Error Handle #3404
                     todo!()
                 }
             }

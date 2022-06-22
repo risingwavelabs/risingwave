@@ -123,6 +123,16 @@ impl PgStatement {
         self.row_description.clone()
     }
 
+    async fn infer_row_description<SM: SessionManager>(
+        session: Arc<SM::Session>,
+        sql: &str,
+    ) -> Result<Vec<PgFieldDescriptor>, ()> {
+        if sql.len() > 6 && sql[0..6].eq_ignore_ascii_case("select") {
+            return session.infer_return_type(sql).await.map_err(|_e| ());
+        }
+        Ok(vec![])
+    }
+
     pub async fn instance<SM: SessionManager>(
         &self,
         session: Arc<SM::Session>,
@@ -133,15 +143,7 @@ impl PgStatement {
 
         if params.is_empty() {
             let row_description =
-                if statement.starts_with("select") || statement.starts_with("SELECT") {
-                    if let Ok(rows) = session.infer_return_type(statement.as_str()).await {
-                        rows
-                    } else {
-                        return Err(());
-                    }
-                } else {
-                    vec![]
-                };
+                Self::infer_row_description::<SM>(session, statement.as_str()).await?;
 
             return Ok(PgPortal {
                 name: portal_name,
@@ -173,20 +175,8 @@ impl PgStatement {
         let instance_query_string = replace_params(statement, &generic_params, &params);
 
         // 4. Get row_description and return portal.
-        let row_description = if instance_query_string.starts_with("select")
-            || instance_query_string.starts_with("SELECT")
-        {
-            if let Ok(rows) = session
-                .infer_return_type(instance_query_string.as_str())
-                .await
-            {
-                rows
-            } else {
-                return Err(());
-            }
-        } else {
-            vec![]
-        };
+        let row_description =
+            Self::infer_row_description::<SM>(session, instance_query_string.as_str()).await?;
 
         Ok(PgPortal {
             name: portal_name,
