@@ -158,7 +158,6 @@ impl<S: StateStore> CellBasedTable<S> {
         &self.cell_based_row_serializer.column_ids
     }
 
-    #[cfg(debug_assertions)]
     /// Returns whether the output columns are a complete set of the table's.
     fn is_complete(&self) -> bool {
         use std::collections::HashSet;
