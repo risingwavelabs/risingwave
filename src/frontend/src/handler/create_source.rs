@@ -70,15 +70,14 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
+    let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
+
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
             let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
             columns.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
             StreamSourceInfo {
-                properties: handle_with_properties(
-                    "create_source",
-                    stmt.with_properties.0.clone(),
-                )?,
+                properties: with_properties.clone(),
                 row_format: RowFormatType::Protobuf as i32,
                 row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                 row_id_index: 0,
@@ -87,7 +86,7 @@ pub async fn handle_create_source(
             }
         }
         SourceSchema::Json => StreamSourceInfo {
-            properties: handle_with_properties("create_source", stmt.with_properties.0.clone())?,
+            properties: with_properties.clone(),
             row_format: RowFormatType::Json as i32,
             row_schema_location: "".to_string(),
             row_id_index: 0,
@@ -105,7 +104,7 @@ pub async fn handle_create_source(
                 context.into(),
                 source.clone(),
                 session.user_name().to_string(),
-                handle_with_properties("create_source", stmt.with_properties.0.clone())?,
+                with_properties.clone(),
             )?;
             let plan = plan.to_stream_prost();
             let graph = StreamFragmenter::build_graph(plan);

@@ -16,11 +16,12 @@ use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::{Statement, WithProperties};
+use risingwave_sqlparser::ast::Statement;
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_table::gen_create_table_plan;
+use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::OptimizerContext;
@@ -48,7 +49,7 @@ pub(super) fn handle_explain(
                 planner.ctx(),
                 query,
                 name,
-                WithProperties(with_options).into(),
+                handle_with_properties("explain", with_options)?,
             )?
             .0
         }
@@ -64,7 +65,7 @@ pub(super) fn handle_explain(
                 planner.ctx(),
                 name,
                 columns,
-                WithProperties(with_options).into(),
+                handle_with_properties("explain", with_options)?,
             )?
             .0
         }
