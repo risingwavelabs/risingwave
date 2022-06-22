@@ -24,6 +24,8 @@ use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
+use crate::table::cell_based_table::DEFAULT_VNODE;
+
 /// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
 pub struct ColumnDescMapping {
     pub output_columns: Vec<ColumnDesc>,
@@ -127,7 +129,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
             let vnode = u16::from_be_bytes(vnode_bytes.try_into().unwrap());
             (vnode, key_bytes)
         } else {
-            (0, raw_key)
+            (DEFAULT_VNODE, raw_key)
         };
         let (cur_pk_bytes, cell_id_bytes) = key_bytes.split_at(key_bytes.len() - 4);
         let result;

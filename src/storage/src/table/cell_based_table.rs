@@ -87,6 +87,11 @@ pub struct CellBasedTable<S: StateStore, const T: AccessType> {
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Option<Vec<usize>>,
 
+    /// Virtual nodes that the table is partitioned into.
+    ///
+    /// Only the rows whose vnode of the primary key is in this set will be visible to the
+    /// executor. For READ_WRITE instances, the table will also check whether the writed rows
+    /// confirm to this partition.
     vnodes: Bitmap,
 }
 
@@ -153,20 +158,10 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
     }
 }
 
+/// Allow transforming a `READ_WRITE` instance to a `READ_ONLY` one.
 impl<S: StateStore> From<CellBasedTable<S, READ_WRITE>> for CellBasedTable<S, READ_ONLY> {
     fn from(rw: CellBasedTable<S, READ_WRITE>) -> Self {
-        Self {
-            keyspace: rw.keyspace,
-            table_columns: rw.table_columns,
-            schema: rw.schema,
-            pk_serializer: rw.pk_serializer,
-            row_serializer: rw.row_serializer,
-            mapping: rw.mapping,
-            pk_indices: rw.pk_indices,
-            dist_key_indices: rw.dist_key_indices,
-            dist_key_in_pk_indices: rw.dist_key_in_pk_indices,
-            vnodes: rw.vnodes,
-        }
+        Self { ..rw }
     }
 }
 
@@ -483,6 +478,8 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
     }
 
     /// Get a [`BatchIter`] with given `encoded_key_range`.
+    /// Differs from [`StreamingIter`], this iterator will wait for the epoch before iteration, and
+    /// the order of the rows among different virtual nodes is not guaranteed.
     pub(super) async fn batch_iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
