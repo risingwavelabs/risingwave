@@ -20,7 +20,7 @@ use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
@@ -88,7 +88,7 @@ pub struct CellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
     /// `CellBasedRowDeserializer` does not deserialize pk itself. We need to take the key in as
     /// we have to know the cell id of each datum. So `pk_bytes` serves as an additional check
     /// which should also be done on the caller side.
-    pk_bytes: Option<Vec<u8>>,
+    current_key: Option<(VirtualNode, Vec<u8>)>,
 }
 
 pub fn make_cell_based_row_deserializer(
@@ -103,7 +103,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         Self {
             columns: column_mapping,
             data: vec![None; num_cells],
-            pk_bytes: None,
+            current_key: None,
         }
     }
 
@@ -111,27 +111,30 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
     /// deserialized. Then we return the key and the value of the previous row.
     pub fn deserialize(
         &mut self,
-        pk_with_cell_id: impl AsRef<[u8]>,
+        raw_key: impl AsRef<[u8]>,
         cell: impl AsRef<[u8]>,
-    ) -> Result<Option<(Vec<u8>, Row)>> {
-        let pk_with_cell_id = pk_with_cell_id.as_ref();
-        let pk_vec_len = pk_with_cell_id.len();
-        if pk_vec_len < 4 {
+    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
+        let raw_key = raw_key.as_ref();
+        if raw_key.len() < 2 + 4 {
+            // vnode + cell_id
             return Err(ErrorCode::InternalError(format!(
                 "corrupted key: {:?}",
-                Bytes::copy_from_slice(pk_with_cell_id)
+                Bytes::copy_from_slice(raw_key)
             ))
             .into());
         }
-        let (cur_pk_bytes, cell_id_bytes) = pk_with_cell_id.split_at(pk_vec_len - 4);
+
+        let (vnode_bytes, key_bytes) = raw_key.split_at(2);
+        let vnode = u16::from_be_bytes(vnode_bytes.try_into().unwrap());
+        let (cur_pk_bytes, cell_id_bytes) = key_bytes.split_at(key_bytes.len() - 4);
         let result;
 
         let cell_id = deserialize_column_id(cell_id_bytes)?;
-        if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes  {
+        if let Some((_vnode, prev_pk_bytes)) = &self.current_key && prev_pk_bytes != cur_pk_bytes  {
             result = self.take();
-            self.pk_bytes = Some(cur_pk_bytes.to_vec());
-        } else if self.pk_bytes.is_none() {
-            self.pk_bytes = Some(cur_pk_bytes.to_vec());
+            self.current_key = Some((vnode, cur_pk_bytes.to_vec()));
+        } else if self.current_key.is_none() {
+            self.current_key = Some((vnode, cur_pk_bytes.to_vec()));
             result = None;
         } else {
             result = None;
@@ -156,12 +159,13 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
     }
 
     /// Take the remaining data out of the deserializer.
-    pub fn take(&mut self) -> Option<(Vec<u8>, Row)> {
-        let cur_pk_bytes = self.pk_bytes.take();
-        cur_pk_bytes.map(|bytes| {
-            let ret = std::mem::replace(&mut self.data, vec![None; self.columns.len()]);
-            (bytes, Row(ret))
-        })
+    pub fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)> {
+        let (vnode, cur_pk_bytes) = self.current_key.take()?;
+        let row = Row(std::mem::replace(
+            &mut self.data,
+            vec![None; self.columns.len()],
+        ));
+        Some((vnode, cur_pk_bytes, row))
     }
 
     /// Since [`CellBasedRowDeserializer`] can be repetitively used with different inputs,
@@ -170,7 +174,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         self.data.iter_mut().for_each(|datum| {
             datum.take();
         });
-        self.pk_bytes.take();
+        self.current_key.take();
     }
 }
 
@@ -227,13 +231,12 @@ mod tests {
             let pk_and_row = deserializer
                 .deserialize(&Bytes::from(key_bytes), &Bytes::from(value_bytes.unwrap()))
                 .unwrap();
-            if let Some(pk_and_row) = pk_and_row {
-                result.push(pk_and_row.1);
+            if let Some((_vnode, _pk, row)) = pk_and_row {
+                result.push(row);
             }
         }
-        let pk_and_row = deserializer.take();
-
-        result.push(pk_and_row.unwrap().1);
+        let (_vnode, _pk, row) = deserializer.take().unwrap();
+        result.push(row);
 
         for (expected, result) in [row1, row2, row3].into_iter().zip_eq(result.into_iter()) {
             assert_eq!(

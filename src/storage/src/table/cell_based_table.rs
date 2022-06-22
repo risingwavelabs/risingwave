@@ -17,18 +17,20 @@ use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use bytes::BufMut;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use log::trace;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema};
 use risingwave_common::error::RwError;
-use risingwave_common::types::Datum;
+use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::{next_key, range_of_prefix};
+use risingwave_hummock_sdk::key::{next_key, prefixed_range, range_of_prefix};
 
 use super::mem_table::RowOp;
 use super::TableIter;
@@ -42,6 +44,8 @@ use crate::{Keyspace, StateStore, StateStoreIter};
 pub type AccessType = bool;
 pub const READ_ONLY: AccessType = false;
 pub const READ_WRITE: AccessType = true;
+
+pub const DEFAULT_VNODE: VirtualNode = 0;
 
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
 /// format: [keyspace | pk | `column_id` (4B)] -> value.
@@ -82,6 +86,8 @@ pub struct CellBasedTable<S: StateStore, const T: AccessType> {
     /// Indices of distribution keys for computing vnode. None if vnode falls to default value.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Option<Vec<usize>>,
+
+    vnodes: Bitmap,
 }
 
 impl<S: StateStore, const T: AccessType> std::fmt::Debug for CellBasedTable<S, T> {
@@ -159,6 +165,7 @@ impl<S: StateStore> From<CellBasedTable<S, READ_WRITE>> for CellBasedTable<S, RE
             pk_indices: rw.pk_indices,
             dist_key_indices: rw.dist_key_indices,
             dist_key_in_pk_indices: rw.dist_key_in_pk_indices,
+            vnodes: rw.vnodes,
         }
     }
 }
@@ -188,6 +195,12 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
                 .collect_vec()
         });
 
+        let vnodes = {
+            let mut b = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
+            b.set(DEFAULT_VNODE as usize, true);
+            b.finish()
+        };
+
         Self {
             keyspace,
             table_columns,
@@ -198,6 +211,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
+            vnodes,
         }
     }
 
@@ -221,22 +235,30 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
 /// Get
 impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
     /// Get vnode value with given primary key.
-    fn compute_vnode_by_pk(&self, pk: &Row) -> u16 {
-        let Some(indices) = self.dist_key_in_pk_indices.as_ref() else {
-            return 0;
+    fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
+        let vnode = match self.dist_key_in_pk_indices.as_ref() {
+            Some(indices) => pk
+                .hash_by_indices(&indices, &CRC32FastBuilder {})
+                .unwrap()
+                .to_vnode(),
+            None => DEFAULT_VNODE,
         };
+        // This table should only to used to access entries with vnode specified in `self.vnodes`.
+        assert!(self.vnodes.is_set(vnode as usize).unwrap());
+        vnode
+    }
 
-        let hash_builder = CRC32FastBuilder {};
-        pk.hash_by_indices(&indices, &hash_builder)
-            .unwrap()
-            .to_vnode()
+    fn serialize_pk_with_vnode(&self, pk: &Row) -> Vec<u8> {
+        let mut output = Vec::new();
+        output.put_u16(self.compute_vnode_by_pk(pk));
+        self.pk_serializer.serialize(pk, &mut output);
+        output
     }
 
     /// Get a single row by point get
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: use multi-get for cell_based get_row
-        let vnode = self.compute_vnode_by_pk(pk);
-        let serialized_pk = serialize_pk(pk, &self.pk_serializer);
+        let serialized_pk = self.serialize_pk_with_vnode(pk);
 
         let sentinel_key =
             serialize_pk_and_column_id(&serialized_pk, &SENTINEL_CELL_ID).map_err(err)?;
@@ -245,26 +267,28 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             return Ok(None);
         };
 
-        let mut row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
+        let mut deserializer = CellBasedRowDeserializer::new(&*self.mapping);
         for column_id in self.column_ids() {
             let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
             if let Some(value) = self.keyspace.get(&key, epoch).await? {
-                let deserialize_res = row_deserializer.deserialize(&key, &value).map_err(err)?;
+                let deserialize_res = deserializer.deserialize(&key, &value).map_err(err)?;
                 assert!(deserialize_res.is_none());
             }
         }
 
-        let pk_and_row = row_deserializer.take();
-        Ok(pk_and_row.map(|(_pk, row)| row))
+        let result = deserializer.take();
+        Ok(result.map(|(vnode, _pk, row)| {
+            // This table should only to used to access entries with vnode specified in
+            // `self.vnodes`.
+            assert!(self.vnodes.is_set(vnode as usize).unwrap());
+            row
+        }))
     }
 
     /// Get a single row by range scan
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        // get row by state_store scan
-        // TODO: encode vnode into key
-        // let vnode = self.compute_vnode_by_row(value);
-        let start_key = serialize_pk(pk, &self.pk_serializer);
-        let key_range = range_of_prefix(&start_key);
+        let serialized_pk = self.serialize_pk_with_vnode(pk);
+        let key_range = range_of_prefix(&serialized_pk);
 
         let kv_pairs = self
             .keyspace
@@ -276,25 +300,32 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             deserializer.deserialize(&key, &value).map_err(err)?;
         }
 
-        let pk_and_row = deserializer.take();
-        Ok(pk_and_row.map(|(_pk, row)| row))
+        let result = deserializer.take();
+        Ok(result.map(|(vnode, _pk, row)| {
+            // This table should only to used to access entries with vnode specified in
+            // `self.vnodes`.
+            assert!(self.vnodes.is_set(vnode as usize).unwrap());
+            row
+        }))
     }
 }
 
 /// Write
 impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
     /// Get vnode value with given full row.
-    fn compute_vnode_by_row(&self, row: &Row) -> u16 {
+    fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
         // With `READ_WRITE`, the output columns should be exactly same with the table columns, so
         // we can directly index into the row with indices to the table columns.
-        let Some(indices) = self.dist_key_indices.as_ref() else {
-            return 0;
+        let vnode = match self.dist_key_indices.as_ref() {
+            Some(indices) => row
+                .hash_by_indices(&indices, &CRC32FastBuilder {})
+                .unwrap()
+                .to_vnode(),
+            None => DEFAULT_VNODE,
         };
-
-        let hash_builder = CRC32FastBuilder {};
-        row.hash_by_indices(&indices, &hash_builder)
-            .unwrap()
-            .to_vnode()
+        // This table should only to used to access entries with vnode specified in `self.vnodes`.
+        assert!(self.vnodes.is_set(vnode as usize).unwrap());
+        vnode
     }
 
     /// Write to state store without value meta
@@ -303,36 +334,45 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        // stateful executors need to compute vnode.
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
 
         for (pk, row_op) in buffer {
-            // If value meta is computed here, then the cell based table is guaranteed to have
-            // distribution keys. Also, it is guaranteed that distribution key indices will
-            // not exceed the length of pk. So we simply do unwrap here.
             match row_op {
                 RowOp::Insert(row) => {
-                    let bytes = self.row_serializer.serialize(&pk, row).map_err(err)?;
+                    let vnode = self.compute_vnode_by_row(&row);
+                    let bytes = self
+                        .row_serializer
+                        .serialize(vnode, &pk, row)
+                        .map_err(err)?;
                     for (key, value) in bytes {
                         local.put(key, StorageValue::new_default_put(value))
                     }
                 }
                 RowOp::Delete(old_row) => {
+                    let vnode = self.compute_vnode_by_row(&old_row);
                     // TODO(wcy-fdu): only serialize key on deletion
-                    let bytes = self.row_serializer.serialize(&pk, old_row).map_err(err)?;
+                    let bytes = self
+                        .row_serializer
+                        .serialize(vnode, &pk, old_row)
+                        .map_err(err)?;
                     for (key, _) in bytes {
                         local.delete(key);
                     }
                 }
                 RowOp::Update((old_row, new_row)) => {
+                    // The row to update should keep the same primary key, so distribution key as
+                    // well.
+                    let vnode = self.compute_vnode_by_row(&new_row);
+                    debug_assert_eq!(self.compute_vnode_by_row(&old_row), vnode);
+
                     let delete_bytes = self
                         .row_serializer
-                        .serialize_without_filter(&pk, old_row)
+                        .serialize_without_filter(vnode, &pk, old_row)
                         .map_err(err)?;
                     let insert_bytes = self
                         .row_serializer
-                        .serialize_without_filter(&pk, new_row)
+                        .serialize_without_filter(vnode, &pk, new_row)
                         .map_err(err)?;
                     for (delete, insert) in
                         delete_bytes.into_iter().zip_eq(insert_bytes.into_iter())
@@ -388,17 +428,35 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
         epoch: u64,
     ) -> StorageResult<StreamingIter<S>>
     where
-        R: RangeBounds<B> + Send,
+        R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
-        Ok(CellBasedIter::<_, STREAMING_ITER_TYPE>::new(
-            &self.keyspace,
-            self.mapping.clone(),
-            encoded_key_range,
-            epoch,
-        )
-        .await?
-        .into_stream())
+        let mut iterators = Vec::with_capacity(self.vnodes.num_high_bits());
+
+        for vnode in self
+            .vnodes
+            .iter()
+            .enumerate()
+            .filter(|&(_, set)| set)
+            .map(|(i, _)| i as VirtualNode)
+        {
+            let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
+            let iter = CellBasedIter::<_, STREAMING_ITER_TYPE>::new(
+                &self.keyspace,
+                self.mapping.clone(),
+                raw_key_range,
+                epoch,
+            )
+            .await?
+            .into_stream();
+            iterators.push(iter);
+        }
+
+        match iterators.len() {
+            0 => unreachable!(),
+            1 => Ok(iterators.into_iter().next().unwrap()),
+            _ => todo!("merge multiple vnode ranges"),
+        }
     }
 
     /// Get a [`BatchIter`] with given `encoded_key_range`.
@@ -408,7 +466,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
         epoch: u64,
     ) -> StorageResult<BatchIter<S>>
     where
-        R: RangeBounds<B> + Send,
+        R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
         Ok(CellBasedIter::<_, BATCH_ITER_TYPE>::new(
@@ -558,7 +616,7 @@ impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
-        encoded_key_range: R,
+        raw_key_range: R,
         epoch: u64,
     ) -> StorageResult<Self>
     where
@@ -571,7 +629,7 @@ impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
-        let iter = keyspace.iter_with_range(encoded_key_range, epoch).await?;
+        let iter = keyspace.iter_with_range(raw_key_range, epoch).await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,
@@ -583,17 +641,17 @@ impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(mut self) {
         while let Some((key, value)) = self.iter.next().await? {
-            if let Some(pk_and_row) = self
+            if let Some((_vnode, pk, row)) = self
                 .cell_based_row_deserializer
                 .deserialize(&key, &value)
                 .map_err(err)?
             {
-                yield pk_and_row;
+                yield (pk, row)
             }
         }
 
-        if let Some(pk_and_row) = self.cell_based_row_deserializer.take() {
-            yield pk_and_row;
+        if let Some((_vnode, pk, row)) = self.cell_based_row_deserializer.take() {
+            yield (pk, row);
         }
     }
 }

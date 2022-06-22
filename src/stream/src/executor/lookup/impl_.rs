@@ -410,7 +410,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         for (pk_with_cell_id, cell) in all_cells {
             tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}", pk_with_cell_id, cell);
-            if let Some((_, row)) = self
+            if let Some((_, _, row)) = self
                 .arrangement
                 .deserializer
                 .deserialize(&pk_with_cell_id, &cell)?
@@ -419,7 +419,7 @@ impl<S: StateStore> LookupExecutor<S> {
             }
         }
 
-        if let Some((_, last_row)) = self.arrangement.deserializer.take() {
+        if let Some((_, _, last_row)) = self.arrangement.deserializer.take() {
             all_rows.push(last_row);
         }
 
