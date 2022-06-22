@@ -41,7 +41,7 @@ impl BatchTableFunction {
 
     pub fn with_dist(logical: LogicalTableFunction, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchTableFunction { base, logical }
     }
 

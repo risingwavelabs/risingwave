@@ -108,7 +108,7 @@ impl HashMappingManager {
 
 /// `HashMappingInfo` stores the vnode mapping and some other helpers for maintaining a
 /// load-balanced vnode mapping.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct HashMappingInfo {
     /// Hash mapping from virtual node to parallel unit.
     vnode_mapping: Vec<ParallelUnitId>,
@@ -183,6 +183,7 @@ impl HashMappingManagerCore {
             owner_mapping,
             load_balancer,
         };
+
         self.hash_mapping_infos.insert(fragment_id, mapping_info);
 
         vnode_mapping

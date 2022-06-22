@@ -75,6 +75,7 @@ impl OrderedRowSerializer {
         Self { order_types }
     }
 
+    #[must_use]
     pub fn prefix(&self, len: usize) -> Self {
         Self {
             order_types: self.order_types[..len].to_vec(),
@@ -113,10 +114,6 @@ impl OrderedRowSerializer {
             serialize_datum_ref_into(&datum, &mut serializer).unwrap();
             append_to.extend(serializer.into_inner());
         }
-    }
-
-    pub fn into_order_types(self) -> Vec<OrderType> {
-        self.order_types
     }
 }
 
@@ -180,8 +177,8 @@ pub fn serialize_pk_and_row(
     assert_eq!(values.len(), column_ids.len());
     let mut result = Vec::with_capacity(column_ids.len() + 1);
 
-    for (index, column_id) in column_ids.iter().enumerate() {
-        match &values[index] {
+    for (column_id, value) in column_ids.iter().zip_eq(values) {
+        match value {
             None => {
                 // This is when the datum is null. If all the datum in a row is null,
                 // we serialize this null row specially by only using one cell encoding.

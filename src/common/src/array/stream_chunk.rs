@@ -269,13 +269,23 @@ impl StreamChunk {
         table.to_string()
     }
 
-    /// Reorder columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
+    /// Reorder (and possibly remove) columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
     /// the chunk contains column `[a, b, c]`, then the output will be
-    /// `[c, b, a]`.
+    /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`.
+    /// If the input mapping is identity mapping, no reorder will be performed.
     pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
-        Self {
-            ops: self.ops,
-            data: self.data.reorder_columns(column_mapping),
+        if column_mapping
+            .iter()
+            .copied()
+            .eq((0..self.data.columns().len()).into_iter())
+        {
+            // no reorder is needed
+            self
+        } else {
+            Self {
+                ops: self.ops,
+                data: self.data.reorder_columns(column_mapping),
+            }
         }
     }
 }

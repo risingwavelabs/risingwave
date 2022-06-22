@@ -336,7 +336,7 @@ impl StreamActorBuilder {
                         },
                     )| *same_worker_node,
                 ),
-            vnode_bitmap: vec![],
+            vnode_bitmap: None,
         }
     }
 }
@@ -545,10 +545,16 @@ impl StreamGraphBuilder {
                     NodeBody::HashJoin(node) => {
                         // The operator id must be assigned with table ids. Otherwise it is a logic
                         // error.
-                        let left_table_id = node.left_table_id + table_id_offset;
-                        let right_table_id = left_table_id + 1;
-                        node.left_table_id = left_table_id;
-                        node.right_table_id = right_table_id;
+                        let mut left_table_id: u32 = 0;
+                        let mut right_table_id: u32 = 0;
+                        if let Some(table) = &mut node.left_table {
+                            left_table_id = table.id + table_id_offset;
+                            table.id = left_table_id;
+                        }
+                        if let Some(table) = &mut node.right_table {
+                            right_table_id = left_table_id + 1;
+                            table.id = right_table_id;
+                        }
                         ctx.internal_table_id_set.insert(left_table_id);
                         ctx.internal_table_id_set.insert(right_table_id);
                     }
@@ -568,11 +574,11 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::HashAgg(node) => {
-                        assert_eq!(node.table_ids.len(), node.agg_calls.len());
+                        assert_eq!(node.internal_tables.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
-                        for table_id in &mut node.table_ids {
-                            *table_id += table_id_offset;
-                            ctx.internal_table_id_set.insert(*table_id);
+                        for table in &mut node.internal_tables {
+                            table.id += table_id_offset;
+                            ctx.internal_table_id_set.insert(table.id);
                         }
                     }
 
@@ -582,11 +588,11 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
-                        assert_eq!(node.table_ids.len(), node.agg_calls.len());
+                        assert_eq!(node.internal_tables.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
-                        for table_id in &mut node.table_ids {
-                            *table_id += table_id_offset;
-                            ctx.internal_table_id_set.insert(*table_id);
+                        for table in &mut node.internal_tables {
+                            table.id += table_id_offset;
+                            ctx.internal_table_id_set.insert(table.id);
                         }
                     }
                     _ => {}

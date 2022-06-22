@@ -11,9 +11,11 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 risingwave_common = { path = "../common" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
+size = "0.2"
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

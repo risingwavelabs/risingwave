@@ -91,7 +91,7 @@ impl StreamMaterialize {
             }
         };
 
-        let input = required_dist.enforce_if_not_satisfies(input, Order::any())?;
+        let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;

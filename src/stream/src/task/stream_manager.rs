@@ -14,13 +14,12 @@
 
 use core::time::Duration;
 use std::fmt::Debug;
-use std::rc::Rc;
 use std::sync::Arc;
 
-use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use parking_lot::Mutex;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
@@ -31,6 +30,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
@@ -119,7 +119,7 @@ pub struct ExecutorParams {
     pub actor_context: ActorContextRef,
 
     // Vnodes owned by this executor. Represented in bitmap.
-    pub vnode_bitmap: Rc<Vec<u8>>,
+    pub vnode_bitmap: Option<Bitmap>,
 }
 
 impl Debug for ExecutorParams {
@@ -308,7 +308,7 @@ impl LocalStreamManager {
     }
 
     #[cfg(test)]
-    pub fn take_source(&self) -> futures::channel::mpsc::Sender<Message> {
+    pub fn take_source(&self) -> tokio::sync::mpsc::Sender<Message> {
         let mut core = self.core.lock();
         core.mock_source.0.take().unwrap()
     }
@@ -464,7 +464,7 @@ impl LocalStreamManagerCore {
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Rc<Vec<u8>>,
+        vnode_bitmap: Option<Bitmap>,
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -482,7 +482,7 @@ impl LocalStreamManagerCore {
                     env.clone(),
                     store.clone(),
                     actor_context,
-                    Rc::clone(&vnode_bitmap),
+                    vnode_bitmap.clone(),
                 )
             })
             .try_collect()?;
@@ -530,7 +530,7 @@ impl LocalStreamManagerCore {
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Rc<Vec<u8>>,
+        vnode_bitmap: Option<Bitmap>,
     ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
@@ -628,6 +628,11 @@ impl LocalStreamManagerCore {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
             let actor_context = Arc::new(Mutex::new(ActorContext::default()));
+            let vnode_bitmap = actor
+                .get_vnode_bitmap()
+                .ok()
+                .map(|b| b.try_into())
+                .transpose()?;
 
             let executor = self.create_nodes(
                 actor.fragment_id,
@@ -635,7 +640,7 @@ impl LocalStreamManagerCore {
                 actor.get_nodes()?,
                 env.clone(),
                 &actor_context,
-                Rc::new(actor.get_vnode_bitmap().to_owned()),
+                vnode_bitmap,
             )?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;

@@ -18,15 +18,15 @@ use futures::pin_mut;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::common::RangeInclusive;
+use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::{BatchDedupPkIter, BatchIter, CellBasedTable};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
@@ -130,18 +130,37 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             NodeBody::RowSeqScan
         )?;
 
+        let table_desc: &CellBasedTableDesc = seq_scan_node.get_table_desc()?;
         let table_id = TableId {
-            table_id: seq_scan_node.table_desc.as_ref().unwrap().table_id,
+            table_id: table_desc.table_id,
         };
-        let column_descs = seq_scan_node
-            .column_descs
+        let column_descs = table_desc
+            .columns
             .iter()
-            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
+            .map(ColumnDesc::from)
             .collect_vec();
-        let pk_descs_proto = &seq_scan_node.table_desc.as_ref().unwrap().order_key;
-        let pk_descs: Vec<OrderedColumnDesc> = pk_descs_proto.iter().map(|d| d.into()).collect();
+        let column_ids = seq_scan_node
+            .column_ids
+            .iter()
+            .copied()
+            .map(ColumnId::from)
+            .collect();
+
+        let pk_descs: Vec<OrderedColumnDesc> =
+            table_desc.order_key.iter().map(|d| d.into()).collect();
         let order_types: Vec<OrderType> = pk_descs.iter().map(|desc| desc.order).collect();
-        let ordered_row_serializer = OrderedRowSerializer::new(order_types);
+
+        let pk_indices = pk_descs
+            .iter()
+            .map(|desc| desc.column_desc.column_id)
+            .map(|pk_id| {
+                column_descs
+                    .iter()
+                    .find_position(|desc| desc.column_id == pk_id)
+                    .unwrap()
+                    .0
+            })
+            .collect_vec();
 
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
         let (pk_prefix_value, next_col_bounds) = get_scan_bound(scan_range.clone());
@@ -149,10 +168,12 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
             let batch_stats = source.context().stats();
-            let table = CellBasedTable::new(
+            let table = CellBasedTable::new_partial(
                 keyspace.clone(),
                 column_descs,
-                Some(ordered_row_serializer),
+                column_ids,
+                order_types,
+                pk_indices,
                 None,
             );
 

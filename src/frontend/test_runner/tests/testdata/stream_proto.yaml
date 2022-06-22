@@ -15,6 +15,16 @@
                 batchPlan:
                   tableDesc:
                     tableId: 2
+                    columns:
+                      - columnType:
+                          typeName: INT64
+                          isNullable: true
+                        name: _row_id
+                      - columnType:
+                          typeName: INT32
+                          isNullable: true
+                        columnId: 1
+                        name: v1
                     orderKey:
                       - columnDesc:
                           columnType:
@@ -22,16 +32,9 @@
                             isNullable: true
                           name: _row_id
                         order: ASCENDING
-                  columnDescs:
-                    - columnType:
-                        typeName: INT32
-                        isNullable: true
-                      columnId: 1
-                      name: v1
-                    - columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: _row_id
+                  columnIds:
+                    - 1
+                    - 0
                   distributionKeys:
                     - 1
             pkIndices:
@@ -154,6 +157,16 @@
             batchPlan:
               tableDesc:
                 tableId: 2
+                columns:
+                  - columnType:
+                      typeName: INT64
+                      isNullable: true
+                    name: _row_id
+                  - columnType:
+                      typeName: INT32
+                      isNullable: true
+                    columnId: 1
+                    name: v1
                 orderKey:
                   - columnDesc:
                       columnType:
@@ -161,16 +174,9 @@
                         isNullable: true
                       name: _row_id
                     order: ASCENDING
-              columnDescs:
-                - columnType:
-                    typeName: INT32
-                    isNullable: true
-                  columnId: 1
-                  name: v1
-                - columnType:
-                    typeName: INT64
-                    isNullable: true
-                  name: _row_id
+              columnIds:
+                - 1
+                - 0
               distributionKeys:
                 - 1
         pkIndices:
@@ -263,6 +269,21 @@
             batchPlan:
               tableDesc:
                 tableId: 2
+                columns:
+                  - columnType:
+                      typeName: INT64
+                      isNullable: true
+                    name: _row_id
+                  - columnType:
+                      typeName: INT32
+                      isNullable: true
+                    columnId: 1
+                    name: v1
+                  - columnType:
+                      typeName: INT32
+                      isNullable: true
+                    columnId: 2
+                    name: v2
                 orderKey:
                   - columnDesc:
                       columnType:
@@ -270,16 +291,9 @@
                         isNullable: true
                       name: _row_id
                     order: ASCENDING
-              columnDescs:
-                - columnType:
-                    typeName: INT32
-                    isNullable: true
-                  columnId: 1
-                  name: v1
-                - columnType:
-                    typeName: INT64
-                    isNullable: true
-                  name: _row_id
+              columnIds:
+                - 1
+                - 0
               distributionKeys:
                 - 1
         pkIndices:
@@ -378,6 +392,16 @@
                     batchPlan:
                       tableDesc:
                         tableId: 2
+                        columns:
+                          - columnType:
+                              typeName: INT64
+                              isNullable: true
+                            name: _row_id
+                          - columnType:
+                              typeName: INT32
+                              isNullable: true
+                            columnId: 1
+                            name: v1
                         orderKey:
                           - columnDesc:
                               columnType:
@@ -385,16 +409,9 @@
                                 isNullable: true
                               name: _row_id
                             order: ASCENDING
-                      columnDescs:
-                        - columnType:
-                            typeName: INT32
-                            isNullable: true
-                          columnId: 1
-                          name: v1
-                        - columnType:
-                            typeName: INT64
-                            isNullable: true
-                          name: _row_id
+                      columnIds:
+                        - 1
+                        - 0
                       distributionKeys:
                         - 1
                 pkIndices:
@@ -461,6 +478,25 @@
               returnType:
                 typeName: INT64
                 isNullable: true
+          internalTables:
+            - id: 4294967294
+              schemaId: 2147483646
+              databaseId: 2147483646
+              columns:
+                - columnDesc:
+                    columnType:
+                      typeName: INT64
+                      isNullable: true
+              owner: root
+            - id: 4294967294
+              schemaId: 2147483646
+              databaseId: 2147483646
+              columns:
+                - columnDesc:
+                    columnType:
+                      typeName: INT64
+                      isNullable: true
+              owner: root
     fields:
       - dataType:
           typeName: INT64
@@ -510,6 +546,21 @@
                             batchPlan:
                               tableDesc:
                                 tableId: 2
+                                columns:
+                                  - columnType:
+                                      typeName: INT64
+                                      isNullable: true
+                                    name: _row_id
+                                  - columnType:
+                                      typeName: INT32
+                                      isNullable: true
+                                    columnId: 1
+                                    name: v1
+                                  - columnType:
+                                      typeName: INT32
+                                      isNullable: true
+                                    columnId: 2
+                                    name: v2
                                 orderKey:
                                   - columnDesc:
                                       columnType:
@@ -517,21 +568,10 @@
                                         isNullable: true
                                       name: _row_id
                                     order: ASCENDING
-                              columnDescs:
-                                - columnType:
-                                    typeName: INT32
-                                    isNullable: true
-                                  columnId: 1
-                                  name: v1
-                                - columnType:
-                                    typeName: INT32
-                                    isNullable: true
-                                  columnId: 2
-                                  name: v2
-                                - columnType:
-                                    typeName: INT64
-                                    isNullable: true
-                                  name: _row_id
+                              columnIds:
+                                - 1
+                                - 2
+                                - 0
                               distributionKeys:
                                 - 2
                         pkIndices:
@@ -656,6 +696,55 @@
                   returnType:
                     typeName: INT64
                     isNullable: true
+              internalTables:
+                - id: 4294967294
+                  schemaId: 2147483646
+                  databaseId: 2147483646
+                  columns:
+                    - columnDesc:
+                        columnType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v2
+                    - columnDesc:
+                        columnType:
+                          typeName: INT64
+                          isNullable: true
+                        columnId: 1
+                  orderColumnIds:
+                    - 0
+                  orders:
+                    - ASCENDING
+                  distributionKeys:
+                    - 0
+                  pk:
+                    - 0
+                  owner: root
+                - id: 4294967294
+                  schemaId: 2147483646
+                  databaseId: 2147483646
+                  columns:
+                    - columnDesc:
+                        columnType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v2
+                    - columnDesc:
+                        columnType:
+                          typeName: INT64
+                          isNullable: true
+                        columnId: 1
+                  orderColumnIds:
+                    - 0
+                  orders:
+                    - ASCENDING
+                  distributionKeys:
+                    - 0
+                  pk:
+                    - 0
+                  owner: root
+              columnMapping:
+                0: 0
         pkIndices:
           - 1
         fields:

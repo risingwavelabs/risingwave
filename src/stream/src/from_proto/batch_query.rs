@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -31,27 +30,49 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
+        let pk_indices = node.pk_indices.iter().map(|&i| i as usize).collect();
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
-        let table_id = node.table_desc.as_ref().unwrap().table_id.into();
 
-        let pk_descs_proto = &node.table_desc.as_ref().unwrap().order_key;
-        let pk_descs = pk_descs_proto.iter().map(|d| d.into()).collect();
+        let table_desc: &CellBasedTableDesc = node.get_table_desc()?;
+        let table_id = TableId {
+            table_id: table_desc.table_id,
+        };
 
-        let column_descs = node
-            .column_descs
+        let pk_descs = table_desc
+            .order_key
             .iter()
-            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
+            .map(OrderedColumnDesc::from)
             .collect_vec();
+        let order_types = pk_descs.iter().map(|desc| desc.order).collect_vec();
+
+        let column_descs = table_desc
+            .columns
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+        let column_ids = node
+            .column_ids
+            .iter()
+            .copied()
+            .map(ColumnId::from)
+            .collect();
+
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new(keyspace, column_descs, None, None);
+        let table = CellBasedTable::new_partial(
+            keyspace,
+            column_descs,
+            column_ids,
+            order_types,
+            pk_indices,
+            None,
+        );
         let key_indices = node
             .get_distribution_keys()
             .iter()
             .map(|key| *key as usize)
             .collect_vec();
 
-        let mapping = (*params.vnode_bitmap).clone();
-        let hash_filter = Bitmap::from_bytes_with_num_bits(mapping.into(), VIRTUAL_NODE_COUNT);
+        let hash_filter = params.vnode_bitmap.expect("no vnode bitmap");
 
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(

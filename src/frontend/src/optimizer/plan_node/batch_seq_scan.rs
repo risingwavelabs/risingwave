@@ -19,9 +19,9 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::RowSeqScanNode;
-use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc};
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use crate::catalog::ColumnId;
 use crate::expr::Literal;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
@@ -39,7 +39,7 @@ impl BatchSeqScan {
     pub fn new_inner(logical: LogicalScan, dist: Distribution, scan_range: ScanRange) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
 
         {
             // validate scan_range
@@ -150,25 +150,14 @@ impl ToDistributedBatch for BatchSeqScan {
 
 impl ToBatchProst for BatchSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_descs = self
-            .logical
-            .column_descs()
-            .iter()
-            .map(ProstColumnDesc::from)
-            .collect();
-
         NodeBody::RowSeqScan(RowSeqScanNode {
-            table_desc: Some(CellBasedTableDesc {
-                table_id: self.logical.table_desc().table_id.into(),
-                order_key: self
-                    .logical
-                    .table_desc()
-                    .order_desc
-                    .iter()
-                    .map(|v| v.into())
-                    .collect(),
-            }),
-            column_descs,
+            table_desc: Some(self.logical.table_desc().to_protobuf()),
+            column_ids: self
+                .logical
+                .output_column_ids()
+                .iter()
+                .map(ColumnId::get_id)
+                .collect(),
             scan_range: Some(self.scan_range.to_protobuf()),
             // To be filled by the scheduler.
             vnode_ranges: vec![],
