@@ -277,21 +277,37 @@ where
             }
             FeMessage::Describe(m) => {
                 // 1. Get statement.
-                let name = cstr_to_str(&m.query_name).unwrap().to_string();
-                let statement = if name.is_empty() {
-                    unnamed_statement
+                if m.kind == b'S' {
+                    let name = cstr_to_str(&m.query_name).unwrap().to_string();
+                    let statement = if name.is_empty() {
+                        unnamed_statement
+                    } else {
+                        // NOTE Error handle need modify later.
+                        named_statements.get(&name).unwrap()
+                    };
+
+                    // 2. Send parameter description.
+                    self.write_message(&BeMessage::ParameterDescription(&statement.type_desc()))
+                        .await?;
+
+                    // 3. Send row description.
+                    self.write_message(&BeMessage::RowDescription(&statement.row_desc()))
+                        .await?;
+                } else if m.kind == b'P' {
+                    let name = cstr_to_str(&m.query_name).unwrap().to_string();
+                    let portal = if name.is_empty() {
+                        unnamed_portal
+                    } else {
+                        // NOTE Error handle need modify later.
+                        named_portals.get(&name).unwrap()
+                    };
+
+                    self.write_message(&BeMessage::RowDescription(&portal.row_desc()))
+                        .await?;
                 } else {
-                    // NOTE Error handle need modify later.
-                    named_statements.get(&name).unwrap()
-                };
-
-                // 2. Send parameter description.
-                self.write_message(&BeMessage::ParameterDescription(&statement.type_desc()))
-                    .await?;
-
-                // 3. Send row description.
-                self.write_message(&BeMessage::RowDescription(&statement.row_desc()))
-                    .await?;
+                    // TODO: Error Handle
+                    todo!()
+                }
             }
             FeMessage::Sync => {
                 self.write_message(&BeMessage::ReadyForQuery).await?;
