@@ -8,6 +8,7 @@ include ./basic/*.slt.part
 include ./aggregate/*.slt.part
 include ./types/*.slt.part
 include ./catalog/*.slt.part
+include ./functions/*.slt.part
 
 statement ok
 SET QUERY_MODE TO distributed;

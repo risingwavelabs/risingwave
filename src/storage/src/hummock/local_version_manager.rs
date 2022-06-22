@@ -385,7 +385,7 @@ impl LocalVersionManager {
     }
 
     pub fn read_version(self: &Arc<LocalVersionManager>, read_epoch: HummockEpoch) -> ReadVersion {
-        self.local_version.read().read_version(read_epoch)
+        LocalVersion::read_version(&self.local_version, read_epoch)
     }
 
     pub fn get_pinned_version(&self) -> Arc<PinnedVersion> {

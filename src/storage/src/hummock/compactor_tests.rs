@@ -46,7 +46,6 @@ mod tests {
             bloom_false_positive: 0.1,
             data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
-            enable_compression: false,
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
