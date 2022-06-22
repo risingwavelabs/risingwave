@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -32,9 +32,7 @@ use risingwave_hummock_sdk::key::{next_key, range_of_prefix};
 
 use super::mem_table::RowOp;
 use super::TableIter;
-use crate::cell_based_row_deserializer::{
-    make_column_desc_index, CellBasedRowDeserializer, ColumnDescMapping,
-};
+use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::cell_serializer::CellSerializer;
 use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
@@ -48,27 +46,23 @@ pub type DedupPkCellBasedTable<S> = CellBasedTableExtended<S, DedupPkCellBasedRo
 impl<S: StateStore> DedupPkCellBasedTable<S> {
     pub fn new_dedup_pk_cell_based_table(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
-        dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
+        dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        let column_ids = column_descs.iter().map(|d| d.column_id).collect_vec();
-        let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
-        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let column_ids = columns.iter().map(|c| c.column_id).collect_vec();
         let cell_based_row_serializer =
-            DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs, &column_ids);
+            DedupPkCellBasedRowSerializer::new(&pk_indices, &columns, &column_ids);
 
-        Self {
+        Self::new_extended(
             keyspace,
-            schema,
-            mapping: Arc::new(make_column_desc_index(column_descs.clone())),
-            column_descs,
-            pk_serializer,
-            cell_based_row_serializer,
-            column_ids,
+            columns,
+            order_types,
+            pk_indices,
             dist_key_indices,
-        }
+            cell_based_row_serializer,
+        )
     }
 }
 
@@ -77,33 +71,51 @@ pub type CellBasedTable<S> = CellBasedTableExtended<S, CellBasedRowSerializer>;
 impl<S: StateStore> CellBasedTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
         dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
-        let column_ids = column_descs.iter().map(|d| d.column_id).collect_vec();
-        let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
-        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let column_ids = columns.iter().map(|c| c.column_id).collect();
+
+        Self::new_partial(
+            keyspace,
+            columns,
+            column_ids,
+            order_types,
+            pk_indices,
+            dist_key_indices,
+        )
+    }
+
+    pub fn new_partial(
+        keyspace: Keyspace<S>,
+        table_columns: Vec<ColumnDesc>,
+        column_ids: Vec<ColumnId>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        dist_key_indices: Option<Vec<usize>>,
+    ) -> Self {
         let cell_based_row_serializer = CellBasedRowSerializer::new(column_ids.clone());
 
-        Self {
+        Self::new_partial_extended(
             keyspace,
-            schema,
-            mapping: Arc::new(make_column_desc_index(column_descs.clone())),
-            column_descs,
-            pk_serializer,
-            cell_based_row_serializer,
+            table_columns,
             column_ids,
+            order_types,
+            pk_indices,
             dist_key_indices,
-        }
+            cell_based_row_serializer,
+        )
     }
 
     pub fn new_for_test(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
     ) -> Self {
-        CellBasedTable::new(keyspace, column_descs, order_types, None)
+        CellBasedTable::new(keyspace, column_descs, order_types, pk_indices, None)
     }
 }
 
@@ -115,33 +127,38 @@ pub struct CellBasedTableExtended<S: StateStore, SER: CellSerializer> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
-    /// The schema of this table viewed by some source executor, e.g. RowSeqScanExecutor.
+    /// All columns of this table. Note that this is different from the output columns in
+    /// `mapping.output_columns`.
+    #[allow(dead_code)]
+    table_columns: Vec<ColumnDesc>,
+
+    /// The schema of the output columns, i.e., this table VIEWED BY some executor like
+    /// RowSeqScanExecutor.
     schema: Schema,
 
-    /// `ColumnDesc` contains strictly more info than `schema`.
-    column_descs: Vec<ColumnDesc>,
-
-    /// Mapping from column id to column index
+    /// Used for serializing the primary key.
     pk_serializer: OrderedRowSerializer,
 
     /// Used for serializing the row.
     cell_based_row_serializer: SER,
 
-    /// Used for deserializing the row.
+    /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
 
-    column_ids: Vec<ColumnId>,
+    /// Indices of primary keys.
+    /// Note that the index is based on the all columns of the table, instead of the output ones.
+    // FIXME: revisit constructions and usages.
+    pk_indices: Vec<usize>,
 
-    /// Indices of distribution keys in full row for computing value meta. None if value meta is
-    /// not required.
+    /// Indices of distribution keys for computing vnode. None if vnode falls to default value.
+    /// Note that the index is based on the all columns of the table, instead of the output ones.
+    // FIXME: revisit constructions and usages.
     dist_key_indices: Option<Vec<usize>>,
 }
 
 impl<S: StateStore, SER: CellSerializer> std::fmt::Debug for CellBasedTableExtended<S, SER> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CellBasedTable")
-            .field("column_descs", &self.column_descs)
-            .finish()
+        f.debug_struct("CellBasedTable").finish_non_exhaustive()
     }
 }
 
@@ -150,42 +167,53 @@ fn err(rw: impl Into<RwError>) -> StorageError {
 }
 
 impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
+    /// Create a [`CellBasedTable`] given a complete set of `columns`.
     pub fn new_extended(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
         dist_key_indices: Option<Vec<usize>>,
         cell_based_row_serializer: SER,
     ) -> Self {
-        let column_ids = column_descs.iter().map(|d| d.column_id).collect();
-        let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
+        let column_ids = columns.iter().map(|c| c.column_id).collect();
+
+        Self::new_partial_extended(
+            keyspace,
+            columns,
+            column_ids,
+            order_types,
+            pk_indices,
+            dist_key_indices,
+            cell_based_row_serializer,
+        )
+    }
+
+    /// Create a [`CellBasedTable`] given a complete set of `columns` and a partial set of
+    /// `column_ids`. The output will only contains columns with the given ids in the same order.
+    pub fn new_partial_extended(
+        keyspace: Keyspace<S>,
+        table_columns: Vec<ColumnDesc>,
+        column_ids: Vec<ColumnId>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        dist_key_indices: Option<Vec<usize>>,
+        cell_based_row_serializer: SER,
+    ) -> Self {
+        let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
+        let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
         Self {
             keyspace,
+            table_columns,
             schema,
-            mapping: Arc::new(make_column_desc_index(column_descs.clone())),
-            column_descs,
             pk_serializer,
             cell_based_row_serializer,
-            column_ids,
+            mapping,
+            pk_indices,
             dist_key_indices,
         }
-    }
-
-    pub fn new_for_test_extended(
-        keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        cell_based_row_serializer: SER,
-    ) -> Self {
-        Self::new_extended(
-            keyspace,
-            column_descs,
-            order_types,
-            None,
-            cell_based_row_serializer,
-        )
     }
 
     pub fn schema(&self) -> &Schema {
@@ -194,6 +222,29 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
 
     pub(super) fn pk_serializer(&self) -> &OrderedRowSerializer {
         &self.pk_serializer
+    }
+
+    pub(super) fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
+    }
+
+    pub(super) fn column_ids(&self) -> &[ColumnId] {
+        &self.cell_based_row_serializer.column_ids()
+    }
+
+    /// Returns whether the output columns are a complete set of the table's.
+    fn is_complete(&self) -> bool {
+        use std::collections::HashSet;
+
+        let output: HashSet<_> = self
+            .mapping
+            .output_columns
+            .iter()
+            .map(|c| c.column_id)
+            .collect();
+        let table: HashSet<_> = self.table_columns.iter().map(|c| c.column_id).collect();
+
+        output == table
     }
 }
 
@@ -214,7 +265,7 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
         };
 
         let mut row_deserializer = CellBasedRowDeserializer::new(&*self.mapping);
-        for column_id in &self.column_ids {
+        for column_id in self.column_ids() {
             let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
             if let Some(value) = self.keyspace.get(&key, epoch).await? {
                 let deserialize_res = row_deserializer.deserialize(&key, &value).map_err(err)?;
@@ -264,6 +315,8 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
+        debug_assert!(self.is_complete(), "cannot write to a partial table");
+
         // stateful executors need to compute vnode.
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
@@ -619,7 +672,7 @@ struct DedupPkCellBasedIter<I> {
 impl<I> DedupPkCellBasedIter<I> {
     async fn new(
         inner: I,
-        table_descs: Arc<ColumnDescMapping>,
+        mapping: Arc<ColumnDescMapping>,
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<Self> {
         let (data_types, order_types) = pk_descs
@@ -633,18 +686,12 @@ impl<I> DedupPkCellBasedIter<I> {
             .unzip();
         let pk_decoder = OrderedRowDeserializer::new(data_types, order_types);
 
-        // TODO: pre-calculate this instead of calculate it every time when creating new iterator
-        let col_id_to_row_idx: HashMap<ColumnId, usize> = table_descs
-            .iter()
-            .map(|(column_id, (_, idx))| (*column_id, *idx))
-            .collect();
-
         let pk_to_row_mapping = pk_descs
             .iter()
             .map(|d| {
                 let column_desc = &d.column_desc;
                 if column_desc.data_type.mem_cmp_eq_value_enc() {
-                    col_id_to_row_idx.get(&column_desc.column_id).copied()
+                    mapping.get(column_desc.column_id).map(|(_, index)| index)
                 } else {
                     None
                 }

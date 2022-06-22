@@ -60,6 +60,7 @@ message Table {
   bool appendonly = 14;
   string owner = 15;
   common.ParallelUnitMapping mapping = 16;
+  map<string, string> properties = 17;
 }
 
 message Schema {

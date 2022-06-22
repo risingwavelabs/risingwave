@@ -24,7 +24,58 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
-pub type ColumnDescMapping = HashMap<ColumnId, (ColumnDesc, usize)>;
+/// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
+pub struct ColumnDescMapping {
+    pub output_columns: Vec<ColumnDesc>,
+
+    pub id_to_column_index: HashMap<ColumnId, usize>,
+}
+
+#[allow(clippy::len_without_is_empty)]
+impl ColumnDescMapping {
+    /// Create a mapping with given `output_columns`.
+    pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
+        let id_to_column_index = output_columns
+            .iter()
+            .enumerate()
+            .map(|(index, d)| (d.column_id, index))
+            .collect();
+
+        Self {
+            output_columns,
+            id_to_column_index,
+        }
+        .into()
+    }
+
+    /// Create a mapping with given `table_columns` projected on the `column_ids`.
+    pub fn new_partial(table_columns: &[ColumnDesc], column_ids: &[ColumnId]) -> Arc<Self> {
+        let mut table_columns = table_columns
+            .iter()
+            .map(|c| (c.column_id, c.clone()))
+            .collect::<HashMap<_, _>>();
+
+        let output_columns = column_ids
+            .iter()
+            .map(|id| table_columns.remove(id).unwrap())
+            .collect();
+
+        Self::new(output_columns)
+    }
+
+    /// Get the [`ColumnDesc`] and its index in the output with given `id`.
+    pub fn get(&self, id: ColumnId) -> Option<(&ColumnDesc, usize)> {
+        self.id_to_column_index
+            .get(&id)
+            .map(|&index| (&self.output_columns[index], index))
+    }
+
+    /// Get the length of output columns.
+    pub fn len(&self) -> usize {
+        self.output_columns.len()
+    }
+}
+
 pub type GeneralCellBasedRowDeserializer = CellBasedRowDeserializer<Arc<ColumnDescMapping>>;
 
 #[derive(Clone)]
@@ -41,17 +92,9 @@ pub struct CellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
 }
 
 pub fn make_cell_based_row_deserializer(
-    table_column_descs: Vec<ColumnDesc>,
+    output_columns: Vec<ColumnDesc>,
 ) -> GeneralCellBasedRowDeserializer {
-    GeneralCellBasedRowDeserializer::new(Arc::new(make_column_desc_index(table_column_descs)))
-}
-
-pub fn make_column_desc_index(table_column_descs: Vec<ColumnDesc>) -> ColumnDescMapping {
-    table_column_descs
-        .into_iter()
-        .enumerate()
-        .map(|(index, d)| (d.column_id, (d, index)))
-        .collect()
+    GeneralCellBasedRowDeserializer::new(ColumnDescMapping::new(output_columns))
 }
 
 impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
@@ -94,9 +137,9 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
             result = None;
         }
         let mut cell = cell.as_ref();
-        if let Some((column_desc, index)) = self.columns.get(&cell_id) {
+        if let Some((column_desc, index)) = self.columns.get(cell_id) {
             if let Some(datum) = deserialize_cell(&mut cell, &column_desc.data_type)? {
-                let old = self.data.get_mut(*index).unwrap().replace(datum);
+                let old = self.data.get_mut(index).unwrap().replace(datum);
                 assert!(old.is_none());
             }
         } else {

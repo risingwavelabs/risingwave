@@ -114,4 +114,10 @@ impl CellSerializer for DedupPkCellBasedRowSerializer {
         let row = self.remove_dup_pk_datums_by_ref(row);
         self.inner.serialize_cell_key(pk, &row)
     }
+
+    /// Get column ids used by cell serializer to serialize.
+    /// TODO: This should probably not be exposed to user.
+    fn column_ids(&self) -> &[ColumnId] {
+        &self.inner.column_ids()
+    }
 }

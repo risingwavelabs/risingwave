@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::Row;
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 
 pub type KeyBytes = Vec<u8>;
@@ -34,4 +35,8 @@ pub trait CellSerializer {
     /// Different from [`CellSerializer::serialize`], only serialize key into cell key (With
     /// column id appended).
     fn serialize_cell_key(&mut self, pk: &[u8], row: &Row) -> Result<Vec<KeyBytes>>;
+
+    /// Get column ids used by cell serializer to serialize.
+    /// TODO: This should probably not be exposed to user.
+    fn column_ids(&self) -> &[ColumnId];
 }

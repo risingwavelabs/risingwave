@@ -34,7 +34,8 @@ impl CellBasedRowSerializer {
 }
 
 impl CellSerializer for CellBasedRowSerializer {
-    /// Serialize key and value.
+    /// Serialize key and value. The `row` must be in the same order with the column ids in this
+    /// serializer.
     fn serialize(&mut self, pk: &[u8], row: Row) -> Result<Vec<(KeyBytes, ValueBytes)>> {
         let res = serialize_pk_and_row(pk, &row, &self.column_ids)?
             .into_iter()
@@ -67,5 +68,11 @@ impl CellSerializer for CellBasedRowSerializer {
         }
         results.push(serialize_pk_and_column_id(pk, &SENTINEL_CELL_ID)?);
         Ok(results)
+    }
+
+    /// Get column ids used by cell serializer to serialize.
+    /// TODO: This should probably not be exposed to user.
+    fn column_ids(&self) -> &[ColumnId] {
+        &self.column_ids
     }
 }

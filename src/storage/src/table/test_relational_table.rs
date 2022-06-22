@@ -718,7 +718,7 @@ async fn test_cell_based_get_row_by_scan() {
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let mut state = StateTable::new(
@@ -726,9 +726,9 @@ async fn test_cell_based_get_row_by_scan() {
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices.clone(),
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -789,7 +789,7 @@ async fn test_cell_based_get_row_by_multi_get() {
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let mut state = StateTable::new(
@@ -797,9 +797,9 @@ async fn test_cell_based_get_row_by_multi_get() {
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -861,15 +861,15 @@ async fn test_cell_based_get_row_for_string() {
         ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -940,15 +940,15 @@ async fn test_shuffled_column_id_for_get_row() {
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1010,15 +1010,15 @@ async fn test_cell_based_table_iter() {
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1084,25 +1084,24 @@ async fn test_multi_cell_based_table_iter() {
         ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state_1 = StateTable::new(
         keyspace_1.clone(),
         column_descs_1.clone(),
         order_types.clone(),
         None,
-        pk_index.clone(),
+        pk_indices.clone(),
     );
     let mut state_2 = StateTable::new(
         keyspace_2.clone(),
         column_descs_2.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
 
-    let table_1 =
-        CellBasedTable::new_for_test(keyspace_1.clone(), column_descs_1, order_types.clone());
-    let table_2 = CellBasedTable::new_for_test(keyspace_2.clone(), column_descs_2, order_types);
+    let table_1 = state_1.cell_based_table().clone();
+    let table_2 = state_2.cell_based_table().clone();
 
     state_1
         .insert(Row(vec![
@@ -1220,11 +1219,12 @@ async fn test_dedup_cell_based_table_iter_with(
     let mut local = batch.prefixify(&keyspace);
 
     // ---------- Init write serializer
-    let mut cell_based_row_serializer = CellBasedRowSerializer::new(partial_row_col_ids.clone());
+    let mut cell_based_row_serializer = CellBasedRowSerializer::new(partial_row_col_ids);
     let ordered_row_serializer = OrderedRowSerializer::new(order_types.clone());
 
     // ---------- Init table for writes
-    let table = CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types);
+    let table =
+        CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types, pk_indices.clone());
 
     for Row(row) in rows.clone() {
         // ---------- Serialize to cell repr
@@ -1338,15 +1338,15 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
-    let pk_index = vec![0_usize, 1_usize];
+    let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
         keyspace.clone(),
         column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices,
     );
-    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let table = state.cell_based_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1791,7 +1791,7 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
 
     // ---------- declare pk
     let order_types = vec![OrderType::Descending];
-    let pk_index = vec![1_usize];
+    let pk_indices = vec![1_usize];
     let pk_ordered_descs = vec![OrderedColumnDesc {
         column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
         order: OrderType::Descending,
@@ -1803,7 +1803,7 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
         actual_column_descs.clone(),
         order_types.clone(),
         None,
-        pk_index,
+        pk_indices.clone(),
     );
 
     // ---------- Init table for reads
@@ -1827,7 +1827,12 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
     state.commit(epoch).await.unwrap();
 
     // ---------- Init reader
-    let table = CellBasedTable::new_for_test(keyspace.clone(), actual_column_descs, order_types);
+    let table = CellBasedTable::new_for_test(
+        keyspace.clone(),
+        actual_column_descs,
+        order_types,
+        pk_indices,
+    );
     let epoch: u64 = 0;
     let iter = table
         .batch_dedup_pk_iter(epoch, &pk_ordered_descs)
