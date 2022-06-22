@@ -188,13 +188,13 @@ impl PgStatement {
             vec![]
         };
 
-        return Ok(PgPortal {
+        Ok(PgPortal {
             name: portal_name,
             query_string: Bytes::from(instance_query_string),
             result_cache: None,
             stmt_type: None,
             row_description,
-        });
+        })
     }
 }
 
