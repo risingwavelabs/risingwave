@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind, Result};
 use std::sync::Arc;
-use std::{str, vec};
+use std::{result, str, vec};
 
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -28,7 +28,7 @@ use crate::pg_message::{
     FeStartupMessage,
 };
 use crate::pg_response::PgResponse;
-use crate::pg_server::{Session, SessionManager, UserAuthenticator};
+use crate::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -150,7 +150,7 @@ where
                 self.state = PgProtocolState::Regular;
             }
             FeMessage::Query(query_msg) => {
-                self.process_query_msg(query_msg.get_sql(), false).await?;
+                self.process_query_msg_simple(query_msg.get_sql()).await?;
                 self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
             }
             FeMessage::CancelQuery => {
@@ -262,11 +262,11 @@ where
                     unnamed_portal
                 } else {
                     // NOTE Error handle need modify later.
-                    named_portals.get(&portal_name).expect("statement_name managed by client_driver, hence assume statement name always valid")
+                    named_portals.get_mut(&portal_name).expect("statement_name managed by client_driver, hence assume statement name always valid")
                 };
 
                 // 2. Execute instance statement using portal.
-                self.process_query_msg(cstr_to_str(&portal.query_string()), true)
+                self.process_query_msg_extended(portal, m.max_rows.try_into().unwrap())
                     .await?;
 
                 // NOTE there is no ReadyForQuery message.
@@ -376,43 +376,60 @@ where
         self.is_terminate = true;
     }
 
-    async fn process_query_msg(
+    async fn process_query_msg_extended(
         &mut self,
-        query_string: Result<&str>,
-        extended: bool,
+        portal: &mut PgPortal,
+        row_limit: usize,
     ) -> Result<()> {
+        let session = self.session.clone().unwrap();
+        // execute query
+        let process_res = portal.execute::<SM>(session, row_limit).await;
+        self.process_query_response(process_res, true).await?;
+        Ok(())
+    }
+
+    async fn process_query_msg_simple(&mut self, query_string: Result<&str>) -> Result<()> {
         match query_string {
             Ok(sql) => {
                 tracing::trace!("receive query: {}", sql);
                 let session = self.session.clone().unwrap();
                 // execute query
                 let process_res = session.run_statement(sql).await;
-                match process_res {
-                    Ok(res) => {
-                        if res.is_empty() {
-                            self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
-                        } else if res.is_query() {
-                            self.process_query_with_results(res, extended).await?;
-                        } else {
-                            self.write_message_no_flush(&BeMessage::CommandComplete(
-                                BeCommandCompleteMessage {
-                                    stmt_type: res.get_stmt_type(),
-                                    notice: res.get_notice(),
-                                    rows_cnt: res.get_effected_rows_cnt(),
-                                },
-                            ))?;
-                        }
-                    }
-                    Err(e) => {
-                        self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
-                    }
-                }
+                self.process_query_response(process_res, false).await?;
             }
             Err(err) => {
                 self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(err)))?;
             }
         };
 
+        Ok(())
+    }
+
+    async fn process_query_response(
+        &mut self,
+        response: result::Result<PgResponse, BoxedError>,
+        extended: bool,
+    ) -> Result<()> {
+        match response {
+            Ok(res) => {
+                if res.is_empty() {
+                    self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
+                } else if res.is_query() {
+                    self.process_query_with_results(res, extended).await?;
+                } else {
+                    self.write_message_no_flush(&BeMessage::CommandComplete(
+                        BeCommandCompleteMessage {
+                            stmt_type: res.get_stmt_type(),
+                            notice: res.get_notice(),
+                            rows_cnt: res.get_effected_rows_cnt(),
+                        },
+                    ))?;
+                }
+            }
+            Err(e) => {
+                self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+            }
+        }
         Ok(())
     }
 
@@ -432,11 +449,23 @@ where
             self.write_message(&BeMessage::DataRow(val)).await?;
             rows_cnt += 1;
         }
-        self.write_message_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-            stmt_type: res.get_stmt_type(),
-            notice: res.get_notice(),
-            rows_cnt,
-        }))?;
+
+        // If has rows limit, it must be extended mode.
+        // If Execute terminates before completing the execution of a portal (due to reaching a
+        // nonzero result-row count), it will send a PortalSuspended message; the appearance of this
+        // message tells the frontend that another Execute should be issued against the same portal
+        // to complete the operation. The CommandComplete message indicating completion of the
+        // source SQL command is not sent until the portal's execution is completed.
+        // Quote from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended
+        if !extended || res.is_row_end() {
+            self.write_message_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                stmt_type: res.get_stmt_type(),
+                notice: res.get_notice(),
+                rows_cnt,
+            }))?;
+        } else {
+            self.write_message(&BeMessage::PortalSuspended).await?;
+        }
         Ok(())
     }
 

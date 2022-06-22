@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
@@ -268,5 +269,6 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
         appendonly: input.append_only(),
         owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
         vnode_mapping: None,
+        properties: HashMap::default(),
     }
 }

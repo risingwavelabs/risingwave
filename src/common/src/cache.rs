@@ -27,8 +27,9 @@ use std::ptr::null_mut;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use futures::channel::oneshot::{channel, Canceled, Receiver, Sender};
 use parking_lot::Mutex;
+use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::oneshot::{channel, Receiver, Sender};
 
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
@@ -731,7 +732,7 @@ impl<K: LruKey + Clone, T: LruValue> LruCache<K, T> {
         hash: u64,
         key: K,
         fetch_value: F,
-    ) -> Result<Result<CachableEntry<K, T>, E>, Canceled>
+    ) -> Result<Result<CachableEntry<K, T>, E>, RecvError>
     where
         F: FnOnce() -> VC,
         E: Error,
@@ -794,6 +795,7 @@ mod tests {
 
     use rand::rngs::SmallRng;
     use rand::{RngCore, SeedableRng};
+    use tokio::sync::oneshot::error::TryRecvError;
 
     use super::*;
 
@@ -1105,9 +1107,9 @@ mod tests {
         let ret2 = cache.lookup_for_request(0, "b".to_string());
         match ret2 {
             LookupResult::WaitPendingRequest(mut recv) => {
-                assert!(recv.try_recv().unwrap().is_none());
+                assert!(matches!(recv.try_recv(), Err(TryRecvError::Empty)));
                 cache.insert("b".to_string(), 0, 1, "v2".to_string());
-                let v = recv.try_recv().unwrap().unwrap();
+                let v = recv.try_recv().unwrap();
                 assert_eq!(v.value(), "v2");
             }
             _ => panic!(),

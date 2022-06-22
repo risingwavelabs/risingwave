@@ -281,6 +281,6 @@ message CompactionConfig {
   uint64 level0_tigger_file_numer = 6;
   uint64 level0_tier_compact_file_number = 7;
   CompactionMode compaction_mode = 8;
-  uint64 target_file_size_base = 9;
-  repeated string compression_algorithm = 10;
+  repeated string compression_algorithm = 9;
+  uint64 target_file_size_base = 10;
 }
