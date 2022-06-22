@@ -164,6 +164,15 @@ impl TranslateApply {
                 data_types,
                 index,
             )
+        } else if let Some(project) = plan.as_logical_project() {
+            Self::rewrite(
+                &project.input(),
+                correlated_indices,
+                offset,
+                index_mapping,
+                data_types,
+                index,
+            )
         } else {
             panic!()
         }
