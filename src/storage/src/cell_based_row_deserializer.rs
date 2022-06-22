@@ -107,15 +107,13 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         }
     }
 
-    /// When we encounter a new key, we can be sure that the previous row has been fully
-    /// deserialized. Then we return the key and the value of the previous row.
-    pub fn deserialize(
+    fn deserialize_inner<const WITH_VNODE: bool>(
         &mut self,
         raw_key: impl AsRef<[u8]>,
         cell: impl AsRef<[u8]>,
     ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
         let raw_key = raw_key.as_ref();
-        if raw_key.len() < 2 + 4 {
+        if raw_key.len() < if WITH_VNODE { 2 } else { 0 } + 4 {
             // vnode + cell_id
             return Err(ErrorCode::InternalError(format!(
                 "corrupted key: {:?}",
@@ -124,8 +122,13 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
             .into());
         }
 
-        let (vnode_bytes, key_bytes) = raw_key.split_at(2);
-        let vnode = u16::from_be_bytes(vnode_bytes.try_into().unwrap());
+        let (vnode, key_bytes) = if WITH_VNODE {
+            let (vnode_bytes, key_bytes) = raw_key.split_at(2);
+            let vnode = u16::from_be_bytes(vnode_bytes.try_into().unwrap());
+            (vnode, key_bytes)
+        } else {
+            (0, raw_key)
+        };
         let (cur_pk_bytes, cell_id_bytes) = key_bytes.split_at(key_bytes.len() - 4);
         let result;
 
@@ -156,6 +159,25 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         }
 
         Ok(result)
+    }
+
+    /// When we encounter a new key, we can be sure that the previous row has been fully
+    /// deserialized. Then we return the key and the value of the previous row.
+    pub fn deserialize(
+        &mut self,
+        raw_key: impl AsRef<[u8]>,
+        cell: impl AsRef<[u8]>,
+    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
+        self.deserialize_inner::<true>(raw_key, cell)
+    }
+
+    // TODO: remove this once we refactored lookup in delta join with cell-based table
+    pub fn deserialize_without_vnode(
+        &mut self,
+        raw_key: impl AsRef<[u8]>,
+        cell: impl AsRef<[u8]>,
+    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
+        self.deserialize_inner::<false>(raw_key, cell)
     }
 
     /// Take the remaining data out of the deserializer.
