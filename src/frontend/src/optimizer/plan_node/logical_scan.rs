@@ -35,7 +35,7 @@ use crate::utils::{ColIndexMapping, Condition, ScanRange};
 #[derive(Debug, Clone)]
 pub struct LogicalScan {
     pub base: PlanBase,
-    table_name: String, // explain-only
+    table_name: String,
     is_sys_table: bool,
     /// Include `output_col_idx` and columns required in `predicate`
     required_col_idx: Vec<usize>,

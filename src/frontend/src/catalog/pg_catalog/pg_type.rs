@@ -32,12 +32,12 @@ pub const PG_TYPE_DATA: &[(i32, &str)] = &[
     (23, "int4"),
     (700, "float4"),
     (701, "float8"),
-    (1002, "_char"),
     (1043, "varchar"),
     (1082, "date"),
     (1083, "time"),
     (1114, "timestamp"),
     (1184, "timestamptz"),
+    (1186, "interval"),
     (1700, "numeric"),
 ];
 

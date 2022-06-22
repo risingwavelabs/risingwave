@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{ObjectName, TableAlias};
 
 use crate::binder::{Binder, Relation};
@@ -82,10 +82,20 @@ impl Binder {
                         sys_table_catalog.columns.clone(),
                     )
                 } else {
-                    return Err(RwError::from(CatalogError::NotFound(
-                        "table",
-                        table_name.to_string(),
-                    )));
+                    return Err(ErrorCode::NotImplemented(
+                        format!(
+                            r###"pg_catalog.{} is not supported, please use `SHOW` commands for now.
+`SHOW TABLES`,
+`SHOW MATERIALIZED VIEWS`,
+`DESCRIBE <table>`,
+`SHOW COLUMNS FROM [table]`
+"###,
+                            table_name
+                        )
+                        .into(),
+                        1695.into(),
+                    )
+                    .into());
                 }
             } else if let Ok(table_catalog) =
                 catalog.get_table_by_name(&self.db_name, schema_name, table_name)
