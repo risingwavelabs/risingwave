@@ -158,6 +158,12 @@ message CompactionGroup {
   uint64 id = 1;
   repeated bytes member_prefixes = 2;
   CompactionConfig compaction_config = 3;
+
+  message TableOption {
+    uint32 ttl = 1;
+  }
+
+  map<uint32, TableOption> table_options = 4;
 }
 
 message CompactTaskAssignment {
