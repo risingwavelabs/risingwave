@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_sqlparser::ast::{ObjectName, Query};
+use risingwave_sqlparser::ast::{ObjectName, Query, WithProperties};
 
+use super::util::handle_with_properties;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
@@ -30,6 +33,7 @@ pub fn gen_create_mv_plan(
     context: OptimizerContextRef,
     query: Box<Query>,
     name: ObjectName,
+    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(name)?;
     let (database_id, schema_id) = session
@@ -63,6 +67,7 @@ pub fn gen_create_mv_plan(
     let mut table = materialize.table().to_prost(schema_id, database_id);
     let plan: PlanRef = materialize.into();
     table.owner = session.user_name().to_string();
+    table.properties = properties;
 
     Ok((plan, table))
 }
@@ -71,11 +76,18 @@ pub async fn handle_create_mv(
     context: OptimizerContext,
     name: ObjectName,
     query: Box<Query>,
+    with_options: WithProperties,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
     let (table, graph) = {
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
+        let (plan, table) = gen_create_mv_plan(
+            &session,
+            context.into(),
+            query,
+            name,
+            handle_with_properties("create_mv", with_options.0)?,
+        )?;
         let stream_plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(stream_plan);
 
@@ -115,7 +127,7 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "create materialized view mv1 as select t1.country from t1";
+        let sql = "create materialized view mv1 with ('ttl' = 300) as select t1.country from t1";
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
