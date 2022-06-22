@@ -241,21 +241,28 @@ impl CatalogWriter for MockCatalogWriter {
 impl MockCatalogWriter {
     pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
         catalog.write().create_database(ProstDatabase {
-            name: DEFAULT_DATABASE_NAME.to_string(),
             id: 0,
+            name: DEFAULT_DATABASE_NAME.to_string(),
             owner: DEFAULT_SUPPER_USER.to_string(),
         });
         catalog.write().create_schema(ProstSchema {
-            id: 0,
+            id: 1,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
             owner: DEFAULT_SUPPER_USER.to_string(),
         });
+        catalog.write().create_schema(ProstSchema {
+            id: 2,
+            name: PG_CATALOG_SCHEMA_NAME.to_string(),
+            database_id: 0,
+            owner: DEFAULT_SUPPER_USER.to_string(),
+        });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
-        map.insert(0_u32, 0_u32);
+        map.insert(1_u32, 0_u32);
+        map.insert(2_u32, 0_u32);
         Self {
             catalog,
-            id: AtomicU32::new(0),
+            id: AtomicU32::new(2),
             table_id_to_schema_id: Default::default(),
             schema_id_to_database_id: RwLock::new(map),
         }
