@@ -36,7 +36,7 @@ use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMap
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::storage_value::{StorageValue, ValueMeta};
+use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 pub type AccessType = bool;
@@ -78,6 +78,10 @@ pub struct CellBasedTable<S: StateStore, const T: AccessType> {
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
     dist_key_indices: Option<Vec<usize>>,
+
+    /// Indices of distribution keys for computing vnode. None if vnode falls to default value.
+    /// Note that the index is based on the primary key columns by `pk_indices`.
+    dist_key_in_pk_indices: Option<Vec<usize>>,
 }
 
 impl<S: StateStore, const T: AccessType> std::fmt::Debug for CellBasedTable<S, T> {
@@ -154,6 +158,7 @@ impl<S: StateStore> From<CellBasedTable<S, READ_WRITE>> for CellBasedTable<S, RE
             mapping: rw.mapping,
             pk_indices: rw.pk_indices,
             dist_key_indices: rw.dist_key_indices,
+            dist_key_in_pk_indices: rw.dist_key_in_pk_indices,
         }
     }
 }
@@ -171,6 +176,18 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
         let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
+        let dist_key_in_pk_indices = dist_key_indices.as_ref().map(|dist_key_indices| {
+            dist_key_indices
+                .iter()
+                .map(|&di| {
+                    pk_indices
+                        .iter()
+                        .position(|&pi| di == pi)
+                        .expect("distribution keys must be a subset of primary keys")
+                })
+                .collect_vec()
+        });
+
         Self {
             keyspace,
             table_columns,
@@ -180,6 +197,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             mapping,
             pk_indices,
             dist_key_indices,
+            dist_key_in_pk_indices,
         }
     }
 
@@ -202,11 +220,22 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
 
 /// Get
 impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
+    /// Get vnode value with given primary key.
+    fn compute_vnode_by_pk(&self, pk: &Row) -> u16 {
+        let Some(indices) = self.dist_key_in_pk_indices.as_ref() else {
+            return 0;
+        };
+
+        let hash_builder = CRC32FastBuilder {};
+        pk.hash_by_indices(&indices, &hash_builder)
+            .unwrap()
+            .to_vnode()
+    }
+
     /// Get a single row by point get
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: use multi-get for cell_based get_row
-        // TODO: encode vnode into key
-        // let vnode = self.compute_vnode_by_row(pk);
+        let vnode = self.compute_vnode_by_pk(pk);
         let serialized_pk = serialize_pk(pk, &self.pk_serializer);
 
         let sentinel_key =
@@ -254,18 +283,22 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
 
 /// Write
 impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
-    /// Get vnode value. Should provide a full row (instead of pk).
-    fn compute_vnode_by_row(&self, value: &Row) -> u16 {
-        let dist_key_indices = self.dist_key_indices.as_ref().unwrap();
+    /// Get vnode value with given full row.
+    fn compute_vnode_by_row(&self, row: &Row) -> u16 {
+        // With `READ_WRITE`, the output columns should be exactly same with the table columns, so
+        // we can directly index into the row with indices to the table columns.
+        let Some(indices) = self.dist_key_indices.as_ref() else {
+            return 0;
+        };
 
         let hash_builder = CRC32FastBuilder {};
-        value
-            .hash_by_indices(dist_key_indices, &hash_builder)
+        row.hash_by_indices(&indices, &hash_builder)
             .unwrap()
             .to_vnode()
     }
 
-    async fn batch_write_rows_inner<const WITH_VALUE_META: bool>(
+    /// Write to state store without value meta
+    pub async fn batch_write_rows(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
@@ -280,34 +313,19 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
             // not exceed the length of pk. So we simply do unwrap here.
             match row_op {
                 RowOp::Insert(row) => {
-                    let value_meta = if WITH_VALUE_META {
-                        ValueMeta::with_vnode(self.compute_vnode_by_row(&row))
-                    } else {
-                        ValueMeta::default()
-                    };
                     let bytes = self.row_serializer.serialize(&pk, row).map_err(err)?;
                     for (key, value) in bytes {
-                        local.put(key, StorageValue::new_put(value_meta, value))
+                        local.put(key, StorageValue::new_default_put(value))
                     }
                 }
                 RowOp::Delete(old_row) => {
                     // TODO(wcy-fdu): only serialize key on deletion
-                    let value_meta = if WITH_VALUE_META {
-                        ValueMeta::with_vnode(self.compute_vnode_by_row(&old_row))
-                    } else {
-                        ValueMeta::default()
-                    };
                     let bytes = self.row_serializer.serialize(&pk, old_row).map_err(err)?;
                     for (key, _) in bytes {
-                        local.delete_with_value_meta(key, value_meta);
+                        local.delete(key);
                     }
                 }
                 RowOp::Update((old_row, new_row)) => {
-                    let value_meta = if WITH_VALUE_META {
-                        ValueMeta::with_vnode(self.compute_vnode_by_row(&new_row))
-                    } else {
-                        ValueMeta::default()
-                    };
                     let delete_bytes = self
                         .row_serializer
                         .serialize_without_filter(&pk, old_row)
@@ -321,15 +339,15 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
                     {
                         match (delete, insert) {
                             (Some((delete_pk, _)), None) => {
-                                local.delete_with_value_meta(delete_pk, value_meta);
+                                local.delete(delete_pk);
                             }
                             (None, Some((insert_pk, insert_row))) => {
-                                local.put(insert_pk, StorageValue::new_put(value_meta, insert_row));
+                                local.put(insert_pk, StorageValue::new_default_put(insert_row));
                             }
                             (None, None) => {}
                             (Some((delete_pk, _)), Some((insert_pk, insert_row))) => {
                                 debug_assert_eq!(delete_pk, insert_pk);
-                                local.put(insert_pk, StorageValue::new_put(value_meta, insert_row));
+                                local.put(insert_pk, StorageValue::new_default_put(insert_row));
                             }
                         }
                     }
@@ -338,24 +356,6 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
         }
         batch.ingest(epoch).await?;
         Ok(())
-    }
-
-    /// Write to state store, and use distribution key indices to compute value meta
-    pub async fn batch_write_rows_with_value_meta(
-        &mut self,
-        buffer: BTreeMap<Vec<u8>, RowOp>,
-        epoch: u64,
-    ) -> StorageResult<()> {
-        self.batch_write_rows_inner::<true>(buffer, epoch).await
-    }
-
-    /// Write to state store without value meta
-    pub async fn batch_write_rows(
-        &mut self,
-        buffer: BTreeMap<Vec<u8>, RowOp>,
-        epoch: u64,
-    ) -> StorageResult<()> {
-        self.batch_write_rows_inner::<false>(buffer, epoch).await
     }
 }
 
