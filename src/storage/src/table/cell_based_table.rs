@@ -421,12 +421,12 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 
 /// Iterators
 impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
-    /// Get a [`StreamingIter`] with given `encoded_key_range`.
-    pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
+    /// Get multiple [`CellBasedIter`] based on the specified vnodes.
+    async fn iters_with_encoded_key_range<R, B, const ITER_TYPE: bool>(
         &self,
         encoded_key_range: R,
         epoch: u64,
-    ) -> StorageResult<StreamingIter<S>>
+    ) -> StorageResult<Vec<CellBasedIter<S, ITER_TYPE>>>
     where
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
@@ -441,16 +441,35 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             .map(|(i, _)| i as VirtualNode)
         {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            let iter = CellBasedIter::<_, STREAMING_ITER_TYPE>::new(
+            let iter = CellBasedIter::<_, ITER_TYPE>::new(
                 &self.keyspace,
                 self.mapping.clone(),
                 raw_key_range,
                 epoch,
             )
-            .await?
-            .into_stream();
+            .await?;
             iterators.push(iter);
         }
+
+        Ok(iterators)
+    }
+
+    /// Get a [`StreamingIter`] with given `encoded_key_range`.
+    pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
+        &self,
+        encoded_key_range: R,
+        epoch: u64,
+    ) -> StorageResult<StreamingIter<S>>
+    where
+        R: RangeBounds<B> + Send + Clone,
+        B: AsRef<[u8]> + Send,
+    {
+        let iterators = self
+            .iters_with_encoded_key_range::<_, _, STREAMING_ITER_TYPE>(encoded_key_range, epoch)
+            .await?
+            .into_iter()
+            .map(|i| i.into_stream())
+            .collect_vec();
 
         let iter = match iterators.len() {
             0 => unreachable!(),
@@ -471,14 +490,22 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
-        Ok(CellBasedIter::<_, BATCH_ITER_TYPE>::new(
-            &self.keyspace,
-            self.mapping.clone(),
-            encoded_key_range,
-            epoch,
-        )
-        .await?
-        .into_stream())
+        let iterators = self
+            .iters_with_encoded_key_range::<_, _, BATCH_ITER_TYPE>(encoded_key_range, epoch)
+            .await?
+            .into_iter()
+            .map(|i| i.into_stream())
+            .collect_vec();
+
+        let iter = match iterators.len() {
+            0 => unreachable!(),
+            1 => iterators.into_iter().next().unwrap(),
+            // Currently batch does not expect scan order, so we just concat mutiple ranges.
+            // TODO: introduce ordered batch iterator
+            _ => todo!("concat multiple vnode ranges"),
+        };
+
+        Ok(iter)
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
