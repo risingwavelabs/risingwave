@@ -248,7 +248,7 @@ impl LevelSelector for DynamicLevelSelector {
                     ret.compression_algorithm = self.config.compression_algorithm[0].clone();
                 } else {
                     let idx = ret.target_level.level_idx as usize - ctx.base_level + 1;
-                    ret.compression_algorithm = self.config.compression_algorithm[idx + 1].clone();
+                    ret.compression_algorithm = self.config.compression_algorithm[idx].clone();
                 }
                 return Some(ret);
             }
@@ -282,7 +282,7 @@ impl LevelSelector for DynamicLevelSelector {
             ret.compression_algorithm = self.config.compression_algorithm[0].clone();
         } else {
             let idx = ret.target_level.level_idx as usize - ctx.base_level + 1;
-            ret.compression_algorithm = self.config.compression_algorithm[idx + 1].clone();
+            ret.compression_algorithm = self.config.compression_algorithm[idx].clone();
         }
         Some(ret)
     }

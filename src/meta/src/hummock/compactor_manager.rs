@@ -183,7 +183,7 @@ mod tests {
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
-            compression_algorithm: 0
+            compression_algorithm: 0,
         }
     }
 
