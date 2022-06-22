@@ -327,8 +327,14 @@ impl TestCase {
                     with_options,
                     ..
                 } => {
-                    if let Err(err) = create_mv::handle_create_mv(context, name, query, WithProperties(with_options))
-                    .await {
+                    if let Err(err) = create_mv::handle_create_mv(
+                        context,
+                        name,
+                        query,
+                        WithProperties(with_options),
+                    )
+                    .await
+                    {
                         let ret = TestCaseResult {
                             catalog_error: Some(err.to_string()),
                             ..Default::default()
@@ -338,7 +344,6 @@ impl TestCase {
                         }
                         result = Some(ret);
                     };
-
                 }
                 Statement::Drop(drop_statement) => {
                     if let Err(err) =
