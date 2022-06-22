@@ -356,7 +356,7 @@ impl fmt::Display for Expr {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
                 } else {
-                    write!(f, "{} {}", op, expr)
+                    write!(f, "{} {}", op, fmt_expr_with_paren(expr))
                 }
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
@@ -487,32 +487,21 @@ impl fmt::Display for Expr {
     }
 }
 
-/// Wrap complex expressions with parentheses.
+/// Wrap complex expressions with necessary parentheses.
+/// For example, `a > b LIKE c` becomes `a > (b LIKE c)`.
 fn fmt_expr_with_paren(e: &Expr) -> String {
-    use BinaryOperator as B;
-    if let Expr::BinaryOp { op, .. } = e {
-        match op {
-            B::Plus
-            | B::Multiply
-            | B::Modulo
-            | B::Minus
-            | B::LtEq
-            | B::GtEq
-            | B::Eq
-            | B::Gt
-            | B::Lt
-            | B::Xor
-            | B::NotEq
-            | B::Divide
-            | B::BitwiseAnd
-            | B::BitwiseOr
-            | B::BitwiseXor
-            | B::PGBitwiseXor
-            | B::PGBitwiseShiftLeft
-            | B::PGBitwiseShiftRight => return format!("({})", e),
-            _ => {}
-        }
-    }
+    use Expr as E;
+    match e {
+        E::BinaryOp { .. }
+        | E::UnaryOp { .. }
+        | E::IsNull(_)
+        | E::IsNotNull(_)
+        | E::IsFalse(_)
+        | E::IsTrue(_)
+        | E::IsNotTrue(_)
+        | E::IsNotFalse(_) => return format!("({})", e),
+        _ => {}
+    };
     format!("{}", e)
 }
 

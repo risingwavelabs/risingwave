@@ -161,10 +161,6 @@ pub struct StorageConfig {
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
-
-    /// whether enable compression when building sstable.
-    #[serde(default = "default::enable_compression")]
-    pub enable_compression: bool,
 }
 
 impl Default for StorageConfig {
@@ -276,8 +272,5 @@ mod default {
 
     pub fn share_buffer_upload_concurrency() -> usize {
         8
-    }
-    pub fn enable_compression() -> bool {
-        true
     }
 }

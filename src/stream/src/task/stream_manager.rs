@@ -16,7 +16,6 @@ use core::time::Duration;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use parking_lot::Mutex;
@@ -31,6 +30,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
@@ -308,7 +308,7 @@ impl LocalStreamManager {
     }
 
     #[cfg(test)]
-    pub fn take_source(&self) -> futures::channel::mpsc::Sender<Message> {
+    pub fn take_source(&self) -> tokio::sync::mpsc::Sender<Message> {
         let mut core = self.core.lock();
         core.mock_source.0.take().unwrap()
     }
