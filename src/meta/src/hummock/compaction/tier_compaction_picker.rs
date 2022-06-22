@@ -113,6 +113,7 @@ impl CompactionPicker for TierCompactionPicker {
                     total_file_size: 0,
                 },
                 split_ranges: vec![],
+                compression_algorithm: "".to_string(),
             });
         }
         None
@@ -215,6 +216,7 @@ impl CompactionPicker for LevelCompactionPicker {
                 table_infos: target_level_inputs,
             },
             split_ranges: splits,
+            compression_algorithm: "".to_string(),
         })
     }
 }

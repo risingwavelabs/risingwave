@@ -243,7 +243,13 @@ impl LevelSelector for DynamicLevelSelector {
                 return None;
             }
             let picker = self.create_compaction_picker(select_level, target_level, task_id);
-            if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
+            if let Some(mut ret) = picker.pick_compaction(levels, level_handlers) {
+                if ret.target_level.level_idx == 0 {
+                    ret.compression_algorithm = self.config.compression_algorithm[0].clone();
+                } else {
+                    let idx = ret.target_level.level_idx as usize - ctx.base_level + 1;
+                    ret.compression_algorithm = self.config.compression_algorithm[idx].clone();
+                }
                 return Some(ret);
             }
         }
@@ -271,7 +277,14 @@ impl LevelSelector for DynamicLevelSelector {
             target_level,
         );
 
-        picker.pick_compaction(levels, level_handlers)
+        let mut ret = picker.pick_compaction(levels, level_handlers)?;
+        if ret.target_level.level_idx == 0 {
+            ret.compression_algorithm = self.config.compression_algorithm[0].clone();
+        } else {
+            let idx = ret.target_level.level_idx as usize - ctx.base_level + 1;
+            ret.compression_algorithm = self.config.compression_algorithm[idx].clone();
+        }
+        Some(ret)
     }
 
     fn name(&self) -> &'static str {
