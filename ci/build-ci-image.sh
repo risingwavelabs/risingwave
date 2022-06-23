@@ -39,7 +39,7 @@ fi
 set -e
 
 echo "--- Docker build"
-if [[ -z ${BUILDKITE} ]] then;
+if [[ -z ${BUILDKITE} ]]; then
     export DOCKER_BUILD_PROGRESS="--progress=plain"
 else
     export DOCKER_BUILD_PROGRESS="--progress=auto"
