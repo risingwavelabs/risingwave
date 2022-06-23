@@ -97,11 +97,11 @@ impl StreamFragmenter {
             let input = match child_node.get_node_body()? {
                 // For stateful operators, set `exchange_flag = true`. If it's already true, force
                 // add an exchange.
-                NodeBody::HashAgg(_) | NodeBody::HashJoin(_) | NodeBody::DeltaIndexJoin(_) => {
-                    // We didn't make `fields` available on Java frontend yet, so we check if schema
-                    // is available (by `child_node.fields.is_empty()`) before deciding to do the
-                    // rewrite.
-                    if insert_exchange_flag && !child_node.fields.is_empty() {
+                NodeBody::HashAgg(_)
+                | NodeBody::HashJoin(_)
+                | NodeBody::DeltaIndexJoin(_)
+                | NodeBody::Chain(_) => {
+                    if insert_exchange_flag {
                         let child_node =
                             self.rewrite_stream_node_inner(state, child_node, false)?;
 
@@ -197,50 +197,42 @@ impl StreamFragmenter {
             _ => {}
         };
 
-        // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-        // with only equal conditions
-        if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_mut().unwrap() {
-            // Allocate local table id. It will be rewrite to global table id after get table id
-            // offset from id generator.
-            hash_join_node.left_table_id = state.gen_table_id();
-            hash_join_node.right_table_id = state.gen_table_id();
-            if hash_join_node.is_delta_join {
-                if hash_join_node.get_join_type()? == JoinType::Inner
-                    && hash_join_node.condition.is_none()
+        Self::assign_local_table_id_to_stream_node(state, &mut stream_node);
+
+        // handle join logic
+        match stream_node.node_body.as_mut().unwrap() {
+            // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+            // with only equal conditions
+            NodeBody::HashJoin(hash_join_node) => {
+                if hash_join_node.is_delta_join {
+                    if hash_join_node.get_join_type()? == JoinType::Inner
+                        && hash_join_node.condition.is_none()
+                    {
+                        return self.build_delta_join(state, current_fragment, stream_node);
+                    } else {
+                        panic!(
+                        "only inner join without non-equal condition is supported for delta joins"
+                    );
+                    }
+                }
+            }
+
+            NodeBody::DeltaIndexJoin(delta_index_join) => {
+                if delta_index_join.get_join_type()? == JoinType::Inner
+                    && delta_index_join.condition.is_none()
                 {
-                    return self.build_delta_join(state, current_fragment, stream_node);
+                    return self.build_delta_join_without_arrange(
+                        state,
+                        current_fragment,
+                        stream_node,
+                    );
                 } else {
                     panic!(
                         "only inner join without non-equal condition is supported for delta joins"
                     );
                 }
             }
-        }
 
-        if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap()
-        {
-            if delta_index_join.get_join_type()? == JoinType::Inner
-                && delta_index_join.condition.is_none()
-            {
-                return self.build_delta_join_without_arrange(state, current_fragment, stream_node);
-            } else {
-                panic!("only inner join without non-equal condition is supported for delta joins");
-            }
-        }
-
-        // Rewrite hash agg. One agg call -> one table id.
-        if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_mut().unwrap() {
-            for _ in &hash_agg_node.agg_calls {
-                hash_agg_node.table_ids.push(state.gen_table_id());
-            }
-        }
-
-        match stream_node.node_body.as_mut().unwrap() {
-            NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
-                for _ in &node.agg_calls {
-                    node.table_ids.push(state.gen_table_id());
-                }
-            }
             _ => {}
         }
 
@@ -316,5 +308,253 @@ impl StreamFragmenter {
             .collect();
         fragment_graph.table_ids_cnt = next_table_id;
         fragment_graph
+    }
+
+    /// This function assigns the `table_id` based on the type of `StreamNode`
+    /// Be careful it has side effects and will change the `StreamNode`
+    fn assign_local_table_id_to_stream_node(
+        state: &mut BuildFragmentGraphState,
+        stream_node: &mut StreamNode,
+    ) {
+        match stream_node.node_body.as_mut().unwrap() {
+            // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+            // with only equal conditions
+            NodeBody::HashJoin(hash_join_node) => {
+                // Allocate local table id. It will be rewrite to global table id after get table id
+                // offset from id generator.
+                if let Some(left_table) = &mut hash_join_node.left_table {
+                    left_table.id = state.gen_table_id();
+                }
+                if let Some(right_table) = &mut hash_join_node.right_table {
+                    right_table.id = state.gen_table_id();
+                }
+            }
+
+            NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
+                for table in &mut node.internal_tables {
+                    table.id = state.gen_table_id();
+                }
+            }
+
+            // Rewrite hash agg. One agg call -> one table id.
+            NodeBody::HashAgg(hash_agg_node) => {
+                for table in &mut hash_agg_node.internal_tables {
+                    table.id = state.gen_table_id();
+                }
+            }
+
+            NodeBody::TopN(top_n_node) => {
+                top_n_node.table_id = state.gen_table_id();
+            }
+
+            NodeBody::AppendOnlyTopN(append_only_top_n_node) => {
+                append_only_top_n_node.table_id = state.gen_table_id();
+            }
+
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::catalog::{Table, Table as ProstTable};
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType;
+    use risingwave_pb::expr::agg_call::{Arg, Type};
+    use risingwave_pb::expr::{AggCall, InputRefExpr};
+    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
+    use risingwave_pb::stream_plan::*;
+
+    use super::*;
+
+    fn make_sum_aggcall(idx: i32) -> AggCall {
+        AggCall {
+            r#type: Type::Sum as i32,
+            args: vec![Arg {
+                input: Some(InputRefExpr { column_idx: idx }),
+                r#type: Some(DataType {
+                    type_name: TypeName::Int64 as i32,
+                    ..Default::default()
+                }),
+            }],
+            return_type: Some(DataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            distinct: false,
+        }
+    }
+
+    fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
+        ColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_type: Some(DataType {
+                    type_name: column_type as i32,
+                    ..Default::default()
+                }),
+                column_id,
+                ..Default::default()
+            }),
+            is_hidden: false,
+        }
+    }
+
+    fn make_internal_table(is_agg_value: bool) -> ProstTable {
+        let mut columns = vec![make_column(TypeName::Int64, 0)];
+        if !is_agg_value {
+            columns.push(make_column(TypeName::Int32, 1));
+        }
+        ProstTable {
+            id: TableId::placeholder().table_id,
+            name: String::new(),
+            columns,
+            order_column_ids: vec![0],
+            orders: vec![2],
+            pk: vec![2],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_assign_local_table_id_to_stream_node() {
+        // let fragmenter = StreamFragmenter {};
+        let mut state = BuildFragmentGraphState::default();
+        let mut expect_table_id = 0;
+        state.gen_table_id(); // to consume one table_id
+
+        {
+            // test HashJoin Type
+            let mut stream_node = StreamNode {
+                node_body: Some(NodeBody::HashJoin(HashJoinNode {
+                    left_table: Some(Table {
+                        id: 0,
+                        ..Default::default()
+                    }),
+                    right_table: Some(Table {
+                        id: 0,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+
+            if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_ref().unwrap() {
+                expect_table_id += 1;
+                assert_eq!(
+                    expect_table_id,
+                    hash_join_node.left_table.as_ref().unwrap().id
+                );
+                expect_table_id += 1;
+                assert_eq!(
+                    expect_table_id,
+                    hash_join_node.right_table.as_ref().unwrap().id
+                );
+            }
+        }
+
+        {
+            // test SimpleAgg Type
+            let mut stream_node = StreamNode {
+                node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
+                    agg_calls: vec![
+                        make_sum_aggcall(0),
+                        make_sum_aggcall(1),
+                        make_sum_aggcall(2),
+                    ],
+                    internal_tables: vec![
+                        make_internal_table(true),
+                        make_internal_table(false),
+                        make_internal_table(false),
+                    ],
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+
+            if let NodeBody::GlobalSimpleAgg(global_simple_agg_node) =
+                stream_node.node_body.as_ref().unwrap()
+            {
+                assert_eq!(
+                    global_simple_agg_node.agg_calls.len(),
+                    global_simple_agg_node.internal_tables.len()
+                );
+                for table in &global_simple_agg_node.internal_tables {
+                    expect_table_id += 1;
+                    assert_eq!(expect_table_id, table.id);
+                }
+            }
+        }
+
+        {
+            // test HashAgg Type
+            let mut stream_node = StreamNode {
+                node_body: Some(NodeBody::HashAgg(HashAggNode {
+                    agg_calls: vec![
+                        make_sum_aggcall(0),
+                        make_sum_aggcall(1),
+                        make_sum_aggcall(2),
+                        make_sum_aggcall(3),
+                    ],
+                    internal_tables: vec![
+                        make_internal_table(true),
+                        make_internal_table(false),
+                        make_internal_table(false),
+                        make_internal_table(false),
+                    ],
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+
+            if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_ref().unwrap() {
+                assert_eq!(
+                    hash_agg_node.agg_calls.len(),
+                    hash_agg_node.internal_tables.len()
+                );
+                for table in &hash_agg_node.internal_tables {
+                    expect_table_id += 1;
+                    assert_eq!(expect_table_id, table.id);
+                }
+            }
+        }
+
+        {
+            // test TopN Type
+            let mut stream_node = StreamNode {
+                node_body: Some(NodeBody::TopN(TopNNode {
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+
+            if let NodeBody::TopN(top_n_node) = stream_node.node_body.as_ref().unwrap() {
+                expect_table_id += 1;
+                assert_eq!(expect_table_id, top_n_node.table_id);
+            }
+        }
+
+        {
+            // test AppendOnlyTopN Type
+            let mut stream_node = StreamNode {
+                node_body: Some(NodeBody::AppendOnlyTopN(TopNNode {
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
+
+            if let NodeBody::AppendOnlyTopN(append_only_top_n_node) =
+                stream_node.node_body.as_ref().unwrap()
+            {
+                expect_table_id += 1;
+                assert_eq!(expect_table_id, append_only_top_n_node.table_id);
+            }
+        }
     }
 }

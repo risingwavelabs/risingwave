@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::base::SplitMetaData;
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum KinesisOffset {
     Earliest,
     Latest,
@@ -27,7 +27,7 @@ pub enum KinesisOffset {
     None,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Hash)]
 pub struct KinesisSplit {
     pub(crate) shard_id: String,
     pub(crate) start_position: KinesisOffset,
@@ -39,7 +39,7 @@ impl SplitMetaData for KinesisSplit {
         self.shard_id.to_string()
     }
 
-    fn to_json_bytes(&self) -> Bytes {
+    fn encode_to_bytes(&self) -> Bytes {
         Bytes::from(serde_json::to_string(self).unwrap())
     }
 
@@ -59,5 +59,18 @@ impl KinesisSplit {
             start_position,
             end_position,
         }
+    }
+
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        let start_offset = if start_offset.is_empty() {
+            KinesisOffset::Earliest
+        } else {
+            KinesisOffset::SequenceNumber(start_offset)
+        };
+        Self::new(
+            self.shard_id.clone(),
+            start_offset,
+            self.end_position.clone(),
+        )
     }
 }

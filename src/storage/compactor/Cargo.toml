@@ -1,18 +1,20 @@
 [package]
 name = "risingwave_compactor"
-version = "0.1.0"
+version = "0.1.9"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 clap = { version = "3", features = ["derive"] }
+madsim = "=0.2.0-alpha.3"
 prometheus = { version = "0.13" }
 risingwave_common = { path = "../../common" }
+risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "../../storage" }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = [
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "fs",
     "rt",
     "rt-multi-thread",
@@ -24,5 +26,6 @@ tokio = { version = "1", features = [
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 toml = "0.5"
-tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
 tracing = { version = "0.1" }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }

@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::net::SocketAddr;
 use std::time::Duration;
 
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::MetaStoreBackend;
+use crate::AddressInfo;
 
 pub struct LocalMeta {
     port: u16,
     join_handle: JoinHandle<()>,
-    shutdown_sender: UnboundedSender<()>,
+    shutdown_sender: Sender<()>,
 }
 
 impl LocalMeta {
@@ -33,14 +35,18 @@ impl LocalMeta {
 
     /// Start a local meta node in the background.
     pub async fn start(port: u16) -> Self {
-        let addr = Self::meta_addr_inner(port).parse().unwrap();
-        let (join_handle, shutdown_sender) = crate::rpc::server::rpc_serve(
+        let addr = Self::meta_addr_inner(port);
+        let listen_addr: SocketAddr = addr.parse().unwrap();
+        let address_info = AddressInfo {
             addr,
-            None,
-            None,
+            listen_addr,
+            ..Default::default()
+        };
+        let (join_handle, shutdown_sender) = crate::rpc::server::rpc_serve(
+            address_info,
             MetaStoreBackend::Mem,
             Duration::from_secs(3600),
-            None,
+            10,
             MetaOpts::default(),
         )
         .await

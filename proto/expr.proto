@@ -29,6 +29,13 @@ message ExprNode {
     OR = 22;
     NOT = 23;
     IN = 24;
+    // bitwise operators
+    BITWISE_AND = 31;
+    BITWISE_OR = 32;
+    BITWISE_XOR = 33;
+    BITWISE_NOT = 34;
+    BITWISE_SHIFT_LEFT = 35;
+    BITWISE_SHIFT_RIGHT = 36;
     // date functions
     EXTRACT = 101;
     TUMBLE_START = 103;
@@ -55,6 +62,16 @@ message ExprNode {
     COALESCE = 217;
     CONCAT_WS = 218;
     ABS = 219;
+    SPLIT_PART = 220;
+    CEIL = 221;
+    FLOOR = 222;
+    TO_CHAR = 223;
+    MD5 = 224;
+    CHAR_LENGTH = 225;
+    REPEAT = 226;
+    CONCAT_OP = 227;
+    // BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL.
+    BOOL_OUT = 228;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -63,10 +80,15 @@ message ExprNode {
     IS_NOT_FALSE = 304;
     IS_NULL = 305;
     IS_NOT_NULL = 306;
+    IS_DISTINCT_FROM = 307;
     // Unary operators
     NEG = 401;
     // Nested selection operators
     FIELD = 501;
+    // Array expression.
+    ARRAY = 521;
+    ARRAY_ACCESS = 522;
+    ROW = 523;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;
@@ -92,6 +114,16 @@ message ConstantValue {
   bytes body = 1;
 }
 
+// For serializing struct value to vec<bytes>.
+message StructValue {
+  repeated bytes fields = 1;
+}
+
+// For serializing list value to vec<bytes>.
+message ListValue {
+  repeated bytes fields = 1;
+}
+
 message FunctionCall {
   repeated ExprNode children = 1;
 }
@@ -107,6 +139,7 @@ message AggCall {
     AVG = 5;
     STRING_AGG = 6;
     SINGLE_VALUE = 7;
+    APPROX_COUNT_DISTINCT = 8;
   }
   message Arg {
     InputRefExpr input = 1;

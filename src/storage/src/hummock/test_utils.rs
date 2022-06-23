@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::sync::Arc;
 
@@ -23,34 +23,67 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
-use crate::hummock::iterator::test_utils::mock_sstable_store;
+use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_sstable_store};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
     SSTableBuilderOptions, Sstable, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;
+use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
-        sstable_size: 256 * (1 << 20),
-        block_size: 64 * (1 << 10),
+        sstable_size_mb: 256,
+        block_size_kb: 64,
         bloom_false_positive: 0.1,
         share_buffers_sync_parallelism: 2,
-        shared_buffer_capacity: 64 << 20,
-        shared_buffer_threshold: 48 << 20,
+        share_buffer_compaction_worker_threads_number: 1,
+        shared_buffer_capacity_mb: 64,
         data_directory: "hummock_001".to_string(),
-        async_checkpoint_enabled: true,
         write_conflict_detection_enabled: true,
-        block_cache_capacity: 64 << 20,
-        meta_cache_capacity: 64 << 20,
+        block_cache_capacity_mb: 64,
+        meta_cache_capacity_mb: 64,
         disable_remote_compactor: false,
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
+        share_buffer_upload_concurrency: 1,
+    }
+}
+
+pub fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
+    vec![(
+        iterator_test_key_of_epoch(0, epoch).into(),
+        StorageValue::new_put(ValueMeta::default(), b"value1".to_vec()),
+    )]
+}
+
+pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
+    let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
+    let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
+    for batch in batches.iter().skip(1) {
+        if min_key.as_slice() > batch.start_key() {
+            min_key = batch.start_key().to_vec();
+        }
+        if max_key.as_slice() < batch.end_key() {
+            max_key = batch.end_key().to_vec();
+        }
+    }
+    SstableInfo {
+        id,
+        key_range: Some(KeyRange {
+            left: min_key,
+            right: max_key,
+            inf: false,
+        }),
+        file_size: batches.len() as u64,
+        table_ids: vec![],
+        unit_id: u64::MAX,
     }
 }
 
@@ -89,12 +122,13 @@ pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
 pub fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
-) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
-    let mut b = SSTableBuilder::new(opts);
+) -> (Bytes, SstableMeta, Vec<u32>) {
+    let mut b = SSTableBuilder::new(0, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }
-    b.finish()
+    let (_, data, meta, table_ids) = b.finish();
+    (data, meta, table_ids)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -107,7 +141,7 @@ pub async fn gen_test_sstable_inner(
 ) -> Sstable {
     let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
     let sst = Sstable { id: sst_id, meta };
-    sstable_store.put(&sst, data, policy).await.unwrap();
+    sstable_store.put(sst.clone(), data, policy).await.unwrap();
     sst
 }
 
@@ -164,5 +198,5 @@ pub async fn count_iter(iter: &mut HummockStateStoreIter) -> usize {
 }
 
 pub fn create_small_table_cache() -> Arc<LruCache<HummockSSTableId, Box<Sstable>>> {
-    Arc::new(LruCache::new(1, 4, 4))
+    Arc::new(LruCache::new(1, 4))
 }

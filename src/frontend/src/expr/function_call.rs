@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -57,7 +58,7 @@ impl std::fmt::Debug for FunctionCall {
                 ExprType::Cast => {
                     assert_eq!(self.inputs.len(), 1);
                     self.inputs[0].fmt(f)?;
-                    return write!(f, "::{:?}", self.return_type);
+                    write!(f, "::{:?}", self.return_type)
                 }
                 ExprType::Add => debug_binary_op(f, "+", &self.inputs),
                 ExprType::Subtract => debug_binary_op(f, "-", &self.inputs),
@@ -72,6 +73,11 @@ impl std::fmt::Debug for FunctionCall {
                 ExprType::GreaterThanOrEqual => debug_binary_op(f, ">=", &self.inputs),
                 ExprType::And => debug_binary_op(f, "AND", &self.inputs),
                 ExprType::Or => debug_binary_op(f, "OR", &self.inputs),
+                ExprType::BitwiseShiftLeft => debug_binary_op(f, "<<", &self.inputs),
+                ExprType::BitwiseShiftRight => debug_binary_op(f, ">>", &self.inputs),
+                ExprType::BitwiseAnd => debug_binary_op(f, "&", &self.inputs),
+                ExprType::BitwiseOr => debug_binary_op(f, "|", &self.inputs),
+                ExprType::BitwiseXor => debug_binary_op(f, "#", &self.inputs),
                 _ => {
                     let func_name = format!("{:?}", self.func_type);
                     let mut builder = f.debug_tuple(&func_name);
@@ -88,6 +94,9 @@ impl std::fmt::Debug for FunctionCall {
 impl FunctionCall {
     /// Create a `FunctionCall` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
+    // The functions listed here are all variadic.  Type signatures of functions that take a fixed
+    // number of arguments are checked
+    // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> Result<Self> {
         let return_type = match func_type {
             ExprType::Case => {
@@ -108,18 +117,22 @@ impl FunctionCall {
             }
             ExprType::Coalesce => {
                 if inputs.is_empty() {
-                    return Err(ErrorCode::BindError(
-                        "Coalesce function must contain at least 1 argument".into(),
-                    )
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `Coalesce` takes at least {} arguments ({} given)",
+                        1, 0
+                    ))
                     .into());
                 }
                 align_types(inputs.iter_mut())
             }
             ExprType::ConcatWs => {
-                if inputs.len() < 2 {
-                    return Err(ErrorCode::BindError(
-                        "ConcatWs function must contain at least 2 arguments".into(),
-                    )
+                let expected = 2;
+                let actual = inputs.len();
+                if actual < expected {
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `ConcatWs` takes at least {} arguments ({} given)",
+                        expected, actual
+                    ))
                     .into());
                 }
 
@@ -129,16 +142,27 @@ impl FunctionCall {
                     .map(|(i, input)| match i {
                         // 0-th arg must be string
                         0 => input.cast_implicit(DataType::Varchar),
-                        // subsequent can be any type
-                        _ => input.cast_explicit(DataType::Varchar),
+                        // subsequent can be any type, using the output format
+                        _ => input.cast_output(),
                     })
-                    .collect::<Result<Vec<_>>>()?;
+                    .try_collect()?;
                 Ok(DataType::Varchar)
             }
-            _ => infer_type(
-                func_type,
-                inputs.iter().map(|expr| expr.return_type()).collect(),
-            ),
+            ExprType::ConcatOp => {
+                inputs = inputs
+                    .into_iter()
+                    .map(|input| input.cast_explicit(DataType::Varchar))
+                    .try_collect()?;
+                Ok(DataType::Varchar)
+            }
+
+            _ => {
+                // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
+                // interface has been enhanced to support mutating (casting) inputs as well.
+                let ret;
+                (inputs, ret) = infer_type(func_type, inputs)?;
+                Ok(ret)
+            }
         }?;
         Ok(Self {
             func_type,
@@ -154,7 +178,7 @@ impl FunctionCall {
             Ok(Literal::new(None, target).into())
         } else if source == target {
             Ok(child)
-        } else if cast_ok(&source, &target, &allows) {
+        } else if cast_ok(&source, &target, allows) {
             Ok(Self {
                 func_type: ExprType::Cast,
                 return_type: target,

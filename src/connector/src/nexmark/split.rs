@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::base::SplitMetaData;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Hash)]
 pub struct NexmarkSplit {
     pub(crate) split_index: i32,
     pub(crate) split_num: i32,
@@ -30,7 +30,7 @@ impl SplitMetaData for NexmarkSplit {
         format!("{}-{}", self.split_num, self.split_index)
     }
 
-    fn to_json_bytes(&self) -> Bytes {
+    fn encode_to_bytes(&self) -> Bytes {
         Bytes::from(serde_json::to_string(self).unwrap())
     }
 
@@ -46,5 +46,13 @@ impl NexmarkSplit {
             split_num,
             start_offset,
         }
+    }
+
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        Self::new(
+            self.split_index,
+            self.split_num,
+            Some(start_offset.as_str().parse::<u64>().unwrap()),
+        )
     }
 }

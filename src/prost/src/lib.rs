@@ -1,29 +1,49 @@
 #![allow(clippy::all)]
+#![allow(rustdoc::bare_urls)]
 
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/catalog.rs")]
 pub mod catalog;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/common.rs")]
 pub mod common;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/data.rs")]
 pub mod data;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/ddl_service.rs")]
 pub mod ddl_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/expr.rs")]
 pub mod expr;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/meta.rs")]
 pub mod meta;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/plan_common.rs")]
 pub mod plan_common;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/batch_plan.rs")]
 pub mod batch_plan;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/task_service.rs")]
 pub mod task_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/stream_plan.rs")]
 pub mod stream_plan;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/stream_service.rs")]
 pub mod stream_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/hummock.rs")]
 pub mod hummock;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/user.rs")]
+pub mod user;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/source.rs")]
+pub mod source;
+
 
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]
@@ -61,6 +81,12 @@ pub mod stream_service_serde;
 #[rustfmt::skip]
 #[path = "hummock.serde.rs"]
 pub mod hummock_serde;
+#[rustfmt::skip]
+#[path = "user.serde.rs"]
+pub mod user_serde;
+#[rustfmt::skip]
+#[path = "source.serde.rs"]
+pub mod source_serde;
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]

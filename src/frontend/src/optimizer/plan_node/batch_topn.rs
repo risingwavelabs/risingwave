@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::TopNNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -71,7 +71,7 @@ impl ToDistributedBatch for BatchTopN {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self
             .input()
-            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
+            .to_distributed_with_required(&Order::any(), &RequiredDist::single())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }

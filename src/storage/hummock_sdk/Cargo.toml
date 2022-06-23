@@ -1,12 +1,14 @@
 [package]
 name = "risingwave_hummock_sdk"
-version = "0.1.0"
+version = "0.1.9"
 edition = "2021"
 
 [dependencies]
 bytes = "1"
 hex = "0.4"
 log = "0.4"
+madsim = "=0.2.0-alpha.3"
 prost = "0.10"
 risingwave_pb = { path = "../../prost" }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }

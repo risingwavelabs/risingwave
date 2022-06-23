@@ -583,6 +583,13 @@ impl<B: BufMut> Serializer<B> {
         self.output.put_u32(nsecs);
         Ok(())
     }
+
+    /// Serialize bytes of ListValue or StructValue.
+    pub fn serialize_struct_or_list(&mut self, bytes: Vec<u8>) -> Result<()> {
+        self.output.put_u32(bytes.len() as u32);
+        self.output.put_slice(bytes.as_slice());
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -784,7 +791,7 @@ mod tests {
     fn test_decimal_e_m() {
         // from: https://sqlite.org/src4/doc/trunk/www/key_encoding.wiki
         let cases = vec![
-            // (decimal, exponets, significand)
+            // (decimal, exponents, significand)
             ("1.0", 1, "02"),
             ("10.0", 1, "14"),
             ("10", 1, "14"),
@@ -818,10 +825,10 @@ mod tests {
             ("9223372036854775807", 10, "13 2d 43 91 07 89 6d 9b 75 0e"),
         ];
 
-        for (decimal, exponets, significand) in cases {
+        for (decimal, exponents, significand) in cases {
             let d = decimal.parse::<rust_decimal::Decimal>().unwrap();
             let (exp, sig) = Serializer::<Vec<u8>>::decimal_e_m(d.mantissa(), d.scale() as u8);
-            assert_eq!(exp, exponets, "wrong exponets for decimal: {decimal}");
+            assert_eq!(exp, exponents, "wrong exponents for decimal: {decimal}");
             assert_eq!(
                 sig.iter()
                     .map(|b| format!("{b:02x}"))

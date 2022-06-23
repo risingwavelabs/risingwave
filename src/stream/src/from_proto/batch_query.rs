@@ -12,14 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use itertools::Itertools;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
-use risingwave_pb::stream_plan::ParallelUnitMapping;
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -35,18 +30,41 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
+        let pk_indices = node.pk_indices.iter().map(|&i| i as usize).collect();
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
-        let table_id = TableId::from(&node.table_ref_id);
-        let column_descs = node
-            .column_descs
+
+        let table_desc: &CellBasedTableDesc = node.get_table_desc()?;
+        let table_id = TableId {
+            table_id: table_desc.table_id,
+        };
+
+        let pk_descs = table_desc
+            .order_key
             .iter()
-            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
+            .map(OrderedColumnDesc::from)
             .collect_vec();
+        let order_types = pk_descs.iter().map(|desc| desc.order).collect_vec();
+
+        let column_descs = table_desc
+            .columns
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+        let column_ids = node
+            .column_ids
+            .iter()
+            .copied()
+            .map(ColumnId::from)
+            .collect();
+
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new_adhoc(
+        let table = CellBasedTable::new_partial(
             keyspace,
             column_descs,
-            Arc::new(StateStoreMetrics::unused()),
+            column_ids,
+            order_types,
+            pk_indices,
+            None,
         );
         let key_indices = node
             .get_distribution_keys()
@@ -54,18 +72,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|key| *key as usize)
             .collect_vec();
 
-        let parallel_unit_id = node.get_parallel_unit_id() as u32;
-        let hash_filter = if let Some(mapping) = &node.hash_mapping {
-            generate_hash_filter(mapping, parallel_unit_id)
-        } else {
-            // TODO: remove this branch once we deprecate Java frontend.
-            // manually build bitmap with full of ones
-            let mut hash_filter_builder = BitmapBuilder::with_capacity(VIRTUAL_NODE_COUNT);
-            for _ in 0..VIRTUAL_NODE_COUNT {
-                hash_filter_builder.append(true);
-            }
-            hash_filter_builder.finish()
-        };
+        let hash_filter = params.vnode_bitmap.expect("no vnode bitmap");
 
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
@@ -78,43 +85,9 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             },
             key_indices,
             hash_filter,
+            pk_descs,
         );
 
         Ok(executor.boxed())
-    }
-}
-
-/// Generate bitmap from compressed parallel unit mapping.
-fn generate_hash_filter(mapping: &ParallelUnitMapping, parallel_unit_id: u32) -> Bitmap {
-    let mut builder = BitmapBuilder::with_capacity(VIRTUAL_NODE_COUNT);
-    let mut start: usize = 0;
-    for (idx, range_right) in mapping.original_indices.iter().enumerate() {
-        let bit = parallel_unit_id == mapping.data[idx];
-        for _ in start..=*range_right as usize {
-            builder.append(bit);
-        }
-        start = *range_right as usize + 1;
-    }
-    builder.finish()
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_pb::stream_plan::ParallelUnitMapping;
-
-    use super::*;
-
-    #[test]
-    fn test_generate_hash_filter() {
-        let mapping = ParallelUnitMapping {
-            original_indices: vec![681, 1363, 2045, 2046, 2047],
-            data: vec![1, 2, 3, 1, 2],
-        };
-        let hash_filter = generate_hash_filter(&mapping, 1);
-        assert!(hash_filter.is_set(0).unwrap());
-        assert!(hash_filter.is_set(681).unwrap());
-        assert!(!hash_filter.is_set(682).unwrap());
-        assert!(hash_filter.is_set(2046).unwrap());
-        assert!(!hash_filter.is_set(2047).unwrap());
     }
 }

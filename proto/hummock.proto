@@ -6,10 +6,6 @@ import "common.proto";
 
 option optimize_for = SPEED;
 
-message SstableRefId {
-  uint64 id = 1;
-}
-
 message SstableIdInfo {
   uint64 id = 1;
   // Timestamp when the sstable id is created, in seconds.
@@ -20,17 +16,12 @@ message SstableIdInfo {
   uint64 meta_delete_timestamp = 4;
 }
 
-message VNodeBitmap {
-  uint32 table_id = 1;
-  uint32 maplen = 2;
-  bytes bitmap = 3;
-}
-
 message SstableInfo {
   uint64 id = 1;
   KeyRange key_range = 2;
   uint64 file_size = 3;
-  repeated VNodeBitmap vnode_bitmaps = 4;
+  repeated uint32 table_ids = 4;
+  uint64 unit_id = 5;
 }
 
 enum LevelType {
@@ -42,6 +33,7 @@ message Level {
   uint32 level_idx = 1;
   LevelType level_type = 2;
   repeated SstableInfo table_infos = 3;
+  uint64 total_file_size = 4;
 }
 
 message UncommittedEpoch {
@@ -49,14 +41,13 @@ message UncommittedEpoch {
   repeated SstableInfo tables = 2;
 }
 
-message HummockVersionRefId {
-  uint64 id = 1;
-}
-
 message HummockVersion {
+  message Levels {
+    repeated Level levels = 1;
+  }
   uint64 id = 1;
-  repeated Level levels = 2;
-  repeated UncommittedEpoch uncommitted_epochs = 3;
+  // Levels of each compaction group
+  map<uint64, Levels> levels = 2;
   uint64 max_committed_epoch = 4;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
@@ -65,17 +56,6 @@ message HummockVersion {
 
 message HummockSnapshot {
   uint64 epoch = 1;
-}
-
-message AddTablesRequest {
-  uint32 context_id = 1;
-  repeated SstableInfo tables = 2;
-  uint64 epoch = 3;
-}
-
-message AddTablesResponse {
-  common.Status status = 1;
-  HummockVersion version = 2;
 }
 
 message PinVersionRequest {
@@ -116,22 +96,19 @@ message UnpinSnapshotResponse {
   common.Status status = 1;
 }
 
+message UnpinSnapshotBeforeRequest {
+  uint32 context_id = 1;
+  HummockSnapshot min_snapshot = 3;
+}
+
+message UnpinSnapshotBeforeResponse {
+  common.Status status = 1;
+}
+
 message KeyRange {
   bytes left = 1;
   bytes right = 2;
   bool inf = 3;
-}
-
-message TableSetStatistics {
-  uint32 level_idx = 1;
-  double size_gb = 2;
-  uint64 cnt = 3;
-}
-
-message CompactMetrics {
-  TableSetStatistics read_level_n = 1;
-  TableSetStatistics read_level_nplus1 = 2;
-  TableSetStatistics write = 3;
 }
 
 message CompactTask {
@@ -142,50 +119,49 @@ message CompactTask {
   repeated KeyRange splits = 2;
   // low watermark in 'ts-aware compaction'
   uint64 watermark = 3;
-  // compacion output, which will be added to [`target_level`] of LSM after compaction
+  // compaction output, which will be added to [`target_level`] of LSM after compaction
   repeated SstableInfo sorted_output_ssts = 4;
   // task id assigned by hummock storage service
   uint64 task_id = 5;
   // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool is_target_ultimate_and_leveling = 7;
-  CompactMetrics metrics = 8;
   bool task_status = 9;
-  repeated CompactionGroup.PrefixPair prefix_pairs = 10;
   // Hash mapping from virtual node to parallel unit. Since one compactor might deal with SSTs
   // with data for more than one relational state tables, here a vector is required.
   repeated common.ParallelUnitMapping vnode_mappings = 11;
-}
-
-message CompactionGroup {
-  message PrefixPair {
-    // key value with `prefix` belongs to compaction group `group_id`
-    uint64 group_id = 1;
-    bytes prefix = 2;
-  }
+  // compaction group the task belongs to
+  uint64 compaction_group_id = 12;
+  // existing_table_ids for compaction drop key
+  repeated uint32 existing_table_ids = 13;
+  uint32 compression_algorithm = 14;
 }
 
 message LevelHandler {
   message SstTask {
     uint64 task_id = 1;
     repeated uint64 ssts = 2;
+    uint64 total_file_size = 3;
   }
   uint32 level = 1;
   repeated SstTask tasks = 3;
 }
 
 message CompactStatus {
-  repeated LevelHandler level_handlers = 1;
-  uint64 next_compact_task_id = 2;
+  uint64 compaction_group_id = 1;
+  repeated LevelHandler level_handlers = 2;
+  CompactionConfig compaction_config = 3;
+}
+
+message CompactionGroup {
+  uint64 id = 1;
+  repeated bytes member_prefixes = 2;
+  CompactionConfig compaction_config = 3;
 }
 
 message CompactTaskAssignment {
   CompactTask compact_task = 1;
   uint32 context_id = 2;
-}
-
-message CompactTaskRefId {
-  uint64 id = 1;
 }
 
 message GetCompactionTasksRequest {}
@@ -203,10 +179,6 @@ message ReportCompactionTasksResponse {
   common.Status status = 1;
 }
 
-message HummockContextRefId {
-  uint32 id = 1;
-}
-
 message HummockPinnedVersion {
   uint32 context_id = 1;
   repeated uint64 version_id = 2;
@@ -221,22 +193,6 @@ message HummockStaleSstables {
   uint64 version_id = 1;
   // sstable ids
   repeated uint64 id = 2;
-}
-
-message CommitEpochRequest {
-  uint64 epoch = 1;
-}
-
-message CommitEpochResponse {
-  common.Status status = 1;
-}
-
-message AbortEpochRequest {
-  uint64 epoch = 1;
-}
-
-message AbortEpochResponse {
-  common.Status status = 1;
 }
 
 message GetNewTableIdRequest {}
@@ -267,18 +223,62 @@ message ReportVacuumTaskResponse {
   common.Status status = 1;
 }
 
+message GetCompactionGroupsRequest {}
+
+message GetCompactionGroupsResponse {
+  common.Status status = 1;
+  repeated CompactionGroup compaction_groups = 2;
+}
+
+message TriggerManualCompactionRequest {
+  uint64 compaction_group_id = 1;
+  KeyRange key_range = 2;
+  uint32 table_id = 3;
+  uint32 level = 4;
+}
+
+message TriggerManualCompactionResponse {
+  common.Status status = 1;
+}
+
+message ListSstableIdInfosRequest {
+  uint64 version_id = 1;
+}
+
+message ListSstableIdInfosResponse {
+  common.Status status = 1;
+  repeated SstableIdInfo sstable_id_infos = 2;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
-  rpc AddTables(AddTablesRequest) returns (AddTablesResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
-  rpc CommitEpoch(CommitEpochRequest) returns (CommitEpochResponse);
-  rpc AbortEpoch(AbortEpochRequest) returns (AbortEpochResponse);
+  rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
+  rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
+  rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
+  rpc ListSstableIdInfos(ListSstableIdInfosRequest) returns (ListSstableIdInfosResponse);
 }
 
 service CompactorService {}
+
+message CompactionConfig {
+  enum CompactionMode {
+    RANGE = 0;
+    CONSISTENT_HASH = 1;
+  }
+  uint64 max_bytes_for_level_base = 1;
+  uint64 max_level = 2;
+  uint64 max_bytes_for_level_multiplier = 3;
+  uint64 max_compaction_bytes = 4;
+  uint64 min_compaction_bytes = 5;
+  uint64 level0_tigger_file_numer = 6;
+  uint64 level0_tier_compact_file_number = 7;
+  CompactionMode compaction_mode = 8;
+  repeated string compression_algorithm = 9;
+}

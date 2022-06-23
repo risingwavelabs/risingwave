@@ -11,7 +11,29 @@ option optimize_for = SPEED;
 
 message RowSeqScanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
-  repeated plan_common.ColumnDesc column_descs = 2;
+  repeated int32 column_ids = 2;
+  ScanRange scan_range = 3;
+}
+
+// The range to scan, which specifies a consecutive range of the PK
+// and can represent: (Suppose there are N columns in the PK)
+// - full table scan: `eq_conds` is empty, and `lower_bound` & `upper_bound` are `None`
+// - index range scan: `eq_conds` includes i (between 0 and N-1, inclusive) values,
+//     and `lower_bound` & `upper_bound` is the range for the (i+1)th column
+// - index point get: `eq_conds` includes N values, and `lower_bound` & `upper_bound` are `None`
+message ScanRange {
+  // The i-th element represents the value of the i-th PK column.
+  repeated expr.ExprNode eq_conds = 1;
+
+  // `None` represent unbounded.
+  message Bound {
+    expr.ExprNode value = 1;
+    bool inclusive = 2;
+  }
+  //  The lower bound of the next PK column subsequent to those in `eq_conds`.
+  Bound lower_bound = 2;
+  //  The upper bound of the next PK column subsequent to those in `eq_conds`.
+  Bound upper_bound = 3;
 }
 
 message SourceScanNode {
@@ -43,6 +65,11 @@ message DeleteNode {
   plan_common.TableRefId table_source_ref_id = 1;
 }
 
+message UpdateNode {
+  plan_common.TableRefId table_source_ref_id = 1;
+  repeated expr.ExprNode exprs = 2;
+}
+
 message ValuesNode {
   message ExprTuple {
     repeated expr.ExprNode cells = 1;
@@ -69,6 +96,7 @@ message LimitNode {
 message NestedLoopJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode join_cond = 2;
+  repeated uint32 output_indices = 3;
 }
 
 message HashAggNode {
@@ -86,6 +114,7 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
+  repeated uint32 output_indices = 5;
 }
 
 message SortMergeJoinNode {
@@ -93,18 +122,25 @@ message SortMergeJoinNode {
   repeated int32 left_keys = 2;
   repeated int32 right_keys = 3;
   plan_common.OrderType direction = 4;
+  repeated uint32 output_indices = 5;
 }
 
 message HopWindowNode {
   expr.InputRefExpr time_col = 1;
   data.IntervalUnit window_slide = 2;
   data.IntervalUnit window_size = 3;
+  repeated uint32 output_indices = 4;
 }
 
-message GenerateSeriesNode {
-  expr.ExprNode start = 1;
-  expr.ExprNode stop = 2;
-  expr.ExprNode step = 3;
+message TableFunctionNode {
+  enum Type {
+    GENERATE = 0;
+    UNNEST = 1;
+  }
+  Type function_type = 1;
+  repeated expr.ExprNode args = 2;
+  // The element type of the return set.
+  data.DataType return_type = 3;
 }
 
 // Task is a running instance of Stage.
@@ -122,10 +158,18 @@ message TaskOutputId {
   uint32 output_id = 2;
 }
 
+message LocalExecutePlan {
+  batch_plan.PlanFragment plan = 1;
+  uint64 epoch = 2;
+}
+
 // ExchangeSource describes where to read results from children operators
 message ExchangeSource {
   TaskOutputId task_output_id = 1;
   common.HostAddress host = 2;
+  oneof local_execute_plan {
+    LocalExecutePlan plan = 3;
+  }
 }
 
 message ExchangeNode {
@@ -143,7 +187,8 @@ message PlanNode {
   oneof node_body {
     InsertNode insert = 2;
     DeleteNode delete = 3;
-    ProjectNode project = 4;
+    UpdateNode update = 4;
+    ProjectNode project = 5;
     HashAggNode hash_agg = 7;
     FilterNode filter = 8;
     ExchangeNode exchange = 9;
@@ -158,7 +203,7 @@ message PlanNode {
     MergeSortExchangeNode merge_sort_exchange = 21;
     SortMergeJoinNode sort_merge_join = 22;
     HopWindowNode hop_window = 25;
-    GenerateSeriesNode generate_series = 26;
+    TableFunctionNode table_function = 26;
   }
   string identity = 24;
 }

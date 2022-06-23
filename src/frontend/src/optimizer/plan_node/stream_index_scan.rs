@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
 use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
+use crate::catalog::ColumnId;
 use crate::optimizer::property::Distribution;
 
 /// `StreamIndexScan` is a virtual plan node to represent a stream table scan. It will be converted
@@ -87,34 +88,20 @@ impl StreamIndexScan {
         use risingwave_pb::stream_plan::*;
 
         let batch_plan_node = BatchPlanNode {
-            table_ref_id: Some(TableRefId {
-                table_id: self.logical.table_desc().table_id.table_id as i32,
-                schema_ref_id: Default::default(),
-            }),
-            column_descs: self
-                .schema()
-                .fields()
+            table_desc: Some(self.logical.table_desc().to_protobuf()),
+            column_ids: self
+                .logical
+                .output_column_ids()
                 .iter()
-                .zip_eq(self.logical.column_descs().iter())
-                .zip_eq(self.logical.column_names().iter())
-                .map(|((field, col), column_name)| ColumnDesc {
-                    column_type: Some(field.data_type().to_protobuf()),
-                    column_id: col.column_id.into(),
-                    name: column_name.clone(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                })
+                .map(ColumnId::get_id)
                 .collect(),
             distribution_keys: self
                 .base
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|k| *k as i32)
+                .map(|k| *k as u32)
                 .collect_vec(),
-            // Will fill when resolving chain node.
-            hash_mapping: None,
-            parallel_unit_id: 0,
         };
 
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();

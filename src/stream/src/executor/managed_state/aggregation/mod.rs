@@ -16,21 +16,22 @@
 
 pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
+use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::write_batch::WriteBatch;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::StateStore;
 pub use value::*;
 
 use crate::executor::aggregation::AggCall;
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::PkDataTypes;
 
 mod extreme;
-mod extreme_serializer;
+
+#[allow(dead_code)]
 mod string_agg;
 mod value;
 
@@ -54,7 +55,7 @@ pub fn verify_batch(
 /// when they are not dirty.
 pub enum ManagedStateImpl<S: StateStore> {
     /// States as single scalar value e.g. `COUNT`, `SUM`
-    Value(ManagedValueState<S>),
+    Value(ManagedValueState),
 
     /// States as table structure e.g. `MAX`, `STRING_AGG`
     Table(Box<dyn ManagedTableState<S>>),
@@ -67,18 +68,27 @@ impl<S: StateStore> ManagedStateImpl<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-    ) -> Result<()> {
+        state_table: &mut StateTable<S>,
+    ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_batch(ops, visibility, data).await,
-            Self::Table(state) => state.apply_batch(ops, visibility, data, epoch).await,
+            Self::Table(state) => {
+                state
+                    .apply_batch(ops, visibility, data, epoch, state_table)
+                    .await
+            }
         }
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(&mut self, epoch: u64) -> Result<Datum> {
+    pub async fn get_output(
+        &mut self,
+        epoch: u64,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output().await,
-            Self::Table(state) => state.get_output(epoch).await,
+            Self::Table(state) => state.get_output(epoch, state_table).await,
         }
     }
 
@@ -91,22 +101,24 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+    pub async fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.flush(write_batch),
-            Self::Table(state) => state.flush(write_batch),
+            Self::Value(state) => state.flush(state_table).await,
+            Self::Table(state) => state.flush(state_table),
         }
     }
 
     /// Create a managed state from `agg_call`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_managed_state(
         agg_call: AggCall,
-        keyspace: Keyspace<S>,
         row_count: Option<usize>,
         pk_data_types: PkDataTypes,
         is_row_count: bool,
         key_hash_code: Option<HashCode>,
-    ) -> Result<Self> {
+        pk: Option<&Row>,
+        state_table: &StateTable<S>,
+    ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
                 assert!(
@@ -117,18 +129,18 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 // optimization: use single-value state for append-only min/max
                 if agg_call.append_only {
                     Ok(Self::Value(
-                        ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                        ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
                     ))
                 } else {
                     Ok(Self::Table(
                         create_streaming_extreme_state(
                             agg_call,
-                            keyspace,
                             row_count.unwrap(),
                             // TODO: estimate a good cache size instead of hard-coding
                             Some(1024),
                             pk_data_types,
                             key_hash_code,
+                            pk,
                         )
                         .await?,
                     ))
@@ -136,32 +148,30 @@ impl<S: StateStore> ManagedStateImpl<S> {
             }
             AggKind::StringAgg => {
                 // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`
-                Err(ErrorCode::NotImplemented(
-                    "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`"
-                        .to_string(),
-                    None.into(),
-                )
-                .into())
+                Err(StreamExecutorError::not_implemented(
+                    "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`",
+                    None,
+                ))
             }
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
-            AggKind::Avg | AggKind::Count | AggKind::Sum => {
+            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
                 assert!(
                     is_row_count || row_count.is_some(),
                     "should set row_count for value states other than AggKind::RowCount"
                 );
                 Ok(Self::Value(
-                    ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                    ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
                 ))
             }
             AggKind::RowCount => {
                 assert!(is_row_count);
                 Ok(Self::Value(
-                    ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                    ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
                 ))
             }
             AggKind::SingleValue => Ok(Self::Value(
-                ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
             )),
         }
     }

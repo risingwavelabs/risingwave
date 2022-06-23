@@ -17,10 +17,15 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 
-use crate::hummock::iterator::{BackwardMergeIterator, HummockIterator};
+use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
+use crate::hummock::iterator::{
+    Backward, BackwardMergeIterator, BoxedHummockIterator, DirectedUserIterator,
+    DirectedUserIteratorBuilder, HummockIterator,
+};
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
+use crate::monitor::StateStoreMetrics;
 
 /// [`BackwardUserIterator`] can be used by user directly.
 pub struct BackwardUserIterator {
@@ -256,7 +261,24 @@ impl BackwardUserIterator {
     }
 }
 
-#[allow(unused)]
+impl DirectedUserIteratorBuilder for BackwardUserIterator {
+    type Direction = Backward;
+
+    fn create(
+        iterator_iter: impl IntoIterator<Item = BoxedHummockIterator<Backward>>,
+        stats: Arc<StateStoreMetrics>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_epoch: u64,
+        version: Option<Arc<PinnedVersion>>,
+    ) -> DirectedUserIterator {
+        let iterator = UnorderedMergeIteratorInner::<Backward>::new(iterator_iter, stats);
+        DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
+            iterator, key_range, read_epoch, version,
+        ))
+    }
+}
+
+#[expect(unused_variables)]
 #[cfg(test)]
 mod tests {
     use std::cmp::Reverse;
@@ -267,7 +289,6 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use risingwave_hummock_sdk::key::{prev_key, user_key};
-    use risingwave_hummock_sdk::VersionedComparator;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -275,13 +296,12 @@ mod tests {
         gen_iterator_test_sstable_from_kv_pair, iterator_test_key_of, iterator_test_key_of_epoch,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{BoxedBackwardHummockIterator, BoxedForwardHummockIterator};
+    use crate::hummock::iterator::BoxedBackwardHummockIterator;
     use crate::hummock::sstable::Sstable;
     use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BackwardSSTableIterator, SstableStoreRef};
     use crate::monitor::StateStoreMetrics;
-    use crate::storage_value::ValueMeta;
 
     #[tokio::test]
     async fn test_backward_user_basic() {

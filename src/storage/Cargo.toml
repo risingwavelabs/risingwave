@@ -1,37 +1,33 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.7"
+version = "0.1.9"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
-async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-endpoint = { version = "0.11", default-features = false }
-aws-sdk-s3 = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.41"
-aws-smithy-types = "0.41"
-aws-types = { version = "0.11", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crc32fast = "1"
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 either = "1"
-enum-as-inner = "0.4"
+enum-as-inner = "0.5"
 fail = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 libc = "0.2"
 log = "0.4"
 lz4 = "1.23.1"
+madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.8", features = ["future"] }
+nix = { version = "0.24.1", features = ["fs"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -41,6 +37,7 @@ prost = "0.10"
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 # rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
@@ -53,7 +50,7 @@ spin = "0.9"
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
-tokio = { version = "1", features = [
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "fs",
     "rt",
     "rt-multi-thread",
@@ -62,13 +59,15 @@ tokio = { version = "1", features = [
     "time",
     "signal",
 ] }
+tokio-metrics = "0.1.0"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
-tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 twox-hash = "1"
 value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
+zstd = "0.11.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }
@@ -77,7 +76,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
-tempfile = "3"
+risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
 [features]
@@ -101,4 +100,8 @@ harness = false
 
 [[bench]]
 name = "bench_fs_operation"
+harness = false
+
+[[bench]]
+name = "bench_compression"
 harness = false

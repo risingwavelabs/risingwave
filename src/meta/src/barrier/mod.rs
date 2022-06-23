@@ -20,15 +20,17 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
-use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
+use risingwave_pb::stream_service::{
+    BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
+};
 use smallvec::SmallVec;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::{oneshot, watch, RwLock};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -36,7 +38,8 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
-use self::notifier::{Notifier, UnfinishedNotifiers};
+use self::notifier::Notifier;
+use self::progress::CreateMviewProgressTracker;
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv};
@@ -48,6 +51,7 @@ use crate::stream::FragmentManagerRef;
 mod command;
 mod info;
 mod notifier;
+mod progress;
 mod recovery;
 
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
@@ -194,10 +198,8 @@ where
         }
     }
 
-    pub async fn start(
-        barrier_manager: BarrierManagerRef<S>,
-    ) -> (JoinHandle<()>, UnboundedSender<()>) {
-        let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    pub async fn start(barrier_manager: BarrierManagerRef<S>) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             barrier_manager.run(shutdown_rx).await;
         });
@@ -206,8 +208,8 @@ where
     }
 
     /// Start an infinite loop to take scheduled barriers and send them.
-    async fn run(&self, mut shutdown_rx: UnboundedReceiver<()>) {
-        let mut unfinished = UnfinishedNotifiers::default();
+    async fn run(&self, mut shutdown_rx: Receiver<()>) {
+        let mut tracker = CreateMviewProgressTracker::default();
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
 
         if self.enable_recovery {
@@ -217,11 +219,11 @@ where
             assert!(new_epoch > state.prev_epoch);
             state.prev_epoch = new_epoch;
 
-            let (new_epoch, actors_to_finish, finished_create_mviews) =
+            let (new_epoch, actors_to_track, create_mview_progress) =
                 self.recovery(state.prev_epoch).await;
-            unfinished.add(new_epoch.0, actors_to_finish, vec![]);
-            for finished in finished_create_mviews {
-                unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+            tracker.add(new_epoch, actors_to_track, vec![]);
+            for progress in create_mview_progress {
+                tracker.update(progress);
             }
             state.prev_epoch = new_epoch;
             state.update(self.env.meta_store()).await.unwrap();
@@ -233,7 +235,7 @@ where
             tokio::select! {
                 biased;
                 // Shutdown
-                _ = shutdown_rx.recv() => {
+                _ = &mut shutdown_rx => {
                     tracing::info!("Barrier manager is shutting down");
                     return;
                 }
@@ -258,7 +260,7 @@ where
             assert!(new_epoch > state.prev_epoch);
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
-                self.env.stream_clients_ref(),
+                self.env.stream_client_pool_ref(),
                 &info,
                 &state.prev_epoch,
                 &new_epoch,
@@ -273,10 +275,10 @@ where
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
 
                     // Then try to finish the barrier for Create MVs.
-                    let actors_to_finish = command_ctx.actors_to_finish();
-                    unfinished.add(new_epoch.0, actors_to_finish, notifiers);
-                    for finished in responses.into_iter().flat_map(|r| r.finished_create_mviews) {
-                        unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                    let actors_to_track = command_ctx.actors_to_track();
+                    tracker.add(new_epoch, actors_to_track, notifiers);
+                    for progress in responses.into_iter().flat_map(|r| r.create_mview_progress) {
+                        tracker.update(progress);
                     }
 
                     state.prev_epoch = new_epoch;
@@ -287,12 +289,12 @@ where
                         .for_each(|notifier| notifier.notify_collection_failed(e.clone()));
                     if self.enable_recovery {
                         // If failed, enter recovery mode.
-                        let (new_epoch, actors_to_finish, finished_create_mviews) =
+                        let (new_epoch, actors_to_track, create_mview_progress) =
                             self.recovery(new_epoch).await;
-                        unfinished = UnfinishedNotifiers::default();
-                        unfinished.add(new_epoch.0, actors_to_finish, vec![]);
-                        for finished in finished_create_mviews {
-                            unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                        tracker = CreateMviewProgressTracker::default(); // Reset progress tracker
+                        tracker.add(new_epoch, actors_to_track, vec![]);
+                        for progress in create_mview_progress {
+                            tracker.update(progress);
                         }
 
                         state.prev_epoch = new_epoch;
@@ -310,26 +312,38 @@ where
     async fn run_inner<'a>(
         &self,
         command_context: &CommandContext<'a, S>,
-    ) -> Result<Vec<InjectBarrierResponse>> {
+    ) -> Result<Vec<BarrierCompleteResponse>> {
         let timer = self.metrics.barrier_latency.start_timer();
 
         // Wait for all barriers collected
         let result = self.inject_barrier(command_context).await;
         // Commit this epoch to Hummock
         if command_context.prev_epoch.0 != INVALID_EPOCH {
-            match result {
-                Ok(_) => {
+            match &result {
+                Ok(resps) => {
                     // We must ensure all epochs are committed in ascending order, because
                     // the storage engine will query from new to old in the order in which
                     // the L0 layer files are generated. see https://github.com/singularity-data/risingwave/issues/1251
+                    let synced_ssts: Vec<LocalSstableInfo> = resps
+                        .iter()
+                        .flat_map(|resp| resp.sycned_sstables.clone())
+                        .map(|grouped| {
+                            (
+                                grouped.compaction_group_id,
+                                grouped.sst.expect("field not None"),
+                            )
+                        })
+                        .collect_vec();
                     self.hummock_manager
-                        .commit_epoch(command_context.prev_epoch.0)
+                        .commit_epoch(command_context.prev_epoch.0, synced_ssts)
                         .await?;
                 }
-                Err(_) => {
-                    self.hummock_manager
-                        .abort_epoch(command_context.prev_epoch.0)
-                        .await?;
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to commit epoch {}: {:#?}",
+                        command_context.prev_epoch.0,
+                        err
+                    );
                 }
             };
         }
@@ -345,14 +359,12 @@ where
     async fn inject_barrier<'a>(
         &self,
         command_context: &CommandContext<'a, S>,
-    ) -> Result<Vec<InjectBarrierResponse>> {
+    ) -> Result<Vec<BarrierCompleteResponse>> {
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info;
-
-        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
+        let inject_futures = info.node_map.iter().filter_map(|(node_id, node)| {
             let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
             let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
-
             if actor_ids_to_collect.is_empty() {
                 // No need to send or collect barrier for this node.
                 assert!(actor_ids_to_send.is_empty());
@@ -365,13 +377,12 @@ where
                         curr: command_context.curr_epoch.0,
                         prev: command_context.prev_epoch.0,
                     }),
-                    mutation: Some(mutation),
+                    mutation,
                     // TODO(chi): add distributed tracing
                     span: vec![],
                 };
-
                 async move {
-                    let mut client = self.env.stream_clients().get(node).await?;
+                    let mut client = self.env.stream_client_pool().get(node).await?;
 
                     let request = InjectBarrierRequest {
                         request_id,
@@ -384,12 +395,45 @@ where
                         "inject barrier request: {:?}", request
                     );
 
-                    // This RPC returns only if this worker node has collected this barrier.
+                    // This RPC returns only if this worker node has injected this barrier.
                     client
                         .inject_barrier(request)
                         .await
                         .map(tonic::Response::<_>::into_inner)
-                        .to_rw_result()
+                        .map_err(RwError::from)
+                }
+                .into()
+            }
+        });
+        try_join_all(inject_futures).await?;
+        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
+            let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+            let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
+            if actor_ids_to_collect.is_empty() {
+                // No need to send or collect barrier for this node.
+                assert!(actor_ids_to_send.is_empty());
+                None
+            } else {
+                let request_id = Uuid::new_v4().to_string();
+                let prev_epoch = command_context.prev_epoch.0;
+                async move {
+                    let mut client = self.env.stream_client_pool().get(node).await?;
+
+                    let request = BarrierCompleteRequest {
+                        request_id,
+                        prev_epoch,
+                    };
+                    tracing::trace!(
+                        target: "events::meta::barrier::barrier_complete",
+                        "barrier complete request: {:?}", request
+                    );
+
+                    // This RPC returns only if this worker node has collected this barrier.
+                    client
+                        .barrier_complete(request)
+                        .await
+                        .map(tonic::Response::<_>::into_inner)
+                        .map_err(RwError::from)
                 }
                 .into()
             }
@@ -419,13 +463,11 @@ where
     }
 
     /// Schedule a command and return immediately.
-    #[allow(dead_code)]
     pub async fn schedule_command(&self, command: Command) -> Result<()> {
         self.do_schedule(command, Default::default()).await
     }
 
     /// Schedule a command and return when its corresponding barrier is about to sent.
-    #[allow(dead_code)]
     pub async fn issue_command(&self, command: Command) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.do_schedule(

@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::iter::once;
 
 use madsim::collections::HashSet;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use tokio::sync::oneshot;
 
-use super::{CollectResult, FinishedCreateMview};
+use super::progress::ChainState;
+use super::CollectResult;
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
@@ -56,7 +59,7 @@ enum ManagedBarrierStateInner {
 pub(super) struct ManagedBarrierState {
     inner: ManagedBarrierStateInner,
 
-    pub finished_create_mviews: Vec<FinishedCreateMview>,
+    pub create_mview_progress: HashMap<ActorId, ChainState>,
 }
 
 impl ManagedBarrierState {
@@ -67,7 +70,7 @@ impl ManagedBarrierState {
                 // TODO: specify last epoch
                 last_epoch: None,
             },
-            finished_create_mviews: Default::default(),
+            create_mview_progress: Default::default(),
         }
     }
 
@@ -94,7 +97,20 @@ impl ManagedBarrierState {
                     last_epoch: Some(epoch),
                 },
             );
-            let finished_create_mviews = std::mem::take(&mut self.finished_create_mviews);
+            let create_mview_progress = std::mem::take(&mut self.create_mview_progress)
+                .into_iter()
+                .map(|(actor, state)| CreateMviewProgress {
+                    chain_actor_id: actor,
+                    done: matches!(state, ChainState::Done),
+                    consumed_epoch: match state {
+                        ChainState::ConsumingUpstream(consumed_epoch) => {
+                            assert!(consumed_epoch <= epoch);
+                            consumed_epoch
+                        }
+                        ChainState::Done => epoch,
+                    },
+                })
+                .collect();
 
             match state {
                 ManagedBarrierStateInner::Issued {
@@ -102,7 +118,8 @@ impl ManagedBarrierState {
                 } => {
                     // Notify about barrier finishing.
                     let result = CollectResult {
-                        finished_create_mviews,
+                        create_mview_progress,
+                        synced_sstables: vec![],
                     };
                     if collect_notifier.send(result).is_err() {
                         warn!("failed to notify barrier collection with epoch {}", epoch)

@@ -15,16 +15,19 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops;
 
+use bytes::Buf;
 use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
+use crate::error::Result as RwResult;
 use crate::hash::HashCode;
 use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
     serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
 };
 use crate::util::sort_util::OrderType;
+use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 impl DataChunk {
     /// Get an iterator for visible rows.
@@ -182,6 +185,13 @@ impl ops::Index<usize> for Row {
     }
 }
 
+impl AsRef<Row> for Row {
+    #[inline]
+    fn as_ref(&self) -> &Row {
+        self
+    }
+}
+
 // TODO: remove this due to implicit allocation
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {
@@ -207,6 +217,11 @@ impl Ord for Row {
 impl Row {
     pub fn new(values: Vec<Datum>) -> Self {
         Self(values)
+    }
+
+    pub fn empty<'a>() -> &'a Self {
+        static EMPTY_ROW: Row = Row(Vec::new());
+        &EMPTY_ROW
     }
 
     /// Serialize the row into a memcomparable bytes.
@@ -254,6 +269,17 @@ impl Row {
         Ok(serializer.into_inner())
     }
 
+    /// Serialize the row into a value encode bytes.
+    ///
+    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
+    pub fn value_encode(&self) -> RwResult<Vec<u8>> {
+        let mut vec = vec![];
+        for v in &self.0 {
+            vec.extend(serialize_datum(v)?);
+        }
+        Ok(vec)
+    }
+
     /// Return number of cells in the row.
     pub fn size(&self) -> usize {
         self.0.len()
@@ -274,6 +300,33 @@ impl Row {
         }
         HashCode(hasher.finish())
     }
+
+    /// Compute hash value of a row on corresponding indices.
+    pub fn hash_by_indices<H>(
+        &self,
+        hash_indices: &[usize],
+        hash_builder: &H,
+    ) -> super::ArrayResult<HashCode>
+    where
+        H: BuildHasher,
+    {
+        let mut hasher = hash_builder.build_hasher();
+        for idx in hash_indices {
+            let datum = self.0.get(*idx);
+            match datum {
+                Some(datum) => datum.hash(&mut hasher),
+                None => bail!("index {} out of row bound", idx),
+            }
+        }
+        Ok(HashCode(hasher.finish()))
+    }
+
+    /// Get an owned `Row` by the given `indices` from current row.
+    ///
+    /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
+    pub fn by_indices(&self, indices: &[usize]) -> Row {
+        Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
+    }
 }
 
 /// Deserializer of the `Row`.
@@ -289,8 +342,7 @@ impl RowDeserializer {
 
     /// Deserialize the row from a memcomparable bytes.
     pub fn deserialize(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
-        let mut values = vec![];
-        values.reserve(self.data_types.len());
+        let mut values = Vec::with_capacity(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for ty in &self.data_types {
             values.push(deserialize_datum_from(ty, &mut deserializer)?);
@@ -300,8 +352,7 @@ impl RowDeserializer {
 
     /// Deserialize the row from a memcomparable bytes. All values are not null.
     pub fn deserialize_not_null(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
-        let mut values = vec![];
-        values.reserve(self.data_types.len());
+        let mut values = Vec::with_capacity(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for ty in &self.data_types {
             values.push(deserialize_datum_not_null_from(
@@ -325,6 +376,15 @@ impl RowDeserializer {
         let mut deserializer = memcomparable::Deserializer::new(data);
         let datum = deserialize_datum_from(&self.data_types[datum_idx], &mut deserializer)?;
         Ok(datum)
+    }
+
+    /// Deserialize the row from a value encoding bytes.
+    pub fn value_decode(&self, mut data: impl Buf) -> RwResult<Row> {
+        let mut values = Vec::with_capacity(self.data_types.len());
+        for ty in &self.data_types {
+            values.push(deserialize_datum(&mut data, ty)?);
+        }
+        Ok(Row(values))
     }
 }
 

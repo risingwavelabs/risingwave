@@ -18,8 +18,12 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{BatchDelete, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{
+    gen_filter_and_pushdown, BatchDelete, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
+};
 use crate::catalog::TableId;
+use crate::utils::Condition;
 
 /// [`LogicalDelete`] iterates on input relation and delete the data from specified table.
 ///
@@ -86,6 +90,12 @@ impl ColPrunable for LogicalDelete {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
         self.clone_with_input(self.input.prune_col(&required_cols))
             .into()
+    }
+}
+
+impl PredicatePushdown for LogicalDelete {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 

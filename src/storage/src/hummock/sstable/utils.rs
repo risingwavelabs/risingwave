@@ -73,70 +73,6 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
 
 use bytes::{Buf, BufMut};
 
-const MASK: u32 = 128;
-
-pub fn var_u32_len(n: u32) -> usize {
-    if n < (1 << 7) {
-        1
-    } else if n < (1 << 14) {
-        2
-    } else if n < (1 << 21) {
-        3
-    } else if n < (1 << 28) {
-        4
-    } else {
-        5
-    }
-}
-
-pub trait BufMutExt: BufMut {
-    fn put_var_u32(&mut self, n: u32) {
-        if n < (1 << 7) {
-            self.put_u8(n as u8);
-        } else if n < (1 << 14) {
-            self.put_u8((n | MASK) as u8);
-            self.put_u8((n >> 7) as u8);
-        } else if n < (1 << 21) {
-            self.put_u8((n | MASK) as u8);
-            self.put_u8(((n >> 7) | MASK) as u8);
-            self.put_u8((n >> 14) as u8);
-        } else if n < (1 << 28) {
-            self.put_u8((n | MASK) as u8);
-            self.put_u8(((n >> 7) | MASK) as u8);
-            self.put_u8(((n >> 14) | MASK) as u8);
-            self.put_u8((n >> 21) as u8);
-        } else {
-            self.put_u8((n | MASK) as u8);
-            self.put_u8(((n >> 7) | MASK) as u8);
-            self.put_u8(((n >> 14) | MASK) as u8);
-            self.put_u8(((n >> 21) | MASK) as u8);
-            self.put_u8((n >> 28) as u8);
-        }
-    }
-}
-
-pub trait BufExt: Buf {
-    fn get_var_u32(&mut self) -> u32 {
-        let mut n = 0u32;
-        let mut shift = 0;
-        loop {
-            let v = self.get_u8() as u32;
-            if v & MASK != 0 {
-                n |= (v & (MASK - 1)) << shift;
-            } else {
-                n |= v << shift;
-                break;
-            }
-            shift += 7;
-        }
-        n
-    }
-}
-
-impl<T: BufMut + ?Sized> BufMutExt for &mut T {}
-
-impl<T: Buf + ?Sized> BufExt for &mut T {}
-
 pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, slice: &[u8]) {
     let len = slice.len() as u32;
     buf.put_u32_le(len);
@@ -154,6 +90,7 @@ pub fn get_length_prefixed_slice(buf: &mut &[u8]) -> Vec<u8> {
 pub enum CompressionAlgorithm {
     None,
     Lz4,
+    Zstd,
 }
 
 impl CompressionAlgorithm {
@@ -161,6 +98,7 @@ impl CompressionAlgorithm {
         let v = match self {
             Self::None => 0,
             Self::Lz4 => 1,
+            Self::Zstd => 2,
         };
         buf.put_u8(v);
     }
@@ -169,6 +107,7 @@ impl CompressionAlgorithm {
         match buf.get_u8() {
             0 => Ok(Self::None),
             1 => Ok(Self::Lz4),
+            2 => Ok(Self::Zstd),
             _ => Err(HummockError::decode_error(
                 "not valid compression algorithm",
             )),
@@ -181,6 +120,7 @@ impl From<CompressionAlgorithm> for u8 {
         match ca {
             CompressionAlgorithm::None => 0,
             CompressionAlgorithm::Lz4 => 1,
+            CompressionAlgorithm::Zstd => 2,
         }
     }
 }
@@ -190,6 +130,7 @@ impl From<CompressionAlgorithm> for u64 {
         match ca {
             CompressionAlgorithm::None => 0,
             CompressionAlgorithm::Lz4 => 1,
+            CompressionAlgorithm::Zstd => 2,
         }
     }
 }
@@ -201,6 +142,7 @@ impl TryFrom<u8> for CompressionAlgorithm {
         match v {
             0 => Ok(Self::None),
             1 => Ok(Self::Lz4),
+            2 => Ok(Self::Zstd),
             _ => Err(HummockError::decode_error(
                 "not valid compression algorithm",
             )),

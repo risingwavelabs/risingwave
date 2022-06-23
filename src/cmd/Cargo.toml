@@ -1,19 +1,24 @@
 [package]
 name = "risingwave_cmd"
-version = "0.1.7"
+version = "0.1.9"
 edition = "2021"
 
+[features]
+static-link = ["workspace-static-link"]
+
 [dependencies]
+anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
+madsim = "=0.2.0-alpha.3"
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
 risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_logging = { path = "../utils/logging" }
 risingwave_meta = { path = "../meta" }
-tikv-jemallocator = "0.4"
-tokio = { version = "1", features = [
+tikv-jemallocator = "0.5"
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -24,6 +29,7 @@ tokio = { version = "1", features = [
 ] }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
+workspace-static-link = { path = "../utils/static-link", optional = true, features = ["enabled"] }
 
 [[bin]]
 name = "frontend"

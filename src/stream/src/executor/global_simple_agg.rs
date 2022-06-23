@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -21,11 +19,13 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::*;
 use crate::executor::aggregation::{
-    agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
+    agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, generate_state_table,
+    AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
@@ -53,9 +53,6 @@ pub struct SimpleAggExecutor<S: StateStore> {
     /// Schema from input
     input_schema: Schema,
 
-    /// The executor operates on this keyspace.
-    keyspace: Vec<Keyspace<S>>,
-
     /// Aggregation states of the current operator.
     /// This is an `Option` and the initial state is built when `Executor::next` is called, since
     /// we may not want `Self::new` to be an `async` function.
@@ -63,6 +60,10 @@ pub struct SimpleAggExecutor<S: StateStore> {
 
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
+
+    /// Relational state tables used by this executor.
+    /// One-to-one map with AggCall.
+    state_tables: Vec<StateTable<S>>,
 
     #[allow(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -99,6 +100,19 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
+        // Create state tables for each agg call.
+        let mut state_tables = Vec::with_capacity(agg_calls.len());
+        for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
+            state_tables.push(generate_state_table(
+                ks.clone(),
+                agg_call,
+                &key_indices,
+                &input_info.pk_indices,
+                &schema,
+                input.as_ref(),
+            ));
+        }
+
         Ok(Self {
             input,
             info: ExecutorInfo {
@@ -108,21 +122,22 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             },
             input_pk_indices: input_info.pk_indices,
             input_schema: input_info.schema,
-            keyspace,
             states: None,
             agg_calls,
             key_indices,
+            state_tables,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn apply_chunk(
         agg_calls: &[AggCall],
         input_pk_indices: &[usize],
         input_schema: &Schema,
         states: &mut Option<AggState<S>>,
-        keyspace: &[Keyspace<S>],
         chunk: StreamChunk,
         epoch: u64,
+        state_tables: &mut [StateTable<S>],
     ) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -149,10 +164,10 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             let state = generate_managed_agg_state(
                 None,
                 agg_calls,
-                keyspace,
                 input_pk_data_types,
                 epoch,
                 None,
+                state_tables,
             )
             .await?;
             *states = Some(state);
@@ -160,17 +175,18 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         let states = states.as_mut().unwrap();
 
         // 2. Mark the state as dirty by filling prev states
-        states
-            .may_mark_as_dirty(epoch)
-            .await
-            .map_err(StreamExecutorError::agg_state_error)?;
+        states.may_mark_as_dirty(epoch, state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
+        for ((agg_state, data), state_table) in states
+            .managed_states
+            .iter_mut()
+            .zip_eq(all_agg_data.iter())
+            .zip_eq(state_tables.iter_mut())
+        {
             agg_state
-                .apply_batch(&ops, visibility.as_ref(), data, epoch)
-                .await
-                .map_err(StreamExecutorError::agg_state_error)?;
+                .apply_batch(&ops, visibility.as_ref(), data, epoch, state_table)
+                .await?;
         }
 
         Ok(())
@@ -179,11 +195,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     async fn flush_data(
         schema: &Schema,
         states: &mut Option<AggState<S>>,
-        keyspace: &[Keyspace<S>],
         epoch: u64,
+        state_tables: &mut [StateTable<S>],
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        // The state store of each keyspace is the same so just need the first.
-        let store = keyspace[0].state_store();
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
@@ -193,36 +207,34 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             _ => return Ok(None), // Nothing to flush.
         };
 
-        let mut write_batch = store.start_write_batch();
-        for state in &mut states.managed_states {
-            state
-                .flush(&mut write_batch)
-                .map_err(StreamExecutorError::agg_state_error)?;
+        for (state, state_table) in states
+            .managed_states
+            .iter_mut()
+            .zip_eq(state_tables.iter_mut())
+        {
+            state.flush(state_table).await?;
         }
-        write_batch
-            .ingest(epoch)
-            .await
-            .map_err(StreamExecutorError::agg_state_error)?;
+
+        // Batch commit state tables.
+        for state_table in state_tables.iter_mut() {
+            state_table.commit(epoch).await?;
+        }
 
         // --- Create array builders ---
         // As the datatype is retrieved from schema, it contains both group key and aggregation
         // state outputs.
-        let mut builders = schema
-            .create_array_builders(2)
-            .map_err(StreamExecutorError::eval_error)?;
+        let mut builders = schema.create_array_builders(2)?;
         let mut new_ops = Vec::with_capacity(2);
 
         // --- Retrieve modified states and put the changes into the builders ---
         states
-            .build_changes(&mut builders, &mut new_ops, epoch)
-            .await
-            .map_err(StreamExecutorError::agg_state_error)?;
+            .build_changes(&mut builders, &mut new_ops, epoch, state_tables)
+            .await?;
 
         let columns: Vec<Column> = builders
             .into_iter()
-            .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
-            .try_collect()
-            .map_err(StreamExecutorError::eval_error)?;
+            .map(|builder| builder.finish().map(Into::into))
+            .try_collect()?;
 
         let chunk = StreamChunk::new(new_ops, columns, None);
 
@@ -236,16 +248,14 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             info,
             input_pk_indices,
             input_schema,
-            keyspace,
             mut states,
             agg_calls,
             key_indices: _,
+            mut state_tables,
         } = self;
         let mut input = input.execute();
-        let first_msg = input.next().await.unwrap()?;
-        let barrier = first_msg
-            .into_barrier()
-            .expect("the first message received by agg executor must be a barrier");
+
+        let barrier = expect_first_barrier(&mut input).await?;
         let mut epoch = barrier.epoch.curr;
         yield Message::Barrier(barrier);
 
@@ -259,16 +269,17 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                         &input_pk_indices,
                         &input_schema,
                         &mut states,
-                        &keyspace,
                         chunk,
                         epoch,
+                        &mut state_tables,
                     )
                     .await?;
                 }
                 Message::Barrier(barrier) => {
                     let next_epoch = barrier.epoch.curr;
                     if let Some(chunk) =
-                        Self::flush_data(&info.schema, &mut states, &keyspace, epoch).await?
+                        Self::flush_data(&info.schema, &mut states, epoch, &mut state_tables)
+                            .await?
                     {
                         assert_eq!(epoch, barrier.epoch.prev);
                         yield Message::Chunk(chunk);
@@ -295,7 +306,7 @@ mod tests {
     use crate::executor::test_utils::*;
     use crate::executor::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_local_simple_aggregation_in_memory() {
         test_local_simple_aggregation(create_in_memory_keyspace_agg(4)).await
     }
@@ -357,7 +368,7 @@ mod tests {
         ];
 
         let simple_agg = Box::new(
-            SimpleAggExecutor::new(Box::new(source), agg_calls, keyspace, vec![], 1, vec![])
+            SimpleAggExecutor::new(Box::new(source), agg_calls, keyspace, vec![2], 1, vec![])
                 .unwrap(),
         );
         let mut simple_agg = simple_agg.execute();

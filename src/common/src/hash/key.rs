@@ -21,14 +21,14 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use super::{VirtualNode, VIRTUAL_NODE_COUNT};
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, Row, StructRef,
 };
 use crate::error::Result;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum,
+    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
+    VIRTUAL_NODE_COUNT,
 };
 use crate::util::hash_util::CRC32FastBuilder;
 
@@ -126,9 +126,9 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 
     #[inline(always)]
     fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> Result<Row> {
-        let mut builders = data_types
+        let mut builders: Vec<_> = data_types
             .map(|dt| dt.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
 
         self.deserialize_to_builders(&mut builders)?;
         builders
@@ -647,7 +647,9 @@ impl HashKey for SerializedKey {
         array_builders
             .iter_mut()
             .zip_eq(self.key)
-            .try_for_each(|(array_builder, key)| array_builder.append_datum(&key))
+            .try_for_each(|(array_builder, key)| {
+                array_builder.append_datum(&key).map_err(Into::into)
+            })
     }
 
     fn has_null(&self) -> bool {
@@ -658,7 +660,6 @@ impl HashKey for SerializedKey {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::convert::TryFrom;
     use std::str::FromStr;
     use std::sync::Arc;
 
@@ -666,8 +667,9 @@ mod tests {
     use crate::array;
     use crate::array::column::Column;
     use crate::array::{
-        ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-        I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray, Utf8Array,
+        ArrayRef, BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array,
+        I16Array, I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray,
+        NaiveTimeArray, Utf8Array,
     };
     use crate::hash::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -698,7 +700,7 @@ mod tests {
             )),
         ];
 
-        DataChunk::try_from(columns).expect("Failed to create data chunk")
+        DataChunk::new(columns, capacity)
     }
 
     fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
@@ -846,7 +848,7 @@ mod tests {
             .into(),
         ) as ArrayRef)];
 
-        DataChunk::try_from(columns).expect("Failed to create data chunk")
+        DataChunk::new(columns, 5)
     }
 
     #[test]
@@ -860,12 +862,11 @@ mod tests {
     fn test_simple_hash_key_nullable_serde() {
         let keys = Key64::build(
             &[0, 1],
-            &DataChunk::builder()
-                .columns(vec![
-                    Column::new(Arc::new(array! { I32Array, [Some(1), None] }.into())),
-                    Column::new(Arc::new(array! { I32Array, [None, Some(2)] }.into())),
-                ])
-                .build(),
+            &DataChunk::from_pretty(
+                "i i
+                 1 .
+                 . 2",
+            ),
         )
         .unwrap();
 

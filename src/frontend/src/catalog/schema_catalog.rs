@@ -27,19 +27,20 @@ pub type SourceId = u32;
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     id: SchemaId,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     name: String,
     table_by_name: HashMap<String, TableCatalog>,
     table_name_by_id: HashMap<TableId, String>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
+    owner: String,
 }
 
 impl SchemaCatalog {
     pub fn create_table(&mut self, prost: &ProstTable) {
         let name = prost.name.clone();
         let id = prost.id.into();
-        let table = prost.into();
+        let table: TableCatalog = prost.into();
 
         self.table_by_name.try_insert(name.clone(), table).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
@@ -77,10 +78,19 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    /// Iterate all materialized views, excluding the indexs.
     pub fn iter_mv(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.associated_source_id.is_none())
+            .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_none())
+            .map(|(_, v)| v)
+    }
+
+    /// Iterate all indexs, excluding the materialized views.
+    pub fn iter_index(&self) -> impl Iterator<Item = &TableCatalog> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_some())
             .map(|(_, v)| v)
     }
 
@@ -114,6 +124,10 @@ impl SchemaCatalog {
     pub fn id(&self) -> SchemaId {
         self.id
     }
+
+    pub fn owner(&self) -> String {
+        self.owner.clone()
+    }
 }
 
 impl From<&ProstSchema> for SchemaCatalog {
@@ -125,6 +139,7 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
+            owner: schema.owner.clone(),
         }
     }
 }

@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
 use risingwave_common::catalog::Schema;
+use tokio::sync::mpsc::Receiver;
+use tokio_stream::wrappers::ReceiverStream;
 
+use super::{ActorContextRef, OperatorInfoStatus};
 use crate::executor::{
     BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
 };
@@ -25,8 +27,12 @@ use crate::executor::{
 /// messages down to the executors.
 pub struct ReceiverExecutor {
     receiver: Receiver<Message>,
+
     /// Logical Operator Info
     info: ExecutorInfo,
+
+    /// Actor operator context
+    status: OperatorInfoStatus,
 }
 
 impl std::fmt::Debug for ReceiverExecutor {
@@ -39,7 +45,13 @@ impl std::fmt::Debug for ReceiverExecutor {
 }
 
 impl ReceiverExecutor {
-    pub fn new(schema: Schema, pk_indices: PkIndices, receiver: Receiver<Message>) -> Self {
+    pub fn new(
+        schema: Schema,
+        pk_indices: PkIndices,
+        receiver: Receiver<Message>,
+        actor_context: ActorContextRef,
+        receiver_id: u64,
+    ) -> Self {
         Self {
             receiver,
             info: ExecutorInfo {
@@ -47,13 +59,20 @@ impl ReceiverExecutor {
                 pk_indices,
                 identity: "ReceiverExecutor".to_string(),
             },
+            status: OperatorInfoStatus::new(actor_context, receiver_id),
         }
     }
 }
 
 impl Executor for ReceiverExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.receiver.map(Ok).boxed()
+        let mut status = self.status;
+        ReceiverStream::new(self.receiver)
+            .map(move |msg| {
+                status.next_message(&msg);
+                Ok(msg)
+            })
+            .boxed()
     }
 
     fn schema(&self) -> &Schema {

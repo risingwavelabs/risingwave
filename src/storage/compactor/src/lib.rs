@@ -18,6 +18,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -96,22 +97,29 @@ impl CompactorConfig {
     }
 }
 
-pub async fn start(opts: CompactorOpts) {
-    tracing::info!("meta address: {}", opts.meta_address.clone());
+use std::future::Future;
+use std::pin::Pin;
 
-    let listen_address = opts.host.parse().unwrap();
-    tracing::info!("Server Listening at {}", listen_address);
+pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    // WARNING: don't change the function signature. Making it `async fn` will cause
+    // slow compile in release mode.
+    Box::pin(async move {
+        tracing::info!("meta address: {}", opts.meta_address.clone());
 
-    let client_address = opts
-        .client_address
-        .as_ref()
-        .unwrap_or(&opts.host)
-        .parse()
-        .unwrap();
-    tracing::info!("Client address is {}", client_address);
+        let listen_address = opts.host.parse().unwrap();
+        tracing::info!("Server Listening at {}", listen_address);
 
-    let (join_handle, _shutdown_sender) =
-        compactor_serve(listen_address, client_address, opts).await;
+        let client_address = opts
+            .client_address
+            .as_ref()
+            .unwrap_or(&opts.host)
+            .parse()
+            .unwrap();
+        tracing::info!("Client address is {}", client_address);
 
-    join_handle.await.unwrap();
+        let (join_handle, _shutdown_sender) =
+            compactor_serve(listen_address, client_address, opts).await;
+
+        join_handle.await.unwrap();
+    })
 }

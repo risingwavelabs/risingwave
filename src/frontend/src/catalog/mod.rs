@@ -25,6 +25,8 @@ pub(crate) mod schema_catalog;
 pub(crate) mod source_catalog;
 pub(crate) mod table_catalog;
 
+pub use table_catalog::TableCatalog;
+
 pub(crate) type SourceId = u32;
 
 pub(crate) type DatabaseId = u32;
@@ -47,8 +49,8 @@ pub fn check_valid_column_name(column_name: &str) -> Result<()> {
 
 const ROWID_PREFIX: &str = "_row_id";
 
-pub fn gen_row_id_column_name(idx: usize) -> String {
-    ROWID_PREFIX.to_string() + "#" + &idx.to_string()
+pub fn row_id_column_name() -> String {
+    ROWID_PREFIX.to_string()
 }
 
 pub fn is_row_id_column_name(name: &str) -> bool {
@@ -62,7 +64,7 @@ pub fn row_id_column_desc() -> ColumnDesc {
     ColumnDesc {
         data_type: DataType::Int64,
         column_id: ColumnId::new(0),
-        name: gen_row_id_column_name(0),
+        name: row_id_column_name(),
         field_descs: vec![],
         type_name: "".to_string(),
     }

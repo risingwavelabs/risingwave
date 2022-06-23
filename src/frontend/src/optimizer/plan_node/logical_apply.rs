@@ -17,7 +17,10 @@ use std::fmt;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
+use super::{
+    ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
+    ToStream,
+};
 use crate::expr::ExprImpl;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -53,13 +56,18 @@ impl LogicalApply {
             join_type
         );
         let ctx = left.ctx();
-        let schema = LogicalJoin::derive_schema(left.schema(), right.schema(), join_type);
+        let out_column_num =
+            LogicalJoin::out_column_num(left.schema().len(), right.schema().len(), join_type);
+        let output_indices = (0..out_column_num).collect::<Vec<_>>();
+        let schema =
+            LogicalJoin::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
         let pk_indices = LogicalJoin::derive_pk(
             left.schema().len(),
             right.schema().len(),
             left.pk_indices(),
             right.pk_indices(),
             join_type,
+            &output_indices,
         );
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalApply {
@@ -108,6 +116,12 @@ impl_plan_tree_node_for_binary! { LogicalApply }
 
 impl ColPrunable for LogicalApply {
     fn prune_col(&self, _: &[usize]) -> PlanRef {
+        panic!("LogicalApply should be unnested")
+    }
+}
+
+impl PredicatePushdown for LogicalApply {
+    fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
         panic!("LogicalApply should be unnested")
     }
 }

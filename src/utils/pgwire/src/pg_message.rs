@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
 use byteorder::{BigEndian, ByteOrder};
 /// Part of code learned from https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs.
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_response::StatementType;
+use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
@@ -28,24 +31,201 @@ pub enum FeMessage {
     Ssl,
     Startup(FeStartupMessage),
     Query(FeQueryMessage),
+    Parse(FeParseMessage),
+    Password(FePasswordMessage),
+    Describe(FeDescribeMessage),
+    Bind(FeBindMessage),
+    Execute(FeExecuteMessage),
+    Close(FeCloseMessage),
+    Sync,
     CancelQuery,
     Terminate,
 }
 
-pub struct FeStartupMessage {}
+pub struct FeStartupMessage {
+    pub config: HashMap<String, String>,
+}
+
+impl FeStartupMessage {
+    pub fn build_with_payload(payload: &[u8]) -> Result<Self> {
+        let config = match std::str::from_utf8(payload) {
+            Ok(v) => Ok(v.trim_end_matches('\0')),
+            Err(err) => Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Input end error: {}", err),
+            )),
+        }?;
+        let mut map = HashMap::new();
+        let config: Vec<&str> = config.split('\0').collect();
+        config.chunks(2).for_each(|chunk| {
+            map.insert(chunk[0].to_string(), chunk[1].to_string());
+        });
+        Ok(FeStartupMessage { config: map })
+    }
+}
 
 /// Query message contains the string sql.
 pub struct FeQueryMessage {
     pub sql_bytes: Bytes,
 }
 
-impl FeQueryMessage {
-    pub fn get_sql(&self) -> &str {
-        // Why there is a \0..
-        match std::str::from_utf8(&self.sql_bytes[..]) {
-            Ok(v) => v.trim_end_matches('\0'),
-            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+#[derive(Debug)]
+pub struct FeBindMessage {
+    pub format_codes: Vec<i16>,
+    pub result_format_codes: Vec<i16>,
+    pub params: Vec<Bytes>,
+    pub portal_name: Bytes,
+    pub statement_name: Bytes,
+}
+
+#[derive(Debug)]
+pub struct FeExecuteMessage {
+    pub portal_name: Bytes,
+    pub max_rows: i32,
+}
+
+#[derive(Debug)]
+pub struct FeParseMessage {
+    pub statement_name: Bytes,
+    pub query_string: Bytes,
+    pub type_ids: Vec<i32>,
+}
+
+#[derive(Debug)]
+pub struct FePasswordMessage {
+    pub password: Bytes,
+}
+
+#[derive(Debug)]
+pub struct FeDescribeMessage {
+    // 'S' to describe a prepared statement; or 'P' to describe a portal.
+    pub kind: u8,
+    pub query_name: Bytes,
+}
+
+#[derive(Debug)]
+pub struct FeCloseMessage {
+    pub kind: u8,
+    pub query_name: Bytes,
+}
+
+impl FeDescribeMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let kind = buf.get_u8();
+        let query_name = read_null_terminated(&mut buf)?;
+
+        if kind != b'S' {
+            unimplemented!("only prepared statement Describe is implemented");
         }
+
+        Ok(FeMessage::Describe(FeDescribeMessage { query_name, kind }))
+    }
+}
+
+impl FeBindMessage {
+    // Bind Message Header
+    // +-----+-----------+
+    // | 'B' | int32 len |
+    // +-----+-----------+
+    // Bind Message Body
+    // +----------------+---------------+
+    // | str portalname | str statement |
+    // +----------------+---------------+
+    // +---------------------+------------------+-------+
+    // | int16 numFormatCode | int16 FormatCode |  ...  |
+    // +---------------------+------------------+-------+
+    // +-----------------+-------------------+---------------+
+    // | int16 numParams | int32 valueLength |  byte value.. |
+    // +-----------------+-------------------+---------------+
+    // +----------------------------------+------------------+-------+
+    // | int16 numResultColumnFormatCodes | int16 FormatCode |  ...  |
+    // +----------------------------------+------------------+-------+
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let portal_name = read_null_terminated(&mut buf)?;
+        let statement_name = read_null_terminated(&mut buf)?;
+        // Read FormatCode
+        let len = buf.get_i16();
+        let format_codes = (0..len).map(|_| buf.get_i16()).collect();
+        // Read Params
+        let len = buf.get_i16();
+        let params = (0..len)
+            .map(|_| {
+                let val_len = buf.get_i32();
+                buf.copy_to_bytes(val_len as usize)
+            })
+            .collect();
+        // Read ResultFormatCode
+        let len = buf.get_i16();
+        let result_format_codes = (0..len).map(|_| buf.get_i16()).collect();
+
+        Ok(FeMessage::Bind(FeBindMessage {
+            format_codes,
+            params,
+            result_format_codes,
+            portal_name,
+            statement_name,
+        }))
+    }
+}
+
+impl FeExecuteMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let portal_name = read_null_terminated(&mut buf)?;
+        let max_rows = buf.get_i32();
+
+        Ok(FeMessage::Execute(FeExecuteMessage {
+            portal_name,
+            max_rows,
+        }))
+    }
+}
+
+impl FeParseMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let statement_name = read_null_terminated(&mut buf)?;
+        let query_string = read_null_terminated(&mut buf)?;
+        let nparams = buf.get_i16();
+
+        let type_ids: Vec<i32> = (0..nparams).map(|_| buf.get_i32()).collect();
+
+        Ok(FeMessage::Parse(FeParseMessage {
+            statement_name,
+            query_string,
+            type_ids,
+        }))
+    }
+}
+
+impl FePasswordMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let password = read_null_terminated(&mut buf)?;
+
+        Ok(FeMessage::Password(FePasswordMessage { password }))
+    }
+}
+
+impl FeQueryMessage {
+    pub fn get_sql(&self) -> Result<&str> {
+        match CStr::from_bytes_with_nul(&self.sql_bytes) {
+            Ok(cstr) => cstr.to_str().map_err(|err| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Invalid UTF-8 sequence: {}", err),
+                )
+            }),
+            Err(err) => Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Input end error: {}", err),
+            )),
+        }
+    }
+}
+
+impl FeCloseMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let kind = buf.get_u8();
+        let query_name = read_null_terminated(&mut buf)?;
+        Ok(FeMessage::Close(FeCloseMessage { kind, query_name }))
     }
 }
 
@@ -64,7 +244,14 @@ impl FeMessage {
 
         match val {
             b'Q' => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
+            b'P' => FeParseMessage::parse(sql_bytes),
+            b'D' => FeDescribeMessage::parse(sql_bytes),
+            b'B' => FeBindMessage::parse(sql_bytes),
+            b'E' => FeExecuteMessage::parse(sql_bytes),
+            b'S' => Ok(FeMessage::Sync),
             b'X' => Ok(FeMessage::Terminate),
+            b'C' => FeCloseMessage::parse(sql_bytes),
+            b'p' => FePasswordMessage::parse(sql_bytes),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("Unsupported tag of regular message: {}", val),
@@ -85,7 +272,9 @@ impl FeStartupMessage {
         }
         match protocol_num {
             // code from: https://www.postgresql.org/docs/current/protocol-message-formats.html
-            196608 => Ok(FeMessage::Startup(FeStartupMessage {})),
+            196608 => Ok(FeMessage::Startup(FeStartupMessage::build_with_payload(
+                &payload,
+            )?)),
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
             80877102 => Ok(FeMessage::CancelQuery),
@@ -100,20 +289,47 @@ impl FeStartupMessage {
     }
 }
 
+/// Continue read until reached a \0. Used in reading string from Bytes.
+fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
+    let mut result = BytesMut::new();
+
+    loop {
+        if !buf.has_remaining() {
+            panic!("no null-terminator in string");
+        }
+
+        let byte = buf.get_u8();
+
+        if byte == 0 {
+            break;
+        }
+        result.put_u8(byte);
+    }
+    Ok(result.freeze())
+}
+
 /// Message sent from server to psql client. Implement `write` (how to serialize it into psql
 /// buffer).
 #[derive(Debug)]
 pub enum BeMessage<'a> {
     AuthenticationOk,
+    AuthenticationCleartextPassword,
+    AuthenticationMD5Password(&'a [u8; 4]),
     CommandComplete(BeCommandCompleteMessage),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
     EncryptionResponse,
     EmptyQueryResponse,
+    ParseComplete,
+    BindComplete,
+    PortalSuspended,
+    ParameterDescription(&'a [TypeOid]),
+    NoData,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
-    ErrorResponse(Box<dyn std::error::Error + Send + Sync>),
+    ErrorResponse(BoxedError),
+    CloseComplete,
 }
 
 #[derive(Debug)]
@@ -142,6 +358,30 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'R');
                 buf.put_i32(8);
                 buf.put_i32(0);
+            }
+
+            // AuthenticationCleartextPassword
+            // +-----+----------+-----------+
+            // | 'R' | int32(8) | int32(3)  |
+            // +-----+----------+-----------+
+            BeMessage::AuthenticationCleartextPassword => {
+                buf.put_u8(b'R');
+                buf.put_i32(8);
+                buf.put_i32(3);
+            }
+
+            // AuthenticationMD5Password
+            // +-----+----------+-----------+----------------+
+            // | 'R' | int32(12) | int32(5)  |  Byte4(salt)  |
+            // +-----+----------+-----------+----------------+
+            //
+            // The 4-byte random salt will be used by client to send encrypted password as
+            // concat('md5', md5(concat(md5(concat(password, username)), random-salt))).
+            BeMessage::AuthenticationMD5Password(salt) => {
+                buf.put_u8(b'R');
+                buf.put_i32(12);
+                buf.put_i32(5);
+                buf.put_slice(&salt[..]);
             }
 
             // ParameterStatus
@@ -278,6 +518,45 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'I');
             }
 
+            BeMessage::ParseComplete => {
+                buf.put_u8(b'1');
+                write_body(buf, |_| Ok(()))?;
+            }
+
+            BeMessage::BindComplete => {
+                buf.put_u8(b'2');
+                write_body(buf, |_| Ok(()))?;
+            }
+
+            BeMessage::CloseComplete => {
+                buf.put_u8(b'3');
+                write_body(buf, |_| Ok(()))?;
+            }
+
+            BeMessage::PortalSuspended => {
+                buf.put_u8(b's');
+                write_body(buf, |_| Ok(()))?;
+            }
+            // ParameterDescription
+            // +-----+-----------+--------------------+---------------+-----+---------------+
+            // | 't' | int32 len | int16 ParameterNum | int32 typeOID | ... | int32 typeOID |
+            // +-----+-----------+-----------------+--+---------------+-----+---------------+
+            BeMessage::ParameterDescription(para_descs) => {
+                buf.put_u8(b't');
+                write_body(buf, |buf| {
+                    buf.put_i16(para_descs.len() as i16);
+                    for oid in para_descs.iter() {
+                        buf.put_i32(oid.as_number());
+                    }
+                    Ok(())
+                })?;
+            }
+
+            BeMessage::NoData => {
+                buf.put_u8(b'n');
+                write_body(buf, |_| Ok(())).unwrap();
+            }
+
             BeMessage::EncryptionResponse => {
                 buf.put_u8(b'N');
             }
@@ -368,4 +647,23 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
     buf.put_slice(s);
     buf.put_u8(0);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use crate::pg_message::FeQueryMessage;
+
+    #[tokio::test]
+    async fn test_get_sql() {
+        let fe = FeQueryMessage {
+            sql_bytes: Bytes::from(vec![255, 255, 255, 255, 255, 255, 0]),
+        };
+        assert!(fe.get_sql().is_err(), "{}", true);
+        let fe = FeQueryMessage {
+            sql_bytes: Bytes::from(vec![1, 2, 3, 4, 5, 6, 7, 8]),
+        };
+        assert!(fe.get_sql().is_err(), "{}", true);
+    }
 }

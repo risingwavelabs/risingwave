@@ -23,7 +23,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{CatalogError, TableId};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
@@ -37,9 +37,10 @@ pub struct BoundTableSource {
     pub name: String,       // explain-only
     pub source_id: TableId, // TODO: refactor to source id
     pub columns: Vec<ColumnDesc>,
+    pub append_only: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundSource {
     pub catalog: SourceCatalog,
 }
@@ -120,7 +121,7 @@ impl Binder {
         Ok(self
             .catalog
             .get_schema_by_name(&self.db_name, schema_name)?
-            .iter_mv()
+            .iter_index()
             .filter(|x| x.is_index_on == Some(table_id))
             .map(|table| table.clone().into())
             .collect())
@@ -166,6 +167,7 @@ impl Binder {
 
         let source_id = TableId::new(source.id);
 
+        let append_only = source.append_only;
         let columns = source
             .columns
             .iter()
@@ -179,6 +181,7 @@ impl Binder {
             name: source_name,
             source_id,
             columns,
+            append_only,
         })
     }
 }

@@ -116,7 +116,7 @@ where
 type IdCategoryType = u8;
 
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
-#[allow(non_snake_case, non_upper_case_globals)]
+#[expect(non_snake_case, non_upper_case_globals)]
 pub mod IdCategory {
     use super::IdCategoryType;
 
@@ -132,6 +132,7 @@ pub mod IdCategory {
     pub const HummockSSTableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
     pub const Source: IdCategoryType = 10;
+    pub const HummockCompactionTask: IdCategoryType = 11;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
@@ -149,6 +150,7 @@ pub struct IdGeneratorManager<S> {
     actor: Arc<StoredIdGenerator<S>>,
     hummock_snapshot: Arc<StoredIdGenerator<S>>,
     hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
+    hummock_compaction_task: Arc<StoredIdGenerator<S>>,
     parallel_unit: Arc<StoredIdGenerator<S>>,
 }
 
@@ -177,6 +179,10 @@ where
             hummock_ss_table_id: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "hummock_ss_table_id", Some(1)).await,
             ),
+            hummock_compaction_task: Arc::new(
+                StoredIdGenerator::new(meta_store.clone(), "hummock_compaction_task", Some(1))
+                    .await,
+            ),
             parallel_unit: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "parallel_unit", None).await,
             ),
@@ -196,6 +202,7 @@ where
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSSTableId => &self.hummock_ss_table_id,
             IdCategory::ParallelUnit => &self.parallel_unit,
+            IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             _ => unreachable!(),
         }
     }

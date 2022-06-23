@@ -220,10 +220,7 @@ pub enum Expr {
         right: Box<Expr>,
     },
     /// Unary operation e.g. `NOT foo`
-    UnaryOp {
-        op: UnaryOperator,
-        expr: Box<Expr>,
-    },
+    UnaryOp { op: UnaryOperator, expr: Box<Expr> },
     /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR(123))`
     Cast {
         expr: Box<Expr>,
@@ -266,14 +263,7 @@ pub enum Expr {
     /// A constant of form `<data_type> 'value'`.
     /// This can represent ANSI SQL `DATE`, `TIME`, and `TIMESTAMP` literals (such as `DATE
     /// '2020-01-01'`), as well as constants of other types (a non-standard PostgreSQL extension).
-    TypedString {
-        data_type: DataType,
-        value: String,
-    },
-    MapAccess {
-        column: Box<Expr>,
-        keys: Vec<Expr>,
-    },
+    TypedString { data_type: DataType, value: String },
     /// Scalar function call e.g. `LEFT(foo, 5)`
     Function(Function),
     /// `CASE [<operand>] WHEN <condition> THEN <result> ... [ELSE <result>] END`
@@ -301,26 +291,17 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
-    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces, e.g. {1, 2,
-    /// 3},
+    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
+    /// e.g. {1, 2, 3},
     Array(Vec<Expr>),
+    /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
+    ArrayIndex { obj: Box<Expr>, indexs: Vec<Expr> },
 }
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
-            Expr::MapAccess { column, keys } => {
-                write!(f, "{}", column)?;
-                for k in keys {
-                    match k {
-                        k @ Expr::Value(Value::Number(_, _)) => write!(f, "[{}]", k)?,
-                        Expr::Value(Value::SingleQuotedString(s)) => write!(f, "[\"{}\"]", s)?,
-                        _ => write!(f, "[{}]", k)?,
-                    }
-                }
-                Ok(())
-            }
             Expr::CompoundIdentifier(s) => write!(f, "{}", display_separated(s, ".")),
             Expr::FieldIdentifier(ast, s) => write!(f, "{}.{}", ast, display_separated(s, ".")),
             Expr::IsNull(ast) => write!(f, "{} IS NULL", ast),
@@ -364,12 +345,18 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
+            Expr::BinaryOp { left, op, right } => write!(
+                f,
+                "{} {} {}",
+                fmt_expr_with_paren(left),
+                op,
+                fmt_expr_with_paren(right)
+            ),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
                 } else {
-                    write!(f, "{} {}", op, expr)
+                    write!(f, "{} {}", op, fmt_expr_with_paren(expr))
                 }
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
@@ -479,6 +466,13 @@ impl fmt::Display for Expr {
                     .as_slice()
                     .join(", ")
             ),
+            Expr::ArrayIndex { obj, indexs } => {
+                write!(f, "{}", obj)?;
+                for i in indexs {
+                    write!(f, "[{}]", i)?;
+                }
+                Ok(())
+            }
             Expr::Array(exprs) => write!(
                 f,
                 "ARRAY[{}]",
@@ -491,6 +485,24 @@ impl fmt::Display for Expr {
             ),
         }
     }
+}
+
+/// Wrap complex expressions with necessary parentheses.
+/// For example, `a > b LIKE c` becomes `a > (b LIKE c)`.
+fn fmt_expr_with_paren(e: &Expr) -> String {
+    use Expr as E;
+    match e {
+        E::BinaryOp { .. }
+        | E::UnaryOp { .. }
+        | E::IsNull(_)
+        | E::IsNotNull(_)
+        | E::IsFalse(_)
+        | E::IsTrue(_)
+        | E::IsNotTrue(_)
+        | E::IsNotFalse(_) => return format!("({})", e),
+        _ => {}
+    };
+    format!("{}", e)
 }
 
 /// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`)
@@ -632,7 +644,9 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
+    Sink { _schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
+    Columns { table: ObjectName },
 }
 
 impl fmt::Display for ShowObject {
@@ -658,6 +672,8 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
+            ShowObject::Sink { _schema } => write!(f, "SINKS{}", fmt_schema(_schema)),
+            ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
 }
@@ -761,6 +777,8 @@ pub enum Statement {
         is_materialized: bool,
         stmt: CreateSourceStatement,
     },
+    /// CREATE SINK
+    CreateSink { stmt: CreateSinkStatement },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -769,11 +787,6 @@ pub enum Statement {
     },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
-        /// Table or Source name
-        name: ObjectName,
-    },
-    /// SHOW COLUMN FROM TABLE OR SOURCE
-    ShowColumn {
         /// Table or Source name
         name: ObjectName,
     },
@@ -797,6 +810,8 @@ pub enum Statement {
     ShowVariable { variable: Vec<Ident> },
     /// `{ BEGIN [ TRANSACTION | WORK ] | START TRANSACTION } ...`
     StartTransaction { modes: Vec<TransactionMode> },
+    /// ABORT
+    Abort,
     /// `SET TRANSACTION ...`
     SetTransaction {
         modes: Vec<TransactionMode>,
@@ -841,6 +856,7 @@ pub enum Statement {
         objects: GrantObjects,
         grantees: Vec<Ident>,
         granted_by: Option<Ident>,
+        revoke_grant_option: bool,
         cascade: bool,
     },
     /// `DEALLOCATE [ PREPARE ] { name | ALL }`
@@ -870,6 +886,8 @@ pub enum Statement {
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
+    /// CREATE USER
+    CreateUser(CreateUserStatement),
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -915,10 +933,6 @@ impl fmt::Display for Statement {
             }
             Statement::Describe { name } => {
                 write!(f, "DESCRIBE {}", name)?;
-                Ok(())
-            }
-            Statement::ShowColumn { name } => {
-                write!(f, "SHOW COLUMNS FROM {}", name)?;
                 Ok(())
             }
             Statement::ShowObjects(show_object) => {
@@ -1104,6 +1118,7 @@ impl fmt::Display for Statement {
                     ""
                 }
             ),
+            Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1136,6 +1151,10 @@ impl fmt::Display for Statement {
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;
                 }
+                Ok(())
+            }
+            Statement::Abort => {
+                write!(f, "ABORT")?;
                 Ok(())
             }
             Statement::SetTransaction {
@@ -1194,9 +1213,19 @@ impl fmt::Display for Statement {
                 objects,
                 grantees,
                 granted_by,
+                revoke_grant_option,
                 cascade,
             } => {
-                write!(f, "REVOKE {} ", privileges)?;
+                write!(
+                    f,
+                    "REVOKE {}{} ",
+                    if *revoke_grant_option {
+                        "GRANT OPTION FOR "
+                    } else {
+                        ""
+                    },
+                    privileges
+                )?;
                 write!(f, "ON {} ", objects)?;
                 write!(f, "FROM {}", display_comma_separated(grantees))?;
                 if let Some(grantor) = granted_by {
@@ -1240,6 +1269,9 @@ impl fmt::Display for Statement {
                 } else {
                     write!(f, "NULL")
                 }
+            }
+            Statement::CreateUser(statement) => {
+                write!(f, "CREATE USER {}", statement)
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -1361,8 +1393,18 @@ pub enum GrantObjects {
     AllSequencesInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL TABLES IN SCHEMA <schema_name> [, ...]`
     AllTablesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SOURCES IN SCHEMA <schema_name> [, ...]`
+    AllSourcesInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL MATERIALIZED VIEWS IN SCHEMA <schema_name> [, ...]`
+    AllMviewsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on specific databases
+    Databases(Vec<ObjectName>),
     /// Grant privileges on specific schemas
     Schemas(Vec<ObjectName>),
+    /// Grant privileges on specific sources
+    Sources(Vec<ObjectName>),
+    /// Grant privileges on specific materialized views
+    Mviews(Vec<ObjectName>),
     /// Grant privileges on specific sequences
     Sequences(Vec<ObjectName>),
     /// Grant privileges on specific tables
@@ -1394,6 +1436,29 @@ impl fmt::Display for GrantObjects {
                     "ALL TABLES IN SCHEMA {}",
                     display_comma_separated(schemas)
                 )
+            }
+            GrantObjects::AllSourcesInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SOURCES IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllMviewsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL MATERIALIZED VIEWS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::Databases(databases) => {
+                write!(f, "DATABASE {}", display_comma_separated(databases))
+            }
+            GrantObjects::Sources(sources) => {
+                write!(f, "SOURCE {}", display_comma_separated(sources))
+            }
+            GrantObjects::Mviews(mviews) => {
+                write!(f, "MATERIALIZED VIEW {}", display_comma_separated(mviews))
             }
         }
     }
@@ -1446,6 +1511,15 @@ pub enum FunctionArg {
     Unnamed(FunctionArgExpr),
 }
 
+impl FunctionArg {
+    pub fn get_expr(&self) -> FunctionArgExpr {
+        match self {
+            FunctionArg::Named { name: _, arg } => arg.clone(),
+            FunctionArg::Unnamed(arg) => arg.clone(),
+        }
+    }
+}
+
 impl fmt::Display for FunctionArg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -1492,7 +1566,9 @@ pub enum ObjectType {
     Schema,
     Source,
     MaterializedSource,
+    Sink,
     Database,
+    User,
 }
 
 impl fmt::Display for ObjectType {
@@ -1505,7 +1581,9 @@ impl fmt::Display for ObjectType {
             ObjectType::Schema => "SCHEMA",
             ObjectType::Source => "SOURCE",
             ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
+            ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
+            ObjectType::User => "USER",
         })
     }
 }
@@ -1522,15 +1600,19 @@ impl ParseTo for ObjectType {
             ObjectType::MaterializedSource
         } else if parser.parse_keyword(Keyword::SOURCE) {
             ObjectType::Source
+        } else if parser.parse_keyword(Keyword::SINK) {
+            ObjectType::Sink
         } else if parser.parse_keyword(Keyword::INDEX) {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {
             ObjectType::Schema
         } else if parser.parse_keyword(Keyword::DATABASE) {
             ObjectType::Database
+        } else if parser.parse_keyword(Keyword::USER) {
+            ObjectType::User
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, or SCHEMA after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
                 parser.peek_token(),
             );
         };

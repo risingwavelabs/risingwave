@@ -18,11 +18,11 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use log::{debug, error};
-use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::Epoch as ProstEpoch;
-use risingwave_pb::stream_service::inject_barrier_response::FinishedCreateMview;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
     UpdateActorsRequest,
@@ -36,7 +36,7 @@ use crate::barrier::{Command, GlobalBarrierManager};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
-pub type RecoveryResult = (Epoch, HashSet<ActorId>, Vec<FinishedCreateMview>);
+pub type RecoveryResult = (Epoch, HashSet<ActorId>, Vec<CreateMviewProgress>);
 
 impl<S> GlobalBarrierManager<S>
 where
@@ -91,7 +91,7 @@ where
             // checkpoint, used as init barrier to initialize all executors.
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
-                self.env.stream_clients_ref(),
+                self.env.stream_client_pool_ref(),
                 &info,
                 &prev_epoch,
                 &new_epoch,
@@ -116,14 +116,14 @@ where
         .expect("Retry until recovery success.");
         debug!("recovery success");
 
-        return (
+        (
             new_epoch,
             self.fragment_manager.all_chain_actor_ids().await,
             responses
                 .into_iter()
-                .flat_map(|r| r.finished_create_mviews)
+                .flat_map(|r| r.create_mview_progress)
                 .collect(),
-        );
+        )
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
@@ -137,12 +137,8 @@ where
                 sources: sources.clone(),
             };
             async move {
-                let client = &self.env.stream_clients().get(node).await?;
-                client
-                    .to_owned()
-                    .sync_sources(request)
-                    .await
-                    .to_rw_result()?;
+                let client = &self.env.stream_client_pool().get(node).await?;
+                client.to_owned().sync_sources(request).await?;
 
                 Ok::<_, RwError>(())
             }
@@ -176,15 +172,14 @@ where
         let node_actors = self.fragment_manager.all_node_actors(false).await;
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
-            let client = self.env.stream_clients().get(node).await?;
+            let client = self.env.stream_client_pool().get(node).await?;
 
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
                     info: actor_infos.clone(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
@@ -195,8 +190,7 @@ where
                     actors: node_actors.get(node_id).cloned().unwrap_or_default(),
                     ..Default::default()
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         Ok(())
@@ -206,7 +200,7 @@ where
     async fn build_actors(&self, info: &BarrierActorInfo) -> Result<()> {
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
-            let client = self.env.stream_clients().get(node).await?;
+            let client = self.env.stream_client_pool().get(node).await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
@@ -216,8 +210,7 @@ where
                     request_id,
                     actor_id: actors.to_owned(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         Ok(())
@@ -235,7 +228,7 @@ where
 
             async move {
                 tokio_retry::Retry::spawn(retry_strategy, || async {
-                    let client = self.env.stream_clients().get(worker_node).await?;
+                    let client = self.env.stream_client_pool().get(worker_node).await?;
                     debug!("force stop actors: {}", worker_node.id);
                     client
                         .to_owned()
@@ -247,7 +240,7 @@ where
                             }),
                         })
                         .await
-                        .to_rw_result()
+                        .map_err(RwError::from)
                 })
                 .await
                 .expect("Force stop actors until success");

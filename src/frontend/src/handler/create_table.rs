@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
@@ -22,13 +23,14 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
+use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName, SqlOption};
 
 use super::create_source::make_prost_source;
+use super::util::handle_with_properties;
 use crate::binder::expr::{bind_data_type, bind_struct_field};
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;
@@ -79,23 +81,32 @@ pub(crate) fn gen_create_table_plan(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
+    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let source = make_prost_source(
         session,
         table_name,
         Info::TableSource(TableSourceInfo {
             columns: bind_sql_columns(columns)?,
+            properties: properties.clone(),
         }),
     )?;
-    let (plan, table) = gen_materialized_source_plan(context, source.clone())?;
+    let (plan, table) = gen_materialized_source_plan(
+        context,
+        source.clone(),
+        session.user_name().to_string(),
+        properties,
+    )?;
     Ok((plan, source, table))
 }
 
-/// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it ressembles a
+/// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it resembles a
 /// `CREATE MATERIALIZED VIEW AS SELECT * FROM <source>`.
 pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
     source: ProstSource,
+    owner: String,
+    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
@@ -109,17 +120,18 @@ pub(crate) fn gen_materialized_source_plan(
 
         PlanRoot::new(
             source_node,
-            Distribution::HashShard(vec![0]),
-            Order::any().clone(),
+            RequiredDist::Any,
+            Order::any(),
             required_cols,
             out_names,
         )
         .gen_create_mv_plan(source.name.clone())?
     };
-    let table = materialize
+    let mut table = materialize
         .table()
         .to_prost(source.schema_id, source.database_id);
-
+    table.owner = owner;
+    table.properties = properties;
     Ok((materialize.into(), table))
 }
 
@@ -127,12 +139,18 @@ pub async fn handle_create_table(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
+    with_options: Vec<SqlOption>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, source, table) = {
-        let (plan, source, table) =
-            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
+        let (plan, source, table) = gen_create_table_plan(
+            &session,
+            context.into(),
+            table_name.clone(),
+            columns,
+            handle_with_properties("create_table", with_options)?,
+        )?;
         let plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(plan);
 
@@ -161,12 +179,12 @@ mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
-    use crate::catalog::gen_row_id_column_name;
+    use crate::catalog::row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>);";
+        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with ('appendonly' = true);";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
@@ -180,6 +198,7 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(source.name, "t");
+        assert!(source.append_only);
 
         // Check table exists.
         let table = catalog_reader
@@ -200,7 +219,7 @@ mod tests {
             .map(|col| (col.name.as_str(), col.data_type.clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let row_id_col_name = gen_row_id_column_name(0);
+        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "v1" => DataType::Int16,

@@ -18,7 +18,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_rpc_client::ExchangeSource;
 
-use crate::task::{BatchEnvironment, TaskId, TaskOutput, TaskOutputId};
+use crate::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 
 /// Exchange data from a local task execution.
 pub struct LocalExchangeSource {
@@ -29,8 +29,12 @@ pub struct LocalExchangeSource {
 }
 
 impl LocalExchangeSource {
-    pub fn create(output_id: TaskOutputId, env: BatchEnvironment, task_id: TaskId) -> Result<Self> {
-        let task_output = env.task_manager().take_output(&output_id.to_prost())?;
+    pub fn create<C: BatchTaskContext>(
+        output_id: TaskOutputId,
+        context: C,
+        task_id: TaskId,
+    ) -> Result<Self> {
+        let task_output = context.get_task_output(output_id)?;
         Ok(Self {
             task_output,
             task_id,
@@ -73,7 +77,8 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
-    use risingwave_pb::batch_plan::{TaskId, TaskOutputId};
+    use risingwave_common::util::addr::HostAddr;
+    use risingwave_pb::batch_plan::{ExchangeSource as ProstExchangeSource, TaskId, TaskOutputId};
     use risingwave_pb::data::DataChunk;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
@@ -81,9 +86,11 @@ mod tests {
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
     };
-    use risingwave_rpc_client::{ExchangeSource, GrpcExchangeSource};
+    use risingwave_rpc_client::ExchangeSource;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
+
+    use crate::execution::grpc_exchange::GrpcExchangeSource;
 
     struct FakeExchangeService {
         rpc_called: Arc<AtomicBool>,
@@ -126,7 +133,7 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
 
         // Start a server.
-        let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+        let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
         let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
             rpc_called: rpc_called.clone(),
         });
@@ -136,7 +143,7 @@ mod tests {
             tonic::transport::Server::builder()
                 .add_service(exchange_svc)
                 .serve_with_shutdown(addr, async move {
-                    shutdown_recv.recv().await;
+                    shutdown_recv.await.unwrap();
                 })
                 .await
                 .unwrap();
@@ -145,15 +152,15 @@ mod tests {
         sleep(Duration::from_secs(1));
         assert!(server_run.load(Ordering::SeqCst));
 
-        let mut src = GrpcExchangeSource::create(
-            addr.into(),
-            TaskOutputId {
+        let exchange_source = ProstExchangeSource {
+            task_output_id: Some(TaskOutputId {
                 task_id: Some(TaskId::default()),
                 ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+            }),
+            host: Some(HostAddr::from(addr).to_protobuf()),
+            local_execute_plan: None,
+        };
+        let mut src = GrpcExchangeSource::create(exchange_source).await.unwrap();
         for _ in 0..3 {
             assert!(src.take_data().await.unwrap().is_some());
         }
@@ -167,8 +174,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_unconnectable_node() {
-        let addr = "127.0.0.1:1001".parse().unwrap();
-        let res = GrpcExchangeSource::create(addr, TaskOutputId::default()).await;
+        let addr: HostAddr = "127.0.0.1:1001".parse().unwrap();
+        let exchange_source = ProstExchangeSource {
+            task_output_id: Some(TaskOutputId {
+                task_id: Some(TaskId::default()),
+                ..Default::default()
+            }),
+            host: Some(addr.to_protobuf()),
+            local_execute_plan: None,
+        };
+        let res = GrpcExchangeSource::create(exchange_source).await;
         assert!(res.is_err());
     }
 }

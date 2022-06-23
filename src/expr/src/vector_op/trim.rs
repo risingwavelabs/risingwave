@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
-use risingwave_common::error::Result;
+
+use crate::Result;
 
 #[inline(always)]
 pub fn trim(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer.write_ref(s.trim())
+    writer.write_ref(s.trim()).map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -27,20 +28,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_trim() -> Result<()> {
+    fn test_trim() {
         let cases = [
             (" Hello\tworld\t", "Hello\tworld"),
             (" 空I ❤️ databases空 ", "空I ❤️ databases空"),
         ];
 
         for (s, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1)?;
+            let builder = Utf8ArrayBuilder::new(1).unwrap();
             let writer = builder.writer();
-            let guard = trim(s, writer)?;
-            let array = guard.into_inner().finish()?;
+            let guard = trim(s, writer).unwrap();
+            let array = guard.into_inner().finish().unwrap();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }
-        Ok(())
     }
 }

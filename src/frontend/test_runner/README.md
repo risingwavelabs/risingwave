@@ -4,10 +4,10 @@ This module contains a testing tool for binder, planner and optimizer.
 Given a sequence of SQL queries as the input, the test runner will check
 the logical operator tree if any, and the physical operator tree if any.
 
-Just the same as a normal Rust unit test, you can independently run the test runner
-via function `run_all_test_files()` in `plan_test_runner.rs`.
-
 The test data in YAML format is organized under `tests/testdata` folder.
+
+To be notice that `create materialized view` is not supported, since it is not needed.
+Because the test runner will generate stream plan regardless the input SQL is a batch query or a streaming query.
 
 ```yaml
 - sql: |
@@ -44,8 +44,11 @@ Firstly, we will need to create a placeholder in yaml testcases:
   stream_plan: ""
 ```
 
+Those plans followed the input SQL are expected outputs.
+
 You'll need to install [yq](https://github.com/mikefarah/yq). For macOS users,
-simply `brew install yq`. For Linux users, download yq 4.x from the release page.
+simply `brew install yq`. For Linux users, download yq 4.x from the
+[release page](https://github.com/mikefarah/yq/releases).
 
 ```
 ./risedev apply-planner-test

@@ -23,25 +23,23 @@ use std::time::{Duration, SystemTime};
 use itertools::Itertools;
 use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_common::try_match_expand;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
-use crate::manager::{
-    HashMappingManager, HashMappingManagerRef, IdCategory, LocalNotification, MetaSrvEnv, TableId,
-};
+use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
 
 pub type WorkerId = u32;
-pub type ParallelUnitId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
 pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
 
-const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
+pub const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
 
 #[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
@@ -68,7 +66,6 @@ pub struct ClusterManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     max_heartbeat_interval: Duration,
-    hash_mapping_manager: HashMappingManagerRef<S>,
 
     core: RwLock<ClusterManagerCore>,
 }
@@ -80,12 +77,9 @@ where
     pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> Result<Self> {
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
-        let compute_nodes = core.list_worker_node(WorkerType::ComputeNode, None);
-        let dispatch_manager = Arc::new(HashMappingManager::new(&compute_nodes, meta_store).await?);
 
         Ok(Self {
             env,
-            hash_mapping_manager: dispatch_manager,
             max_heartbeat_interval,
             core: RwLock::new(core),
         })
@@ -134,13 +128,6 @@ where
                     parallel_units,
                 };
 
-                // Alter consistent hash mapping.
-                if r#type == WorkerType::ComputeNode {
-                    self.hash_mapping_manager
-                        .add_worker_node(&worker_node)
-                        .await?;
-                }
-
                 let worker = Worker::from_protobuf(worker_node.clone());
 
                 // Persist worker node.
@@ -181,12 +168,6 @@ where
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
         let worker_type = worker.worker_type();
         let worker_node = worker.to_protobuf();
-        // Alter consistent hash mapping.
-        if worker_type == WorkerType::ComputeNode {
-            self.hash_mapping_manager
-                .delete_worker_node(&worker.worker_node)
-                .await?;
-        }
 
         // Persist deletion.
         Worker::delete(self.env.meta_store(), &host_address).await?;
@@ -227,8 +208,8 @@ where
     pub async fn start_heartbeat_checker(
         cluster_manager: ClusterManagerRef<S>,
         check_interval: Duration,
-    ) -> (JoinHandle<()>, UnboundedSender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval = tokio::time::interval(check_interval);
             loop {
@@ -236,7 +217,7 @@ where
                     // Wait for interval
                     _ = min_interval.tick() => {},
                     // Shutdown
-                    _ = shutdown_rx.recv() => {
+                    _ = &mut shutdown_rx => {
                         tracing::info!("Heartbeat checker is shutting down");
                         return;
                     }
@@ -327,29 +308,6 @@ where
     ) -> usize {
         let core = self.core.read().await;
         core.get_parallel_unit_count(parallel_unit_type)
-    }
-
-    /// Get default hash mapping, which uses all hash parallel units in the cluster.
-    pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
-        self.hash_mapping_manager.get_default_mapping().await
-    }
-
-    /// Get hash mapping for a specific relational state table. If the mapping does not exist yet,
-    /// then build one and return the mapping.
-    pub async fn get_table_hash_mapping(&self, table_id: &TableId) -> Result<Vec<ParallelUnitId>> {
-        match self.hash_mapping_manager.get_table_mapping(table_id).await {
-            Some(mapping) => Ok(mapping),
-            None => {
-                self.hash_mapping_manager
-                    .build_table_mapping(*table_id)
-                    .await?;
-                Ok(self
-                    .hash_mapping_manager
-                    .get_table_mapping(table_id)
-                    .await
-                    .unwrap())
-            }
-        }
     }
 
     async fn generate_cn_parallel_units(
@@ -539,8 +497,6 @@ impl ClusterManagerCore {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
     use crate::hummock::test_utils::setup_compute_env;
     use crate::storage::MemStore;
@@ -585,16 +541,6 @@ mod tests {
                 .unwrap();
         }
         assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1).await;
-
-        let mapping = cluster_manager
-            .hash_mapping_manager
-            .get_default_mapping()
-            .await;
-        let unique_parallel_units = HashSet::<ParallelUnitId>::from_iter(mapping.into_iter());
-        assert_eq!(
-            unique_parallel_units.len(),
-            DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1
-        );
 
         Ok(())
     }

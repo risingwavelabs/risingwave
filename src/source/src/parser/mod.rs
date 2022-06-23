@@ -24,9 +24,9 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
 
+use crate::parser::avro_parser::AvroParser;
 use crate::{SourceColumnDesc, SourceFormat};
 
-#[allow(dead_code)]
 mod avro_parser;
 mod common;
 mod debezium;
@@ -53,6 +53,7 @@ pub enum SourceParserImpl {
     Json(JSONParser),
     Protobuf(ProtobufParser),
     DebeziumJson(DebeziumJsonParser),
+    Avro(AvroParser),
 }
 
 impl SourceParserImpl {
@@ -61,16 +62,16 @@ impl SourceParserImpl {
             Self::Json(parser) => parser.parse(payload, columns),
             Self::Protobuf(parser) => parser.parse(payload, columns),
             Self::DebeziumJson(parser) => parser.parse(payload, columns),
+            Self::Avro(avro_parser) => avro_parser.parse(payload, columns),
         }
     }
 
-    pub fn create(
+    pub async fn create(
         format: &SourceFormat,
         properties: &HashMap<String, String>,
         schema_location: &str,
     ) -> Result<Arc<Self>> {
         const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
-
         let parser = match format {
             SourceFormat::Json => SourceParserImpl::Json(JSONParser {}),
             SourceFormat::Protobuf => {
@@ -83,6 +84,9 @@ impl SourceParserImpl {
                 SourceParserImpl::Protobuf(ProtobufParser::new(schema_location, message_name)?)
             }
             SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser {}),
+            SourceFormat::Avro => {
+                SourceParserImpl::Avro(AvroParser::new(schema_location, properties.clone()).await?)
+            }
             _ => {
                 return Err(RwError::from(ProtocolError(
                     "format not support".to_string(),

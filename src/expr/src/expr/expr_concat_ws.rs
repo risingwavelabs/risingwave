@@ -16,15 +16,14 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8ArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Row, Utf8ArrayBuilder,
 };
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
-use risingwave_common::{ensure, try_match_expand};
+use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
+use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
 pub struct ConcatWsExpression {
@@ -85,6 +84,33 @@ impl Expression for ConcatWsExpression {
         }
         Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
     }
+
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
+        let sep = self.sep_expr.eval_row(input)?;
+        let sep = match sep {
+            Some(sep) => sep,
+            None => return Ok(None),
+        };
+
+        let strings = self
+            .string_exprs
+            .iter()
+            .map(|c| c.eval_row(input))
+            .collect::<Result<Vec<_>>>()?;
+        let mut final_string = String::new();
+
+        let mut strings_iter = strings.iter();
+        if let Some(string) = strings_iter.by_ref().flatten().next() {
+            final_string.push_str(string.as_utf8())
+        }
+
+        for string in strings_iter.flatten() {
+            final_string.push_str(sep.as_utf8());
+            final_string.push_str(string.as_utf8());
+        }
+
+        Ok(Some(final_string.to_scalar_value()))
+    }
 }
 
 impl ConcatWsExpression {
@@ -102,13 +128,15 @@ impl ConcatWsExpression {
 }
 
 impl<'a> TryFrom<&'a ExprNode> for ConcatWsExpression {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type()? == Type::ConcatWs);
+        ensure!(prost.get_expr_type().unwrap() == Type::ConcatWs);
 
-        let ret_type = DataType::from(prost.get_return_type()?);
-        let func_call_node = try_match_expand!(prost.get_rex_node().unwrap(), RexNode::FuncCall)?;
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
+            bail!("Expected RexNode::FuncCall");
+        };
 
         let children = &func_call_node.children;
         let sep_expr = expr_build_from_prost(&children[0])?;
@@ -124,7 +152,8 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatWsExpression {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_common::array::{DataChunk, DataChunkTestExt, Row};
+    use risingwave_common::types::{Datum, Scalar};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -177,5 +206,41 @@ mod tests {
         let expected = vec![Some("a,b,c"), None, Some("b,c"), Some(""), None];
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_eval_row_concat_ws_expr() {
+        let input_node1 = make_input_ref(0, TypeName::Varchar);
+        let input_node2 = make_input_ref(1, TypeName::Varchar);
+        let input_node3 = make_input_ref(2, TypeName::Varchar);
+        let input_node4 = make_input_ref(3, TypeName::Varchar);
+        let concat_ws_expr = ConcatWsExpression::try_from(&make_concat_ws_function(
+            vec![input_node1, input_node2, input_node3, input_node4],
+            TypeName::Varchar,
+        ))
+        .unwrap();
+
+        let row_inputs = vec![
+            vec![Some(","), Some("a"), Some("b"), Some("c")],
+            vec![None, Some("a"), Some("b"), Some("c")],
+            vec![Some(","), None, Some("b"), Some("c")],
+            vec![Some(","), None, None, None],
+            vec![None, None, None, None],
+        ];
+
+        let expected = vec![Some("a,b,c"), None, Some("b,c"), Some(""), None];
+
+        for (i, row_input) in row_inputs.iter().enumerate() {
+            let datum_vec: Vec<Datum> = row_input
+                .iter()
+                .map(|e| e.map(|s| s.to_string().to_scalar_value()))
+                .collect();
+            let row = Row::new(datum_vec);
+
+            let result = concat_ws_expr.eval_row(&row).unwrap();
+            let expected = expected[i].map(|s| s.to_string().to_scalar_value());
+
+            assert_eq!(result, expected);
+        }
     }
 }

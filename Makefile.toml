@@ -11,7 +11,6 @@ extend = [
 
 env_files = ["./risedev-components.user.env"]
 
-
 env_scripts = [
   '''
 #!@duckscript
@@ -22,11 +21,11 @@ is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
   set_env RISEDEV_BUILD_TARGET_DIR "${CARGO_MAKE_RUST_TARGET_TRIPLE}/"
-  set_env RISEDEV_RUSTFLAGS "-Zsanitizer=thread"
+  set_env RISEDEV_RUSTFLAGS "--cfg tokio_unstable -Zsanitizer=thread"
 else
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS ""
   set_env RISEDEV_BUILD_TARGET_DIR ""
-  set_env RISEDEV_RUSTFLAGS ""
+  set_env RISEDEV_RUSTFLAGS "--cfg tokio_unstable"
 end
 
 if ${is_all_in_one_enabled}
@@ -38,8 +37,11 @@ end
 ]
 
 [config]
-skip_core_tasks = true
 default_to_workspace = false
+skip_core_tasks = true
+skip_git_env_info = true
+skip_rust_env_info = false
+skip_crate_env_info = true
 
 [tasks.clean-full]
 category = "Misc"
@@ -254,8 +256,6 @@ script = '''
 
 set -e
 
-cp "grafana/risingwave-dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
-cp "grafana/aws-s3.json" "${PREFIX_CONFIG}/aws-s3.json"
 cp "src/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
 cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
@@ -295,6 +295,25 @@ echo "Use \`./risedev d\` instead if you want to start a full cluster."
 set -ex
 
 RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
+'''
+
+[tasks.ctl]
+category = "RiseDev - Start"
+description = "Start RiseCtl"
+script = '''
+#!@shell
+
+RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
+  exit 1
+fi
+
+source "${RC_ENV_FILE}"
+
+cargo run --bin risectl --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
+test $? -eq 0 || exit 1
 '''
 
 [tasks.d]
@@ -345,7 +364,7 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo install $tool
@@ -403,6 +422,29 @@ cargo nextest run "$@"
 """
 description = "Run unit tests"
 
+[tasks.sbuild]
+category = "RiseDev - Build in simulation mode"
+description = "Build in simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo build "$@"
+"""
+
+[tasks.stest]
+category = "RiseDev - Deterministic Simulation Test"
+description = "Run unit tests in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo nextest run "$@"
+"""
 
 [tasks.check-hakari]
 category = "RiseDev - Check"
@@ -411,7 +453,10 @@ script = """
 #!@shell
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
-cargo hakari generate
+
+# cargo hakari will generate new Cargo.toml regardless whether the original Cargo.toml is correct or not.
+# So we always verify before generate, so as not to change the modified time of Cargo.toml.
+(cargo hakari verify > /dev/null) || cargo hakari generate
 test $? -eq 0 || exit 1
 """
 
@@ -465,11 +510,6 @@ script = """
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
 description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
-
-[tasks.apply-ci-template]
-category = "RiseDev - Check"
-command = ".github/workflow-template/generate.sh"
-description = "Update CI workflow by applying templates"
 
 [tasks.c]
 alias = "check"
@@ -534,7 +574,46 @@ description = "Compose a docker-compose.yaml file"
 script = '''
 #!@shell
 set -e
+rm -rf ${PREFIX_DOCKER}/*
 mkdir -p "${PREFIX_DOCKER}"
 cargo run --bin risedev-compose -- -d "${PREFIX_DOCKER}" "$@"
 echo docker-compose file generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
+'''
+
+[tasks.compose-deploy]
+category = "RiseDev - Compose"
+description = "Compose a docker-compose.yaml deploy directory"
+script = '''
+#!@shell
+set -e
+rm -rf "${PREFIX_DOCKER}"/*
+mkdir -p "${PREFIX_DOCKER}"
+cargo run --bin risedev-compose -- -d "${PREFIX_DOCKER}" --deploy "$@"
+echo docker-compose file and deploy.sh generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
+echo If you are ready, run $(tput setaf 4)./risedev apply-compose-deploy$(tput sgr0) to do the deployment.
+'''
+
+[tasks.apply-compose-deploy]
+category = "RiseDev - Compose"
+description = "Run deploy.sh"
+script = '''
+#!@shell
+set -e
+
+.risingwave/rw-docker/deploy.sh "$@"
+
+echo
+echo "Deploy finished!"
+
+cat .risingwave/rw-docker/_message.partial.sh
+'''
+
+[tasks.apply-compose-docker]
+category = "RiseDev - Compose"
+description = "Run deploy.sh"
+script = '''
+#!@shell
+set -e
+
+cp -a .risingwave/rw-docker/* docker
 '''

@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
@@ -34,7 +35,6 @@ impl StreamSimpleAgg {
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
-            Distribution::Any => Distribution::Any,
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
@@ -51,9 +51,13 @@ impl StreamSimpleAgg {
 
 impl fmt::Display for StreamSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("StreamSimpleAgg")
-            .field("aggs", &self.agg_calls())
-            .finish()
+        let mut builder = if self.input().append_only() {
+            f.debug_struct("StreamAppendOnlySimpleAgg")
+        } else {
+            f.debug_struct("StreamSimpleAgg")
+        };
+        builder.field("aggs", &self.agg_calls());
+        builder.finish()
     }
 }
 
@@ -71,7 +75,7 @@ impl_plan_tree_node_for_unary! { StreamSimpleAgg }
 impl ToStreamProst for StreamSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-
+        let (internal_tables, column_mapping) = self.logical.infer_internal_table_catalog();
         // TODO: local or global simple agg?
         ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
@@ -84,10 +88,22 @@ impl ToStreamProst for StreamSimpleAgg {
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|idx| *idx as i32)
+                .map(|idx| *idx as u32)
                 .collect_vec(),
-            table_ids: vec![],
-            append_only: self.append_only(),
+            internal_tables: internal_tables
+                .into_iter()
+                .map(|table_catalog| {
+                    table_catalog.to_prost(
+                        SchemaId::placeholder() as u32,
+                        DatabaseId::placeholder() as u32,
+                    )
+                })
+                .collect_vec(),
+            column_mapping: column_mapping
+                .into_iter()
+                .map(|(k, v)| (k as u32, v))
+                .collect(),
+            is_append_only: self.input().append_only(),
         })
     }
 }

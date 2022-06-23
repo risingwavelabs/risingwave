@@ -15,8 +15,8 @@
 mod barrier;
 mod catalog;
 mod cluster;
-mod hash_mapping;
 mod stream;
+mod user;
 
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
@@ -25,10 +25,10 @@ use async_trait::async_trait;
 pub use barrier::*;
 pub use catalog::*;
 pub use cluster::*;
-pub use hash_mapping::*;
 use prost::Message;
 use risingwave_common::error::Result;
 pub use stream::*;
+pub use user::*;
 
 use crate::storage::{self, MetaStore, Transaction};
 

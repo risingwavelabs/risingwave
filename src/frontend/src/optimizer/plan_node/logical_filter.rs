@@ -18,8 +18,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
-    ToStream,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
@@ -112,7 +112,7 @@ impl ColPrunable for LogicalFilter {
 
         let mut predicate = self.predicate.clone();
         let input_required_cols = {
-            let mut tmp = predicate_required_cols.clone();
+            let mut tmp = predicate_required_cols;
             tmp.union_with(&required_cols_bitset);
             tmp.ones().collect_vec()
         };
@@ -123,7 +123,7 @@ impl ColPrunable for LogicalFilter {
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
-        if predicate_required_cols.is_subset(&required_cols_bitset) {
+        if input_required_cols == required_cols {
             filter.into()
         } else {
             // Given that `LogicalFilter` always has same schema of its input, if predicate's
@@ -140,6 +140,13 @@ impl ColPrunable for LogicalFilter {
             )
             .into()
         }
+    }
+}
+
+impl PredicatePushdown for LogicalFilter {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        self.input
+            .predicate_pushdown(predicate.and(self.predicate.clone()))
     }
 }
 
@@ -240,6 +247,71 @@ mod tests {
         assert_eq!(values.schema().fields().len(), 2);
         assert_eq!(values.schema().fields()[0], fields[1]);
         assert_eq!(values.schema().fields()[1], fields[2]);
+    }
+
+    #[tokio::test]
+    /// Pruning
+    /// ```text
+    /// Filter(cond: input_ref(1)<null)
+    ///   TableScan(v1, v2, v3)
+    /// ```
+    /// with required columns [1, 0] will result in
+    /// ```text
+    /// Project(input_ref(1), input_ref(0))
+    ///   Filter(cond: input_ref(1)<null)
+    ///     TableScan(v1, v2)
+    /// ```
+    async fn test_prune_filter_with_order_required() {
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
+        ];
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
+        let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::LessThan,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                    ExprImpl::Literal(Box::new(Literal::new(None, DataType::Int32))),
+                ],
+            )
+            .unwrap(),
+        ));
+        let filter: PlanRef =
+            LogicalFilter::new(values.into(), Condition::with_expr(predicate)).into();
+
+        // Perform the prune
+        let required_cols = vec![1, 0];
+        let plan = filter.prune_col(&required_cols);
+
+        // Check the result
+        let project = plan.as_logical_project().unwrap();
+        assert_eq!(project.exprs().len(), 2);
+        assert_eq_input_ref!(&project.exprs()[0], 1);
+        assert_eq_input_ref!(&project.exprs()[1], 0);
+
+        let filter = project.input();
+        let filter = filter.as_logical_filter().unwrap();
+        assert_eq!(filter.schema().fields().len(), 2);
+        assert_eq!(filter.schema().fields()[0], fields[0]);
+        assert_eq!(filter.schema().fields()[1], fields[1]);
+
+        let expr: ExprImpl = filter.predicate.clone().into();
+        let call = expr.as_function_call().unwrap();
+        assert_eq_input_ref!(&call.inputs()[0], 1);
+        let values = filter.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[0]);
+        assert_eq!(values.schema().fields()[1], fields[1]);
     }
 
     #[tokio::test]

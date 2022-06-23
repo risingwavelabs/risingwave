@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::ops::Deref;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::array::Row;
@@ -22,10 +24,64 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
+/// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
+pub struct ColumnDescMapping {
+    pub output_columns: Vec<ColumnDesc>,
+
+    pub id_to_column_index: HashMap<ColumnId, usize>,
+}
+
+#[allow(clippy::len_without_is_empty)]
+impl ColumnDescMapping {
+    /// Create a mapping with given `output_columns`.
+    pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
+        let id_to_column_index = output_columns
+            .iter()
+            .enumerate()
+            .map(|(index, d)| (d.column_id, index))
+            .collect();
+
+        Self {
+            output_columns,
+            id_to_column_index,
+        }
+        .into()
+    }
+
+    /// Create a mapping with given `table_columns` projected on the `column_ids`.
+    pub fn new_partial(table_columns: &[ColumnDesc], column_ids: &[ColumnId]) -> Arc<Self> {
+        let mut table_columns = table_columns
+            .iter()
+            .map(|c| (c.column_id, c.clone()))
+            .collect::<HashMap<_, _>>();
+
+        let output_columns = column_ids
+            .iter()
+            .map(|id| table_columns.remove(id).unwrap())
+            .collect();
+
+        Self::new(output_columns)
+    }
+
+    /// Get the [`ColumnDesc`] and its index in the output with given `id`.
+    pub fn get(&self, id: ColumnId) -> Option<(&ColumnDesc, usize)> {
+        self.id_to_column_index
+            .get(&id)
+            .map(|&index| (&self.output_columns[index], index))
+    }
+
+    /// Get the length of output columns.
+    pub fn len(&self) -> usize {
+        self.output_columns.len()
+    }
+}
+
+pub type GeneralCellBasedRowDeserializer = CellBasedRowDeserializer<Arc<ColumnDescMapping>>;
+
 #[derive(Clone)]
-pub struct CellBasedRowDeserializer {
+pub struct CellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
     /// A mapping from column id to its desc and the index in the row.
-    columns: HashMap<ColumnId, (ColumnDesc, usize)>,
+    columns: Desc,
 
     data: Vec<Datum>,
 
@@ -34,17 +90,18 @@ pub struct CellBasedRowDeserializer {
     /// which should also be done on the caller side.
     pk_bytes: Option<Vec<u8>>,
 }
-impl CellBasedRowDeserializer {
-    pub fn new(table_column_descs: Vec<ColumnDesc>) -> Self {
-        let num_cells = table_column_descs.len();
-        let columns = table_column_descs
-            .into_iter()
-            .enumerate()
-            .map(|(index, d)| (d.column_id, (d, index)))
-            .collect();
 
+pub fn make_cell_based_row_deserializer(
+    output_columns: Vec<ColumnDesc>,
+) -> GeneralCellBasedRowDeserializer {
+    GeneralCellBasedRowDeserializer::new(ColumnDescMapping::new(output_columns))
+}
+
+impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
+    pub fn new(column_mapping: Desc) -> Self {
+        let num_cells = column_mapping.len();
         Self {
-            columns,
+            columns: column_mapping,
             data: vec![None; num_cells],
             pk_bytes: None,
         }
@@ -54,31 +111,45 @@ impl CellBasedRowDeserializer {
     /// deserialized. Then we return the key and the value of the previous row.
     pub fn deserialize(
         &mut self,
-        pk_with_cell_id: &Bytes,
-        cell: &Bytes,
+        pk_with_cell_id: impl AsRef<[u8]>,
+        cell: impl AsRef<[u8]>,
     ) -> Result<Option<(Vec<u8>, Row)>> {
-        let pk_with_cell_id = pk_with_cell_id.to_vec();
+        let pk_with_cell_id = pk_with_cell_id.as_ref();
         let pk_vec_len = pk_with_cell_id.len();
         if pk_vec_len < 4 {
-            return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
+            return Err(ErrorCode::InternalError(format!(
+                "corrupted key: {:?}",
+                Bytes::copy_from_slice(pk_with_cell_id)
+            ))
+            .into());
         }
         let (cur_pk_bytes, cell_id_bytes) = pk_with_cell_id.split_at(pk_vec_len - 4);
-        let mut result = None;
+        let result;
+
         let cell_id = deserialize_column_id(cell_id_bytes)?;
         if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes  {
             result = self.take();
             self.pk_bytes = Some(cur_pk_bytes.to_vec());
         } else if self.pk_bytes.is_none() {
             self.pk_bytes = Some(cur_pk_bytes.to_vec());
+            result = None;
+        } else {
+            result = None;
         }
-
-        if let Some((column_desc, index)) = self.columns.get(&cell_id) {
-            if let Some(datum) = deserialize_cell(&mut cell.clone(), &column_desc.data_type)? {
-                let old = self.data.get_mut(*index).unwrap().replace(datum);
+        let mut cell = cell.as_ref();
+        if let Some((column_desc, index)) = self.columns.get(cell_id) {
+            if let Some(datum) = deserialize_cell(&mut cell, &column_desc.data_type)? {
+                let old = self.data.get_mut(index).unwrap().replace(datum);
                 assert!(old.is_none());
             }
         } else {
-            // ignore this cell
+            // TODO: enable this check after we migrate all executors to use cell-based table
+
+            // return Err(ErrorCode::InternalError(format!(
+            //     "found null value in storage: {:?}",
+            //     Bytes::copy_from_slice(pk_with_cell_id)
+            // ))
+            // .into());
         }
 
         Ok(result)
@@ -88,7 +159,7 @@ impl CellBasedRowDeserializer {
     pub fn take(&mut self) -> Option<(Vec<u8>, Row)> {
         let cur_pk_bytes = self.pk_bytes.take();
         cur_pk_bytes.map(|bytes| {
-            let ret = self.data.iter_mut().map(Option::take).collect::<Vec<_>>();
+            let ret = std::mem::replace(&mut self.data, vec![None; self.columns.len()]);
             (bytes, Row(ret))
         })
     }
@@ -112,7 +183,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::ordered::serialize_pk_and_row_state;
 
-    use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
+    use super::make_cell_based_row_deserializer;
 
     #[test]
     fn test_cell_based_deserializer() {
@@ -148,9 +219,10 @@ mod tests {
         let bytes2 = serialize_pk_and_row_state(&pk2, &Some(row2.clone()), &column_ids).unwrap();
         let bytes3 = serialize_pk_and_row_state(&pk3, &Some(row3.clone()), &column_ids).unwrap();
         let bytes = [bytes1, bytes2, bytes3].concat();
-        let partial_table_column_descs = table_column_descs.into_iter().skip(1).take(3).collect();
+        let partial_table_column_descs =
+            table_column_descs.into_iter().skip(1).take(3).collect_vec();
         let mut result = vec![];
-        let mut deserializer = CellBasedRowDeserializer::new(partial_table_column_descs);
+        let mut deserializer = make_cell_based_row_deserializer(partial_table_column_descs);
         for (key_bytes, value_bytes) in bytes {
             let pk_and_row = deserializer
                 .deserialize(&Bytes::from(key_bytes), &Bytes::from(value_bytes.unwrap()))

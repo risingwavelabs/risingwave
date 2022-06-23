@@ -29,10 +29,10 @@ use console::style;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
-    preflight_check, AwsS3Config, CompactorService, ComputeNodeService, ConfigExpander,
-    ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService, GrafanaService,
-    JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService, ServiceConfig,
-    Task, ZooKeeperService, RISEDEV_SESSION_NAME,
+    compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
+    ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
+    GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService,
+    ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -173,7 +173,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = PrometheusService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api http://{}:{}/", c.address, c.port));
@@ -184,7 +185,8 @@ fn task_main(
                 let mut service = ComputeNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
 
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api grpc://{}:{}/", c.address, c.port));
@@ -194,7 +196,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = MetaNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "api grpc://{}:{}/, dashboard http://{}:{}/",
@@ -206,7 +209,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = FrontendService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api postgres://{}:{}/", c.address, c.port));
@@ -214,7 +218,7 @@ fn task_main(
                 writeln!(
                     log_buffer,
                     "* Run {} to start Postgres interactive shell.",
-                    style(format!("psql -h localhost -p {}", c.port))
+                    style(format!("psql -h localhost -p {} -d dev -U root", c.port))
                         .blue()
                         .bold()
                 )?;
@@ -224,7 +228,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = CompactorService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("compactor {}:{}", c.address, c.port));
@@ -234,7 +239,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = GrafanaService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("dashboard http://{}:{}/", c.address, c.port));
@@ -244,7 +250,11 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = JaegerService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.dashboard_port, false)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(
+                    c.dashboard_address.clone(),
+                    c.dashboard_port,
+                    false,
+                )?;
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "dashboard http://{}:{}/",
@@ -279,7 +289,8 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = ZooKeeperService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("zookeeper {}:{}", c.address, c.port));
@@ -313,7 +324,12 @@ fn main() -> Result<()> {
         File::open("risedev.yml")?.read_to_string(&mut content)?;
         content
     };
-    let risedev_config = ConfigExpander::expand(&risedev_config)?;
+
+    let task_name = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "default".to_string());
+
+    let risedev_config = ConfigExpander::expand(&risedev_config, &task_name)?;
     {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);
@@ -326,9 +342,6 @@ fn main() -> Result<()> {
 
     preflight_check()?;
 
-    let task_name = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "default".to_string());
     let (steps, services) = ConfigExpander::select(&risedev_config, &task_name)?;
 
     let mut manager = ProgressManager::new();
@@ -365,12 +378,22 @@ fn main() -> Result<()> {
 
     match task_result {
         Ok((stat, log_buffer)) => {
-            println!("--- summary of startup time ---");
+            println!("---- summary of startup time ----");
             for (task_name, duration) in stat {
                 println!("{}: {:.2}s", task_name, duration.as_secs_f64());
             }
             println!("-------------------------------");
             println!();
+
+            let risectl_env = match compute_risectl_env(&services) {
+                Ok(x) => x,
+                Err(_) => "".into(),
+            };
+
+            std::fs::write(
+                Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
+                &risectl_env,
+            )?;
 
             println!("All services started successfully.");
 

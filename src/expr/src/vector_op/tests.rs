@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::str::FromStr;
 
 use chrono::{NaiveDate, NaiveDateTime};
@@ -20,9 +21,12 @@ use risingwave_common::types::{
 };
 
 use crate::vector_op::arithmetic_op::*;
+use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cast::date_to_timestamp;
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::*;
+use crate::ExprError;
+
 #[test]
 fn test_arithmetic() {
     assert_eq!(
@@ -137,6 +141,36 @@ fn test_arithmetic() {
 }
 
 #[test]
+fn test_bitwise() {
+    // check the boundary
+    assert_eq!(general_shl::<i32, i32>(1i32, 0i32).unwrap(), 1i32);
+    assert_eq!(general_shl::<i64, i32>(1i64, 31i32).unwrap(), 2147483648i64);
+    assert_matches!(
+        general_shl::<i32, i32>(1i32, 32i32).unwrap_err(),
+        ExprError::NumericOutOfRange,
+    );
+    assert_eq!(
+        general_shr::<i64, i32>(-2147483648i64, 31i32).unwrap(),
+        -1i64
+    );
+    assert_eq!(general_shr::<i64, i32>(1i64, 0i32).unwrap(), 1i64);
+    // truth table
+    assert_eq!(
+        general_bitand::<u32, u32, u64>(0b0011u32, 0b0101u32).unwrap(),
+        0b1u64
+    );
+    assert_eq!(
+        general_bitor::<u32, u32, u64>(0b0011u32, 0b0101u32).unwrap(),
+        0b0111u64
+    );
+    assert_eq!(
+        general_bitxor::<u32, u32, u64>(0b0011u32, 0b0101u32).unwrap(),
+        0b0110u64
+    );
+    assert_eq!(general_bitnot::<i32>(0b01i32).unwrap(), -2i32);
+}
+
+#[test]
 fn test_comparison() {
     assert!(general_eq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap());
     assert!(general_eq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap());
@@ -150,18 +184,68 @@ fn test_comparison() {
     assert!(!general_ge::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
     assert!(general_lt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
     assert!(general_lt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
+    assert!(general_is_distinct_from::<Decimal, i32, Decimal>(
+        Some(Decimal::from_str("1.0").unwrap()),
+        Some(2)
+    )
+    .unwrap()
+    .unwrap());
+    assert!(general_is_distinct_from::<Decimal, f32, Decimal>(
+        Some(Decimal::from_str("1.0").unwrap()),
+        Some(2.0)
+    )
+    .unwrap()
+    .unwrap());
+    assert!(general_is_distinct_from::<Decimal, f32, Decimal>(
+        Some(Decimal::from_str("1.0").unwrap()),
+        None
+    )
+    .unwrap()
+    .unwrap());
+    assert!(
+        general_is_distinct_from::<Decimal, i32, Decimal>(None, Some(1))
+            .unwrap()
+            .unwrap()
+    );
+    assert!(!general_is_distinct_from::<Decimal, i32, Decimal>(
+        Some(Decimal::from_str("1.0").unwrap()),
+        Some(1)
+    )
+    .unwrap()
+    .unwrap());
+    assert!(!general_is_distinct_from::<Decimal, f32, Decimal>(
+        Some(Decimal::from_str("1.0").unwrap()),
+        Some(1.0)
+    )
+    .unwrap()
+    .unwrap());
+    assert!(
+        !general_is_distinct_from::<Decimal, f32, Decimal>(None, None)
+            .unwrap()
+            .unwrap()
+    );
     assert!(general_eq::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
     assert!(!general_ne::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
     assert!(!general_lt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
     assert!(general_le::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
     assert!(!general_gt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
     assert!(general_ge::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
+    assert!(
+        !general_is_distinct_from::<OrderedF32, i32, OrderedF64>(Some(1.0.into()), Some(1))
+            .unwrap()
+            .unwrap()
+    );
     assert!(general_eq::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(!general_ne::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(!general_lt::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(general_le::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(!general_gt::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(general_ge::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(
+        !general_is_distinct_from::<i64, i32, i64>(Some(1i64), Some(1))
+            .unwrap()
+            .unwrap()
+    );
 }
 
 #[test]

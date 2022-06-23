@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
@@ -45,7 +46,21 @@ pub async fn handle_create_database(
     }
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_database(&database_name).await?;
+    let owner: String = session.user_name().to_string();
+    catalog_writer
+        .create_database(&database_name, owner.clone())
+        .await?;
+
+    // Default create dev schema.
+    let db_id = {
+        let catalog_reader = session.env().catalog_reader();
+        let reader = catalog_reader.read_guard();
+        reader.get_database_by_name(&database_name)?.id()
+    };
+    catalog_writer
+        .create_schema(db_id, DEFAULT_SCHEMA_NAME, owner.clone())
+        .await?;
+
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))
 }
 

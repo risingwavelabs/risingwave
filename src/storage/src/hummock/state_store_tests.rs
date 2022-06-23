@@ -14,20 +14,20 @@
 
 use std::sync::Arc;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
+use futures::executor::block_on;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::hummock::VNodeBitmap;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::sstable::VNODE_BITMAP_LEN;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
 use crate::store::StateStore;
+use crate::StateStoreIter;
 
 #[tokio::test]
 async fn test_basic() {
@@ -154,7 +154,15 @@ async fn test_basic() {
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
     hummock_storage.sync(Some(epoch1)).await.unwrap();
-    meta_client.commit_epoch(epoch1).await.unwrap();
+    meta_client
+        .commit_epoch(
+            epoch1,
+            hummock_storage
+                .local_version_manager
+                .get_uncommitted_ssts(epoch1),
+        )
+        .await
+        .unwrap();
     hummock_storage.wait_epoch(epoch1).await.unwrap();
     let value = hummock_storage
         .get(&Bytes::from("bb"), epoch2)
@@ -170,88 +178,11 @@ async fn test_basic() {
 }
 
 #[tokio::test]
-async fn test_vnode_filter() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let storage = HummockStorage::with_default_stats(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-    )
-    .await
-    .unwrap();
-
-    let val = Bytes::from(&b"value"[..]);
-    let table_count = 2;
-    let mut batch = Vec::with_capacity(table_count);
-    for table_id in 0..table_count as u32 {
-        let mut key = BytesMut::from(&b"t"[..]);
-        key.put_u32(table_id);
-        batch.push((key.freeze(), StorageValue::new_default_put(val.clone())));
-    }
-
-    let epoch: u64 = 1;
-    storage.ingest_batch(batch, epoch).await.unwrap();
-    storage.sync(Some(epoch)).await.unwrap();
-    meta_client.commit_epoch(epoch).await.unwrap();
-
-    let value_with_dummy_filter = storage
-        .get_with_vnode_set(
-            &Bytes::from(&b"t\0\0\0\0"[..]),
-            epoch,
-            Some(VNodeBitmap {
-                table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
-                bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
-            }),
-        )
-        .await
-        .unwrap();
-    assert_eq!(value_with_dummy_filter.unwrap(), Bytes::from(&b"value"[..]));
-
-    let value_with_blockall_filter = storage
-        .get_with_vnode_set(
-            &Bytes::from(&b"t\0\0\0\0"[..]),
-            epoch,
-            Some(VNodeBitmap {
-                table_id: 0,
-                maplen: VNODE_BITMAP_LEN as u32,
-                bitmap: [0; VNODE_BITMAP_LEN].to_vec(),
-            }),
-        )
-        .await
-        .unwrap();
-    assert!(value_with_blockall_filter.is_none());
-
-    let value_with_mismatch_dummy_filter = storage
-        .get_with_vnode_set(
-            &Bytes::from(&b"t\0\0\0\0"[..]),
-            epoch,
-            Some(VNodeBitmap {
-                table_id: 5,
-                maplen: VNODE_BITMAP_LEN as u32,
-                bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
-            }),
-        )
-        .await
-        .unwrap();
-    assert!(value_with_mismatch_dummy_filter.is_none());
-}
-
-#[tokio::test]
 async fn test_state_store_sync() {
     let sstable_store = mock_sstable_store();
 
     let mut config = default_config_for_test();
-    config.shared_buffer_capacity = 64;
-    config.shared_buffer_threshold = 64;
+    config.shared_buffer_capacity_mb = 64;
     config.write_conflict_detection_enabled = false;
 
     let hummock_options = Arc::new(config);
@@ -328,7 +259,7 @@ async fn test_state_store_sync() {
     //     hummock_storage.shared_buffer_manager().size() as u64
     // );
 
-    // triger a sync
+    // trigger a sync
     hummock_storage.sync(Some(epoch)).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
@@ -435,4 +366,195 @@ async fn test_reload_storage() {
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 3);
+}
+
+#[tokio::test]
+async fn test_write_anytime() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+    let hummock_storage = HummockStorage::with_default_stats(
+        hummock_options,
+        sstable_store,
+        meta_client.clone(),
+        Arc::new(StateStoreMetrics::unused()),
+    )
+    .await
+    .unwrap();
+
+    let initial_epoch = hummock_storage
+        .local_version_manager
+        .get_local_version()
+        .pinned_version()
+        .max_committed_epoch();
+
+    let epoch1 = initial_epoch + 1;
+
+    let assert_old_value = |epoch| {
+        // check point get
+        assert_eq!(
+            "111".as_bytes(),
+            block_on(hummock_storage.get("aa".as_bytes(), epoch))
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            "222".as_bytes(),
+            block_on(hummock_storage.get("bb".as_bytes(), epoch))
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            "333".as_bytes(),
+            block_on(hummock_storage.get("cc".as_bytes(), epoch))
+                .unwrap()
+                .unwrap()
+        );
+        // check iter
+        let mut iter =
+            block_on(hummock_storage.iter("aa".as_bytes()..="cc".as_bytes(), epoch)).unwrap();
+        assert_eq!(
+            (Bytes::from("aa"), Bytes::from("111")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert_eq!(
+            (Bytes::from("bb"), Bytes::from("222")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert_eq!(
+            (Bytes::from("cc"), Bytes::from("333")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert!(block_on(iter.next()).unwrap().is_none());
+    };
+
+    let batch1 = vec![
+        (Bytes::from("aa"), StorageValue::new_default_put("111")),
+        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (Bytes::from("cc"), StorageValue::new_default_put("333")),
+    ];
+
+    hummock_storage
+        .ingest_batch(batch1.clone(), epoch1)
+        .await
+        .unwrap();
+    assert_old_value(epoch1);
+
+    let assert_new_value = |epoch| {
+        // check point get
+        assert_eq!(
+            "111_new".as_bytes(),
+            block_on(hummock_storage.get("aa".as_bytes(), epoch))
+                .unwrap()
+                .unwrap()
+        );
+        assert!(block_on(hummock_storage.get("bb".as_bytes(), epoch))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            "333".as_bytes(),
+            block_on(hummock_storage.get("cc".as_bytes(), epoch))
+                .unwrap()
+                .unwrap()
+        );
+        let mut iter =
+            block_on(hummock_storage.iter("aa".as_bytes()..="cc".as_bytes(), epoch)).unwrap();
+        assert_eq!(
+            (Bytes::from("aa"), Bytes::from("111_new")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert_eq!(
+            (Bytes::from("cc"), Bytes::from("333")),
+            block_on(iter.next()).unwrap().unwrap()
+        );
+        assert!(block_on(iter.next()).unwrap().is_none());
+    };
+
+    // Update aa, delete bb, cc unchanged
+    let batch2 = vec![
+        (Bytes::from("aa"), StorageValue::new_default_put("111_new")),
+        (Bytes::from("bb"), StorageValue::new_default_delete()),
+    ];
+
+    hummock_storage.ingest_batch(batch2, epoch1).await.unwrap();
+
+    assert_new_value(epoch1);
+
+    let epoch2 = epoch1 + 1;
+
+    // Write to epoch2
+    hummock_storage.ingest_batch(batch1, epoch2).await.unwrap();
+    // Assert epoch 1 unchanged
+    assert_new_value(epoch1);
+    // Assert epoch 2 correctness
+    assert_old_value(epoch2);
+
+    hummock_storage.sync(Some(epoch1)).await.unwrap();
+    assert_new_value(epoch1);
+    assert_old_value(epoch2);
+
+    hummock_storage.sync(Some(epoch2)).await.unwrap();
+    assert_new_value(epoch1);
+    assert_old_value(epoch2);
+
+    assert!(!hummock_storage.get_uncommitted_ssts(epoch1).is_empty());
+    assert!(!hummock_storage.get_uncommitted_ssts(epoch2).is_empty());
+}
+
+#[tokio::test]
+async fn test_delete_get() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let hummock_storage = HummockStorage::with_default_stats(
+        hummock_options,
+        sstable_store.clone(),
+        hummock_meta_client.clone(),
+        Arc::new(StateStoreMetrics::unused()),
+    )
+    .await
+    .unwrap();
+
+    let initial_epoch = hummock_storage
+        .local_version_manager
+        .get_pinned_version()
+        .max_committed_epoch();
+    let epoch1 = initial_epoch + 1;
+    let batch1 = vec![
+        (Bytes::from("aa"), StorageValue::new_default_put("111")),
+        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+    ];
+    hummock_storage.ingest_batch(batch1, epoch1).await.unwrap();
+    hummock_storage.sync(Some(epoch1)).await.unwrap();
+    let ssts = hummock_storage.get_uncommitted_ssts(epoch1);
+    hummock_meta_client
+        .commit_epoch(epoch1, ssts)
+        .await
+        .unwrap();
+    let epoch2 = initial_epoch + 2;
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
+    hummock_storage.ingest_batch(batch2, epoch2).await.unwrap();
+    hummock_storage.sync(Some(epoch2)).await.unwrap();
+    let ssts = hummock_storage.get_uncommitted_ssts(epoch2);
+    hummock_meta_client
+        .commit_epoch(epoch2, ssts)
+        .await
+        .unwrap();
+    hummock_storage.wait_epoch(epoch2).await.unwrap();
+    assert!(hummock_storage
+        .get("bb".as_bytes(), epoch2)
+        .await
+        .unwrap()
+        .is_none());
 }

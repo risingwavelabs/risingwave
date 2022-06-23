@@ -47,7 +47,7 @@ impl Aggregator for CountStar {
 
     fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         match builder {
-            ArrayBuilderImpl::Int64(b) => b.append(Some(self.result as i64)),
+            ArrayBuilderImpl::Int64(b) => b.append(Some(self.result as i64)).map_err(Into::into),
             _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
         }
     }

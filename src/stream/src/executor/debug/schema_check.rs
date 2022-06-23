@@ -88,7 +88,7 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::executor::Executor;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_schema_ok() {
         let schema = Schema {
             fields: vec![
@@ -114,7 +114,7 @@ mod tests {
     }
 
     #[should_panic]
-    #[madsim::test]
+    #[tokio::test]
     async fn test_schema_bad() {
         let schema = Schema {
             fields: vec![

@@ -61,8 +61,24 @@ message Cluster {
   map<string, string> config = 3;
 }
 
+message Buffer {
+  enum CompressionType {
+    INVALID = 0;
+    NONE = 1;
+  }
+  CompressionType compression = 1;
+  bytes body = 2;
+}
+
+// Vnode mapping for stream fragments / relational state tables. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
   uint32 table_id = 1;
   repeated uint64 original_indices = 2;
   repeated uint32 data = 3;
+}
+
+// Bitmap that records whether vnodes are present.
+message VNodeBitmap {
+  uint32 table_id = 1;
+  Buffer bitmap = 2;
 }

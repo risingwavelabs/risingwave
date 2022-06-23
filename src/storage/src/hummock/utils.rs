@@ -17,7 +17,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_pb::hummock::{Level, SstableInfo, VNodeBitmap};
+use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::{HummockError, HummockResult};
 
@@ -25,17 +25,12 @@ pub fn range_overlap<R, B>(
     search_key_range: &R,
     inclusive_start_key: &[u8],
     inclusive_end_key: &[u8],
-    backward: bool,
 ) -> bool
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    let (start_bound, end_bound) = if backward {
-        (search_key_range.end_bound(), search_key_range.start_bound())
-    } else {
-        (search_key_range.start_bound(), search_key_range.end_bound())
-    };
+    let (start_bound, end_bound) = (search_key_range.start_bound(), search_key_range.end_bound());
 
     //        RANGE
     // TABLE
@@ -77,23 +72,15 @@ pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
     Ok(())
 }
 
-pub fn bitmap_overlap(pattern: &VNodeBitmap, sst_bitmaps: &Vec<VNodeBitmap>) -> bool {
-    if sst_bitmaps.is_empty() {
-        return true;
-    }
-    if let Ok(pos) =
-        sst_bitmaps.binary_search_by_key(&pattern.get_table_id(), |bitmap| bitmap.get_table_id())
-    {
-        let text = &sst_bitmaps[pos];
-        let pattern_maplen = pattern.get_maplen();
-        assert_eq!(pattern_maplen, text.get_maplen());
-        for i in 0..pattern_maplen as usize {
-            if (pattern.get_bitmap()[i] & text.get_bitmap()[i]) != 0 {
-                return true;
-            }
-        }
-    }
-    false
+pub fn filter_single_sst<R, B>(info: &SstableInfo, key_range: &R) -> bool
+where
+    R: RangeBounds<B>,
+    B: AsRef<[u8]>,
+{
+    let table_range = info.key_range.as_ref().unwrap();
+    let table_start = user_key(table_range.left.as_slice());
+    let table_end = user_key(table_range.right.as_slice());
+    range_overlap(key_range, table_start, table_end)
 }
 
 /// Prune SSTs that does not overlap with a specific key range or does not overlap with a specific
@@ -101,28 +88,13 @@ pub fn bitmap_overlap(pattern: &VNodeBitmap, sst_bitmaps: &Vec<VNodeBitmap>) -> 
 pub fn prune_ssts<'a, R, B>(
     ssts: impl Iterator<Item = &'a SstableInfo>,
     key_range: &R,
-    backward: bool,
-    vnode_set: Option<&VNodeBitmap>,
 ) -> Vec<&'a SstableInfo>
 where
-    R: RangeBounds<B> + Send,
-    B: AsRef<[u8]> + Send,
+    R: RangeBounds<B>,
+    B: AsRef<[u8]>,
 {
-    let mut result_sst_ids: Vec<&'a SstableInfo> = ssts
-        .filter(|info| {
-            let table_range = info.key_range.as_ref().unwrap();
-            let table_start = user_key(table_range.left.as_slice());
-            let table_end = user_key(table_range.right.as_slice());
-            range_overlap(key_range, table_start, table_end, backward)
-        })
-        .collect();
-    if let Some(vnode_set) = vnode_set {
-        result_sst_ids = result_sst_ids
-            .into_iter()
-            .filter(|info| bitmap_overlap(vnode_set, &info.vnode_bitmaps))
-            .collect();
-    }
-    result_sst_ids
+    ssts.filter(|info| filter_single_sst(info, key_range))
+        .collect()
 }
 
 pub fn can_concat(ssts: &[&SstableInfo]) -> bool {

@@ -42,8 +42,10 @@ impl MetaNodeService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
-        cmd.arg("--host")
+        cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
+            .arg("--host")
+            .arg(config.address.clone())
             .arg("--dashboard-host")
             .arg(format!(
                 "{}:{}",
@@ -82,10 +84,6 @@ impl MetaNodeService {
             cmd.arg("--disable-recovery");
         }
 
-        if let Some(interval) = config.checkpoint_interval {
-            cmd.arg("--checkpoint-interval").arg(interval.to_string());
-        }
-
         Ok(())
     }
 }
@@ -99,6 +97,10 @@ impl Task for MetaNodeService {
 
         cmd.env("RUST_BACKTRACE", "1");
         Self::apply_command_args(&mut cmd, &self.config)?;
+
+        let prefix_config = env::var("PREFIX_CONFIG")?;
+        cmd.arg("--config-path")
+            .arg(Path::new(&prefix_config).join("risingwave.toml"));
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

@@ -14,9 +14,11 @@
 
 use std::ops::RangeBounds;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use futures::Future;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -58,7 +60,13 @@ where
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
-        let monitored = MonitoredStateStoreIter { inner: iter };
+        let monitored = MonitoredStateStoreIter {
+            inner: iter,
+            total_items: 0,
+            total_size: 0,
+            start_time: Instant::now(),
+            stats: self.stats.clone(),
+        };
         Ok(monitored)
     }
 
@@ -230,11 +238,19 @@ where
                 .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
         }
     }
+
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
+        self.inner.get_uncommitted_ssts(epoch)
+    }
 }
 
 /// A state store iterator wrapper for monitoring metrics.
 pub struct MonitoredStateStoreIter<I> {
     inner: I,
+    total_items: usize,
+    total_size: usize,
+    start_time: Instant,
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
@@ -254,7 +270,23 @@ where
                 .await
                 .inspect_err(|e| error!("Failed in next: {:?}", e))?;
 
+            self.total_items += 1;
+            self.total_size += pair
+                .as_ref()
+                .map(|(k, v)| k.len() + v.len())
+                .unwrap_or_default();
+
             Ok(pair)
         }
+    }
+}
+
+impl<I> Drop for MonitoredStateStoreIter<I> {
+    fn drop(&mut self) {
+        self.stats
+            .iter_duration
+            .observe(self.start_time.elapsed().as_secs_f64());
+        self.stats.iter_item.observe(self.total_items as f64);
+        self.stats.iter_size.observe(self.total_size as f64);
     }
 }

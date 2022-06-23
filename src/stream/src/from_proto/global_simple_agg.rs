@@ -33,14 +33,14 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| build_agg_call_from_prost(node.append_only, agg_call))
+            .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
         let keyspace = node
-            .get_table_ids()
+            .internal_tables
             .iter()
-            .map(|table_id| Keyspace::table_root(store.clone(), &TableId::new(*table_id)))
+            .map(|table| Keyspace::table_root(store.clone(), &TableId::new(table.id)))
             .collect();
         let key_indices = node
             .get_distribution_keys()

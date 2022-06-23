@@ -17,15 +17,15 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
+use risingwave_object_store::object::{
+    parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
+};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
-use crate::object::{parse_local_object_store, parse_remote_object_store, ObjectStoreImpl};
-use crate::rocksdb_local::RocksDBStateStore;
-use crate::tikv::TikvStateStore;
 use crate::StateStore;
 
 /// The type erased [`StateStore`].
@@ -45,12 +45,6 @@ pub enum StateStoreImpl {
     /// store misses some critical implementation to ensure the correctness of persisting streaming
     /// state. (e.g., no read_epoch support, no async checkpoint)
     MemoryStateStore(Monitored<MemoryStateStore>),
-    /// Should enable `rocksdb-local` feature to use this state store. Not feature-complete, and
-    /// should never be used in tests and production.
-    RocksDBStateStore(Monitored<RocksDBStateStore>),
-    /// Should enable `tikv` feature to use this state store. Not feature-complete, and
-    /// should never be used in tests and production.
-    TikvStateStore(Monitored<TikvStateStore>),
 }
 
 impl StateStoreImpl {
@@ -64,8 +58,6 @@ impl Debug for StateStoreImpl {
         match self {
             StateStoreImpl::HummockStateStore(_) => write!(f, "HummockStateStore"),
             StateStoreImpl::MemoryStateStore(_) => write!(f, "MemoryStateStore"),
-            StateStoreImpl::RocksDBStateStore(_) => write!(f, "RocksDBStateStore"),
-            StateStoreImpl::TikvStateStore(_) => write!(f, "TikvStateStore"),
         }
     }
 }
@@ -74,10 +66,20 @@ impl Debug for StateStoreImpl {
 macro_rules! dispatch_state_store {
     ($impl:expr, $store:ident, $body:tt) => {
         match $impl {
-            StateStoreImpl::MemoryStateStore($store) => $body,
+            StateStoreImpl::MemoryStateStore($store) => {
+                // WARNING: don't change this. Enabling memory backend will cause monomorphization
+                // explosion and thus slow compile time in release mode.
+                #[cfg(debug_assertions)]
+                {
+                    $body
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    let _store = $store;
+                    unimplemented!("memory state store should never be used in release mode");
+                }
+            }
             StateStoreImpl::HummockStateStore($store) => $body,
-            StateStoreImpl::TikvStateStore($store) => $body,
-            StateStoreImpl::RocksDBStateStore($store) => $body,
         }
     };
 }
@@ -111,9 +113,8 @@ impl StateStoreImpl {
                 let sstable_store = Arc::new(SstableStore::new(
                     Arc::new(object_store),
                     config.data_directory.to_string(),
-                    state_store_stats.clone(),
-                    config.block_cache_capacity,
-                    config.meta_cache_capacity,
+                    config.block_cache_capacity_mb * (1 << 20),
+                    config.meta_cache_capacity_mb * (1 << 20),
                 ));
                 let inner = HummockStorage::new(
                     config.clone(),
@@ -126,20 +127,7 @@ impl StateStoreImpl {
             }
 
             "in_memory" | "in-memory" => {
-                tracing::warn!("in-memory state backend should never be used in benchmarks and production environment.");
-                StateStoreImpl::shared_in_memory_store(state_store_stats.clone())
-            }
-
-            tikv if tikv.starts_with("tikv") => {
-                let inner =
-                    TikvStateStore::new(vec![tikv.strip_prefix("tikv://").unwrap().to_string()]);
-                StateStoreImpl::TikvStateStore(inner.monitored(state_store_stats))
-            }
-
-            rocksdb if rocksdb.starts_with("rocksdb_local://") => {
-                let inner =
-                    RocksDBStateStore::new(rocksdb.strip_prefix("rocksdb_local://").unwrap());
-                StateStoreImpl::RocksDBStateStore(inner.monitored(state_store_stats))
+                panic!("in-memory state backend should never be used in end-to-end environment, use `hummock+memory` instead.")
             }
 
             other => unimplemented!("{} state store is not supported", other),

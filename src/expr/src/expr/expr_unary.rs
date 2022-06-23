@@ -15,7 +15,6 @@
 //! For expression that only accept one value as input (e.g. CAST)
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type as ProstType;
 
@@ -25,15 +24,19 @@ use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
 use crate::vector_op::ascii::ascii;
+use crate::vector_op::bitwise_op::general_bitnot;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
 use crate::vector_op::length::length_default;
 use crate::vector_op::lower::lower;
 use crate::vector_op::ltrim::ltrim;
+use crate::vector_op::md5::md5;
+use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
+use crate::{ExprError, Result};
 
 /// This macro helps to create cast expression.
 /// It receives all the combinations of `gen_cast` and generates corresponding match cases
@@ -59,11 +62,7 @@ macro_rules! gen_cast_impl {
                 ),
             )*
             _ => {
-                return Err(ErrorCode::NotImplemented(format!(
-                    "CAST({:?} AS {:?}) not supported yet!",
-                    $child.return_type(), $ret
-                ), 1632.into())
-                .into());
+                return Err(ExprError::Cast2($child.return_type(), $ret));
             }
         }
     };
@@ -73,20 +72,6 @@ macro_rules! gen_cast {
     ($($x:tt, )* ) => {
         gen_cast_impl! {
             [$($x),*],
-
-            // We do not always expect the frontend to do constant folding
-            // to eliminate the unnecessary cast.
-            { int16, int16, |x| Ok(x) },
-            { int32, int32, |x| Ok(x) },
-            { int64, int64, |x| Ok(x) },
-            { float64, float64, |x| Ok(x) },
-            { float32, float32, |x| Ok(x) },
-            { decimal, decimal, |x| Ok(x) },
-            { date, date, |x| Ok(x) },
-            { timestamp, timestamp, |x| Ok(x) },
-            { time, time, |x| Ok(x) },
-            { boolean, boolean, |x| Ok(x) },
-            { varchar, varchar, |x| Ok(x.into()) },
 
             { varchar, date, str_to_date },
             { varchar, time, str_to_time },
@@ -171,10 +156,7 @@ macro_rules! gen_unary_impl {
                 ),
             )*
             _ => {
-                return Err(ErrorCode::NotImplemented(format!(
-                    "{:?} is not supported on ({:?}, {:?})", $expr_name, $child.return_type(), $ret,
-                ), 112.into())
-                .into());
+                return Err(ExprError::UnsupportedFunction(format!("{}({:?}) -> {:?}", $expr_name, $child.return_type(), $ret)));
             }
         }
     };
@@ -204,6 +186,22 @@ macro_rules! gen_unary_atm_expr  {
     };
 }
 
+macro_rules! gen_round_expr {
+    (
+        $expr_name:literal,
+        $child:expr,
+        $ret:expr,
+        $float64_round_func:ident,
+        $decimal_round_func:ident
+    ) => {
+        gen_unary_impl! {
+            [$expr_name, $child, $ret],
+            { float64, float64, $float64_round_func },
+            { decimal, decimal, $decimal_round_func },
+        }
+    };
+}
+
 pub fn new_unary_expr(
     expr_type: ProstType,
     return_type: DataType,
@@ -213,6 +211,13 @@ pub fn new_unary_expr(
 
     let expr: BoxedExpression = match (expr_type, return_type.clone(), child_expr.return_type()) {
         (ProstType::Cast, _, _) => gen_cast! { child_expr, return_type, },
+        (ProstType::BoolOut, _, DataType::Boolean) => {
+            Box::new(UnaryExpression::<BoolArray, Utf8Array, _>::new(
+                child_expr,
+                return_type,
+                bool_out,
+            ))
+        }
         (ProstType::Not, _, _) => {
             Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
                 child_expr,
@@ -260,10 +265,20 @@ pub fn new_unary_expr(
             return_type,
             lower,
         )),
+        (ProstType::Md5, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
+            child_expr,
+            return_type,
+            md5,
+        )),
         (ProstType::Ascii, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
             child_expr,
             return_type,
             ascii,
+        )),
+        (ProstType::CharLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+            child_expr,
+            return_type,
+            length_default,
         )),
         (ProstType::Neg, _, _) => {
             gen_unary_atm_expr! { "Neg", child_expr, return_type, general_neg,
@@ -279,12 +294,29 @@ pub fn new_unary_expr(
                 }
             }
         }
+        (ProstType::BitwiseNot, _, _) => {
+            gen_unary_impl! {
+                [ "BitwiseNot", child_expr, return_type],
+                { int16, int16, general_bitnot },
+                { int32, int32, general_bitnot },
+                { int64, int64, general_bitnot },
+
+            }
+        }
+        (ProstType::Ceil, _, _) => {
+            gen_round_expr! {"Ceil", child_expr, return_type, ceil_f64, ceil_decimal}
+        }
+        (ProstType::Floor, _, _) => {
+            gen_round_expr! {"Floor", child_expr, return_type, floor_f64, floor_decimal}
+        }
+        (ProstType::Round, _, _) => {
+            gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
+        }
         (expr, ret, child) => {
-            return Err(ErrorCode::NotImplemented(format!(
-                "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
+            return Err(ExprError::UnsupportedFunction(format!(
+                "{:?}({:?}) -> {:?}",
                 expr, child, ret
-            ), 112.into())
-            .into());
+            )));
         }
     };
 
@@ -292,7 +324,7 @@ pub fn new_unary_expr(
 }
 
 pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryExpression::<Utf8Array, I64Array, _>::new(
+    Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         return_type,
         length_default,
@@ -327,19 +359,15 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
 mod tests {
     use chrono::NaiveDate;
     use itertools::Itertools;
-    use num_traits::FromPrimitive;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
-    use risingwave_common::types::{
-        Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, Scalar, ScalarImpl,
-    };
+    use risingwave_common::types::{NaiveDateWrapper, Scalar};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::FunctionCall;
 
     use super::super::*;
-    use super::new_unary_expr;
     use crate::expr::test_utils::{make_expression, make_input_ref};
     use crate::vector_op::cast::{date_to_timestamp, str_parse};
 
@@ -368,7 +396,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 100);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
             is_nullable: false,
@@ -387,6 +415,13 @@ mod tests {
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
+        }
+
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i].map(|int| int.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].map(|int| int.to_scalar_value());
+            assert_eq!(result, expected);
         }
     }
 
@@ -408,7 +443,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 3);
         let return_type = DataType {
             type_name: TypeName::Int32 as i32,
             is_nullable: false,
@@ -427,6 +462,13 @@ mod tests {
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
+        }
+
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i].map(|int| int.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].map(|int| int.to_scalar_value());
+            assert_eq!(result, expected);
         }
     }
 
@@ -454,7 +496,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 1);
         let return_type = DataType {
             type_name: TypeName::Int16 as i32,
             is_nullable: false,
@@ -473,6 +515,16 @@ mod tests {
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
+        }
+
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i]
+                .as_ref()
+                .cloned()
+                .map(|str| str.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
+            assert_eq!(result, expected);
         }
     }
 
@@ -503,7 +555,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
@@ -511,6 +563,13 @@ mod tests {
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
+        }
+
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i].map(|b| b.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
+            assert_eq!(result, expected);
         }
     }
 
@@ -539,7 +598,7 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );
-        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Date], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
@@ -548,38 +607,12 @@ mod tests {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
         }
-    }
 
-    #[test]
-    fn test_same_type_cast() {
-        use risingwave_common::types::DataType;
-        use risingwave_pb::expr::expr_node::Type as ExprType;
-
-        fn assert_castible<T: Into<ScalarImpl>>(t: DataType, v: T) {
-            let expr = new_unary_expr(
-                ExprType::Cast,
-                t.clone(),
-                Box::new(LiteralExpression::new(t, Some(v.into()))) as BoxedExpression,
-            )
-            .unwrap();
-            expr.eval(&DataChunk::new_dummy(1)).unwrap();
+        for i in 0..input.len() {
+            let row = Row::new(vec![input[i].map(|d| d.to_scalar_value())]);
+            let result = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
+            assert_eq!(result, expected);
         }
-        assert_castible(DataType::Int16, 1_i16);
-        assert_castible(DataType::Int32, 1_i32);
-        assert_castible(DataType::Int64, 1_i64);
-        assert_castible(DataType::Boolean, true);
-        assert_castible(DataType::Float32, 3.0_f32);
-        assert_castible(DataType::Float64, 3.0_f64);
-        assert_castible(DataType::Decimal, Decimal::from_f32(3.15_f32).unwrap());
-        assert_castible(DataType::Varchar, "abc".to_string());
-        assert_castible(DataType::Date, NaiveDateWrapper::with_days(100).unwrap());
-        assert_castible(
-            DataType::Time,
-            NaiveTimeWrapper::with_secs_nano(1, 1).unwrap(),
-        );
-        assert_castible(
-            DataType::Timestamp,
-            NaiveDateTimeWrapper::with_secs_nsecs(1, 1).unwrap(),
-        );
     }
 }

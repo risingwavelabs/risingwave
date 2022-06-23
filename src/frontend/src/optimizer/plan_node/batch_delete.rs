@@ -38,8 +38,8 @@ impl BatchDelete {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
+            Distribution::Single,
+            Order::any(),
         );
         Self { base, logical }
     }
@@ -84,7 +84,6 @@ impl ToBatchProst for BatchDelete {
 
 impl ToLocalBatch for BatchDelete {
     fn to_local(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_local()?;
-        Ok(self.clone_with_input(new_input).into())
+        unreachable!();
     }
 }

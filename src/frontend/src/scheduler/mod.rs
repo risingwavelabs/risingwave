@@ -12,17 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Fragment and schedule batch queries.
+
 use std::sync::Arc;
+
+use futures::Stream;
+use risingwave_common::array::DataChunk;
+use risingwave_common::error::Result;
 
 use crate::session::SessionImpl;
 
-mod execution;
+mod distributed;
+pub use distributed::QueryManager;
 mod hummock_snapshot_manager;
 pub use hummock_snapshot_manager::*;
-pub mod plan_fragmenter;
-mod query_manager;
-pub use query_manager::*;
+mod plan_fragmenter;
+pub use plan_fragmenter::BatchPlanFragmenter;
+mod local;
+pub use local::*;
+mod error;
+mod task_context;
 pub mod worker_node_manager;
+
+pub use self::error::SchedulerError;
+pub type SchedulerResult<T> = std::result::Result<T, SchedulerError>;
+
+pub trait DataChunkStream = Stream<Item = Result<DataChunk>>;
 
 /// Context for mpp query execution.
 pub struct ExecutionContext {

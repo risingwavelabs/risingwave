@@ -14,10 +14,10 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
+use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_mv(
@@ -29,16 +29,7 @@ pub async fn handle_drop_mv(
 
     let catalog_reader = session.env().catalog_reader();
 
-    {
-        let reader = catalog_reader.read_guard();
-        if let Ok(s) = reader.get_source_by_name(session.database(), &schema_name, &table_name) {
-            if s.source_type == SourceType::Source {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP SOURCE` to drop a source.".to_owned(),
-                )));
-            }
-        }
-    }
+    check_source(catalog_reader, session.clone(), &schema_name, &table_name)?;
 
     let table_id = {
         let reader = catalog_reader.read_guard();
@@ -50,6 +41,13 @@ pub async fn handle_drop_mv(
                 "Use `DROP TABLE` to drop a table.".to_owned(),
             )));
         }
+
+        // If is index on is `Some`, then it is a actually an index.
+        if table.is_index_on.is_some() {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                "Use `DROP INDEX` to drop an index.".to_owned(),
+            )));
+        }
         table.id()
     };
 
@@ -59,4 +57,32 @@ pub async fn handle_drop_mv(
     Ok(PgResponse::empty_result(
         StatementType::DROP_MATERIALIZED_VIEW,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_drop_mv_handler() {
+        let sql_create_table = "create table t (v1 smallint);";
+        let sql_create_mv = "create materialized view mv as select v1 from t;";
+        let sql_drop_mv = "drop materialized view mv;";
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql_create_table).await.unwrap();
+        frontend.run_sql(sql_create_mv).await.unwrap();
+        frontend.run_sql(sql_drop_mv).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+
+        let table = catalog_reader
+            .read_guard()
+            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "idx")
+            .ok()
+            .cloned();
+        assert!(table.is_none());
+    }
 }

@@ -18,8 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk, RowRef};
-use crate::error::Result;
+use crate::array::{ArrayBuilderImpl, ArrayResult, DataChunk, RowRef};
 use crate::types::{DataType, Datum, DatumRef};
 
 pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;
@@ -61,15 +60,15 @@ impl DataChunkBuilder {
         self.batch_size - self.buffered_count
     }
 
-    fn ensure_builders(&mut self) -> Result<()> {
-        if self.array_builders.is_empty() {
+    fn ensure_builders(&mut self) -> ArrayResult<()> {
+        if self.array_builders.len() != self.data_types.len() {
             self.array_builders = self
                 .data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(self.batch_size))
-                .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+                .collect::<ArrayResult<Vec<ArrayBuilderImpl>>>()?;
 
-            self.buffered_count = 0;
+            ensure!(self.buffered_count == 0);
         }
 
         Ok(())
@@ -86,7 +85,7 @@ impl DataChunkBuilder {
     pub fn append_chunk(
         &mut self,
         input_chunk: SlicedDataChunk,
-    ) -> Result<(Option<SlicedDataChunk>, Option<DataChunk>)> {
+    ) -> ArrayResult<(Option<SlicedDataChunk>, Option<DataChunk>)> {
         self.ensure_builders()?;
 
         let mut new_return_offset = input_chunk.offset;
@@ -137,7 +136,7 @@ impl DataChunkBuilder {
     /// Returns all data in current buffer.
     ///
     /// If `buffered_count` is 0, `None` is returned.
-    pub fn consume_all(&mut self) -> Result<Option<DataChunk>> {
+    pub fn consume_all(&mut self) -> ArrayResult<Option<DataChunk>> {
         if self.buffered_count > 0 {
             self.build_data_chunk().map(Some)
         } else {
@@ -145,14 +144,18 @@ impl DataChunkBuilder {
         }
     }
 
-    fn append_one_row_internal(&mut self, data_chunk: &DataChunk, row_idx: usize) -> Result<()> {
+    fn append_one_row_internal(
+        &mut self,
+        data_chunk: &DataChunk,
+        row_idx: usize,
+    ) -> ArrayResult<()> {
         self.do_append_one_row_from_datum_refs(data_chunk.row_at(row_idx)?.0.values())
     }
 
     fn do_append_one_row_from_datum_refs<'a>(
         &mut self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,
-    ) -> Result<()> {
+    ) -> ArrayResult<()> {
         self.array_builders
             .iter_mut()
             .zip_eq(datum_refs)
@@ -164,7 +167,7 @@ impl DataChunkBuilder {
     fn do_append_one_row_from_datums<'a>(
         &mut self,
         datums: impl Iterator<Item = &'a Datum>,
-    ) -> Result<()> {
+    ) -> ArrayResult<()> {
         self.array_builders
             .iter_mut()
             .zip_eq(datums)
@@ -178,7 +181,7 @@ impl DataChunkBuilder {
     pub fn append_one_row_from_datum_refs<'a>(
         &mut self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,
-    ) -> Result<Option<DataChunk>> {
+    ) -> ArrayResult<Option<DataChunk>> {
         ensure!(self.buffered_count < self.batch_size);
         self.ensure_builders()?;
 
@@ -192,7 +195,7 @@ impl DataChunkBuilder {
 
     /// Append one row from the given `row_ref`.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
-    pub fn append_one_row_ref(&mut self, row_ref: RowRef<'_>) -> Result<Option<DataChunk>> {
+    pub fn append_one_row_ref(&mut self, row_ref: RowRef<'_>) -> ArrayResult<Option<DataChunk>> {
         self.append_one_row_from_datum_refs(row_ref.values())
     }
 
@@ -201,7 +204,7 @@ impl DataChunkBuilder {
     pub fn append_one_row_from_datums<'a>(
         &mut self,
         datums: impl Iterator<Item = &'a Datum>,
-    ) -> Result<Option<DataChunk>> {
+    ) -> ArrayResult<Option<DataChunk>> {
         ensure!(self.buffered_count < self.batch_size);
         self.ensure_builders()?;
 
@@ -213,22 +216,22 @@ impl DataChunkBuilder {
         }
     }
 
-    fn build_data_chunk(&mut self) -> Result<DataChunk> {
+    fn build_data_chunk(&mut self) -> ArrayResult<DataChunk> {
         let mut new_array_builders = vec![];
         swap(&mut new_array_builders, &mut self.array_builders);
+        let cardinality = self.buffered_count;
         self.buffered_count = 0;
 
         let columns = new_array_builders.into_iter().try_fold(
             Vec::with_capacity(self.data_types.len()),
-            |mut vec, array_builder| -> Result<Vec<Column>> {
+            |mut vec, array_builder| -> ArrayResult<Vec<Column>> {
                 let array = array_builder.finish()?;
                 let column = Column::new(Arc::new(array));
                 vec.push(column);
                 Ok(vec)
             },
         )?;
-
-        DataChunk::try_from(columns)
+        Ok(DataChunk::new(columns, cardinality))
     }
 
     pub fn buffered_count(&self) -> usize {
@@ -237,16 +240,16 @@ impl DataChunkBuilder {
 }
 
 impl SlicedDataChunk {
-    pub fn new_checked(data_chunk: DataChunk) -> Result<Self> {
+    pub fn new_checked(data_chunk: DataChunk) -> ArrayResult<Self> {
         SlicedDataChunk::with_offset_checked(data_chunk, 0)
     }
 
-    pub fn with_offset_checked(data_chunk: DataChunk, offset: usize) -> Result<Self> {
+    pub fn with_offset_checked(data_chunk: DataChunk, offset: usize) -> ArrayResult<Self> {
         ensure!(offset < data_chunk.capacity());
         Ok(Self { data_chunk, offset })
     }
 
-    pub fn with_new_offset_checked(self, new_offset: usize) -> Result<Self> {
+    pub fn with_new_offset_checked(self, new_offset: usize) -> ArrayResult<Self> {
         SlicedDataChunk::with_offset_checked(self.data_chunk, new_offset)
     }
 
@@ -257,9 +260,8 @@ impl SlicedDataChunk {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{DataChunk, I32Array, I64Array};
-    use crate::buffer::Bitmap;
-    use crate::column;
+    use crate::array::DataChunk;
+    use crate::test_prelude::DataChunkTestExt;
     use crate::types::DataType;
     use crate::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 
@@ -268,19 +270,12 @@ mod tests {
         let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
 
         // Append a chunk with 2 rows
-        let input = {
-            let column1 = column! {
-                I32Array, [Some(3), None]
-            };
-
-            let column2 = column! {
-                I64Array, [None, Some(7i64)]
-            };
-
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            SlicedDataChunk::new_checked(chunk).expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7",
+        ))
+        .expect("Failed to create sliced data chunk");
 
         let (returned_input, output) = builder
             .append_chunk(input)
@@ -289,15 +284,14 @@ mod tests {
         assert!(output.is_none());
 
         // Append a chunk with 4 rows
-        let input = {
-            let column1 = column! {I32Array, [Some(3), None, Some(4), None]};
-
-            let column2 = column! {I64Array, [None, Some(7i64), Some(8i64), Some(9i64)]};
-
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            SlicedDataChunk::new_checked(chunk).expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7
+             4 8
+             . 9",
+        ))
+        .expect("Failed to create sliced data chunk");
         let (returned_input, output) = builder
             .append_chunk(input)
             .expect("Failed to append chunk!");
@@ -321,16 +315,12 @@ mod tests {
         let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
 
         // Append a chunk with 2 rows
-        let input = {
-            let column1 = column! {I32Array, [Some(3), None]};
-            let column2 = column! {I64Array, [None, Some(7i64)]};
-
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            let bitmap = Bitmap::try_from(vec![true, false]).expect("Failed to create bitmap");
-            SlicedDataChunk::new_checked(chunk.with_visibility(bitmap))
-                .expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7 D",
+        ))
+        .expect("Failed to create sliced data chunk");
 
         let (returned_input, output) = builder
             .append_chunk(input)
@@ -340,18 +330,14 @@ mod tests {
         assert_eq!(1, builder.buffered_count());
 
         // Append a chunk with 4 rows
-        let input = {
-            let column1 = column! { I32Array, [Some(3), None, Some(4), None] };
-
-            let column2 = column! { I64Array, [None, Some(7i64), Some(8i64), Some(9i64)]};
-
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            let bitmap =
-                Bitmap::try_from(vec![false, true, true, false]).expect("Failed to create bitmap!");
-            SlicedDataChunk::new_checked(chunk.with_visibility(bitmap))
-                .expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 . D
+             . 7
+             4 8
+             . 9 D",
+        ))
+        .expect("Failed to create sliced data chunk");
         let (returned_input, output) = builder
             .append_chunk(input)
             .expect("Failed to append chunk!");
@@ -378,13 +364,12 @@ mod tests {
         assert!(builder.consume_all().unwrap().is_none());
 
         // Append a chunk with 2 rows
-        let input = {
-            let column1 = column! {I32Array, [Some(3), None]};
-            let column2 = column! {I64Array, [None, Some(7i64)] };
-            let chunk =
-                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
-            SlicedDataChunk::new_checked(chunk).expect("Failed to create sliced data chunk")
-        };
+        let input = SlicedDataChunk::new_checked(DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7",
+        ))
+        .expect("Failed to create sliced data chunk");
 
         let (returned_input, output) = builder
             .append_chunk(input)

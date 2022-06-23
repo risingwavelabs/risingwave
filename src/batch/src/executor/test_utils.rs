@@ -19,9 +19,11 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::RwError;
+use risingwave_common::error::{Result, RwError};
+use risingwave_rpc_client::ExchangeSource;
 
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, Executor2};
+use crate::executor::{BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor};
+use crate::task::BatchTaskContext;
 
 /// Mock the input of executor.
 /// You can bind one or more `MockExecutor` as the children of the executor to test,
@@ -52,7 +54,7 @@ impl MockExecutor {
     }
 }
 
-impl Executor2 for MockExecutor {
+impl Executor for MockExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -81,7 +83,7 @@ impl MockExecutor {
 ///
 /// if want diff ignoring order, add a `order_by` executor in manual currently, when the `schema`
 /// method of `executor` is ready, an order-ignored version will be added.
-pub async fn diff_executor_output(actual: BoxedExecutor2, expect: BoxedExecutor2) {
+pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) {
     let mut expect_cardinality = 0;
     let mut actual_cardinality = 0;
     let mut expects = vec![];
@@ -141,4 +143,52 @@ fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
     left.rows()
         .zip_eq(right.rows())
         .for_each(|(row1, row2)| assert_eq!(row1, row2));
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct FakeExchangeSource {
+    chunks: Vec<Option<DataChunk>>,
+}
+
+impl FakeExchangeSource {
+    pub fn new(chunks: Vec<Option<DataChunk>>) -> Self {
+        Self { chunks }
+    }
+}
+
+#[async_trait::async_trait]
+impl ExchangeSource for FakeExchangeSource {
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+        if let Some(chunk) = self.chunks.pop() {
+            Ok(chunk)
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct FakeCreateSource {
+    fake_exchange_source: FakeExchangeSource,
+}
+
+impl FakeCreateSource {
+    pub fn new(fake_exchange_source: FakeExchangeSource) -> Self {
+        Self {
+            fake_exchange_source,
+        }
+    }
+}
+
+use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
+
+#[async_trait::async_trait]
+impl CreateSource for FakeCreateSource {
+    async fn create_source(
+        &self,
+        _: impl BatchTaskContext,
+        _: &ProstExchangeSource,
+    ) -> Result<Box<dyn ExchangeSource>> {
+        Ok(Box::new(self.fake_exchange_source.clone()))
+    }
 }

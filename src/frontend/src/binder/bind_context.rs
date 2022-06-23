@@ -76,7 +76,7 @@ impl BindContext {
         }
     }
 
-    fn get_index(&self, column_name: &String) -> Result<usize> {
+    pub fn get_index(&self, column_name: &String) -> Result<usize> {
         let columns = self
             .indexs_of
             .get(column_name)
@@ -112,7 +112,6 @@ impl BindContext {
 }
 
 impl BindContext {
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         BindContext {
             columns: Vec::new(),

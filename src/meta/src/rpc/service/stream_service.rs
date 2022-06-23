@@ -49,10 +49,7 @@ where
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         let _req = request.into_inner();
 
-        self.global_stream_manager
-            .flush()
-            .await
-            .map_err(|e| e.to_grpc_status())?;
+        self.global_stream_manager.flush().await?;
         Ok(Response::new(FlushResponse { status: None }))
     }
 }

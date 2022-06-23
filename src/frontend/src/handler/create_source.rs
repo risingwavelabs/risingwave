@@ -12,21 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_source::ProtobufParser;
-use risingwave_sqlparser::ast::{
-    CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema, SqlOption, Value,
-};
+use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
 
 use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
+use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -51,6 +47,7 @@ pub(crate) fn make_prost_source(
         database_id,
         name,
         info: Some(source_info),
+        owner: session.user_name().to_string(),
     })
 }
 
@@ -68,29 +65,19 @@ fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstCol
         .collect_vec())
 }
 
-fn handle_source_with_properties(options: Vec<SqlOption>) -> Result<HashMap<String, String>> {
-    options
-        .into_iter()
-        .map(|x| match x.value {
-            Value::SingleQuotedString(s) => Ok((x.name.value, s)),
-            _ => Err(RwError::from(ProtocolError(
-                "with properties only support single quoted string value".to_string(),
-            ))),
-        })
-        .collect()
-}
-
 pub async fn handle_create_source(
     context: OptimizerContext,
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
+    let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
+
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
             let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
             columns.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
             StreamSourceInfo {
-                properties: handle_source_with_properties(stmt.with_properties.0)?,
+                properties: with_properties.clone(),
                 row_format: RowFormatType::Protobuf as i32,
                 row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                 row_id_index: 0,
@@ -99,7 +86,7 @@ pub async fn handle_create_source(
             }
         }
         SourceSchema::Json => StreamSourceInfo {
-            properties: handle_source_with_properties(stmt.with_properties.0)?,
+            properties: with_properties.clone(),
             row_format: RowFormatType::Json as i32,
             row_schema_location: "".to_string(),
             row_id_index: 0,
@@ -113,7 +100,12 @@ pub async fn handle_create_source(
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {
         let (graph, table) = {
-            let (plan, table) = gen_materialized_source_plan(context.into(), source.clone())?;
+            let (plan, table) = gen_materialized_source_plan(
+                context.into(),
+                source.clone(),
+                session.user_name().to_string(),
+                with_properties.clone(),
+            )?;
             let plan = plan.to_stream_prost();
             let graph = StreamFragmenter::build_graph(plan);
 
@@ -136,7 +128,7 @@ pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
-    use crate::catalog::gen_row_id_column_name;
+    use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
@@ -178,7 +170,7 @@ pub mod tests {
         let city_type = DataType::Struct {
             fields: vec![DataType::Varchar, DataType::Varchar].into(),
         };
-        let row_id_col_name = gen_row_id_column_name(0);
+        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "id" => DataType::Int32,

@@ -32,6 +32,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stream_plan",
         "stream_service",
         "hummock",
+        "user",
+        "source",
     ];
     let protos: Vec<String> = proto_files
         .iter()

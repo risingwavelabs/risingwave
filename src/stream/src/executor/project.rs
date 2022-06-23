@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
@@ -24,7 +24,6 @@ use super::{
     Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
     StreamExecutorResult,
 };
-use crate::executor::error::StreamExecutorError;
 
 pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;
 
@@ -89,26 +88,14 @@ impl SimpleExecutor for SimpleProjectExecutor {
         &mut self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
+        let chunk = chunk.compact()?;
 
-        let (ops, columns, visibility) = chunk.into_inner();
-        let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().columns(columns);
-            if let Some(visibility) = visibility {
-                data_chunk_builder.visibility(visibility).build()
-            } else {
-                data_chunk_builder.build()
-            }
-        };
+        let (data_chunk, ops) = chunk.into_parts();
 
         let projected_columns = self
             .exprs
             .iter_mut()
-            .map(|expr| {
-                expr.eval(&data_chunk)
-                    .map(Column::new)
-                    .map_err(StreamExecutorError::eval_error)
-            })
+            .map(|expr| expr.eval(&data_chunk).map(Column::new))
             .collect::<Result<Vec<Column>, _>>()?;
 
         let new_chunk = StreamChunk::new(ops, projected_columns, None);
@@ -143,7 +130,7 @@ mod tests {
     use super::super::*;
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_projection() {
         let chunk1 = StreamChunk::from_pretty(
             " I I

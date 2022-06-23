@@ -16,6 +16,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::LocalSstableInfo;
 
 use crate::error::StorageResult;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
@@ -158,6 +159,11 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         MonitoredStateStore::new(self, stats)
+    }
+
+    /// Gets `epoch`'s uncommitted `SSTables`.
+    fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<LocalSstableInfo> {
+        todo!()
     }
 }
 

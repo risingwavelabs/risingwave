@@ -96,7 +96,14 @@ impl AggCall {
             (AggKind::Sum, _) => return invalid(),
 
             // Count
-            (AggKind::Count, _) => DataType::Int64,
+            (AggKind::Count | AggKind::ApproxCountDistinct, _) => DataType::Int64,
+
+            // StringAgg
+            (AggKind::StringAgg, _) => DataType::Varchar,
+
+            // SingleValue
+            (AggKind::SingleValue, [input]) => input.clone(),
+            (AggKind::SingleValue, _) => return invalid(),
 
             // Others
             _ => return unsupported(),
@@ -131,6 +138,7 @@ impl AggCall {
         self.inputs.as_ref()
     }
 }
+
 impl Expr for AggCall {
     fn return_type(&self) -> DataType {
         self.return_type.clone()

@@ -1,0 +1,49 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T
+select concat('a', 'b');
+----
+ab
+
+query T
+select concat(NULL);
+----
+(empty)
+
+query T
+select concat(NULL, NULL);
+----
+(empty)
+
+query T
+select concat(1, 1.01);
+----
+11.01
+
+query T
+select concat('a', NULL);
+----
+a
+
+query T
+select concat(1, 1.01, 'A', true, NULL);
+----
+11.01At
+
+statement error
+select concat();
+
+statement ok
+create table t (v1 smallint, v2 int, v3 decimal, v4 real, v5 double precision, v6 bool, v7 varchar);
+
+statement ok
+insert into t values (1, 2, 3.01, 4, 5.01, true, NULL);
+
+query T
+select concat(v1, v2, v3, v4, v5, v6, v7) from t;
+----
+123.0145.01t
+
+statement ok
+drop table t;

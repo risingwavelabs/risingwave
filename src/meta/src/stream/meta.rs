@@ -20,23 +20,30 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
-use crate::cluster::{ParallelUnitId, WorkerId};
+use crate::cluster::WorkerId;
+use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
+use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
+use crate::stream::record_table_vnode_mappings;
 
 struct FragmentManagerCore {
     table_fragments: HashMap<TableId, TableFragments>,
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
-pub struct FragmentManager<S> {
+pub struct FragmentManager<S: MetaStore> {
     meta_store: Arc<S>,
 
     core: RwLock<FragmentManagerCore>,
+
+    compaction_group_manager: CompactionGroupManagerRef<S>,
 }
 
 pub struct ActorInfos {
@@ -55,11 +62,15 @@ pub struct BuildGraphInfo {
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
 
-impl<S> FragmentManager<S>
+impl<S: MetaStore> FragmentManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store: Arc<S>) -> Result<Self> {
+    pub async fn new(
+        env: MetaSrvEnv<S>,
+        compaction_group_manager: CompactionGroupManagerRef<S>,
+    ) -> Result<Self> {
+        let meta_store = env.meta_store_ref();
         let table_fragments = try_match_expand!(
             TableFragments::list(&*meta_store).await,
             Ok,
@@ -71,9 +82,12 @@ where
             .map(|tf| (tf.table_id(), tf))
             .collect();
 
+        Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
+
         Ok(Self {
             meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
+            compaction_group_manager,
         })
     }
 
@@ -100,6 +114,21 @@ where
         }
     }
 
+    pub async fn select_table_fragments_by_table_id(
+        &self,
+        table_id: &TableId,
+    ) -> Result<TableFragments> {
+        let map = &self.core.read().await.table_fragments;
+        if let Some(table_fragments) = map.get(table_id) {
+            Ok(table_fragments.clone())
+        } else {
+            Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            ))))
+        }
+    }
+
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
     /// state is `ActorState::Inactive`.
     pub async fn start_create_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
@@ -111,6 +140,12 @@ where
                 table_fragment.table_id()
             )))),
             Entry::Vacant(v) => {
+                // Register to compaction group beforehand.
+                // If any following operation fails, the registration will be eventually reverted.
+                self.compaction_group_manager
+                    .register_table_fragments(&table_fragment)
+                    .await?;
+
                 table_fragment.insert(&*self.meta_store).await?;
                 v.insert(table_fragment);
                 Ok(())
@@ -125,7 +160,19 @@ where
         match map.entry(*table_id) {
             Entry::Occupied(o) => {
                 TableFragments::delete(&*self.meta_store, &table_id.table_id).await?;
-                o.remove();
+                let table_fragments = o.remove();
+                // Unregister from compaction group afterwards.
+                if let Err(e) = self
+                    .compaction_group_manager
+                    .unregister_table_fragments(&table_fragments)
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                        table_id,
+                        e
+                    );
+                }
                 Ok(())
             }
             Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
@@ -228,11 +275,22 @@ where
             }
 
             self.meta_store.txn(transaction).await?;
-            map.remove(table_id);
+            let table_fragments = map.remove(table_id).unwrap();
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
             }
-
+            // Unregister from compaction group afterwards.
+            if let Err(e) = self
+                .compaction_group_manager
+                .unregister_table_fragments(&table_fragments)
+                .await
+            {
+                tracing::warn!(
+                    "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                    table_id,
+                    e
+                );
+            }
             Ok(())
         } else {
             Err(RwError::from(InternalError(format!(
@@ -418,5 +476,30 @@ where
         }
 
         Ok(info)
+    }
+
+    fn restore_vnode_mappings(
+        hash_mapping_manager: HashMappingManagerRef,
+        table_fragments: &HashMap<TableId, TableFragments>,
+    ) -> Result<()> {
+        for fragments in table_fragments.values() {
+            for (fragment_id, fragment) in &fragments.fragments {
+                let mapping = fragment.vnode_mapping.as_ref().unwrap();
+                let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
+                assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
+                hash_mapping_manager.set_fragment_hash_mapping(*fragment_id, vnode_mapping);
+
+                // Looking at the first actor is enough, since all actors in one fragment have
+                // identical state table id.
+                let actor = fragment.actors.first().unwrap();
+                let stream_node = actor.get_nodes()?;
+                record_table_vnode_mappings(
+                    &hash_mapping_manager,
+                    stream_node,
+                    fragment.fragment_id,
+                )?;
+            }
+        }
+        Ok(())
     }
 }

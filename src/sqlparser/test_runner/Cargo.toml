@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1"
 itertools = "0.10"
 risingwave_sqlparser = { path = "../" }
+serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"
 tempfile = "3"
 walkdir = "2"

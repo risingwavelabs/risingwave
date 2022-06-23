@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{Statement, TableAlias};
 
 pub mod bind_context;
 mod delete;
@@ -30,11 +32,12 @@ mod values;
 
 pub use bind_context::BindContext;
 pub use delete::BoundDelete;
+pub use expr::bind_data_type;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundTableSource,
-    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundTableFunction, BoundTableSource,
+    BoundWindowTableFunction, FunctionType, Relation, WindowTableFunctionKind,
 };
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
@@ -56,6 +59,8 @@ pub struct Binder {
     upper_contexts: Vec<BindContext>,
 
     next_subquery_id: usize,
+    /// Map the cte's name to its Relation::Subquery.
+    cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
 }
 
 impl Binder {
@@ -66,6 +71,7 @@ impl Binder {
             context: BindContext::new(),
             upper_contexts: vec![],
             next_subquery_id: 0,
+            cte_to_relation: HashMap::new(),
         }
     }
 

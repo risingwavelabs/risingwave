@@ -26,7 +26,10 @@ mod block_cache;
 pub use block_cache::*;
 mod sstable;
 pub use sstable::*;
-mod cache;
+
+pub mod compaction_executor;
+#[expect(dead_code)]
+mod compaction_group_client;
 pub mod compactor;
 #[cfg(test)]
 mod compactor_tests;
@@ -43,14 +46,17 @@ pub mod sstable_store;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
-pub mod test_runner;
 #[cfg(test)]
 pub(crate) mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
-pub use cache::{CachableEntry, LookupResult, LruCache};
+
+#[cfg(target_os = "linux")]
+pub mod file_cache;
+
 pub use error::*;
+pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use value::*;
 
 use self::iterator::HummockIterator;
@@ -59,8 +65,10 @@ pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::iterator::ReadOptions;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::monitor::StoreLocalStatistic;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -124,14 +132,16 @@ impl HummockStorage {
         table: TableHolder,
         internal_key: &[u8],
         key: &[u8],
-    ) -> HummockResult<Option<Bytes>> {
+        read_options: Arc<ReadOptions>,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<Option<Option<Bytes>>> {
         if table.value().surely_not_have_user_key(key) {
-            self.stats.bloom_filter_true_negative_counts.inc();
+            stats.bloom_filter_true_negative_count += 1;
             return Ok(None);
         }
         // Might have the key, take it as might positive.
-        self.stats.bloom_filter_might_positive_counts.inc();
-        let mut iter = SSTableIterator::new(table, self.sstable_store.clone());
+        stats.bloom_filter_might_positive_count += 1;
+        let mut iter = SSTableIterator::create(table, self.sstable_store.clone(), read_options);
         iter.seek(internal_key).await?;
         // Iterator has seeked passed the borders.
         if !iter.is_valid() {
@@ -141,9 +151,10 @@ impl HummockStorage {
         // Iterator gets us the key, we tell if it's the key we want
         // or key next to it.
         let value = match user_key(iter.key()) == key {
-            true => iter.value().into_user_value().map(Bytes::copy_from_slice),
+            true => Some(iter.value().into_user_value().map(Bytes::copy_from_slice)),
             false => None,
         };
+        iter.collect_local_statistic(stats);
         Ok(value)
     }
 

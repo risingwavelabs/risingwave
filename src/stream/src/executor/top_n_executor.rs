@@ -23,6 +23,7 @@ use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
+use super::expect_first_barrier;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef};
 
@@ -85,12 +86,10 @@ where
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub(crate) async fn top_n_executor_execute(mut self: Box<Self>) {
         let mut input = self.input.execute();
-        let first_msg = input.next().await.unwrap()?;
-        let barrier = first_msg
-            .as_barrier()
-            .expect("the first message received by agg executor must be a barrier");
+
+        let barrier = expect_first_barrier(&mut input).await?;
         let mut epoch = barrier.epoch.curr;
-        yield first_msg;
+        yield Message::Barrier(barrier);
 
         #[for_await]
         for msg in input {
@@ -117,15 +116,10 @@ pub(crate) fn generate_output(
     if !new_rows.is_empty() {
         let mut data_chunk_builder = DataChunkBuilder::with_default_size(schema.data_types());
         for row in &new_rows {
-            data_chunk_builder
-                .append_one_row_from_datums(row.0.iter())
-                .map_err(StreamExecutorError::eval_error)?;
+            data_chunk_builder.append_one_row_from_datums(row.0.iter())?;
         }
         // since `new_rows` is not empty, we unwrap directly
-        let new_data_chunk = data_chunk_builder
-            .consume_all()
-            .map_err(StreamExecutorError::eval_error)?
-            .unwrap();
+        let new_data_chunk = data_chunk_builder.consume_all()?.unwrap();
         let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
         Ok(new_stream_chunk)
     } else {

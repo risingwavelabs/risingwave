@@ -2,3 +2,7 @@ include ./views/q0.slt.part
 include ./views/q1.slt.part
 include ./views/q2.slt.part
 include ./views/q3.slt.part
+include ./views/q4.slt.part
+include ./views/q5.slt.part
+include ./views/q7.slt.part
+include ./views/q8.slt.part

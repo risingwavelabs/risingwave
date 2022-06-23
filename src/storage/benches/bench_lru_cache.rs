@@ -87,7 +87,7 @@ pub struct LruCacheImpl {
 impl LruCacheImpl {
     pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
-            inner: Arc::new(LruCache::new(3, capacity, 1024)),
+            inner: Arc::new(LruCache::new(3, capacity)),
             fake_io_latency,
         }
     }
@@ -120,9 +120,7 @@ impl CacheBase for LruCacheImpl {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref IO_COUNT: AtomicUsize = AtomicUsize::new(0);
-}
+static IO_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 async fn get_fake_block(sst: u64, offset: u64, io_latency: Duration) -> HummockResult<Block> {
     if !io_latency.is_zero() {

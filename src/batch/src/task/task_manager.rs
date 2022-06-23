@@ -13,23 +13,27 @@
 // limitations under the License.
 
 use std::collections::{hash_map, HashMap};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::{
-    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
+    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
+use risingwave_pb::task_service::GetDataResponse;
+use tokio::sync::mpsc::Sender;
+use tonic::Status;
 
-use crate::task::env::BatchEnvironment;
-use crate::task::{BatchTaskExecution, TaskId, TaskOutput};
+use crate::rpc::service::exchange::GrpcExchangeWriter;
+use crate::task::{BatchTaskExecution, ComputeNodeContext, TaskId, TaskOutput, TaskOutputId};
 
 /// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
 pub struct BatchManager {
     /// Every task id has a corresponding task execution.
-    tasks: Arc<Mutex<HashMap<TaskId, Box<BatchTaskExecution>>>>,
+    tasks: Arc<Mutex<HashMap<TaskId, Arc<BatchTaskExecution<ComputeNodeContext>>>>>,
 }
 
 impl BatchManager {
@@ -39,20 +43,21 @@ impl BatchManager {
         }
     }
 
-    pub fn fire_task(
+    pub async fn fire_task(
         &self,
-        env: BatchEnvironment,
         tid: &ProstTaskId,
         plan: PlanFragment,
         epoch: u64,
+        context: ComputeNodeContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
-        let task = BatchTaskExecution::new(tid, plan, env, epoch)?;
+        let task = BatchTaskExecution::new(tid, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
+        let task = Arc::new(task);
 
-        task.async_execute()?;
+        task.clone().async_execute().await?;
         if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
-            e.insert(Box::new(task));
+            e.insert(task);
             Ok(())
         } else {
             Err(ErrorCode::InternalError(format!(
@@ -63,9 +68,34 @@ impl BatchManager {
         }
     }
 
-    pub fn take_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
+    pub fn get_data(
+        &self,
+        tx: Sender<std::result::Result<GetDataResponse, Status>>,
+        peer_addr: SocketAddr,
+        pb_task_output_id: &ProstTaskOutputId,
+    ) -> Result<()> {
+        let task_id = TaskOutputId::try_from(pb_task_output_id)?;
+        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
+        let mut task_output = self.take_output(pb_task_output_id)?;
+        tokio::spawn(async move {
+            let mut writer = GrpcExchangeWriter::new(tx.clone());
+            match task_output.take_data(&mut writer).await {
+                Ok(_) => {
+                    tracing::trace!(
+                        from = ?task_id,
+                        "exchanged {} chunks",
+                        writer.written_chunks(),
+                    );
+                    Ok(())
+                }
+                Err(e) => tx.send(Err(e.into())).await,
+            }
+        });
+        Ok(())
+    }
+
+    pub fn take_output(&self, output_id: &ProstTaskOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
-        debug!("Trying to take output of: {:?}", output_id);
         self.tasks
             .lock()
             .get(&task_id)
@@ -73,8 +103,18 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    #[cfg(test)]
-    pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<BatchTaskExecution>>> {
+    pub fn abort_task(&self, sid: &ProstTaskId) -> Result<()> {
+        let sid = TaskId::from(sid);
+        match self.tasks.lock().get(&sid) {
+            Some(task) => task.abort_task(),
+            None => Err(TaskNotFound.into()),
+        }
+    }
+
+    pub fn remove_task(
+        &self,
+        sid: &ProstTaskId,
+    ) -> Result<Option<Arc<BatchTaskExecution<ComputeNodeContext>>>> {
         let task_id = TaskId::from(sid);
         match self.tasks.lock().remove(&task_id) {
             Some(t) => Ok(Some(t)),
@@ -87,6 +127,32 @@ impl BatchManager {
         match self.tasks.lock().get(task_id) {
             Some(task) => task.check_if_running(),
             None => Err(TaskNotFound.into()),
+        }
+    }
+
+    pub fn check_if_task_aborted(&self, task_id: &TaskId) -> Result<bool> {
+        match self.tasks.lock().get(task_id) {
+            Some(task) => task.check_if_aborted(),
+            None => Err(TaskNotFound.into()),
+        }
+    }
+
+    #[cfg(test)]
+    async fn wait_until_task_aborted(&self, task_id: &TaskId) -> Result<()> {
+        use std::time::Duration;
+        loop {
+            match self.tasks.lock().get(task_id) {
+                Some(task) => {
+                    let ret = task.check_if_aborted();
+                    match ret {
+                        Ok(true) => return Ok(()),
+                        Ok(false) => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                None => return Err(TaskNotFound.into()),
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await
         }
     }
 
@@ -108,15 +174,22 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::DataType;
+    use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
-    use risingwave_pb::batch_plan::TaskOutputId as ProstTaskOutputId;
+    use risingwave_pb::batch_plan::table_function_node::Type;
+    use risingwave_pb::batch_plan::{
+        ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, TaskId as ProstTaskId,
+        TaskOutputId as ProstTaskOutputId, ValuesNode,
+    };
     use tonic::Code;
 
-    use crate::task::{BatchEnvironment, BatchManager, TaskId};
+    use crate::task::{BatchManager, ComputeNodeContext, TaskId};
 
     #[test]
     fn test_task_not_found() {
+        use tonic::Status;
         let manager = BatchManager::new();
         let task_id = TaskId {
             task_id: 0,
@@ -125,11 +198,7 @@ mod tests {
         };
 
         assert_eq!(
-            manager
-                .check_if_task_running(&task_id)
-                .unwrap_err()
-                .to_grpc_status()
-                .code(),
+            Status::from(manager.check_if_task_running(&task_id).unwrap_err()).code(),
             Code::Internal
         );
 
@@ -142,15 +211,13 @@ mod tests {
             output_id: 0,
         };
         match manager.take_output(&output_id) {
-            Err(e) => assert_eq!(e.to_grpc_status().code(), Code::Internal),
+            Err(e) => assert_eq!(Status::from(e).code(), Code::Internal),
             Ok(_) => unreachable!(),
         };
     }
 
     #[tokio::test]
     async fn test_task_id_conflict() {
-        use risingwave_pb::batch_plan::*;
-
         let manager = BatchManager::new();
         let plan = PlanFragment {
             root: Some(PlanNode {
@@ -166,16 +233,62 @@ mod tests {
                 distribution: None,
             }),
         };
-        let env = BatchEnvironment::for_test();
-        let task_id = TaskId {
-            ..Default::default()
+        let context = ComputeNodeContext::new_for_test();
+        let task_id = ProstTaskId {
+            query_id: "".to_string(),
+            stage_id: 0,
+            task_id: 0,
         };
         manager
-            .fire_task(env.clone(), &task_id, plan.clone(), 0)
+            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .await
             .unwrap();
-        let err = manager.fire_task(env, &task_id, plan, 0).unwrap_err();
+        let err = manager
+            .fire_task(&task_id, plan, 0, context)
+            .await
+            .unwrap_err();
         assert!(err
             .to_string()
             .contains("can not create duplicate task with the same id"));
+    }
+
+    #[tokio::test]
+    async fn test_task_aborted() {
+        let manager = BatchManager::new();
+        let plan = PlanFragment {
+            root: Some(PlanNode {
+                children: vec![],
+                identity: "".to_string(),
+                node_body: Some(NodeBody::TableFunction(TableFunctionNode {
+                    function_type: Type::Generate as i32,
+                    args: vec![
+                        make_i32_literal(1),
+                        make_i32_literal(i32::MAX),
+                        make_i32_literal(1),
+                    ],
+                    // This is a bit hacky as we want to make sure the task lasts long enough
+                    // for us to abort it.
+                    return_type: Some(DataType::Int32.to_protobuf()),
+                })),
+            }),
+            exchange_info: Some(ExchangeInfo {
+                mode: DistributionMode::Single as i32,
+                distribution: None,
+            }),
+        };
+        let context = ComputeNodeContext::new_for_test();
+        let task_id = ProstTaskId {
+            query_id: "".to_string(),
+            stage_id: 0,
+            task_id: 0,
+        };
+        manager
+            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .await
+            .unwrap();
+        manager.abort_task(&task_id).unwrap();
+        let task_id = TaskId::from(&task_id);
+        let res = manager.wait_until_task_aborted(&task_id).await;
+        assert_eq!(res, Ok(()));
     }
 }

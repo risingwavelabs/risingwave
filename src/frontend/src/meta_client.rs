@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
@@ -27,6 +27,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn flush(&self) -> Result<()>;
 
     async fn unpin_snapshot(&self, epoch: u64) -> Result<()>;
+
+    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -43,5 +45,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn unpin_snapshot(&self, epoch: u64) -> Result<()> {
         self.0.unpin_snapshot(&[epoch]).await
+    }
+
+    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()> {
+        self.0.unpin_snapshot_before(epoch).await
     }
 }

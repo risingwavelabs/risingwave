@@ -23,20 +23,36 @@ pub struct MergeExecutorBuilder;
 impl ExecutorBuilder for MergeExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        x_node: &StreamNode,
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Merge)?;
+        let node = try_match_expand!(x_node.get_node_body().unwrap(), NodeBody::Merge)?;
         let upstreams = node.get_upstream_actor_id();
         let fields = node.fields.iter().map(Field::from).collect();
         let schema = Schema::new(fields);
         let mut rxs = stream.get_receive_message(params.actor_id, upstreams)?;
+        let actor_context = params.actor_context;
 
         if upstreams.len() == 1 {
-            Ok(ReceiverExecutor::new(schema, params.pk_indices, rxs.remove(0)).boxed())
+            Ok(ReceiverExecutor::new(
+                schema,
+                params.pk_indices,
+                rxs.remove(0),
+                actor_context,
+                x_node.operator_id,
+            )
+            .boxed())
         } else {
-            Ok(MergeExecutor::new(schema, params.pk_indices, params.actor_id, rxs).boxed())
+            Ok(MergeExecutor::new(
+                schema,
+                params.pk_indices,
+                params.actor_id,
+                rxs,
+                actor_context,
+                x_node.operator_id,
+            )
+            .boxed())
         }
     }
 }

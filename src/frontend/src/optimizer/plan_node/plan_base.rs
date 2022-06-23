@@ -29,7 +29,7 @@ pub struct PlanBase {
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty pk_indices vec means there is no pk
     pub pk_indices: Vec<usize>,
-    /// The order property of the PlanNode's output, store an `Order::any()` here will not affect
+    /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
     pub order: Order,
     /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
@@ -48,8 +48,8 @@ impl PlanBase {
             ctx,
             schema,
             pk_indices,
-            dist: Distribution::any().clone(),
-            order: Order::any().clone(),
+            dist: Distribution::Single,
+            order: Order::any(),
             // Logical plan node won't touch `append_only` field
             append_only: true,
         }
@@ -69,7 +69,7 @@ impl PlanBase {
             ctx,
             schema,
             dist,
-            order: Order::any().clone(),
+            order: Order::any(),
             pk_indices,
             append_only,
         }

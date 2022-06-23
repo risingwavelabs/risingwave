@@ -5,6 +5,7 @@ package stream_service;
 import "catalog.proto";
 import "common.proto";
 import "data.proto";
+import "hummock.proto";
 import "stream_plan.proto";
 
 option optimize_for = SPEED;
@@ -68,13 +69,28 @@ message InjectBarrierRequest {
 }
 
 message InjectBarrierResponse {
-  message FinishedCreateMview {
-    uint64 epoch = 1;
-    uint32 actor_id = 2;
+  string request_id = 1;
+  common.Status status = 2;
+}
+
+message BarrierCompleteRequest {
+  string request_id = 1;
+  uint64 prev_epoch = 2;
+}
+message BarrierCompleteResponse {
+  message CreateMviewProgress {
+    uint32 chain_actor_id = 1;
+    bool done = 2;
+    uint64 consumed_epoch = 3;
   }
   string request_id = 1;
   common.Status status = 2;
-  repeated FinishedCreateMview finished_create_mviews = 3;
+  repeated CreateMviewProgress create_mview_progress = 3;
+  message GroupedSstableInfo {
+    uint64 compaction_group_id = 1;
+    hummock.SstableInfo sst = 2;
+  }
+  repeated GroupedSstableInfo sycned_sstables = 4;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
@@ -116,6 +132,7 @@ service StreamService {
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc SyncSources(SyncSourcesRequest) returns (SyncSourcesResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
+  rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
 }
 
 // TODO: Lifecycle management for actors.

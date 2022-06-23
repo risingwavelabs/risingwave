@@ -17,14 +17,11 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result as RwResult, RwError};
+use risingwave_common::error::{internal_error, Result as RwResult};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
-#[allow(unused_imports)]
-use serde::{Deserialize, Serialize};
 
-use crate::{ConnectorState, SplitImpl, SplitMetaData};
+use crate::{SplitImpl, SplitMetaData};
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -68,7 +65,7 @@ impl<S: StateStore> SourceStateHandler<S> {
             let mut write_batch = self.keyspace.state_store().start_write_batch();
             let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
-                let value = state.to_json_bytes();
+                let value = state.encode_to_bytes();
                 // TODO(Yuanxin): Implement value meta
                 local_batch.put(state.id(), StorageValue::new_default_put(value));
             });
@@ -104,26 +101,26 @@ impl<S: StateStore> SourceStateHandler<S> {
 
     pub async fn try_recover_from_state_store(
         &self,
-        stream_source_splits: &SplitImpl,
+        stream_source_split: &SplitImpl,
         epoch: u64,
-    ) -> RwResult<ConnectorState> {
-        match self.restore_states(stream_source_splits.id(), epoch).await {
-            Ok(Some(s)) => ConnectorState::restore_from_bytes(&s)
-                .map_err(|e| RwError::from(InternalError(e.to_string()))),
-            Ok(None) => Err(RwError::from(InternalError(format!(
-                "cannot found state for {:?}, epoch: {:?}",
-                stream_source_splits, epoch
-            )))),
-            Err(e) => Err(RwError::from(InternalError(e.to_string()))),
+    ) -> RwResult<Option<SplitImpl>> {
+        // let connector_type = stream_source_split.get_type();
+        match self.restore_states(stream_source_split.id(), epoch).await {
+            Ok(Some(s)) => Ok(Some(
+                SplitImpl::restore_from_bytes(&s).map_err(|e| internal_error(e.to_string()))?,
+            )),
+            Ok(None) => Ok(None),
+            Err(e) => Err(internal_error(e.to_string())),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use itertools::Itertools;
+    use risingwave_common::catalog::TableId;
     use risingwave_storage::memory::MemoryStateStore;
+    use serde::{Deserialize, Serialize};
 
     use super::*;
 
@@ -147,7 +144,7 @@ mod tests {
             self.partition.clone()
         }
 
-        fn to_json_bytes(&self) -> Bytes {
+        fn encode_to_bytes(&self) -> Bytes {
             Bytes::from(serde_json::to_string(self).unwrap())
         }
 
@@ -164,7 +161,7 @@ mod tests {
         assert_eq!(offset, state_instance.offset);
         assert_eq!(partition, state_instance.partition);
         println!("TestSourceState = {:?}", state_instance);
-        let encode_value = state_instance.to_json_bytes();
+        let encode_value = state_instance.encode_to_bytes();
         let decode_value = TestSourceState::restore_from_bytes(&encode_value)?;
         println!("decode from Bytes instance = {:?}", decode_value);
         assert_eq!(offset, decode_value.offset);
@@ -175,7 +172,7 @@ mod tests {
 
     fn new_test_keyspace() -> Keyspace<MemoryStateStore> {
         let test_mem_state_store = MemoryStateStore::new();
-        Keyspace::executor_root(test_mem_state_store, 1)
+        Keyspace::table_root(test_mem_state_store, &TableId::from(1))
     }
 
     fn test_state_store_vec() -> Vec<TestSourceState> {

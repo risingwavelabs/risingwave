@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
 use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
-use crate::optimizer::property::{Distribution, FieldOrder, Order};
+use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;
@@ -94,23 +94,24 @@ pub(crate) fn gen_create_index_plan(
 
     // Manually assemble the materialization plan for the index MV.
     let materialize = {
-        let scan_node = StreamTableScan::new(LogicalScan::new(
+        let mut required_cols = FixedBitSet::with_capacity(table_desc.columns.len());
+        required_cols.toggle_range(..);
+        required_cols.toggle(0);
+        let mut out_names: Vec<String> =
+            table_desc.columns.iter().map(|c| c.name.clone()).collect();
+        out_names.remove(0);
+
+        let scan_node = StreamTableScan::new(LogicalScan::create(
             table_name,
-            (0..table_desc.columns.len()).into_iter().collect(),
             table_desc,
             // indexes are only used by DeltaJoin rule, and we don't need to provide them here.
             vec![],
             context,
         ));
-        let mut required_cols = FixedBitSet::with_capacity(scan_node.schema().len());
-        required_cols.toggle_range(..);
-        required_cols.toggle(0);
-        let mut out_names = scan_node.schema().names();
-        out_names.remove(0);
 
         PlanRoot::new(
             scan_node.into(),
-            Distribution::AnyShard,
+            RequiredDist::AnyShard,
             Order::new(
                 arrange_keys
                     .iter()

@@ -14,16 +14,16 @@
 
 use std::convert::TryFrom;
 
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
-use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
-use risingwave_common::{ensure, ensure_eq, try_match_expand};
+use anyhow::anyhow;
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, Row};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
+use crate::{bail, ensure, ExprError, Result};
 
-/// `InputRefExpression` references to a column in input relation
+/// `FieldExpression` access a field from a struct.
 #[derive(Debug)]
 pub struct FieldExpression {
     return_type: DataType,
@@ -39,10 +39,14 @@ impl Expression for FieldExpression {
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let array = self.input.eval(input)?;
         if let ArrayImpl::Struct(struct_array) = array.as_ref() {
-            Ok(struct_array.get_children_by_index(self.index))
+            Ok(struct_array.field_at(self.index))
         } else {
-            Err(internal_error("expects a struct array ref"))
+            Err(anyhow!("expects a struct array ref").into())
         }
+    }
+
+    fn eval_row(&self, _input: &Row) -> Result<Datum> {
+        Err(anyhow!("expects a struct array ref").into())
     }
 }
 
@@ -57,23 +61,31 @@ impl FieldExpression {
 }
 
 impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type()? == Type::Field);
+        ensure!(prost.get_expr_type().unwrap() == Type::Field);
 
-        let ret_type = DataType::from(prost.get_return_type()?);
-        let func_call_node = try_match_expand!(prost.get_rex_node().unwrap(), RexNode::FuncCall)?;
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
+            bail!("Expected RexNode::FuncCall");
+        };
 
         let children = func_call_node.children.to_vec();
         // Field `func_call_node` have 2 child nodes, the first is Field `FuncCall` or
         // `InputRef`, the second is i32 `Literal`.
-        ensure_eq!(children.len(), 2);
+        ensure!(children.len() == 2);
         let input = expr_build_from_prost(&children[0])?;
-        let value = try_match_expand!(children[1].get_rex_node().unwrap(), RexNode::Constant)?;
-        let index = i32::from_be_bytes(value.body.clone().try_into().map_err(|e| {
-            ErrorCode::InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
-        })?);
+        let RexNode::Constant(value) = children[1].get_rex_node().unwrap() else {
+            bail!("Expected Constant as 1st argument");
+        };
+        let index = i32::from_be_bytes(
+            value
+                .body
+                .clone()
+                .try_into()
+                .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?,
+        );
         Ok(FieldExpression::new(ret_type, input, index as usize))
     }
 }
@@ -87,38 +99,10 @@ mod tests {
     use risingwave_common::array::{DataChunk, F32Array, I32Array, StructArray};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
-    use risingwave_pb::expr::expr_node::Type::Field;
-    use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
 
     use crate::expr::expr_field::FieldExpression;
-    use crate::expr::test_utils::make_input_ref;
+    use crate::expr::test_utils::{make_field_function, make_i32_literal, make_input_ref};
     use crate::expr::Expression;
-
-    pub fn make_i32_literal(data: i32) -> ExprNode {
-        ExprNode {
-            expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ConstantValue {
-                body: data.to_be_bytes().to_vec(),
-            })),
-        }
-    }
-
-    pub fn make_field_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
-        ExprNode {
-            expr_type: Field as i32,
-            return_type: Some(ProstDataType {
-                type_name: ret as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
-        }
-    }
 
     #[test]
     fn test_field_expr() {
@@ -141,7 +125,7 @@ mod tests {
         .unwrap();
 
         let column = Column::new(array);
-        let data_chunk = DataChunk::builder().columns(vec![column]).build();
+        let data_chunk = DataChunk::new(vec![column], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
@@ -183,7 +167,7 @@ mod tests {
         .unwrap();
 
         let column = Column::new(array);
-        let data_chunk = DataChunk::builder().columns(vec![column]).build();
+        let data_chunk = DataChunk::new(vec![column], 1);
         let res = field_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Float32(1.0.into())));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Float32(2.0.into())));

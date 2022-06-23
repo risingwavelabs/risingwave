@@ -35,12 +35,12 @@ impl_plan_tree_node_for_leaf!(BatchValues);
 
 impl BatchValues {
     pub fn new(logical: LogicalValues) -> Self {
-        Self::with_dist(logical, Distribution::Any)
+        Self::with_dist(logical, Distribution::Single)
     }
 
     pub fn with_dist(logical: LogicalValues, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchValues { base, logical }
     }
 

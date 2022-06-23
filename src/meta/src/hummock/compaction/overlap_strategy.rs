@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 pub trait OverlapInfo {
     fn check_overlap(&self, a: &SstableInfo) -> bool;
@@ -97,27 +99,28 @@ impl OverlapInfo for RangeOverlapInfo {
     }
 
     fn update(&mut self, table: &SstableInfo) {
-        let other = KeyRange::from(table.key_range.as_ref().unwrap());
+        let other = table.key_range.as_ref().unwrap();
         if let Some(range) = self.target_range.as_mut() {
-            range.full_key_extend(&other);
+            range.full_key_extend(other);
             return;
         }
-        self.target_range = Some(other);
+        self.target_range = Some(other.clone());
     }
 }
 
 #[derive(Default)]
 pub struct HashOverlapInfo {
-    target_range: Option<KeyRange>,
+    infos: Vec<SstableInfo>,
 }
 
 impl OverlapInfo for HashOverlapInfo {
     fn check_overlap(&self, a: &SstableInfo) -> bool {
-        // TODO: We may need to handle vnode overlap as well in `check_overlap` and `update`
-        match self.target_range.as_ref() {
-            Some(range) => check_table_overlap(range, a),
-            None => false,
+        for info in &self.infos {
+            if check_key_vnode_overlap(info, a) {
+                return true;
+            }
         }
+        false
     }
 
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo> {
@@ -129,12 +132,7 @@ impl OverlapInfo for HashOverlapInfo {
     }
 
     fn update(&mut self, table: &SstableInfo) {
-        let other = KeyRange::from(table.key_range.as_ref().unwrap());
-        if let Some(range) = self.target_range.as_mut() {
-            range.full_key_extend(&other);
-            return;
-        }
-        self.target_range = Some(other);
+        self.infos.push(table.clone());
     }
 }
 
@@ -143,8 +141,8 @@ pub struct RangeOverlapStrategy {}
 
 impl OverlapStrategy for RangeOverlapStrategy {
     fn check_overlap(&self, a: &SstableInfo, b: &SstableInfo) -> bool {
-        let key_range = KeyRange::from(a.key_range.as_ref().unwrap());
-        check_table_overlap(&key_range, b)
+        let key_range = a.key_range.as_ref().unwrap();
+        check_table_overlap(key_range, b)
     }
 
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {
@@ -153,8 +151,44 @@ impl OverlapStrategy for RangeOverlapStrategy {
 }
 
 fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
-    let other = KeyRange::from(table.key_range.as_ref().unwrap());
-    key_range.full_key_overlap(&other)
+    let other = table.key_range.as_ref().unwrap();
+    key_range.full_key_overlap(other)
+}
+
+/// check whether 2 SSTs may have same key by key range and vnode bitmaps in table info
+fn check_key_vnode_overlap(info: &SstableInfo, table: &SstableInfo) -> bool {
+    if !info
+        .key_range
+        .as_ref()
+        .unwrap()
+        .full_key_overlap(table.key_range.as_ref().unwrap())
+    {
+        return false;
+    }
+    let text_len = info.get_table_ids().len();
+    let other_len = table.get_table_ids().len();
+    if text_len == 0 || other_len == 0 {
+        return true;
+    }
+    let (mut i, mut j) = (0, 0);
+    while i < text_len && j < other_len {
+        let x = &info.get_table_ids()[i];
+        let y = &table.get_table_ids()[j];
+        match x.cmp(y) {
+            Ordering::Less => {
+                i += 1;
+            }
+            Ordering::Greater => {
+                j += 1;
+            }
+            Ordering::Equal => {
+                return true;
+                // i += 1;
+                // j += 1;
+            }
+        }
+    }
+    false
 }
 
 #[derive(Default)]
@@ -162,8 +196,7 @@ pub struct HashStrategy {}
 
 impl OverlapStrategy for HashStrategy {
     fn check_overlap(&self, a: &SstableInfo, b: &SstableInfo) -> bool {
-        let key_range = KeyRange::from(a.key_range.as_ref().unwrap());
-        check_table_overlap(&key_range, b)
+        check_key_vnode_overlap(a, b)
     }
 
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {

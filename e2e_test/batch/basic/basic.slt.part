@@ -1,0 +1,32 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query I
+values(1);
+----
+1
+
+query I
+values(1+2*3)
+----
+7
+
+statement error
+values(CAST('abc' AS BOOLEAN))
+
+query I
+select 1;
+----
+1
+
+query I
+select 1+2*3, 4*5;
+----
+7 20
+
+statement ok
+start transaction;
+
+
+statement ok
+abort;

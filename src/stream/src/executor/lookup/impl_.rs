@@ -20,7 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -176,13 +176,6 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices.len()
         );
 
-        // check whether output column mapping is valid.
-        assert_eq!(
-            column_mapping.len(),
-            output_column_length,
-            "column mapping mismatched"
-        );
-
         // resolve mapping from join keys in stream row -> joins keys for arrangement.
         let key_indices_mapping = arrangement_order_rules
             .iter()
@@ -227,7 +220,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 col_types: arrangement_datatypes,
                 // special thing about this pair of serializer and deserializer: the serializer only
                 // serializes join key, while the deserializer will take join key + pk into account.
-                deserializer: CellBasedRowDeserializer::new(arrangement_col_descs.clone()),
+                deserializer: make_cell_based_row_deserializer(arrangement_col_descs.clone()),
                 serializer: OrderedRowSerializer::new(arrangement_order_types),
                 col_descs: arrangement_col_descs,
                 order_rules: arrangement_order_rules,
@@ -264,7 +257,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         #[for_await]
         for msg in input {
-            let msg = msg.map_err(StreamExecutorError::input_error)?;
+            let msg = msg?;
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
                     if self.arrangement.use_current_epoch {
@@ -332,7 +325,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
                             if let Some(chunk) = builder
-                                .append_row_with_limit(*op, &row, &matched_row)
+                                .append_row(*op, &row, &matched_row)
                                 .map_err(StreamExecutorError::eval_error)?
                             {
                                 yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));

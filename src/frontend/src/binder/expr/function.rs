@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::once;
+
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -40,6 +42,9 @@ impl Binder {
                 "min" => Some(AggKind::Min),
                 "max" => Some(AggKind::Max),
                 "avg" => Some(AggKind::Avg),
+                "string_agg" => Some(AggKind::StringAgg),
+                "single_value" => Some(AggKind::SingleValue),
+                "approx_count_distinct" => Some(AggKind::ApproxCountDistinct),
                 _ => None,
             };
             if let Some(kind) = agg_kind {
@@ -58,23 +63,53 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
+                "md5" => ExprType::Md5,
+                "to_char" => ExprType::ToChar,
                 "nullif" => {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case
                 }
+                "concat" => {
+                    inputs = Self::rewrite_concat_to_concat_ws(inputs)?;
+                    ExprType::ConcatWs
+                }
                 "concat_ws" => ExprType::ConcatWs,
+                "split_part" => ExprType::SplitPart,
                 "coalesce" => ExprType::Coalesce,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
-                    ExprType::RoundDigit
+                    if inputs.len() >= 2 {
+                        ExprType::RoundDigit
+                    } else {
+                        ExprType::Round
+                    }
+                }
+                "ceil" => {
+                    inputs = Self::rewrite_round_args(inputs);
+                    ExprType::Ceil
+                }
+                "floor" => {
+                    inputs = Self::rewrite_round_args(inputs);
+                    ExprType::Floor
                 }
                 "abs" => ExprType::Abs,
+                "booleq" => {
+                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
+                    ExprType::Equal
+                }
+                "boolne" => {
+                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
+                    ExprType::NotEqual
+                }
+                "char_length" => ExprType::CharLength,
+                "character_length" => ExprType::CharLength,
+                "repeat" => ExprType::Repeat,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
                         112.into(),
                     )
-                    .into())
+                    .into());
                 }
             };
             Ok(FunctionCall::new(function_type, inputs)?.into())
@@ -84,6 +119,20 @@ impl Binder {
                 112.into(),
             )
             .into())
+        }
+    }
+
+    fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.is_empty() {
+            Err(ErrorCode::BindError(
+                "Function `Concat` takes at least 1 arguments (0 given)".to_string(),
+            )
+            .into())
+        } else {
+            let inputs = once(ExprImpl::literal_varchar("".to_string()))
+                .chain(inputs)
+                .collect();
+            Ok(inputs)
         }
     }
 
@@ -102,20 +151,32 @@ impl Binder {
         }
     }
 
-    /// Rewrite the arguments to be consistent with the `round` signature:
+    /// Rewrite the arguments to be consistent with the `round, ceil, floor` signature:
+    /// Round:
     /// - round(Decimal, Int32) -> Decimal
     /// - round(Decimal) -> Decimal
+    /// - round(Float64) -> Float64
+    /// - Extend: round(Int16, Int32, Int64, Float32) -> Float64
+    ///
+    /// Ceil:
+    /// - ceil(Decimal) -> Decimal
+    /// - ceil(Float) -> Float64
+    /// - Extend: ceil(Int16, Int32, Int64, Float32) -> Float64
+    ///
+    /// Floor:
+    /// - floor(Decimal) -> Decimal
+    /// - floor(Float) -> Float64
+    /// - Extend: floor(Int16, Int32, Int64, Float32) -> Float64
     fn rewrite_round_args(mut inputs: Vec<ExprImpl>) -> Vec<ExprImpl> {
         if inputs.len() == 1 {
-            // Rewrite round(Decimal) to round(Decimal, 0).
             let input = inputs.pop().unwrap();
-            vec![
-                input
+            match input.return_type() {
+                risingwave_common::types::DataType::Decimal => vec![input],
+                _ => vec![input
                     .clone()
-                    .cast_implicit(DataType::Decimal)
-                    .unwrap_or(input),
-                Literal::new(Some(0.into()), DataType::Int32).into(),
-            ]
+                    .cast_implicit(DataType::Float64)
+                    .unwrap_or(input)],
+            }
         } else if inputs.len() == 2 {
             let digits = inputs.pop().unwrap();
             let input = inputs.pop().unwrap();
@@ -132,6 +193,20 @@ impl Binder {
         } else {
             inputs
         }
+    }
+
+    fn rewrite_two_bool_inputs(mut inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.len() != 2 {
+            return Err(
+                ErrorCode::BindError("function must contain only 2 arguments".to_string()).into(),
+            );
+        }
+        let left = inputs.pop().unwrap();
+        let right = inputs.pop().unwrap();
+        Ok(vec![
+            left.cast_implicit(DataType::Boolean)?,
+            right.cast_implicit(DataType::Boolean)?,
+        ])
     }
 
     fn ensure_aggregate_allowed(&self) -> Result<()> {

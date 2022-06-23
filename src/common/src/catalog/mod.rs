@@ -23,7 +23,10 @@ pub use physical_table::*;
 pub use schema::{test_utils as schema_test_utils, Field, Schema};
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
-pub const DEFAULT_SCHEMA_NAME: &str = "dev";
+pub const DEFAULT_SCHEMA_NAME: &str = "public";
+pub const DEFAULT_SUPPER_USER: &str = "root";
+// This is for compatibility with customized utils for PostgreSQL.
+pub const DEFAULT_SUPPER_USER_FOR_PG: &str = "postgres";
 
 pub type CatalogVersion = u64;
 
@@ -42,6 +45,10 @@ impl DatabaseId {
     pub fn new(database_id: i32) -> Self {
         DatabaseId { database_id }
     }
+
+    pub fn placeholder() -> i32 {
+        i32::MAX - 1
+    }
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
@@ -56,6 +63,10 @@ impl SchemaId {
             database_ref_id,
             schema_id,
         }
+    }
+
+    pub fn placeholder() -> i32 {
+        i32::MAX - 1
     }
 }
 

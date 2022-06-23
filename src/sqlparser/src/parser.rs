@@ -187,6 +187,7 @@ impl Parser {
                 Keyword::GRANT => Ok(self.parse_grant()?),
                 Keyword::REVOKE => Ok(self.parse_revoke()?),
                 Keyword::START => Ok(self.parse_start_transaction()?),
+                Keyword::ABORT => Ok(Statement::Abort),
                 // `BEGIN` is a nonstandard but common alias for the
                 // standard `START TRANSACTION` statement. It is supported
                 // by at least PostgreSQL and MySQL.
@@ -398,9 +399,7 @@ impl Parser {
                     op: UnaryOperator::Not,
                     expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
                 }),
-                Keyword::ROW => Ok(Expr::Row(
-                    self.parse_token_wrapped_exprs(&Token::LParen, &Token::RParen)?,
-                )),
+                Keyword::ROW => self.parse_row_expr(),
                 Keyword::ARRAY => Ok(Expr::Array(
                     self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
                 )),
@@ -957,7 +956,7 @@ impl Parser {
             Token::Minus => Some(BinaryOperator::Minus),
             Token::Mul => Some(BinaryOperator::Multiply),
             Token::Mod => Some(BinaryOperator::Modulo),
-            Token::StringConcat => Some(BinaryOperator::StringConcat),
+            Token::Concat => Some(BinaryOperator::Concat),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
             Token::Caret => Some(BinaryOperator::BitwiseXor),
             Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
@@ -1047,31 +1046,26 @@ impl Parser {
                 expr: Box::new(expr),
             })
         } else if Token::LBracket == tok {
-            self.parse_map_access(expr)
+            self.parse_array_index(expr)
         } else {
             // Can only happen if `get_next_precedence` got out of sync with this function
             parser_err!(format!("No infix parser for token {:?}", tok))
         }
     }
 
-    pub fn parse_map_access(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let key = self.parse_map_key()?;
-        let tok = self.consume_token(&Token::RBracket);
-        debug!("Tok: {}", tok);
-        let mut key_parts: Vec<Expr> = vec![key];
+    pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
+        let index = self.parse_expr()?;
+        self.expect_token(&Token::RBracket)?;
+        let mut indexs: Vec<Expr> = vec![index];
         while self.consume_token(&Token::LBracket) {
-            let key = self.parse_map_key()?;
-            let tok = self.consume_token(&Token::RBracket);
-            debug!("Tok: {}", tok);
-            key_parts.push(key);
+            let index = self.parse_expr()?;
+            self.expect_token(&Token::RBracket)?;
+            indexs.push(index);
         }
-        match expr {
-            e @ Expr::Identifier(_) | e @ Expr::CompoundIdentifier(_) => Ok(Expr::MapAccess {
-                column: Box::new(e),
-                keys: key_parts,
-            }),
-            _ => Ok(expr),
-        }
+        Ok(Expr::ArrayIndex {
+            obj: Box::new(expr),
+            indexs,
+        })
     }
 
     /// Parses the parens following the `[ NOT ] IN` operator
@@ -1159,7 +1153,7 @@ impl Parser {
             Token::Caret | Token::Sharp | Token::ShiftRight | Token::ShiftLeft => Ok(22),
             Token::Ampersand => Ok(23),
             Token::Plus | Token::Minus => Ok(Self::PLUS_MINUS_PREC),
-            Token::Mul | Token::Div | Token::Mod | Token::StringConcat => Ok(40),
+            Token::Mul | Token::Div | Token::Mod | Token::Concat => Ok(40),
             Token::DoubleColon => Ok(50),
             Token::ExclamationMark => Ok(50),
             Token::LBracket => Ok(10),
@@ -1360,7 +1354,7 @@ impl Parser {
         let all = self.parse_keyword(Keyword::ALL);
         let distinct = self.parse_keyword(Keyword::DISTINCT);
         if all && distinct {
-            return parser_err!("Cannot specify both ALL and DISTINCT".to_string());
+            parser_err!("Cannot specify both ALL and DISTINCT".to_string())
         } else {
             Ok(distinct)
         }
@@ -1382,6 +1376,8 @@ impl Parser {
             self.parse_create_source(false, or_replace)
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
             self.parse_create_source(true, or_replace)
+        } else if self.parse_keyword(Keyword::SINK) {
+            self.parse_create_sink(or_replace)
         } else if or_replace {
             self.expected(
                 "[EXTERNAL] TABLE or [MATERIALIZED] VIEW after CREATE OR REPLACE",
@@ -1395,6 +1391,8 @@ impl Parser {
             self.parse_create_schema()
         } else if self.parse_keyword(Keyword::DATABASE) {
             self.parse_create_database()
+        } else if self.parse_keyword(Keyword::USER) {
+            self.parse_create_user()
         } else {
             self.expected("an object type after CREATE", self.peek_token())
         }
@@ -1460,6 +1458,29 @@ impl Parser {
             is_materialized,
             stmt: CreateSourceStatement::parse_to(self)?,
         })
+    }
+
+    // CREATE [OR REPLACE]?
+    // SINK
+    // [IF NOT EXISTS]?
+    // <sink_name: Ident>
+    // FROM
+    // <materialized_view: Ident>
+    // [WITH (properties)]?
+    pub fn parse_create_sink(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSink {
+            stmt: CreateSinkStatement::parse_to(self)?,
+        })
+    }
+
+    // CREATE USER name [ [ WITH ] option [ ... ] ]
+    // where option can be:
+    //       SUPERUSER | NOSUPERUSER
+    //     | CREATEDB | NOCREATEDB
+    //     | LOGIN | NOLOGIN
+    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
+    fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }
 
     fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
@@ -1772,6 +1793,11 @@ impl Parser {
                     old_column_name,
                     new_column_name,
                 }
+            }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterTableOperation::ChangeOwner {
+                new_owner_name: owner_name,
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -2193,6 +2219,22 @@ impl Parser {
         }
     }
 
+    pub fn parse_row_expr(&mut self) -> Result<Expr, ParserError> {
+        if self.consume_token(&Token::LParen) {
+            if self.consume_token(&Token::RParen) {
+                Ok(Expr::Row(vec![]))
+            } else {
+                self.prev_token();
+                Ok(Expr::Row(self.parse_token_wrapped_exprs(
+                    &Token::LParen,
+                    &Token::RParen,
+                )?))
+            }
+        } else {
+            self.expected("(", self.peek_token())
+        }
+    }
+
     /// Parse a comma-separated list from a wrapped expression
     pub fn parse_token_wrapped_exprs(
         &mut self,
@@ -2591,9 +2633,9 @@ impl Parser {
                 }
                 Keyword::COLUMNS => {
                     if self.parse_keyword(Keyword::FROM) {
-                        return Ok(Statement::ShowColumn {
-                            name: self.parse_object_name()?,
-                        });
+                        return Ok(Statement::ShowObjects(ShowObject::Columns {
+                            table: self.parse_object_name()?,
+                        }));
                     } else {
                         return self.expected("from after columns", self.peek_token());
                     }
@@ -2815,6 +2857,8 @@ impl Parser {
                 self.parse_comma_separated(Parser::parse_grant_permission)?
                     .into_iter()
                     .map(|(kw, columns)| match kw {
+                        Keyword::CONNECT => Action::Connect,
+                        Keyword::CREATE => Action::Create,
                         Keyword::DELETE => Action::Delete,
                         Keyword::INSERT => Action::Insert { columns },
                         Keyword::REFERENCES => Action::References { columns },
@@ -2849,13 +2893,41 @@ impl Parser {
             GrantObjects::AllSequencesInSchema {
                 schemas: self.parse_comma_separated(Parser::parse_object_name)?,
             }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::SOURCES,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllSourcesInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::MATERIALIZED,
+            Keyword::VIEWS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllMviewsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+            GrantObjects::Mviews(self.parse_comma_separated(Parser::parse_object_name)?)
         } else {
-            let object_type =
-                self.parse_one_of_keywords(&[Keyword::SEQUENCE, Keyword::SCHEMA, Keyword::TABLE]);
+            let object_type = self.parse_one_of_keywords(&[
+                Keyword::SEQUENCE,
+                Keyword::DATABASE,
+                Keyword::SCHEMA,
+                Keyword::TABLE,
+                Keyword::SOURCE,
+            ]);
             let objects = self.parse_comma_separated(Parser::parse_object_name);
             match object_type {
+                Some(Keyword::DATABASE) => GrantObjects::Databases(objects?),
                 Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
                 Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
+                Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
                 Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
                 _ => unreachable!(),
             }
@@ -2898,6 +2970,8 @@ impl Parser {
 
     /// Parse a REVOKE statement
     pub fn parse_revoke(&mut self) -> Result<Statement, ParserError> {
+        let revoke_grant_option =
+            self.parse_keywords(&[Keyword::GRANT, Keyword::OPTION, Keyword::FOR]);
         let (privileges, objects) = self.parse_grant_revoke_privileges_objects()?;
 
         self.expect_keyword(Keyword::FROM)?;
@@ -2918,6 +2992,7 @@ impl Parser {
             objects,
             grantees,
             granted_by,
+            revoke_grant_option,
             cascade,
         })
     }

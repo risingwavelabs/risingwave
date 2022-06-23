@@ -39,7 +39,7 @@ impl Binder {
                 let s: ExprImpl = self.bind_string(value)?.into();
                 s.cast_explicit(bind_data_type(&data_type)?)
             }
-            Expr::Row(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_row(&exprs)?))),
+            Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
@@ -50,6 +50,8 @@ impl Binder {
             Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
+            Expr::Array(exprs) => self.bind_array(exprs),
+            Expr::ArrayIndex { obj, indexs } => self.bind_array_index(*obj, indexs),
             Expr::Function(f) => self.bind_function(f),
             // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
@@ -179,6 +181,7 @@ impl Binder {
         let func_type = match op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
+            UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
             }
@@ -201,7 +204,7 @@ impl Binder {
         if return_type.is_numeric() {
             return Ok(expr);
         }
-        return Err(ErrorCode::InvalidInputSyntax(format!("+ {:?}", return_type)).into());
+        Err(ErrorCode::InvalidInputSyntax(format!("+ {:?}", return_type)).into())
     }
 
     pub(super) fn bind_trim(
@@ -327,40 +330,13 @@ impl Binder {
     ) -> Result<ExprImpl> {
         let left = self.bind_expr(left)?;
         let right = self.bind_expr(right)?;
-        let both_not_null = FunctionCall::new(
-            ExprType::And,
-            vec![
-                FunctionCall::new(ExprType::IsNotNull, vec![left.clone()])?.into(),
-                FunctionCall::new(ExprType::IsNotNull, vec![right.clone()])?.into(),
-            ],
-        );
 
-        let func_call = FunctionCall::new(
-            ExprType::Or,
-            vec![
-                FunctionCall::new(
-                    ExprType::And,
-                    vec![
-                        FunctionCall::new(ExprType::IsNull, vec![left.clone()])?.into(),
-                        FunctionCall::new(ExprType::IsNull, vec![right.clone()])?.into(),
-                    ],
-                )?
-                .into(),
-                FunctionCall::new(
-                    ExprType::And,
-                    vec![
-                        both_not_null?.into(),
-                        FunctionCall::new(ExprType::Equal, vec![left, right])?.into(),
-                    ],
-                )?
-                .into(),
-            ],
-        );
+        let func_call = FunctionCall::new(ExprType::IsDistinctFrom, vec![left, right]);
 
         if negated {
-            Ok(func_call?.into())
-        } else {
             Ok(FunctionCall::new(ExprType::Not, vec![func_call?.into()])?.into())
+        } else {
+            Ok(func_call?.into())
         }
     }
 
@@ -406,7 +382,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar(_) => DataType::Varchar,
+        AstDataType::Varchar(_) | AstDataType::String => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,

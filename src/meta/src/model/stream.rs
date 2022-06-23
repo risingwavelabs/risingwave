@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -24,7 +25,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::cluster::{ParallelUnitId, WorkerId};
+use crate::cluster::WorkerId;
 use crate::manager::SourceId;
 use crate::model::MetadataModel;
 
@@ -45,6 +46,9 @@ pub struct TableFragments {
 
     /// The status of actors
     actor_status: BTreeMap<ActorId, ActorStatus>,
+
+    /// Internal TableIds from all Fragment
+    internal_table_ids: Vec<u32>,
 }
 
 impl MetadataModel for TableFragments {
@@ -60,6 +64,7 @@ impl MetadataModel for TableFragments {
             table_id: self.table_id.table_id(),
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
+            internal_table_ids: self.internal_table_ids.clone(),
         }
     }
 
@@ -68,6 +73,7 @@ impl MetadataModel for TableFragments {
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
+            internal_table_ids: prost.internal_table_ids,
         }
     }
 
@@ -77,11 +83,16 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
+    pub fn new(
+        table_id: TableId,
+        fragments: BTreeMap<FragmentId, Fragment>,
+        internal_table_id_set: HashSet<u32>,
+    ) -> Self {
         Self {
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
+            internal_table_ids: Vec::from_iter(internal_table_id_set),
         }
     }
 
@@ -367,5 +378,9 @@ impl TableFragments {
         assert_eq!(result.len(), self.fragments.len());
 
         result
+    }
+
+    pub fn internal_table_ids(&self) -> Vec<u32> {
+        self.internal_table_ids.clone()
     }
 }
