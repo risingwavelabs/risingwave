@@ -19,7 +19,7 @@ pub fn generate_intertable_name(mview_name: &String, table_id: u32) -> String {
     format!("__INTERNAL_{}_{}", mview_name, table_id)
 }
 
-pub fn valid_table_name(table_name: &String) -> bool {
+pub fn valid_table_name(table_name: &str) -> bool {
     lazy_static! {
         static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__INTERNAL_.*_\d+").unwrap();
     }
