@@ -147,6 +147,7 @@ pub struct DispatchExecutor {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
     actor_id: u32,
+    actor_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
 }
@@ -164,11 +165,10 @@ impl DispatchExecutorInner {
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Chunk(chunk) => {
-                let actor_id_str = self.actor_id.to_string();
                 self.metrics
                     .actor_out_record_cnt
-                    .with_label_values(&[&actor_id_str])
-                    .inc_by(chunk.cardinality().try_into().unwrap());
+                    .with_label_values(&[&self.actor_id_str])
+                    .inc_by(chunk.cardinality() as _);
 
                 if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
@@ -283,6 +283,7 @@ impl DispatchExecutor {
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
+                actor_id_str: actor_id.to_string(),
                 context,
                 metrics,
             },

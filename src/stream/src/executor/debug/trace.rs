@@ -23,7 +23,12 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ExecutorInfo, Message, MessageStream};
 use crate::task::ActorId;
+
+/// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries and
+/// might affect the prometheus performance. If you only need actor input and output rows data, see
+/// `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
 const ENABLE_EXECUTOR_ROW_COUNT: bool = false;
+
 /// Streams wrapped by `trace` will print data passing in the stream graph to stdout.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn trace(
