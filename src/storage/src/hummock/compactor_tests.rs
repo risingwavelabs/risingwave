@@ -20,7 +20,7 @@ mod tests {
     use bytes::Bytes;
     use rand::Rng;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::config::StorageConfig;
+    use risingwave_common::config::{CompactionFilterFlag, StorageConfig};
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::get_table_id;
@@ -114,11 +114,14 @@ mod tests {
         }
 
         // 2. get compact task
-        let compact_task = hummock_manager_ref
+        let mut compact_task = hummock_manager_ref
             .get_compact_task(StaticCompactionGroupId::StateDefault.into())
             .await
             .unwrap()
             .unwrap();
+        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
+        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id, async { true })
             .await
@@ -231,16 +234,14 @@ mod tests {
         }
 
         // 2. get compact task
-        let compact_task = hummock_manager_ref
+        let mut compact_task = hummock_manager_ref
             .get_compact_task(StaticCompactionGroupId::StateDefault.into())
             .await
             .unwrap()
             .unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id, async { true })
-            .await
-            .unwrap();
 
+        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
+        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         // assert compact_task
         assert_eq!(
             compact_task.input_ssts.first().unwrap().table_infos.len(),
@@ -328,6 +329,8 @@ mod tests {
             .unwrap()
             .unwrap();
         compact_task.existing_table_ids.push(2);
+        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
+        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id, async { true })

@@ -3944,6 +3944,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "auto_enums",
+ "bitflags",
  "byteorder",
  "bytes",
  "chrono",

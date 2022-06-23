@@ -306,6 +306,7 @@ pub mod tests {
     use std::ops::Range;
 
     use itertools::Itertools;
+    use risingwave_common::config::CompactionFilterFlag;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
     use risingwave_pb::hummock::{LevelType, SstableInfo};
 
@@ -458,10 +459,12 @@ pub mod tests {
         assert_eq!(compaction.select_level.table_infos.len(), 10);
         assert_eq!(compaction.target_level.table_infos.len(), 0);
 
+        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         let config = CompactionConfigBuilder::new_with(config)
             .min_compaction_bytes(1)
             .max_bytes_for_level_base(100)
             .level0_tigger_file_numer(8)
+            .compaction_filter_mask(compaction_filter_flag.into())
             .build();
         let selector = DynamicLevelSelector::new(
             Arc::new(config.clone()),

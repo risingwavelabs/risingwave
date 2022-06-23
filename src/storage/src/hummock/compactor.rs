@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use dyn_clone::DynClone;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::{CompactionFilterFlag, StorageConfig};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -133,7 +133,7 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
 
 #[derive(Clone)]
 pub struct TTLCompactionFilter {
-    table_id_to_ttl: BTreeMap<u32, u64>,
+    table_id_to_ttl: HashMap<u32, u32>,
     expire: u64,
 }
 
@@ -145,7 +145,7 @@ impl CompactionFilter for TTLCompactionFilter {
                 let ttl = self.table_id_to_ttl[&table_id];
                 let epoch = get_epoch(key);
 
-                epoch + ttl > self.expire
+                epoch + ttl as u64 > self.expire
             }
 
             None => true,
@@ -154,8 +154,7 @@ impl CompactionFilter for TTLCompactionFilter {
 }
 
 impl TTLCompactionFilter {
-    #![expect(dead_code)]
-    fn new(table_id_to_ttl: BTreeMap<u32, u64>, expire: u64) -> Self {
+    fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
         Self {
             table_id_to_ttl,
             expire,
@@ -298,6 +297,8 @@ impl Compactor {
             existing_table_ids: vec![],
             target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
             compression_algorithm: 0,
+            compaction_filter_mask: 0,
+            table_options: HashMap::default(),
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -496,10 +497,26 @@ impl Compactor {
         }
 
         let mut multi_filter = MultiCompactionFilter::default();
-        let state_clean_up_filter = Box::new(StateCleanUpCompactionFilter::new(
-            HashSet::from_iter(compact_task.existing_table_ids),
-        ));
-        multi_filter.register(state_clean_up_filter);
+        let compaction_filter_flag =
+            CompactionFilterFlag::from_bits(compact_task.compaction_filter_mask)
+                .unwrap_or_default();
+        if compaction_filter_flag.contains(CompactionFilterFlag::STATE_CLEAN) {
+            let state_clean_up_filter = Box::new(StateCleanUpCompactionFilter::new(
+                HashSet::from_iter(compact_task.existing_table_ids),
+            ));
+
+            multi_filter.register(state_clean_up_filter);
+        }
+
+        if compaction_filter_flag.contains(CompactionFilterFlag::TTL) {
+            let id_to_ttl = compact_task
+                .table_options
+                .iter()
+                .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
+                .collect();
+            let ttl_filter = Box::new(TTLCompactionFilter::new(id_to_ttl, compact_task.watermark));
+            multi_filter.register(ttl_filter);
+        }
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
