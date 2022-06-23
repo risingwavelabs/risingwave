@@ -59,6 +59,11 @@ pub fn record_table_vnode_mappings(
                 hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
             }
         }
+        NodeBody::GlobalSimpleAgg(node) => {
+            for table in &node.internal_tables {
+                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
+            }
+        }
         NodeBody::HashJoin(node) => {
             hash_mapping_manager
                 .set_fragment_state_table(fragment_id, node.left_table.as_ref().unwrap().id);
