@@ -304,42 +304,30 @@ fn narrow_category<'a, 'b>(
 /// [rule 4f src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1300-L1355
 /// [Rule 2]: https://www.postgresql.org/docs/current/typeconv-oper.html#:~:text=then%20assume%20it%20is%20the%20same%20type%20as%20the%20other%20argument%20for%20this%20check
 fn narrow_same_type<'a, 'b>(
-    best_candidate: Vec<&'a FuncSign>,
+    candidates: Vec<&'a FuncSign>,
     inputs: &'b [Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
-    let mut t = None;
-    for e in inputs {
-        if e.is_none() {
-            continue;
-        }
-        let tc = e.unwrap();
-        match t {
-            None => {
-                t = Some(tc);
-            }
-            Some(tt) => {
-                if tt != tc {
-                    t = None;
-                    break;
-                }
-            }
-        }
+    let Ok(Some(same_type)) = inputs.iter().try_fold(None, |acc, cur| match (acc, cur) {
+        (None, t) => Ok(*t),
+        (t, None) => Ok(t),
+        (Some(l), Some(r)) if l == *r => Ok(Some(l)),
+        _ => Err(())
+    }) else {
+        return candidates;
+    };
+    let cands_temp = candidates
+        .iter()
+        .filter(|sig| {
+            sig.inputs_type
+                .iter()
+                .all(|formal| cast_ok_base(same_type, *formal, CastContext::Implicit))
+        })
+        .copied()
+        .collect_vec();
+    match cands_temp.is_empty() {
+        true => candidates,
+        false => cands_temp,
     }
-    if let Some(t) = t {
-        let cand_temp = best_candidate
-            .iter()
-            .filter(|sig| {
-                sig.inputs_type
-                    .iter()
-                    .all(|p| cast_ok_base(t, *p, CastContext::Implicit))
-            })
-            .cloned()
-            .collect_vec();
-        if !cand_temp.is_empty() {
-            return cand_temp;
-        }
-    }
-    best_candidate
 }
 
 struct TypeDebug<'a>(&'a Option<DataTypeName>);
