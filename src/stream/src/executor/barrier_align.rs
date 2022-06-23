@@ -18,10 +18,10 @@ use futures::future::{select, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use madsim::time::Instant;
+use risingwave_common::monitor::StreamingMetrics;
 
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk};
-use crate::executor::monitor::StreamingMetrics;
 
 #[derive(Debug, PartialEq)]
 pub enum AlignedMessage {

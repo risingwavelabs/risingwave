@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use risingwave_common::catalog::Schema;
+use risingwave_common::monitor::StreamingMetrics;
 
-use super::monitor::StreamingMetrics;
 use super::{
     BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, MessageStream, PkIndicesRef,
 };

@@ -58,7 +58,6 @@ mod lookup;
 mod lookup_union;
 mod managed_state;
 pub mod merge;
-pub mod monitor;
 mod mview;
 mod project;
 mod rearranged_chain;

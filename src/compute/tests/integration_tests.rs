@@ -29,6 +29,7 @@ use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::monitor::StreamingMetrics;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -39,7 +40,6 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::Keyspace;
-use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
     Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };

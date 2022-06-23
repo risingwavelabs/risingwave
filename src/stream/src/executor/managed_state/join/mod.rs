@@ -27,13 +27,12 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::monitor::StreamingMetrics;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
-
-use crate::executor::monitor::StreamingMetrics;
 
 type DegreeType = u64;
 /// This is a row with a match degree

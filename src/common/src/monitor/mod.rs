@@ -14,8 +14,10 @@
 
 pub mod my_stats;
 
+pub mod streaming_stats;
 use prometheus::core::{AtomicU64, Collector, GenericCounter, GenericCounterVec, Metric};
 use prometheus::{Histogram, HistogramVec};
+pub use streaming_stats::*;
 
 use crate::monitor::my_stats::MyHistogram;
 

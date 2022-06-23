@@ -23,6 +23,7 @@ use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::monitor::StreamingMetrics;
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::compress::decompress_data;
@@ -36,7 +37,6 @@ use tokio::task::JoinHandle;
 use super::{unique_executor_id, unique_operator_id, CollectResult};
 use crate::executor::dispatch::*;
 use crate::executor::merge::RemoteInput;
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
 use crate::task::{

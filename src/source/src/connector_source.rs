@@ -22,6 +22,7 @@ use madsim::collections::HashMap;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::monitor::StreamingMetrics;
 use risingwave_connector::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitMetaData, SplitReaderImpl,
 };
@@ -60,6 +61,8 @@ pub struct ConnectorSourceReader {
     // We need to keep this tx, otherwise the channel will return none with 0 inner readers, and we
     // need to clone this tx when adding new inner readers in the future.
     message_tx: Sender<Either<Vec<SourceMessage>, RwError>>,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl InnerConnectorSourceReader {
@@ -154,7 +157,21 @@ impl StreamSourceReader for ConnectorSourceReader {
                 *split_offset_mapping
                     .entry(msg.split_id.clone())
                     .or_insert_with(|| "".to_string()) = msg.offset.to_string();
-                events.push(self.parser.parse(content.as_ref(), &self.columns)?);
+                match self.parser.parse(content.as_ref(), &self.columns) {
+                    Ok(event) => events.push(event),
+                    Err(e) => {
+                        log::warn!(
+                            "source parse error: {}, cannot parse {:?} into {:?}",
+                            e,
+                            content,
+                            self.columns
+                        );
+                        self.metrics
+                            .source_parse_error_count
+                            .with_label_values(&[&self.parser.get_type()])
+                            .inc_by(1);
+                    }
+                }
             }
         }
         let mut ops = Vec::with_capacity(events.iter().map(|e| e.ops.len()).sum());
@@ -261,6 +278,7 @@ impl ConnectorSource {
         &self,
         splits: ConnectorState,
         column_ids: Vec<ColumnId>,
+        metrics: Arc<StreamingMetrics>,
     ) -> Result<ConnectorSourceReader> {
         let (tx, rx) = mpsc::channel(CONNECTOR_MESSAGE_BUFFER_SIZE);
         let mut handles = HashMap::with_capacity(if let Some(split) = &splits {
@@ -311,6 +329,7 @@ impl ConnectorSource {
             parser: self.parser.clone(),
             columns,
             message_tx: tx,
+            metrics,
         })
     }
 }

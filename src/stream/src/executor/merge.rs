@@ -21,13 +21,13 @@ use futures::{SinkExt, Stream, StreamExt};
 use futures_async_stream::{for_await, stream};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::monitor::StreamingMetrics;
 use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
 
 use super::error::StreamExecutorError;
 use super::*;
-use crate::executor::monitor::StreamingMetrics;
 use crate::task::UpDownActorIds;
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`

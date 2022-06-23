@@ -40,6 +40,7 @@ pub struct StreamingMetrics {
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
+    pub source_parse_error_count: GenericCounterVec<AtomicU64>,
 }
 
 impl StreamingMetrics {
@@ -197,6 +198,14 @@ impl StreamingMetrics {
             register_histogram_vec_with_registry!(opts, &["actor_id", "wait_side"], registry)
                 .unwrap();
 
+        let source_parse_error_count = register_int_counter_vec_with_registry!(
+            "stream_source_parse_error_count",
+            "Total number of parse error that have been encountered by source",
+            &["source_id"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             executor_row_count,
@@ -218,6 +227,7 @@ impl StreamingMetrics {
             join_lookup_miss_count,
             join_total_lookup_count,
             join_barrier_align_duration,
+            source_parse_error_count,
         }
     }
 

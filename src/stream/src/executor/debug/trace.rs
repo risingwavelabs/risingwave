@@ -16,11 +16,11 @@ use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::monitor::StreamingMetrics;
 use tracing::event;
 use tracing_futures::Instrument;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ExecutorInfo, Message, MessageStream};
 use crate::task::ActorId;
 

@@ -23,6 +23,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::monitor::StreamingMetrics;
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::*;
@@ -32,7 +33,6 @@ use tokio::sync::{Mutex, Notify};
 use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
-use super::monitor::StreamingMetrics;
 use super::*;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
@@ -261,7 +261,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
             SourceImpl::Connector(c) => c
-                .stream_reader(state, self.column_ids.clone())
+                .stream_reader(state, self.column_ids.clone(), self.metrics.clone())
                 .await
                 .map(SourceStreamReaderImpl::Connector),
         }?;

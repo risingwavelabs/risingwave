@@ -66,6 +66,15 @@ impl SourceParserImpl {
         }
     }
 
+    pub fn get_type(&self) -> String {
+        match self {
+            Self::Json(_) => "Json".to_string(),
+            Self::Protobuf(_) => "Protobuf".to_string(),
+            Self::DebeziumJson(_) => "DebeziumJson".to_string(),
+            Self::Avro(_) => "Avro".to_string(),
+        }
+    }
+
     pub async fn create(
         format: &SourceFormat,
         properties: &HashMap<String, String>,

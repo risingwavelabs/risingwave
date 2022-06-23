@@ -19,10 +19,10 @@ use futures::pin_mut;
 use madsim::time::Instant;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
+use risingwave_common::monitor::StreamingMetrics;
 use tokio_stream::StreamExt;
 use tracing_futures::Instrument;
 
-use super::monitor::StreamingMetrics;
 use super::{Message, StreamConsumer};
 use crate::task::{ActorId, SharedContext};
 

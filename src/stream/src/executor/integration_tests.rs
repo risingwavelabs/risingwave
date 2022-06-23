@@ -20,6 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::monitor::StreamingMetrics;
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
 
@@ -27,7 +28,6 @@ use super::*;
 use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::dispatch::*;
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::create_in_memory_keyspace_agg;
 use crate::executor::{
