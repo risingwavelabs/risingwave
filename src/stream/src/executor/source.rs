@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
-use futures::{Stream, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
@@ -27,7 +27,7 @@ use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::Instant;
 
@@ -134,7 +134,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
 struct SourceReader {
     /// The reader for stream source.
-    stream_reader: Arc<Mutex<Box<SourceStreamReaderImpl>>>,
+    stream_reader: Arc<Mutex<Option<Box<SourceStreamReaderImpl>>>>,
     /// The reader for barrier.
     barrier_receiver: UnboundedReceiver<Barrier>,
     /// Expected barrier latency in ms. If there are no barrier within the expected barrier
@@ -145,23 +145,50 @@ struct SourceReader {
 impl SourceReader {
     #[try_stream(ok = StreamChunkWithState, error = RwError)]
     async fn stream_reader(
-        stream_reader: Arc<Mutex<Box<SourceStreamReaderImpl>>>,
+        stream_reader: Arc<Mutex<Option<Box<SourceStreamReaderImpl>>>>,
         notifier: Arc<Notify>,
         expected_barrier_latency_ms: u64,
+        mut abort_notifier: UnboundedReceiver<()>,
     ) {
         'outer: loop {
             let now = Instant::now();
 
             // We allow data to flow for `expected_barrier_latency_ms` milliseconds.
             while now.elapsed().as_millis() < expected_barrier_latency_ms as u128 {
+                let mut reader = stream_reader.lock().await.take().unwrap();
+                let chunk_result: Option<Result<StreamChunkWithState>>;
+
+                {
+                    let chunk_future = reader.next();
+                    let abort_future = abort_notifier.recv();
+
+                    pin_mut!(chunk_future);
+                    pin_mut!(abort_future);
+
+                    match futures::future::select(chunk_future, abort_future).await {
+                        futures::future::Either::Left((chunk, _)) => {
+                            chunk_result = Some(chunk);
+                        }
+                        futures::future::Either::Right(_) => {
+                            chunk_result = None;
+                        }
+                    }
+                }
+
                 let mut reader_guard = stream_reader.lock().await;
-                let chunk_result = reader_guard.next().await;
+                if reader_guard.is_none() {
+                    *reader_guard = Some(reader);
+                } else {
+                    continue;
+                }
                 drop(reader_guard);
-                match chunk_result {
-                    Ok(chunk) => yield chunk,
-                    Err(e) => {
-                        error!("hang up stream reader due to polling error: {}", e);
-                        break 'outer;
+                if let Some(chunk) = chunk_result {
+                    match chunk {
+                        Ok(c) => yield c,
+                        Err(e) => {
+                            error!("hang up stream reader due to polling error: {}", e);
+                            break 'outer;
+                        }
                     }
                 };
             }
@@ -191,6 +218,7 @@ impl SourceReader {
 
     fn into_stream(
         self,
+        abort_notifier: UnboundedReceiver<()>,
     ) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunkWithState>>> {
         let notifier = Arc::new(Notify::new());
 
@@ -199,6 +227,7 @@ impl SourceReader {
             self.stream_reader,
             notifier,
             self.expected_barrier_latency_ms,
+            abort_notifier,
         );
         select_with_strategy(
             barrier_receiver.map(Either::Left),
@@ -309,11 +338,11 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         // todo: use epoch from msg to restore state from state store
-        let stream_reader = Arc::new(Mutex::new(
+        let stream_reader = Arc::new(Mutex::new(Some(
             self.build_stream_source_reader(recover_state)
                 .await
                 .map_err(StreamExecutorError::source_error)?,
-        ));
+        )));
 
         let reader = SourceReader {
             stream_reader: stream_reader.clone(),
@@ -322,8 +351,10 @@ impl<S: StateStore> SourceExecutor<S> {
         };
         yield Message::Barrier(barrier);
 
+        let (abort_tx, abort_rx) = unbounded_channel::<()>();
+
         #[for_await]
-        for msg in reader.into_stream() {
+        for msg in reader.into_stream(abort_rx) {
             match msg {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
@@ -352,7 +383,8 @@ impl<S: StateStore> SourceExecutor<S> {
                                                 ))
                                                 .await
                                                 .map_err(StreamExecutorError::source_error)?;
-                                            *stream_reader.lock().await = reader;
+                                            abort_tx.send(()).unwrap();
+                                            *stream_reader.lock().await = Some(reader);
                                             self.stream_source_splits = target_state;
                                         }
                                     }
