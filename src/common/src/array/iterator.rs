@@ -83,9 +83,9 @@ impl<'a> Iterator for ArrayImplIterator<'a> {
 }
 
 pub struct MarkedArayRefIter<'a> {
-    vis: &'a Vis,
-    arr: &'a ArrayImpl,
-    pos: usize,
+    pub(super) arr: &'a ArrayImpl,
+    pub(super) vis: &'a Vis,
+    pub(super) pos: usize,
 }
 
 impl<'a> Iterator for MarkedArayRefIter<'a> {
@@ -96,7 +96,7 @@ impl<'a> Iterator for MarkedArayRefIter<'a> {
             if self.vis.is_set(self.pos).unwrap() {
                 let item = self.arr.value_at(self.pos);
                 self.pos += 1;
-                return Some(item)
+                return Some(item);
             }
 
             self.pos += 1;

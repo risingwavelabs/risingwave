@@ -58,6 +58,7 @@ pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 
 pub use self::error::ArrayError;
+use self::iterator::MarkedArayRefIter;
 use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
 use crate::types::*;
@@ -594,7 +595,7 @@ impl PartialEq for ArrayImpl {
 }
 
 pub struct MarkedArrayRef<'a> {
-    arr: &'a ArrayImpl,
+    arr: Cow<'a, ArrayImpl>,
     vis: &'a Vis,
 }
 
@@ -602,7 +603,15 @@ impl<'a> MarkedArrayRef<'a> {
     pub fn compact(self) -> ArrayResult<Cow<'a, ArrayImpl>> {
         match self.vis {
             Vis::Bitmap(b) => Ok(Cow::Owned(self.arr.compact(b, b.num_high_bits())?)),
-            Vis::Compact(_) => Ok(Cow::Borrowed(self.arr)),
+            Vis::Compact(_) => Ok(self.arr),
+        }
+    }
+
+    pub fn iter(&self) -> MarkedArayRefIter<'_> {
+        MarkedArayRefIter {
+            arr: &self.arr,
+            vis: self.vis,
+            pos: 0,
         }
     }
 }
