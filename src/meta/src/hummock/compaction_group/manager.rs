@@ -300,6 +300,8 @@ impl CompactionGroupManagerInner {
                 .get_mut(&compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
             compaction_group.member_prefixes.remove(prefix);
+            let table_id: u32 = prefix.into();
+            compaction_group.table_options.remove(&table_id);
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
@@ -372,6 +374,14 @@ mod tests {
                 .sum::<usize>()
         };
 
+        let table_option_number = |inner: &CompactionGroupManagerInner| {
+            inner
+                .compaction_groups
+                .iter()
+                .map(|(_, cg)| cg.table_options().len())
+                .sum::<usize>()
+        };
+
         assert!(inner.read().await.index.is_empty());
         assert_eq!(registered_number(inner.read().await.deref()), 0);
 
@@ -413,6 +423,7 @@ mod tests {
         let inner = compaction_group_manager.inner;
         assert_eq!(inner.read().await.index.len(), 2);
         assert_eq!(registered_number(inner.read().await.deref()), 2);
+        assert_eq!(table_option_number(inner.read().await.deref()), 2);
 
         // Test unregister
         inner
@@ -423,12 +434,34 @@ mod tests {
             .unwrap();
         assert_eq!(inner.read().await.index.len(), 1);
         assert_eq!(registered_number(inner.read().await.deref()), 1);
+        assert_eq!(table_option_number(inner.read().await.deref()), 1);
 
         // Test init
         let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
         let inner = compaction_group_manager.inner;
         assert_eq!(inner.read().await.index.len(), 1);
         assert_eq!(registered_number(inner.read().await.deref()), 1);
+        assert_eq!(table_option_number(inner.read().await.deref()), 1);
+
+        // Test table_option_by_table_id
+        {
+            let table_option = inner
+                .read()
+                .await
+                .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 1u32)
+                .unwrap();
+            assert_eq!(300, table_option.ttl);
+        }
+
+        {
+            // unregistered table_id
+            let table_option_default = inner
+                .read()
+                .await
+                .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 2u32);
+            assert!(table_option_default.is_ok());
+            assert_eq!(0, table_option_default.unwrap().ttl);
+        }
     }
 
     #[tokio::test]
