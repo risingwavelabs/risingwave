@@ -221,62 +221,66 @@ fn top_matches<'a, 'b>(
 ///
 /// [rule 4e src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1164-L1298
 fn narrow_category<'a, 'b>(
-    best_candidate: Vec<&'a FuncSign>,
+    candidates: Vec<&'a FuncSign>,
     inputs: &'b [Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
-    let mut ets = Vec::new();
-    for (i, arg) in inputs.iter().enumerate() {
-        if !arg.is_none() {
-            continue;
+    const BIASED_TYPE: DataTypeName = DataTypeName::Varchar;
+    let Ok(categories) = inputs.iter().enumerate().map(|(i, actual)| {
+        // This closure returns
+        // * Err(()) when a category cannot be selected
+        // * Ok(None) when actual argument is non-null and can skip selection
+        // * Ok(Some(t)) when the selected category is `t`
+        //
+        // Here `t` is actually just one type within that selected category, rather than the
+        // category itself. It is selected to be the [`super::least_restrictive`] over all
+        // candidates. This makes sure that `t` is the preferred type if any candidate accept it.
+        if actual.is_some() {
+            return Ok(None);
         }
-        let mut t = Some(best_candidate[0].inputs_type[i]);
-        for sig in &best_candidate[1..] {
-            let tc = sig.inputs_type[i];
-            if tc == DataTypeName::Varchar {
-                t = Some(DataTypeName::Varchar);
-            } else if let Some(tt) = t {
-                if tt == DataTypeName::Varchar
-                    || tc == tt
-                    || cast_ok_base(tc, tt, CastContext::Implicit)
-                {
-                } else if cast_ok_base(tt, tc, CastContext::Implicit) {
-                    t = Some(tc);
-                } else {
-                    t = None;
-                }
+        let mut category = Ok(candidates[0].inputs_type[i]);
+        for sig in &candidates[1..] {
+            let formal = sig.inputs_type[i];
+            if formal == BIASED_TYPE || category == Ok(BIASED_TYPE) {
+                category = Ok(BIASED_TYPE);
+                break;
+            }
+            // formal != BIASED_TYPE && category.is_err():
+            // - Category conflict err can only be solved by a later varchar. Skip this candidate.
+            let Ok(selected) = category else { continue };
+            // least_restrictive or mark temporary conflict err
+            if selected == formal || cast_ok_base(formal, selected, CastContext::Implicit) {
+            } else if cast_ok_base(selected, formal, CastContext::Implicit) {
+                category = Ok(formal);
+            } else {
+                category = Err(());
             }
         }
-        if let Some(t) = t {
-            ets.push(t);
-        } else {
-            break;
-        }
-    }
-    let cands_temp = best_candidate
+        category.map(Some)
+    }).try_collect::<_, Vec<_>, _>() else {
+        // First phase failed.
+        return candidates;
+    };
+    let cands_temp = candidates
         .iter()
         .filter(|sig| {
-            let mut ets_iter = ets.iter();
-            for (i, p) in sig.inputs_type.iter().enumerate() {
-                if inputs[i].is_some() {
-                    continue;
-                }
-                let Some(t) = ets_iter.next() else {return false};
-                if is_preferred(*t) {
-                    if *p != *t {
-                        return false;
-                    }
-                } else if !cast_ok_base(*p, *t, CastContext::Implicit) {
-                    return false;
-                }
-            }
-            true
+            sig.inputs_type
+                .iter()
+                .zip_eq(&categories)
+                .all(|(formal, category)| {
+                    // category.is_none() means the actual argument is non-null and skipped category
+                    // selection.
+                    let Some(selected) = category else { return true };
+                    *formal == *selected
+                        || !is_preferred(*selected)
+                            && cast_ok_base(*formal, *selected, CastContext::Implicit)
+                })
         })
-        .cloned()
+        .copied()
         .collect_vec();
     if !cands_temp.is_empty() {
         cands_temp
     } else {
-        best_candidate
+        candidates
     }
 }
 
