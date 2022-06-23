@@ -61,6 +61,10 @@ impl LogicalExpand {
         fields.push(Field::with_name(DataType::Int64, "flag"));
         Schema::new(fields)
     }
+
+    pub fn expanded_keys(&self) -> &Vec<Vec<usize>> {
+        &self.expanded_keys
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalExpand {
@@ -155,11 +159,65 @@ impl ToBatch for LogicalExpand {
 }
 
 impl ToStream for LogicalExpand {
-    fn to_stream(&self) -> Result<PlanRef> {
-        todo!()
-    }
-
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         todo!()
     }
+
+    fn to_stream(&self) -> Result<PlanRef> {
+        todo!()
+    }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+    use crate::optimizer::plan_node::{LogicalExpand, LogicalValues, PlanTreeNodeUnary};
+    use crate::session::OptimizerContext;
+
+    #[tokio::test]
+    /// Pruning
+    /// ```text
+    /// Expand(expanded_keys: [[0, 1], [2]]
+    ///   TableScan(v1, v2, v3)
+    /// ```
+    /// with required columns [1] will result in
+    /// ```text
+    /// Expand(expanded_keys: [[0]])
+    ///   TableScan(v2)
+    /// ```
+    async fn test_prune_expand() {
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
+        ];
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
+
+        let expanded_keys = vec![vec![0, 1], vec![2]];
+        let expand = LogicalExpand::create(values.into(), expanded_keys);
+
+        // Perform the prune
+        let required_cols = vec![1];
+        let plan = expand.prune_col(&required_cols);
+
+        // Check the result
+        let expand = plan.as_logical_expand().unwrap();
+        let expanded_keys = expand.expanded_keys();
+        assert_eq!(expand.schema().len(), 2);
+        assert_eq!(expanded_keys, &vec![vec![0 as usize]]);
+
+        let values = expand.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields()[0], fields[1]);
+    }
+}
+
+
