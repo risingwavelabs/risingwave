@@ -21,7 +21,8 @@ use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`, this will be stored
 /// persistently to meta store. Add more states when needed.
 pub struct BarrierManagerState {
-    pub prev_epoch: Epoch,
+    /// The last sent `prev_epoch`
+    pub in_flight_prev_epoch: Epoch,
 }
 
 impl BarrierManagerState {
@@ -29,29 +30,31 @@ impl BarrierManagerState {
     where
         S: MetaStore,
     {
-        match store
-            .get_cf(DEFAULT_COLUMN_FAMILY, b"barrier_manager_state")
+        let in_flight_prev_epoch = match store
+            .get_cf(
+                DEFAULT_COLUMN_FAMILY,
+                b"barrier_manager_state_epoch_inflight",
+            )
             .await
         {
-            Ok(byte_vec) => BarrierManagerState {
-                prev_epoch: u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()).into(),
-            },
-            Err(storage::Error::ItemNotFound(_)) => BarrierManagerState {
-                prev_epoch: INVALID_EPOCH.into(),
-            },
+            Ok(byte_vec) => u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()).into(),
+            Err(storage::Error::ItemNotFound(_)) => INVALID_EPOCH.into(),
             Err(e) => panic!("{:?}", e),
+        };
+        Self {
+            in_flight_prev_epoch,
         }
     }
 
-    pub async fn update<S>(&self, store: &S) -> Result<()>
+    pub async fn update_inflight_prev_epoch<S>(&self, store: &S) -> Result<()>
     where
         S: MetaStore,
     {
         store
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
-                b"barrier_manager_state".to_vec(),
-                self.prev_epoch.0.to_be_bytes().to_vec(),
+                b"barrier_manager_state_epoch_inflight".to_vec(),
+                self.in_flight_prev_epoch.0.to_be_bytes().to_vec(),
             )
             .await
             .map_err(Into::into)

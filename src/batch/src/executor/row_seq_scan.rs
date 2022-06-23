@@ -26,7 +26,9 @@ use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::CellBasedTableDesc;
-use risingwave_storage::table::cell_based_table::{BatchDedupPkIter, BatchIter, CellBasedTable};
+use risingwave_storage::table::cell_based_table::{
+    BatchDedupPkIter, CellBasedIter, CellBasedTable,
+};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
@@ -48,7 +50,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
 pub enum ScanType<S: StateStore> {
     TableScan(BatchDedupPkIter<S>),
-    RangeScan(BatchIter<S>),
+    RangeScan(CellBasedIter<S>),
     PointGet(Option<Row>),
 }
 
