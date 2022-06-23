@@ -76,15 +76,15 @@ fn infer_type_name<'a, 'b>(
         .map(std::ops::Deref::deref)
         .unwrap_or_default();
 
-    // Binary operators have a special unknown rule for exact match. We do not distinguish operators
-    // from functions as of now.
+    // Binary operators have a special `unknown` handling rule for exact match. We do not
+    // distinguish operators from functions as of now.
     if inputs.len() == 2 {
         let t = match (inputs[0], inputs[1]) {
-            (None, t) => t,
-            (t, None) => t,
-            (Some(_), Some(_)) => None,
+            (None, t) => Ok(t),
+            (t, None) => Ok(t),
+            (Some(_), Some(_)) => Err(()),
         };
-        if let Some(t) = t {
+        if let Ok(Some(t)) = t {
             let exact = candidates.iter().find(|sig| sig.inputs_type == [t, t]);
             if let Some(sig) = exact {
                 return Ok(sig);
@@ -106,11 +106,12 @@ fn infer_type_name<'a, 'b>(
         .into());
     }
 
+    // After this line `candidates` will never be empty, as the narrow rules will retain original
+    // list when no desirable candidates can be selected.
+
     candidates = narrow_category(candidates, inputs);
 
-    if candidates.len() > 1 {
-        candidates = narrow_same_type(candidates, inputs);
-    }
+    candidates = narrow_same_type(candidates, inputs);
 
     match &candidates[..] {
         [] => unreachable!(),
@@ -259,6 +260,7 @@ fn narrow_category<'a, 'b>(
             let Ok(selected) = category else { continue };
             // least_restrictive or mark temporary conflict err
             if implicit_ok(formal, selected, true) {
+                // noop
             } else if implicit_ok(selected, formal, false) {
                 category = Ok(formal);
             } else {
@@ -342,7 +344,7 @@ struct TypeDebug<'a>(&'a Option<DataTypeName>);
 impl<'a> std::fmt::Debug for TypeDebug<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
-            Some(t) => std::fmt::Debug::fmt(&t, f),
+            Some(t) => t.fmt(f),
             None => write!(f, "unknown"),
         }
     }
