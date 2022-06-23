@@ -24,7 +24,14 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
 pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
-    let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &inputs)?;
+    let actuals = inputs
+        .iter()
+        .map(|e| match e.is_null() {
+            true => None,
+            false => Some(e.return_type().into()),
+        })
+        .collect_vec();
+    let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &actuals)?;
     let inputs = inputs
         .into_iter()
         .zip_eq(&sig.inputs_type)
@@ -61,7 +68,7 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
 fn infer_type_name<'a, 'b>(
     sig_map: &'a FuncSigMap,
     func_type: ExprType,
-    inputs: &'b [ExprImpl],
+    inputs: &'b [Option<DataTypeName>],
 ) -> Result<&'a FuncSign> {
     let candidates = sig_map
         .0
@@ -72,11 +79,10 @@ fn infer_type_name<'a, 'b>(
     // Binary operators have a special unknown rule for exact match. We do not distinguish operators
     // from functions as of now.
     if inputs.len() == 2 {
-        let t = match (inputs[0].is_null(), inputs[1].is_null()) {
-            (true, true) => None,
-            (true, false) => Some(inputs[1].return_type().into()),
-            (false, true) => Some(inputs[0].return_type().into()),
-            (false, false) => None,
+        let t = match (inputs[0], inputs[1]) {
+            (None, t) => t,
+            (t, None) => t,
+            (Some(_), Some(_)) => None,
         };
         if let Some(t) = t {
             let exact = candidates.iter().find(|sig| sig.inputs_type == [t, t]);
@@ -93,7 +99,7 @@ fn infer_type_name<'a, 'b>(
             format!(
                 "{:?}{:?}",
                 func_type,
-                inputs.iter().map(|e| e.return_type()).collect_vec()
+                inputs.iter().map(TypeDebug).collect_vec()
             ),
             112.into(),
         )
@@ -112,7 +118,7 @@ fn infer_type_name<'a, 'b>(
         _ => Err(ErrorCode::BindError(format!(
             "function {:?}{:?} is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
             func_type,
-            inputs.iter().map(|e| e.return_type()).collect_vec(),
+            inputs.iter().map(TypeDebug).collect_vec(),
         ))
         .into()),
     }
@@ -154,7 +160,10 @@ fn is_preferred(t: DataTypeName) -> bool {
 /// [rule 4a src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L907-L947
 /// [rule 4c src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1062-L1104
 /// [rule 4d src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1106-L1153
-fn top_matches<'a, 'b>(candidates: &'a [FuncSign], inputs: &'b [ExprImpl]) -> Vec<&'a FuncSign> {
+fn top_matches<'a, 'b>(
+    candidates: &'a [FuncSign],
+    inputs: &'b [Option<DataTypeName>],
+) -> Vec<&'a FuncSign> {
     let mut best_exact = 0;
     let mut best_preferred = 0;
     let mut best_candidate = Vec::new();
@@ -164,8 +173,8 @@ fn top_matches<'a, 'b>(candidates: &'a [FuncSign], inputs: &'b [ExprImpl]) -> Ve
         let mut n_preferred = 0;
         let mut castable = true;
         for (a, p) in inputs.iter().zip_eq(&sig.inputs_type) {
-            if !a.is_null() {
-                let at = a.return_type().into();
+            if a.is_some() {
+                let at = a.unwrap();
                 if at == *p {
                     n_exact += 1;
                 } else if !cast_ok_base(at, *p, CastContext::Implicit) {
@@ -224,11 +233,11 @@ fn top_matches<'a, 'b>(candidates: &'a [FuncSign], inputs: &'b [ExprImpl]) -> Ve
 /// [rule 4e src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1164-L1298
 fn narrow_category<'a, 'b>(
     best_candidate: Vec<&'a FuncSign>,
-    inputs: &'b [ExprImpl],
+    inputs: &'b [Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     let mut ets = Vec::new();
     for (i, arg) in inputs.iter().enumerate() {
-        if !arg.is_null() {
+        if !arg.is_none() {
             continue;
         }
         let mut t = Some(best_candidate[0].inputs_type[i]);
@@ -259,7 +268,7 @@ fn narrow_category<'a, 'b>(
         .filter(|sig| {
             let mut ets_iter = ets.iter();
             for (i, p) in sig.inputs_type.iter().enumerate() {
-                if !inputs[i].is_null() {
+                if inputs[i].is_some() {
                     continue;
                 }
                 let Some(t) = ets_iter.next() else {return false};
@@ -303,14 +312,14 @@ fn narrow_category<'a, 'b>(
 /// [Rule 2]: https://www.postgresql.org/docs/current/typeconv-oper.html#:~:text=then%20assume%20it%20is%20the%20same%20type%20as%20the%20other%20argument%20for%20this%20check
 fn narrow_same_type<'a, 'b>(
     best_candidate: Vec<&'a FuncSign>,
-    inputs: &'b [ExprImpl],
+    inputs: &'b [Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     let mut t = None;
     for e in inputs {
-        if e.is_null() {
+        if e.is_none() {
             continue;
         }
-        let tc = e.return_type().into();
+        let tc = e.unwrap();
         match t {
             None => {
                 t = Some(tc);
@@ -338,6 +347,16 @@ fn narrow_same_type<'a, 'b>(
         }
     }
     best_candidate
+}
+
+struct TypeDebug<'a>(&'a Option<DataTypeName>);
+impl<'a> std::fmt::Debug for TypeDebug<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(t) => std::fmt::Debug::fmt(&t, f),
+            None => write!(f, "unknown"),
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
