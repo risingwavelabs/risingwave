@@ -14,6 +14,7 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use risingwave_batch::executor::ExecutorBuilder;
@@ -35,22 +36,30 @@ use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::SchedulerResult;
-use crate::session::FrontendEnv;
+use crate::session::{AuthContext, FrontendEnv};
 
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
     epoch: Option<u64>,
+
+    auth_context: Arc<AuthContext>,
 }
 
 impl LocalQueryExecution {
-    pub fn new<S: Into<String>>(query: Query, front_env: FrontendEnv, sql: S) -> Self {
+    pub fn new<S: Into<String>>(
+        query: Query,
+        front_env: FrontendEnv,
+        sql: S,
+        auth_context: Arc<AuthContext>,
+    ) -> Self {
         Self {
             sql: sql.into(),
             query,
             front_env,
             epoch: None,
+            auth_context,
         }
     }
 
@@ -61,7 +70,8 @@ impl LocalQueryExecution {
             self.query.query_id, self.sql
         );
 
-        let context = FrontendBatchTaskContext::new(self.front_env.clone());
+        let context =
+            FrontendBatchTaskContext::new(self.front_env.clone(), self.auth_context.clone());
 
         let query_id = self.query.query_id().clone();
 
