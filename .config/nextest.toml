@@ -1,0 +1,10 @@
+[profile.default]
+retries = 5
+slow-timeout = { period = "5s" }
+status-level = "all"
+final-status-level = "slow"
+
+[profile.ci]
+retries = 0
+failure-output = "immediate-final"
+fail-fast = false
