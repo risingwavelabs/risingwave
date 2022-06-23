@@ -27,6 +27,11 @@ RUN mkdir -p /risingwave/bin
 RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features static-link && \
   mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
   cargo clean
+RUN objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/risingwave && \
+  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/frontend && \
+  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/compute-node && \
+  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/meta-node && \
+  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/compactor
 
 FROM ubuntu:22.04 as image-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates && rm -rf /var/lib/{apt,dpkg,cache,log}/

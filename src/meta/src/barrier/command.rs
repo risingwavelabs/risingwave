@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
@@ -79,38 +80,44 @@ impl Command {
             _ => None,
         }
     }
+
+    /// If we need to send a barrier to modify actor configuration, we will pause the barrier
+    /// injection. return true
+    pub fn should_pause_inject_barrier(&self) -> bool {
+        !matches!(self, Command::Plain(_))
+    }
 }
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<'a, S: MetaStore> {
+pub struct CommandContext<S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
     client_pool: StreamClientPoolRef,
 
     /// Resolved info in this barrier loop.
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
-    pub info: &'a BarrierActorInfo,
+    pub info: Arc<BarrierActorInfo>,
 
-    pub prev_epoch: &'a Epoch,
-    pub curr_epoch: &'a Epoch,
+    pub prev_epoch: Epoch,
+    pub curr_epoch: Epoch,
 
-    command: Command,
+    pub command: Command,
 }
 
-impl<'a, S: MetaStore> CommandContext<'a, S> {
+impl<S: MetaStore> CommandContext<S> {
     pub fn new(
         fragment_manager: FragmentManagerRef<S>,
         client_pool: StreamClientPoolRef,
-        info: &'a BarrierActorInfo,
-        prev_epoch: &'a Epoch,
-        curr_epoch: &'a Epoch,
+        info: BarrierActorInfo,
+        prev_epoch: Epoch,
+        curr_epoch: Epoch,
         command: Command,
     ) -> Self {
         Self {
             fragment_manager,
             client_pool,
-            info,
+            info: Arc::new(info),
             prev_epoch,
             curr_epoch,
             command,
@@ -118,7 +125,7 @@ impl<'a, S: MetaStore> CommandContext<'a, S> {
     }
 }
 
-impl<S> CommandContext<'_, S>
+impl<S> CommandContext<S>
 where
     S: MetaStore,
 {

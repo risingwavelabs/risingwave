@@ -77,7 +77,7 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
         }
     }
 
-    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
+    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
 }
 
 async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {

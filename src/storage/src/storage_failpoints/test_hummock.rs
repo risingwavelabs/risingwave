@@ -27,7 +27,7 @@ use crate::StateStore;
 
 #[tokio::test]
 #[cfg(all(test, feature = "failpoints"))]
-async fn test_failpoint_state_store_read_upload() {
+async fn test_failpoints_state_store_read_upload() {
     let mem_upload_err = "mem_upload_err";
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
