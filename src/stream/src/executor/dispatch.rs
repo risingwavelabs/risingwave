@@ -164,9 +164,10 @@ impl DispatchExecutorInner {
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Chunk(chunk) => {
+                let actor_id_str = self.actor_id.to_string();
                 self.metrics
                     .actor_out_record_cnt
-                    .with_label_values(&[&self.actor_id.to_string()])
+                    .with_label_values(&[&actor_id_str])
                     .inc_by(chunk.cardinality().try_into().unwrap());
 
                 if self.dispatchers.len() == 1 {

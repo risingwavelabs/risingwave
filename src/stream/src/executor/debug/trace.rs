@@ -50,15 +50,15 @@ pub async fn trace(
     pin_mut!(input);
 
     while let Some(message) = input.next().instrument(span()).await.transpose()? {
-        if ENABLE_EXECUTOR_ROW_COUNT {
-            if let Message::Chunk(chunk) = &message {
-                if chunk.cardinality() > 0 {
+        if let Message::Chunk(chunk) = &message {
+            if chunk.cardinality() > 0 {
+                if ENABLE_EXECUTOR_ROW_COUNT {
                     metrics
                         .executor_row_count
                         .with_label_values(&[&actor_id_string, &executor_id_string])
                         .inc_by(chunk.cardinality() as u64);
-                    event!(tracing::Level::TRACE, prev = %info.identity, msg = "chunk", "input = \n{:#?}", chunk);
                 }
+                event!(tracing::Level::TRACE, prev = %info.identity, msg = "chunk", "input = \n{:#?}", chunk);
             }
         }
 

@@ -141,11 +141,22 @@ impl Executor for MergeExecutor {
         let upstreams = self.upstreams;
         // Futures of all active upstreams.
         let status = self.status;
-        let select_all =
-            SelectReceivers::new(self.actor_id, status, upstreams, self.metrics.clone());
+        let select_all = SelectReceivers::new(self.actor_id, status, upstreams);
         // Channels that're blocked by the barrier to align.
+        let actor_id_str = self.actor_id.to_string();
+        let metrics = self.metrics.clone();
+        select_all
+            .map(move |msg| {
+                if let Ok(Message::Chunk(chunk)) = &msg {
+                    metrics
+                        .actor_in_record_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .inc_by(chunk.cardinality().try_into().unwrap());
+                }
 
-        select_all.boxed()
+                msg
+            })
+            .boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -168,16 +179,10 @@ pub struct SelectReceivers {
     last_base: usize,
     status: OperatorInfoStatus,
     actor_id: u32,
-    metrics: Arc<StreamingMetrics>,
 }
 
 impl SelectReceivers {
-    fn new(
-        actor_id: u32,
-        status: OperatorInfoStatus,
-        upstreams: Vec<Receiver<Message>>,
-        metrics: Arc<StreamingMetrics>,
-    ) -> Self {
+    fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Receiver<Message>>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
             upstreams: upstreams.into_iter().map(ReceiverStream::new).collect(),
@@ -185,7 +190,6 @@ impl SelectReceivers {
             actor_id,
             status,
             barrier: None,
-            metrics,
         }
     }
 }
@@ -227,10 +231,6 @@ impl Stream for SelectReceivers {
                             poll_count = 0;
                         }
                         Message::Chunk(chunk) => {
-                            self.metrics
-                                .actor_in_record_cnt
-                                .with_label_values(&[&self.actor_id.to_string()])
-                                .inc_by(chunk.cardinality().try_into().unwrap());
                             let message = Message::Chunk(chunk);
 
                             self.status.next_message(&message);
