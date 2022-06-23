@@ -39,12 +39,10 @@ pub struct BlockHolder {
 
 impl BlockHolder {
     pub fn from_ref_block(block: Arc<Block>) -> Self {
-        unsafe {
-            let ptr = block.as_ref() as *const _;
-            Self {
-                _handle: BlockEntry::RefEntry(block),
-                block: ptr,
-            }
+        let ptr = block.as_ref() as *const _;
+        Self {
+            _handle: BlockEntry::RefEntry(block),
+            block: ptr,
         }
     }
 

@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
-use futures::future::try_join_all;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
@@ -232,8 +231,8 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
         load_data: bool,
     ) -> HummockResult<TableHolder> {
-        stats.cache_meta_block_total += 1;
         loop {
+            stats.cache_meta_block_total += 1;
             let entry = self
                 .meta_cache
                 .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || async {

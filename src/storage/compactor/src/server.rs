@@ -84,7 +84,7 @@ pub async fn compactor_serve(
         .await,
         object_metrics,
     ));
-    let sstable_store = Arc::new(SstableStore::new(
+    let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,
         storage_config.data_directory.to_string(),
         storage_config.block_cache_capacity_mb * (1 << 20),

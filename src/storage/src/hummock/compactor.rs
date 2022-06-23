@@ -547,15 +547,17 @@ impl Compactor {
         };
 
         let get_id_time = Arc::new(AtomicU64::new(0));
-        let cache_policy =
-            if self.compact_task.target_level == 0 && !self.context.is_share_buffer_compact {
-                CachePolicy::Fill
-            } else {
-                CachePolicy::NotFill
-            };
+        let max_target_file_size = self.context.options.sstable_size_mb as usize * (1 << 20);
+        let cache_policy = if !self.context.is_share_buffer_compact
+            && (self.compact_task.target_file_size as usize) < max_target_file_size
+        {
+            CachePolicy::Fill
+        } else {
+            CachePolicy::NotFill
+        };
         let target_file_size = std::cmp::min(
             self.compact_task.target_file_size as usize,
-            self.context.options.sstable_size_mb as usize * (1 << 20),
+            max_target_file_size,
         );
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
@@ -675,16 +677,6 @@ impl Compactor {
         let read_options = Arc::new(ReadOptions { prefetch: true });
 
         // TODO: check memory limit
-        let total_file_size = self
-            .compact_task
-            .input_ssts
-            .iter()
-            .map(|level| level.total_file_size)
-            .sum::<u64>();
-        let mut can_load_whole_object = true;
-        if total_file_size > self.context.options.meta_cache_capacity_mb as u64 / 2 * 1024 * 1024 {
-            can_load_whole_object = false;
-        }
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -701,7 +693,7 @@ impl Compactor {
             // 1024) as f64;     read_statistics.cnt += 1;
             // }
 
-            if can_concat(&level.get_table_infos().iter().collect_vec()) {
+            if can_concat(&level.table_infos.iter().collect_vec()) {
                 table_iters.push(Box::new(ConcatIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
@@ -709,17 +701,11 @@ impl Compactor {
                 )) as BoxedForwardHummockIterator);
             } else {
                 for table_info in &level.table_infos {
-                    let table = if can_load_whole_object {
-                        self.context
-                            .sstable_store
-                            .load_table(table_info.id, &mut stats, true)
-                            .await?
-                    } else {
-                        self.context
-                            .sstable_store
-                            .sstable(table_info.id, &mut stats)
-                            .await?
-                    };
+                    let table = self
+                        .context
+                        .sstable_store
+                        .load_table(table_info.id, &mut stats, true)
+                        .await?;
                     table_iters.push(Box::new(SSTableIterator::create(
                         table,
                         self.context.sstable_store.clone(),
