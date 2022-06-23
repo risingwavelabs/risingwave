@@ -261,7 +261,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 }
                 tokio::select! {
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Barrier manager is shutting down");
+                        tracing::info!("Stop register leader info");
                         return;
                     }
                     // Wait for the minimal interval,
@@ -437,6 +437,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
+
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 

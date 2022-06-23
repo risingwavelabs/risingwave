@@ -4308,6 +4308,7 @@ dependencies = [
  "derivative",
  "either",
  "etcd-client",
+ "fail",
  "futures",
  "hex",
  "hyper",
@@ -4331,6 +4332,7 @@ dependencies = [
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_test_runner",
  "serde",
  "serde_derive",
  "serde_json",
@@ -4532,6 +4534,7 @@ version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",
+ "auto_enums",
  "byteorder",
  "bytes",
  "chrono",
@@ -6065,6 +6068,8 @@ name = "workspace-hack"
 version = "0.1.9"
 dependencies = [
  "anyhow",
+ "auto_enums",
+ "auto_enums_derive",
  "axum",
  "bstr",
  "bytes",
