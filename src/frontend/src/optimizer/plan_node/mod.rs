@@ -238,6 +238,7 @@ mod logical_table_function;
 mod logical_topn;
 mod logical_update;
 mod logical_values;
+mod logical_expand;
 mod stream_delta_join;
 mod stream_exchange;
 mod stream_filter;
@@ -286,6 +287,7 @@ pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use logical_expand::LogicalExpand;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
@@ -336,6 +338,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, HopWindow }
             , { Logical, TableFunction }
             , { Logical, MultiJoin }
+            , { Logical, Expand }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -394,6 +397,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, HopWindow }
             , { Logical, TableFunction }
             , { Logical, MultiJoin }
+            , { Logical, Expand }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }

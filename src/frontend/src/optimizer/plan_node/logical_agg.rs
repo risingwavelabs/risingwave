@@ -562,6 +562,14 @@ impl LogicalAgg {
         having: Option<ExprImpl>,
         input: PlanRef,
     ) -> Result<(PlanRef, Vec<ExprImpl>, Option<ExprImpl>)> {
+        // Here is how we rewrite distinct aggregate calls:
+        // 1. the original `input` should subquery's input.
+        // 2. collect all the group by expressions, aggregate calls without distinct expression and
+        // distinct expressions, which are the select list of the subquery.
+        // 3. add distinct expressions to group by expressions collected before, which are the group
+        // by expressions of the subquery.
+        // 4. rewrite the select list of original query.
+
         let group_keys = (0..group_exprs.len()).collect();
         let mut expr_handler = ExprHandler::new(group_exprs)?;
 
