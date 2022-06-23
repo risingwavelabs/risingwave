@@ -66,7 +66,7 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         _ => unreachable!(),
     };
 
-    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
+    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {
@@ -148,6 +148,6 @@ fn local_execute(
     let front_env = session.env();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(query, front_env.clone(), "");
+    let execution = LocalQueryExecution::new(query, front_env.clone(), "", session.auth_context());
     Ok((Box::pin(execution.run()), pg_descs))
 }

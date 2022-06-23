@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -29,23 +30,42 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
+        let pk_indices = node.pk_indices.iter().map(|&i| i as usize).collect();
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
-        let table_id = node.table_desc.as_ref().unwrap().table_id.into();
 
-        let pk_descs_proto = &node.table_desc.as_ref().unwrap().order_key;
-        let pk_descs = pk_descs_proto
+        let table_desc: &CellBasedTableDesc = node.get_table_desc()?;
+        let table_id = TableId {
+            table_id: table_desc.table_id,
+        };
+
+        let pk_descs = table_desc
+            .order_key
             .iter()
             .map(OrderedColumnDesc::from)
             .collect_vec();
         let order_types = pk_descs.iter().map(|desc| desc.order).collect_vec();
 
-        let column_descs = node
-            .column_descs
+        let column_descs = table_desc
+            .columns
             .iter()
-            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
+            .map(ColumnDesc::from)
             .collect_vec();
+        let column_ids = node
+            .column_ids
+            .iter()
+            .copied()
+            .map(ColumnId::from)
+            .collect();
+
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new(keyspace, column_descs, order_types, None);
+        let table = CellBasedTable::new_partial(
+            keyspace,
+            column_descs,
+            column_ids,
+            order_types,
+            pk_indices,
+            None,
+        );
         let key_indices = node
             .get_distribution_keys()
             .iter()

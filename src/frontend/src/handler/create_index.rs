@@ -23,6 +23,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
+use crate::catalog::check_schema_writable;
 use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
@@ -103,6 +104,7 @@ pub(crate) fn gen_create_index_plan(
 
         let scan_node = StreamTableScan::new(LogicalScan::create(
             table_name,
+            false,
             table_desc,
             // indexes are only used by DeltaJoin rule, and we don't need to provide them here.
             vec![],
@@ -125,6 +127,7 @@ pub(crate) fn gen_create_index_plan(
     };
 
     let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;
+    check_schema_writable(&index_schema_name)?;
     let (index_database_id, index_schema_id) = session
         .env()
         .catalog_reader()

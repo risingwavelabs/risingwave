@@ -233,7 +233,7 @@ impl HummockStorage {
                                 )
                                 .await?
                             {
-                                return Ok(Some(v));
+                                return Ok(v);
                             }
                         }
                     }
@@ -257,7 +257,7 @@ impl HummockStorage {
                         .get_from_table(table, &internal_key, key, read_options.clone(), &mut stats)
                         .await?
                     {
-                        return Ok(Some(v));
+                        return Ok(v);
                     }
                 }
             }

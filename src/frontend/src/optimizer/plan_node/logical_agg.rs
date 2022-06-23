@@ -198,6 +198,7 @@ impl LogicalAgg {
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
                 vnode_mapping: None,
+                properties: HashMap::default(),
             });
         }
         (table_catalogs, column_mapping)

@@ -16,11 +16,12 @@ use std::collections::HashMap;
 
 use lazy_static::lazy_static;
 use regex::Regex;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::source_catalog::SourceCatalog;
+use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::SchemaId;
 
@@ -29,12 +30,14 @@ pub type SourceId = u32;
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     id: SchemaId,
-    #[expect(dead_code)]
     name: String,
     table_by_name: HashMap<String, TableCatalog>,
     table_name_by_id: HashMap<TableId, String>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
+
+    // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
+    system_table_by_name: HashMap<String, SystemCatalog>,
     owner: String,
 }
 
@@ -46,6 +49,13 @@ impl SchemaCatalog {
 
         self.table_by_name.try_insert(name.clone(), table).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
+    }
+
+    pub fn create_sys_table(&mut self, sys_table: SystemCatalog) {
+        assert_eq!(self.name, PG_CATALOG_SCHEMA_NAME);
+        self.system_table_by_name
+            .try_insert(sys_table.name.clone(), sys_table)
+            .unwrap();
     }
 
     pub fn drop_table(&mut self, id: TableId) {
@@ -123,6 +133,10 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
+        self.system_table_by_name.iter().map(|(_, v)| v)
+    }
+
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
         self.table_by_name.get(table_name)
     }
@@ -131,8 +145,16 @@ impl SchemaCatalog {
         self.source_by_name.get(source_name)
     }
 
+    pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
+        self.system_table_by_name.get(table_name)
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
+    }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
     }
 
     pub fn owner(&self) -> String {
@@ -149,6 +171,7 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
+            system_table_by_name: HashMap::new(),
             owner: schema.owner.clone(),
         }
     }

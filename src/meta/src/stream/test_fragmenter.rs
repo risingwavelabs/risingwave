@@ -340,14 +340,11 @@ async fn test_fragmenter() -> Result<()> {
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    let mut internal_table_ids = table_fragments.internal_table_ids();
+    let internal_table_ids = table_fragments.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(4, internal_table_ids.len());
-    internal_table_ids.sort();
-    let expected_internal_table_ids = vec![0, 1, 2, 3];
-    assert_eq!(expected_internal_table_ids, internal_table_ids);
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);

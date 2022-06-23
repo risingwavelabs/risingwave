@@ -14,7 +14,17 @@
                 appendOnly: true
                 batchPlan:
                   tableDesc:
-                    tableId: 2
+                    tableId: 4
+                    columns:
+                      - columnType:
+                          typeName: INT64
+                          isNullable: true
+                        name: _row_id
+                      - columnType:
+                          typeName: INT32
+                          isNullable: true
+                        columnId: 1
+                        name: v1
                     orderKey:
                       - columnDesc:
                           columnType:
@@ -22,16 +32,9 @@
                             isNullable: true
                           name: _row_id
                         order: ASCENDING
-                  columnDescs:
-                    - columnType:
-                        typeName: INT32
-                        isNullable: true
-                      columnId: 1
-                      name: v1
-                    - columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: _row_id
+                  columnIds:
+                    - 1
+                    - 0
                   distributionKeys:
                     - 1
             pkIndices:
@@ -47,7 +50,7 @@
                 name: _row_id
             chain:
               tableRefId:
-                tableId: 2
+                tableId: 4
               upstreamFields:
                 - dataType:
                     typeName: INT64
@@ -116,6 +119,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -153,7 +157,17 @@
             appendOnly: true
             batchPlan:
               tableDesc:
-                tableId: 2
+                tableId: 4
+                columns:
+                  - columnType:
+                      typeName: INT64
+                      isNullable: true
+                    name: _row_id
+                  - columnType:
+                      typeName: INT32
+                      isNullable: true
+                    columnId: 1
+                    name: v1
                 orderKey:
                   - columnDesc:
                       columnType:
@@ -161,16 +175,9 @@
                         isNullable: true
                       name: _row_id
                     order: ASCENDING
-              columnDescs:
-                - columnType:
-                    typeName: INT32
-                    isNullable: true
-                  columnId: 1
-                  name: v1
-                - columnType:
-                    typeName: INT64
-                    isNullable: true
-                  name: _row_id
+              columnIds:
+                - 1
+                - 0
               distributionKeys:
                 - 1
         pkIndices:
@@ -186,7 +193,7 @@
             name: _row_id
         chain:
           tableRefId:
-            tableId: 2
+            tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -225,6 +232,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -262,7 +270,22 @@
             appendOnly: true
             batchPlan:
               tableDesc:
-                tableId: 2
+                tableId: 4
+                columns:
+                  - columnType:
+                      typeName: INT64
+                      isNullable: true
+                    name: _row_id
+                  - columnType:
+                      typeName: INT32
+                      isNullable: true
+                    columnId: 1
+                    name: v1
+                  - columnType:
+                      typeName: INT32
+                      isNullable: true
+                    columnId: 2
+                    name: v2
                 orderKey:
                   - columnDesc:
                       columnType:
@@ -270,16 +293,9 @@
                         isNullable: true
                       name: _row_id
                     order: ASCENDING
-              columnDescs:
-                - columnType:
-                    typeName: INT32
-                    isNullable: true
-                  columnId: 1
-                  name: v1
-                - columnType:
-                    typeName: INT64
-                    isNullable: true
-                  name: _row_id
+              columnIds:
+                - 1
+                - 0
               distributionKeys:
                 - 1
         pkIndices:
@@ -295,7 +311,7 @@
             name: _row_id
         chain:
           tableRefId:
-            tableId: 2
+            tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -338,6 +354,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -377,7 +394,17 @@
                     appendOnly: true
                     batchPlan:
                       tableDesc:
-                        tableId: 2
+                        tableId: 4
+                        columns:
+                          - columnType:
+                              typeName: INT64
+                              isNullable: true
+                            name: _row_id
+                          - columnType:
+                              typeName: INT32
+                              isNullable: true
+                            columnId: 1
+                            name: v1
                         orderKey:
                           - columnDesc:
                               columnType:
@@ -385,16 +412,9 @@
                                 isNullable: true
                               name: _row_id
                             order: ASCENDING
-                      columnDescs:
-                        - columnType:
-                            typeName: INT32
-                            isNullable: true
-                          columnId: 1
-                          name: v1
-                        - columnType:
-                            typeName: INT64
-                            isNullable: true
-                          name: _row_id
+                      columnIds:
+                        - 1
+                        - 0
                       distributionKeys:
                         - 1
                 pkIndices:
@@ -410,7 +430,7 @@
                     name: _row_id
                 chain:
                   tableRefId:
-                    tableId: 2
+                    tableId: 4
                   upstreamFields:
                     - dataType:
                         typeName: INT64
@@ -495,6 +515,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -528,7 +549,22 @@
                             appendOnly: true
                             batchPlan:
                               tableDesc:
-                                tableId: 2
+                                tableId: 4
+                                columns:
+                                  - columnType:
+                                      typeName: INT64
+                                      isNullable: true
+                                    name: _row_id
+                                  - columnType:
+                                      typeName: INT32
+                                      isNullable: true
+                                    columnId: 1
+                                    name: v1
+                                  - columnType:
+                                      typeName: INT32
+                                      isNullable: true
+                                    columnId: 2
+                                    name: v2
                                 orderKey:
                                   - columnDesc:
                                       columnType:
@@ -536,21 +572,10 @@
                                         isNullable: true
                                       name: _row_id
                                     order: ASCENDING
-                              columnDescs:
-                                - columnType:
-                                    typeName: INT32
-                                    isNullable: true
-                                  columnId: 1
-                                  name: v1
-                                - columnType:
-                                    typeName: INT32
-                                    isNullable: true
-                                  columnId: 2
-                                  name: v2
-                                - columnType:
-                                    typeName: INT64
-                                    isNullable: true
-                                  name: _row_id
+                              columnIds:
+                                - 1
+                                - 2
+                                - 0
                               distributionKeys:
                                 - 2
                         pkIndices:
@@ -570,7 +595,7 @@
                             name: _row_id
                         chain:
                           tableRefId:
-                            tableId: 2
+                            tableId: 4
                           upstreamFields:
                             - dataType:
                                 typeName: INT64
@@ -774,6 +799,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
