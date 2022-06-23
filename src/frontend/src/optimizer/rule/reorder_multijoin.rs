@@ -115,12 +115,13 @@ mod tests {
             .unwrap(),
         ));
         let join_1 = LogicalJoin::new(
-            LogicalMultiJoin::from_join(&join_0.into()).unwrap().into(),
+            join_0.into(),
             relation_b.clone().into(),
             join_type,
             Condition::with_expr(on_1),
         );
-        let multi_join = LogicalMultiJoin::from_join(&join_1.into()).unwrap();
+        let multijoin_builder = LogicalMultiJoinBuilder::new(join_1.into());
+        let multi_join = multijoin_builder.build();
         for (input, schema) in multi_join.inputs().iter().zip_eq(vec![
             relation_a.schema(),
             relation_c.schema(),

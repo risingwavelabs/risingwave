@@ -179,6 +179,7 @@ impl CompactionPicker for MinOverlappingPicker {
             },
             split_ranges: vec![],
             compression_algorithm: "".to_string(),
+            target_file_size: 0,
         })
     }
 }

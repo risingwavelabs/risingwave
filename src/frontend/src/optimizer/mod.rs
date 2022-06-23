@@ -134,7 +134,7 @@ impl PlanRoot {
         // This rule assumes that filters have already been pushed down near to
         // their relevant joins.
         plan = {
-            let rules = vec![MultiJoinJoinRule::create(), MultiJoinFilterRule::create()];
+            let rules = vec![MergeMultiJoinRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
             heuristic_optimizer.optimize(plan)
         };
