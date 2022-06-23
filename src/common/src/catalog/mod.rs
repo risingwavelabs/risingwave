@@ -13,8 +13,8 @@
 // limitations under the License.
 
 mod column;
-mod physical_table;
 mod internal_table;
+mod physical_table;
 mod schema;
 pub mod test_utils;
 
@@ -23,8 +23,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 pub use column::*;
-pub use physical_table::*;
 pub use internal_table::*;
+pub use physical_table::*;
 pub use schema::{test_utils as schema_test_utils, Field, Schema};
 
 use crate::array::Row;

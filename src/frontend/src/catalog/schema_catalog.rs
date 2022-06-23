@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::{TableId, PG_CATALOG_SCHEMA_NAME, valid_table_name};
+use risingwave_common::catalog::{valid_table_name, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 use risingwave_pb::stream_plan::source_node::SourceType;
 

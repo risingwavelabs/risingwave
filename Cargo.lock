@@ -4218,7 +4218,6 @@ dependencies = [
  "pgwire",
  "prost",
  "rand 0.8.5",
- "regex",
  "risingwave_batch",
  "risingwave_common",
  "risingwave_expr",
