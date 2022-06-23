@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use core::fmt;
-use std::collections::HashMap;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
@@ -258,16 +257,6 @@ impl fmt::Display for WithProperties {
         } else {
             Ok(())
         }
-    }
-}
-
-impl From<WithProperties> for HashMap<String, String> {
-    fn from(props: WithProperties) -> Self {
-        props
-            .0
-            .into_iter()
-            .map(|x| (x.name.value, format!("{}", x.value)))
-            .collect()
     }
 }
 
