@@ -496,6 +496,7 @@ impl StreamGraphBuilder {
         }
 
         let mut internal_tables = vec![];
+        let mut is_filled = false;
         for builder in self.actor_builders.values() {
             let actor_id = builder.actor_id;
             let mut actor = builder.build();
@@ -507,7 +508,10 @@ impl StreamGraphBuilder {
 
             let (stream_node, mut inner_internal_tables) =
                 self.build_inner(ctx, actor.get_nodes()?, actor_id, &mut upstream_actors)?;
-            internal_tables.append(&mut inner_internal_tables);
+            if !is_filled {
+                internal_tables.append(&mut inner_internal_tables);
+                is_filled = true;
+            }
             actor.nodes = Some(stream_node);
             graph
                 .entry(builder.get_fragment_id())
