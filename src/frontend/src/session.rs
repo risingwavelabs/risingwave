@@ -30,7 +30,9 @@ use rand::RngCore;
 use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::session_config::{DELTA_JOIN, IMPLICIT_FLUSH, QUERY_MODE};
+use risingwave_common::session_config::{
+    DELTA_JOIN, EXTRA_FLOAT_DIGITS, IMPLICIT_FLUSH, QUERY_MODE,
+};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -374,6 +376,7 @@ fn build_default_session_config_map() -> HashMap<String, String> {
     m.insert(IMPLICIT_FLUSH.to_ascii_lowercase(), "false".to_string());
     m.insert(DELTA_JOIN.to_ascii_lowercase(), "false".to_string());
     m.insert(QUERY_MODE.to_ascii_lowercase(), "distributed".to_string());
+    m.insert(EXTRA_FLOAT_DIGITS.to_ascii_lowercase(), "1".to_string());
     m
 }
 
