@@ -67,6 +67,9 @@ impl<S: StateStore> DedupPkCellBasedTable<S> {
     }
 }
 
+/// [`CellBasedTable`] is the interface accessing relational data in KV(`StateStore`) with encoding
+/// format: [keyspace | pk | `column_id` (4B)] -> value.
+/// if the key of the column id does not exist, it will be Null in the relation
 pub type CellBasedTable<S> = CellBasedTableExtended<S, CellBasedRowSerializer>;
 
 impl<S: StateStore> CellBasedTable<S> {
@@ -122,9 +125,11 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 }
 
-/// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
+/// `CellBasedTableExtended` is the interface accessing relational data in KV(`StateStore`) with encoding
 /// format: [keyspace | pk | `column_id` (4B)] -> value.
-/// if the key of the column id does not exist, it will be Null in the relation
+/// if the key of the column id does not exist, it will be Null in the relation.
+/// It is parameterized by its encoding, by specifying cell serializer and deserializers.
+/// TODO: Parameterize on CellDeserializer.
 #[derive(Clone)]
 pub struct CellBasedTableExtended<S: StateStore, SER: CellSerializer> {
     /// The keyspace that the pk and value of the original table has.
