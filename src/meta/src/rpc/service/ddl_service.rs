@@ -305,8 +305,11 @@ where
                     .map_err(tonic_err)?;
                 return Err(e.into());
             }
-            Ok(inner_internal_tables) => {
-                self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
+            Ok(mut inner_internal_tables) => {
+                self.set_table_mapping(&mut mview).map_err(tonic_err)?;
+                for inner_table in &mut inner_internal_tables {
+                    self.set_table_mapping(inner_table).map_err(tonic_err)?;
+                }
                 inner_internal_tables
             }
         };
@@ -582,8 +585,11 @@ where
                 self.source_manager.drop_source(source_id).await?;
                 return Err(e);
             }
-            Ok(inner_internal_tables) => {
-                self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
+            Ok(mut inner_internal_tables) => {
+                self.set_table_mapping(&mut mview).map_err(tonic_err)?;
+                for inner_table in &mut inner_internal_tables {
+                    self.set_table_mapping(inner_table).map_err(tonic_err)?;
+                }
                 inner_internal_tables
             }
         };
@@ -621,7 +627,7 @@ where
     }
 
     /// Fill in mview's vnode mapping so that frontend will know the data distribution.
-    fn set_mview_mapping(&self, mview: &mut Table) -> RwResult<()> {
+    fn set_table_mapping(&self, mview: &mut Table) -> RwResult<()> {
         let vnode_mapping = self
             .env
             .hash_mapping_manager_ref()
