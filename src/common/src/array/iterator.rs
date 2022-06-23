@@ -91,6 +91,7 @@ pub struct MarkedArayRefIter<'a> {
 impl<'a> Iterator for MarkedArayRefIter<'a> {
     type Item = DatumRef<'a>;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         while self.pos < self.arr.len() {
             if self.vis.is_set(self.pos).unwrap() {
@@ -110,6 +111,8 @@ impl<'a> Iterator for MarkedArayRefIter<'a> {
         (size, Some(size))
     }
 }
+
+unsafe impl<'a> TrustedLen for MarkedArayRefIter<'a> {}
 
 #[cfg(test)]
 mod tests {
