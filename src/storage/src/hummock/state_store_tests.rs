@@ -505,3 +505,56 @@ async fn test_write_anytime() {
     assert!(!hummock_storage.get_uncommitted_ssts(epoch1).is_empty());
     assert!(!hummock_storage.get_uncommitted_ssts(epoch2).is_empty());
 }
+
+#[tokio::test]
+async fn test_delete_get() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let hummock_storage = HummockStorage::with_default_stats(
+        hummock_options,
+        sstable_store.clone(),
+        hummock_meta_client.clone(),
+        Arc::new(StateStoreMetrics::unused()),
+    )
+    .await
+    .unwrap();
+
+    let initial_epoch = hummock_storage
+        .local_version_manager
+        .get_pinned_version()
+        .max_committed_epoch();
+    let epoch1 = initial_epoch + 1;
+    let batch1 = vec![
+        (Bytes::from("aa"), StorageValue::new_default_put("111")),
+        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+    ];
+    hummock_storage.ingest_batch(batch1, epoch1).await.unwrap();
+    hummock_storage.sync(Some(epoch1)).await.unwrap();
+    let ssts = hummock_storage.get_uncommitted_ssts(epoch1);
+    hummock_meta_client
+        .commit_epoch(epoch1, ssts)
+        .await
+        .unwrap();
+    let epoch2 = initial_epoch + 2;
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
+    hummock_storage.ingest_batch(batch2, epoch2).await.unwrap();
+    hummock_storage.sync(Some(epoch2)).await.unwrap();
+    let ssts = hummock_storage.get_uncommitted_ssts(epoch2);
+    hummock_meta_client
+        .commit_epoch(epoch2, ssts)
+        .await
+        .unwrap();
+    hummock_storage.wait_epoch(epoch2).await.unwrap();
+    assert!(hummock_storage
+        .get("bb".as_bytes(), epoch2)
+        .await
+        .unwrap()
+        .is_none());
+}

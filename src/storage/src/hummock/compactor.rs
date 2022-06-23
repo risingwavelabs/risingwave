@@ -242,6 +242,8 @@ impl Compactor {
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
+            target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
+            compression_algorithm: 0,
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -550,6 +552,10 @@ impl Compactor {
         } else {
             CachePolicy::NotFill
         };
+        let target_file_size = std::cmp::min(
+            self.compact_task.target_file_size as usize,
+            self.context.options.sstable_size_mb as usize * (1 << 20),
+        );
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = GroupedSstableBuilder::new(
@@ -557,20 +563,13 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let options = {
-                    let mut options: SSTableBuilderOptions = self.context.options.as_ref().into();
+                let mut options: SSTableBuilderOptions = self.context.options.as_ref().into();
 
-                    if self.context.options.enable_compression {
-                        // support compression setting per level
-                        // L0 and L1 do not use compression algorithms
-                        // L2 - L4 use Lz4, else use Zstd
-                        options.compression_algorithm = match self.compact_task.target_level {
-                            0 | 1 => CompressionAlgorithm::None,
-                            2 | 3 | 4 => CompressionAlgorithm::Lz4,
-                            _ => CompressionAlgorithm::Zstd,
-                        }
-                    };
-                    options
+                options.capacity = target_file_size;
+                options.compression_algorithm = match self.compact_task.compression_algorithm {
+                    0 => CompressionAlgorithm::None,
+                    1 => CompressionAlgorithm::Lz4,
+                    _ => CompressionAlgorithm::Zstd,
                 };
                 let builder = SSTableBuilder::new(table_id, options);
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
