@@ -4534,6 +4534,7 @@ version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",
+ "auto_enums",
  "byteorder",
  "bytes",
  "chrono",
@@ -6067,6 +6068,8 @@ name = "workspace-hack"
 version = "0.1.9"
 dependencies = [
  "anyhow",
+ "auto_enums",
+ "auto_enums_derive",
  "axum",
  "bstr",
  "bytes",
