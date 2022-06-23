@@ -151,7 +151,7 @@ impl Executor for MergeExecutor {
                     metrics
                         .actor_in_record_cnt
                         .with_label_values(&[&actor_id_str])
-                        .inc_by(chunk.cardinality().try_into().unwrap());
+                        .inc_by(chunk.cardinality() as _);
                 }
 
                 msg
