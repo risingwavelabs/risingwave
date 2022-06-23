@@ -401,12 +401,9 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
 
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 
-/// The [`CellBasedIter`] used in streaming executor.
-pub type StreamingIter<S: StateStore> = impl PkAndRowStream;
-/// The [`CellBasedIter`] used in batch executor, which will wait for the epoch before iteration.
-pub type BatchIter<S: StateStore> = impl PkAndRowStream;
-/// The [`CellBasedIter`] used in batch executor if pk is not persisted, which will wait for the
-/// epoch before iteration.
+/// The row iterator of the cell-based table.
+pub type CellBasedIter<S: StateStore> = impl PkAndRowStream;
+/// The wrapper of [`CellBasedIter`] if pk is not persisted.
 pub type BatchDedupPkIter<S: StateStore> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
@@ -421,12 +418,15 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 
 /// Iterators
 impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
-    /// Get multiple [`CellBasedIter`] based on the specified vnodes.
-    async fn iters_with_encoded_key_range<R, B, const ITER_TYPE: bool>(
+    /// Get multiple [`CellBasedIter`] based on the specified vnodes, and merge or concat them by
+    /// given `ordered`.
+    async fn iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
         epoch: u64,
-    ) -> StorageResult<Vec<CellBasedIter<S, ITER_TYPE>>>
+        wait_for_epoch: bool,
+        ordered: bool,
+    ) -> StorageResult<CellBasedIter<S>>
     where
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
@@ -444,77 +444,62 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             .map(|(i, _)| i as VirtualNode)
         {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            let iter = CellBasedIter::<_, ITER_TYPE>::new(
+            let iter = CellBasedIterInner::new(
                 &self.keyspace,
                 self.mapping.clone(),
                 raw_key_range,
                 epoch,
+                wait_for_epoch,
             )
-            .await?;
+            .await?
+            .into_stream();
             iterators.push(iter);
         }
 
-        Ok(iterators)
-    }
-
-    /// Get a [`StreamingIter`] with given `encoded_key_range`.
-    pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
-        &self,
-        encoded_key_range: R,
-        epoch: u64,
-    ) -> StorageResult<StreamingIter<S>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
-        let iterators = self
-            .iters_with_encoded_key_range::<_, _, STREAMING_ITER_TYPE>(encoded_key_range, epoch)
-            .await?
-            .into_iter()
-            .map(|i| i.into_stream())
-            .collect_vec();
-
         let iter = match iterators.len() {
             0 => unreachable!(),
             1 => iterators.into_iter().next().unwrap(),
-            _ => todo!("merge multiple vnode ranges"),
-        };
-
-        Ok(iter)
-    }
-
-    /// Get a [`BatchIter`] with given `encoded_key_range`.
-    /// Differs from [`StreamingIter`], this iterator will wait for the epoch before iteration, and
-    /// the order of the rows among different virtual nodes is not guaranteed.
-    pub(super) async fn batch_iter_with_encoded_key_range<R, B>(
-        &self,
-        encoded_key_range: R,
-        epoch: u64,
-    ) -> StorageResult<BatchIter<S>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
-        let iterators = self
-            .iters_with_encoded_key_range::<_, _, BATCH_ITER_TYPE>(encoded_key_range, epoch)
-            .await?
-            .into_iter()
-            .map(|i| i.into_stream())
-            .collect_vec();
-
-        let iter = match iterators.len() {
-            0 => unreachable!(),
-            1 => iterators.into_iter().next().unwrap(),
-            // Currently batch does not expect scan order, so we just concat mutiple ranges.
-            // TODO: introduce ordered batch iterator
+            _ if ordered => todo!("merge multiple vnode ranges"),
             _ => todo!("concat multiple vnode ranges"),
         };
 
         Ok(iter)
     }
 
+    /// Get a [`CellBasedIter`] for streaming use with given `encoded_key_range`.
+    pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
+        &self,
+        encoded_key_range: R,
+        epoch: u64,
+    ) -> StorageResult<CellBasedIter<S>>
+    where
+        R: RangeBounds<B> + Send + Clone,
+        B: AsRef<[u8]> + Send,
+    {
+        self.iter_with_encoded_key_range(encoded_key_range, epoch, false, true)
+            .await
+    }
+
+    /// Get a [`CellBasedIter`] with given `encoded_key_range`.
+    /// Differs from the streaming one, this iterator will wait for the epoch before iteration, and
+    /// the order of the rows among different virtual nodes is not guaranteed.
+    pub(super) async fn batch_iter_with_encoded_key_range<R, B>(
+        &self,
+        encoded_key_range: R,
+        epoch: u64,
+    ) -> StorageResult<CellBasedIter<S>>
+    where
+        R: RangeBounds<B> + Send + Clone,
+        B: AsRef<[u8]> + Send,
+    {
+        // Currently batch does not expect scan order, so we just concat mutiple ranges.
+        // TODO: introduce ordered batch iterator
+        self.iter_with_encoded_key_range(encoded_key_range, epoch, true, false)
+            .await
+    }
+
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<BatchIter<S>> {
+    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<CellBasedIter<S>> {
         self.batch_iter_with_encoded_key_range::<_, &[u8]>(.., epoch)
             .await
     }
@@ -542,7 +527,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
         epoch: u64,
         pk_prefix: Row,
         next_col_bounds: impl RangeBounds<Datum>,
-    ) -> StorageResult<BatchIter<S>> {
+    ) -> StorageResult<CellBasedIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerializer,
             pk_prefix: &Row,
@@ -617,7 +602,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
         &self,
         epoch: u64,
         pk_prefix: Row,
-    ) -> StorageResult<BatchIter<S>> {
+    ) -> StorageResult<CellBasedIter<S>> {
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
         let serialized_pk_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
 
@@ -633,12 +618,8 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
     }
 }
 
-const STREAMING_ITER_TYPE: bool = true;
-const BATCH_ITER_TYPE: bool = false;
-
-/// [`CellBasedIter`] iterates on the cell-based table.
-/// If `ITER_TYPE` is `BATCH`, it will wait for the given epoch to be committed before iteration.
-struct CellBasedIter<S: StateStore, const ITER_TYPE: bool> {
+/// [`CellBasedIterInner`] iterates on the cell-based table.
+struct CellBasedIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
@@ -646,18 +627,20 @@ struct CellBasedIter<S: StateStore, const ITER_TYPE: bool> {
     cell_based_row_deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
-impl<S: StateStore, const ITER_TYPE: bool> CellBasedIter<S, ITER_TYPE> {
+impl<S: StateStore> CellBasedIterInner<S> {
+    /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
         raw_key_range: R,
         epoch: u64,
+        wait_epoch: bool,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        if ITER_TYPE == BATCH_ITER_TYPE {
+        if wait_epoch {
             keyspace.state_store().wait_epoch(epoch).await?;
         }
 
