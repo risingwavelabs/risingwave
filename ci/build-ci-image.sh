@@ -20,7 +20,7 @@ aws ecr-public get-login-password --region us-east-1 | docker login --username A
 
 echo "--- Check image existence"
 set +e
-if docker manifest inspect ${BUILD_TAG}; then
+if docker manifest inspect "${BUILD_TAG}"; then
     echo "${BUILD_TAG} already exists - please change build env version"
     exit 1
 fi
