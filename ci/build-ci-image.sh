@@ -15,17 +15,6 @@ export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 echo "--- Arch"
 arch
 
-echo "--- Docker login"
-aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/x5u3w5h6
-
-echo "--- Check image existence"
-set +e
-if docker manifest inspect "${BUILD_TAG}"; then
-    echo "${BUILD_TAG} already exists - please change build env version"
-    exit 1
-fi
-set -e
-
 echo "--- Check docker-compose"
 set +e
 if ! grep "${BUILD_TAG}" docker-compose.yml; then
@@ -34,8 +23,29 @@ if ! grep "${BUILD_TAG}" docker-compose.yml; then
 fi
 set -e
 
+echo "--- Docker login"
+aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/x5u3w5h6
+
+echo "--- Check image existence"
+set +e
+# remove all local images to ensure we fetch remote images
+docker rm ${BUILD_TAG}
+# check manifest
+if docker manifest inspect "${BUILD_TAG}"; then
+    echo "+++ Image already exists"
+    echo "${BUILD_TAG} already exists -- skipping build image"
+    exit 0
+fi
+set -e
+
 echo "--- Docker build"
-docker build -t ${BUILD_TAG} --build-arg "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}" .
+if [[ -z ${BUILDKITE} ]] then;
+    export DOCKER_BUILD_PROGRESS="--progress=plain"
+else
+    export DOCKER_BUILD_PROGRESS="--progress=auto"
+fi
+
+docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --build-arg "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}" .
 
 echo "--- Docker push"
 docker push ${BUILD_TAG}

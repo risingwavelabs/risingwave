@@ -13,7 +13,7 @@ cargo-cache: &cargo-cache
     - ".cargo/git/db"
 
 steps:
-  - label: "build ci image"
+  - label: "check if needed to rebuild ci image"
     plugins:
       - chronotc/monorepo-diff#v2.3.0:
           diff: "git diff --name-only HEAD~1"
