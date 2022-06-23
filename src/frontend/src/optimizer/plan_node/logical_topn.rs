@@ -170,7 +170,7 @@ impl PredicatePushdown for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
-        self.to_batch_with_order_required(Order::any())
+        self.to_batch_with_order_required(&Order::any())
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {

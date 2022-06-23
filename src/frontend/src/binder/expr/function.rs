@@ -156,25 +156,25 @@ impl Binder {
     /// - round(Decimal, Int32) -> Decimal
     /// - round(Decimal) -> Decimal
     /// - round(Float64) -> Float64
-    /// - Extend: round(Int16, Int32, Int64, Float32) -> Decimal
+    /// - Extend: round(Int16, Int32, Int64, Float32) -> Float64
     ///
     /// Ceil:
     /// - ceil(Decimal) -> Decimal
     /// - ceil(Float) -> Float64
-    /// - Extend: ceil(Int16, Int32, Int64, Float32) -> Decimal
+    /// - Extend: ceil(Int16, Int32, Int64, Float32) -> Float64
     ///
     /// Floor:
     /// - floor(Decimal) -> Decimal
     /// - floor(Float) -> Float64
-    /// - Extend: floor(Int16, Int32, Int64, Float32) -> Decimal
+    /// - Extend: floor(Int16, Int32, Int64, Float32) -> Float64
     fn rewrite_round_args(mut inputs: Vec<ExprImpl>) -> Vec<ExprImpl> {
         if inputs.len() == 1 {
             let input = inputs.pop().unwrap();
             match input.return_type() {
-                risingwave_common::types::DataType::Float64 => vec![input],
+                risingwave_common::types::DataType::Decimal => vec![input],
                 _ => vec![input
                     .clone()
-                    .cast_implicit(DataType::Decimal)
+                    .cast_implicit(DataType::Float64)
                     .unwrap_or(input)],
             }
         } else if inputs.len() == 2 {

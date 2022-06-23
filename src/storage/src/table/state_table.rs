@@ -38,8 +38,6 @@ pub struct StateTable<S: StateStore> {
 
     /// Relation layer
     cell_based_table: CellBasedTable<S>,
-
-    pk_indices: Vec<usize>,
 }
 
 impl<S: StateStore> StateTable<S> {
@@ -56,10 +54,15 @@ impl<S: StateStore> StateTable<S> {
                 keyspace,
                 column_descs,
                 order_types,
+                pk_indices,
                 dist_key_indices,
             ),
-            pk_indices,
         }
+    }
+
+    /// Get the underlying [`CellBasedTable`]. Should only be used for tests.
+    pub fn cell_based_table(&self) -> &CellBasedTable<S> {
+        &self.cell_based_table
     }
 
     fn pk_serializer(&self) -> &OrderedRowSerializer {
@@ -67,8 +70,8 @@ impl<S: StateStore> StateTable<S> {
     }
 
     // TODO: remove, should not be exposed to user
-    pub fn get_pk_indices(&self) -> &[usize] {
-        &self.pk_indices
+    pub fn pk_indices(&self) -> &[usize] {
+        self.cell_based_table.pk_indices()
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -103,7 +106,7 @@ impl<S: StateStore> StateTable<S> {
     /// the table.
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
         let mut datums = vec![];
-        for pk_index in &self.pk_indices {
+        for pk_index in self.pk_indices() {
             datums.push(value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
@@ -116,7 +119,7 @@ impl<S: StateStore> StateTable<S> {
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
         let mut datums = vec![];
-        for pk_index in &self.pk_indices {
+        for pk_index in self.pk_indices() {
             datums.push(old_value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
@@ -127,8 +130,8 @@ impl<S: StateStore> StateTable<S> {
 
     /// Update a row. The old and new value should have the same pk.
     pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
-        let pk = old_value.by_indices(&self.pk_indices);
-        debug_assert_eq!(pk, new_value.by_indices(&self.pk_indices));
+        let pk = old_value.by_indices(self.pk_indices());
+        debug_assert_eq!(pk, new_value.by_indices(self.pk_indices()));
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.update(pk_bytes, old_value, new_value);
         Ok(())
@@ -198,11 +201,11 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_with_pk_prefix(
-        &self,
-        pk_prefix: &Row,
+    pub async fn iter_with_pk_prefix<'a>(
+        &'a self,
+        pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<RowStream<'_, S>> {
+    ) -> StorageResult<RowStream<'a, S>> {
         let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);

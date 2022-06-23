@@ -17,7 +17,6 @@ use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
@@ -102,10 +101,8 @@ impl ManagedValueState {
         self.is_dirty
     }
 
-    /// Flush the internal state to a write batch.
     pub async fn flush<S: StateStore>(
         &mut self,
-        _write_batch: &mut WriteBatch<S>,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
@@ -175,13 +172,9 @@ mod tests {
             .unwrap();
         assert!(managed_state.is_dirty());
 
-        // flush to write batch and write to state store
+        // write to state store
         let epoch: u64 = 0;
-        let mut write_batch = keyspace.state_store().start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .await
-            .unwrap();
+        managed_state.flush(&mut state_table).await.unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output
@@ -246,13 +239,9 @@ mod tests {
             .unwrap();
         assert!(managed_state.is_dirty());
 
-        // flush to write batch and write to state store
+        // write to state store
         let epoch: u64 = 0;
-        let mut write_batch = keyspace.state_store().start_write_batch();
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .await
-            .unwrap();
+        managed_state.flush(&mut state_table).await.unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output

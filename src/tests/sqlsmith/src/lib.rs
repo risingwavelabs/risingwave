@@ -14,7 +14,7 @@
 
 use std::vec;
 
-use rand::prelude::{SliceRandom, ThreadRng};
+use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
@@ -48,15 +48,15 @@ impl From<ColumnDef> for Column {
     }
 }
 
-struct SqlGenerator<'a> {
+struct SqlGenerator<'a, R: Rng> {
     tables: Vec<Table>,
-    rng: &'a mut ThreadRng,
+    rng: &'a mut R,
 
     bound_relations: Vec<Table>,
 }
 
-impl<'a> SqlGenerator<'a> {
-    fn new(rng: &'a mut ThreadRng, tables: Vec<Table>) -> Self {
+impl<'a, R: Rng> SqlGenerator<'a, R> {
+    fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
         SqlGenerator {
             tables,
             rng,
@@ -221,7 +221,7 @@ impl<'a> SqlGenerator<'a> {
 }
 
 /// Generate a random SQL string.
-pub fn sql_gen(rng: &mut ThreadRng, tables: Vec<Table>) -> String {
+pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
     let mut gen = SqlGenerator::new(rng, tables);
     format!("{}", gen.gen_stmt())
 }

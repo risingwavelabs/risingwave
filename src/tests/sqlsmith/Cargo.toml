@@ -11,6 +11,7 @@ env_logger = { version = "0.9" }
 lazy_static = "1"
 log = "0.4"
 madsim = "=0.2.0-alpha.3"
+paste = "1"
 rand = "0.8"
 risingwave_frontend = { path = "../../frontend" }
 risingwave_sqlparser = { path = "../../sqlparser" }

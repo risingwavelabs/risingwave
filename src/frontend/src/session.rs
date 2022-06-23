@@ -221,7 +221,7 @@ impl FrontendEnv {
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
-        let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
+        let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
@@ -323,10 +323,23 @@ impl FrontendEnv {
     }
 }
 
+pub struct AuthContext {
+    pub database: String,
+    pub user_name: String,
+}
+
+impl AuthContext {
+    pub fn new(database: String, user_name: String) -> Self {
+        Self {
+            database,
+            user_name,
+        }
+    }
+}
+
 pub struct SessionImpl {
     env: FrontendEnv,
-    database: String,
-    user_name: String,
+    auth_context: Arc<AuthContext>,
     // Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
@@ -373,14 +386,12 @@ lazy_static::lazy_static! {
 impl SessionImpl {
     pub fn new(
         env: FrontendEnv,
-        database: String,
-        user_name: String,
+        auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
     ) -> Self {
         Self {
             env,
-            database,
-            user_name,
+            auth_context,
             user_authenticator,
             config_map: Self::init_config_map(),
         }
@@ -390,8 +401,10 @@ impl SessionImpl {
     pub fn mock() -> Self {
         Self {
             env: FrontendEnv::mock(),
-            database: DEFAULT_DATABASE_NAME.to_string(),
-            user_name: DEFAULT_SUPPER_USER.to_string(),
+            auth_context: Arc::new(AuthContext::new(
+                DEFAULT_DATABASE_NAME.to_string(),
+                DEFAULT_SUPPER_USER.to_string(),
+            )),
             user_authenticator: UserAuthenticator::None,
             config_map: Self::init_config_map(),
         }
@@ -401,12 +414,16 @@ impl SessionImpl {
         &self.env
     }
 
+    pub fn auth_context(&self) -> Arc<AuthContext> {
+        self.auth_context.clone()
+    }
+
     pub fn database(&self) -> &str {
-        &self.database
+        &self.auth_context.database
     }
 
     pub fn user_name(&self) -> &str {
-        &self.user_name
+        &self.auth_context.user_name
     }
 
     /// Set configuration values in this session.
@@ -471,7 +488,7 @@ impl SessionManager for SessionManagerImpl {
                     format!("User {} is not allowed to login", user_name),
                 )));
             }
-            let authenticator = match &user.auth_info {
+            let user_authenticator = match &user.auth_info {
                 None => UserAuthenticator::None,
                 Some(auth_info) => {
                     if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
@@ -498,9 +515,11 @@ impl SessionManager for SessionManagerImpl {
 
             Ok(SessionImpl::new(
                 self.env.clone(),
-                database.to_string(),
-                user_name.to_string(),
-                authenticator,
+                Arc::new(AuthContext::new(
+                    database.to_string(),
+                    user_name.to_string(),
+                )),
+                user_authenticator,
             )
             .into())
         } else {

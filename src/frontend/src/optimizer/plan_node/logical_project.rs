@@ -315,7 +315,7 @@ impl ToStream for LogicalProject {
         } else {
             StreamProject::new(new_logical)
         };
-        required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
+        required_dist.enforce_if_not_satisfies(stream_plan.into(), &Order::any())
     }
 
     fn to_stream(&self) -> Result<PlanRef> {

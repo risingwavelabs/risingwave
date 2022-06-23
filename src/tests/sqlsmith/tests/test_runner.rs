@@ -17,6 +17,7 @@ mod tests {
     use std::panic;
     use std::sync::Arc;
 
+    use rand::SeedableRng;
     use risingwave_frontend::binder::Binder;
     use risingwave_frontend::handler::create_table;
     use risingwave_frontend::planner::Planner;
@@ -62,19 +63,18 @@ mod tests {
         tables
     }
 
-    #[tokio::test]
-    async fn run_sqlsmith_on_frontend() {
+    async fn run_sqlsmith_with_seed(seed: u64) {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
         let tables = create_tables(session.clone()).await;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
 
-        for _ in 0..5000 {
+        for _ in 0..512 {
             let sql = sql_gen(&mut rng, tables.clone());
 
             let sql_copy = sql.clone();
             panic::set_hook(Box::new(move |e| {
-                println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e,);
+                println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);
             }));
 
             // The generated SQL must be parsable.
@@ -105,4 +105,48 @@ mod tests {
             }
         }
     }
+
+    macro_rules! generate_sqlsmith_test {
+        ($seed:expr) => {
+            paste::paste! {
+                #[tokio::test]
+                async fn [<run_sqlsmith_on_frontend_ $seed>]() {
+                    run_sqlsmith_with_seed($seed).await;
+                }
+            }
+        };
+    }
+
+    generate_sqlsmith_test! { 0 }
+    generate_sqlsmith_test! { 1 }
+    generate_sqlsmith_test! { 2 }
+    generate_sqlsmith_test! { 3 }
+    generate_sqlsmith_test! { 4 }
+    generate_sqlsmith_test! { 5 }
+    generate_sqlsmith_test! { 6 }
+    generate_sqlsmith_test! { 7 }
+    generate_sqlsmith_test! { 8 }
+    generate_sqlsmith_test! { 9 }
+    generate_sqlsmith_test! { 10 }
+    generate_sqlsmith_test! { 11 }
+    generate_sqlsmith_test! { 12 }
+    generate_sqlsmith_test! { 13 }
+    generate_sqlsmith_test! { 14 }
+    generate_sqlsmith_test! { 15 }
+    generate_sqlsmith_test! { 16 }
+    generate_sqlsmith_test! { 17 }
+    generate_sqlsmith_test! { 18 }
+    generate_sqlsmith_test! { 19 }
+    generate_sqlsmith_test! { 20 }
+    generate_sqlsmith_test! { 21 }
+    generate_sqlsmith_test! { 22 }
+    generate_sqlsmith_test! { 23 }
+    generate_sqlsmith_test! { 24 }
+    generate_sqlsmith_test! { 25 }
+    generate_sqlsmith_test! { 26 }
+    generate_sqlsmith_test! { 27 }
+    generate_sqlsmith_test! { 28 }
+    generate_sqlsmith_test! { 29 }
+    generate_sqlsmith_test! { 30 }
+    generate_sqlsmith_test! { 31 }
 }

@@ -134,6 +134,8 @@ message CompactTask {
   uint64 compaction_group_id = 12;
   // existing_table_ids for compaction drop key
   repeated uint32 existing_table_ids = 13;
+  uint32 compression_algorithm = 14;
+  uint64 target_file_size = 15;
 }
 
 message LevelHandler {
@@ -240,6 +242,15 @@ message TriggerManualCompactionResponse {
   common.Status status = 1;
 }
 
+message ListSstableIdInfosRequest {
+  uint64 version_id = 1;
+}
+
+message ListSstableIdInfosResponse {
+  common.Status status = 1;
+  repeated SstableIdInfo sstable_id_infos = 2;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
@@ -252,6 +263,7 @@ service HummockManagerService {
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
+  rpc ListSstableIdInfos(ListSstableIdInfosRequest) returns (ListSstableIdInfosResponse);
 }
 
 service CompactorService {}
@@ -269,4 +281,6 @@ message CompactionConfig {
   uint64 level0_tigger_file_numer = 6;
   uint64 level0_tier_compact_file_number = 7;
   CompactionMode compaction_mode = 8;
+  repeated string compression_algorithm = 9;
+  uint64 target_file_size_base = 10;
 }
