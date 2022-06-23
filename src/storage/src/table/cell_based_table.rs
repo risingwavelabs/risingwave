@@ -42,6 +42,8 @@ use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore, StateStoreIter};
 
+mod iter_utils;
+
 pub type AccessType = bool;
 pub const READ_ONLY: AccessType = false;
 pub const READ_WRITE: AccessType = true;
@@ -464,8 +466,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             // Concat all iterators if not to preserve order.
             _ if !ordered => futures::stream::iter(iterators).flatten(),
             // Merge all iterators if to preserve order.
-            #[never]
-            _ => todo!("merge multiple vnode ranges"),
+            _ => iter_utils::merge_sort(iterators.into_iter().map(Box::pin).collect()),
         };
 
         Ok(iter)
