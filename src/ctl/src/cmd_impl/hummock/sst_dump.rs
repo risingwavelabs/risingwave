@@ -24,7 +24,7 @@ use crate::common::HummockServiceOpts;
 
 pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the SSTable store so we can access the SSTableMeta
-    let hummock_opts = HummockServiceOpts::from_env()?;
+    let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
     let sstable_store = &*hummock.inner().sstable_store();
 
@@ -108,5 +108,6 @@ pub async fn sst_dump() -> anyhow::Result<()> {
 
     meta_client.unpin_version(&[version.id]).await?;
 
+    hummock_opts.shutdown().await;
     Ok(())
 }
