@@ -396,7 +396,7 @@ impl<S: StateStore> LookupExecutor<S> {
         // Serialize join key to a state store key.
         let key_prefix = {
             let mut key_prefix = vec![];
-            // TODO: manually encode a vnode here to match the encoding of cell-based table
+            // Manually encode a vnode here to match the encoding of cell-based table
             // TODO: refactor lookup with cell-based table
             key_prefix.extend(DEFAULT_VNODE.to_be_bytes());
             self.arrangement
@@ -412,7 +412,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let mut all_rows = vec![];
 
-        // TODO: the key is truncated in `arrange_keyspace` so there's no vnode to decode
+        // The key is truncated in `arrange_keyspace` so there's no vnode to decode
         // TODO: refactor lookup with cell-based table and remove `deserialize_with_vnode`
         for (pk_with_cell_id, cell) in all_cells {
             tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}", pk_with_cell_id, cell);

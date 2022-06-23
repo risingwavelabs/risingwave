@@ -81,6 +81,7 @@ pub struct CellBasedTable<S: StateStore, const T: AccessType> {
     /// Indices of distribution keys for computing vnode. None if vnode falls to default value.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
+    // TODO: make the the indices and the vnode bitmap into a struct.
     dist_key_indices: Option<Vec<usize>>,
 
     /// Indices of distribution keys for computing vnode. None if vnode falls to default value.
@@ -106,7 +107,7 @@ fn err(rw: impl Into<RwError>) -> StorageError {
 }
 
 impl<S: StateStore> CellBasedTable<S, READ_ONLY> {
-    /// Create a [`CellBasedTable`] given a complete set of `columns` and a partial set of
+    /// Create a read-only [`CellBasedTable`] given a complete set of `columns` and a partial set of
     /// `column_ids`. The output will only contains columns with the given ids in the same order.
     pub fn new_partial(
         keyspace: Keyspace<S>,
@@ -128,7 +129,7 @@ impl<S: StateStore> CellBasedTable<S, READ_ONLY> {
 }
 
 impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
-    /// Create a [`CellBasedTable`] given a complete set of `columns`.
+    /// Create a read-write [`CellBasedTable`] given a complete set of `columns`.
     pub fn new(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,
@@ -192,6 +193,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
                 .collect_vec()
         });
 
+        // TODO: allow the executor to specify the vnodes.
         let vnodes = {
             let mut b = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
             b.set(DEFAULT_VNODE as usize, true);
@@ -245,6 +247,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
         vnode
     }
 
+    /// `vnode | pk`
     fn serialize_pk_with_vnode(&self, pk: &Row) -> Vec<u8> {
         let mut output = Vec::new();
         output.put_u16(self.compute_vnode_by_pk(pk));
@@ -309,7 +312,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
 
 /// Write
 impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
-    /// Get vnode value with given full row.
+    /// Get vnode value with full row.
     fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
         // With `READ_WRITE`, the output columns should be exactly same with the table columns, so
         // we can directly index into the row with indices to the table columns.
@@ -325,7 +328,7 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
         vnode
     }
 
-    /// Write to state store without value meta
+    /// Write to state store.
     pub async fn batch_write_rows(
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
@@ -428,6 +431,9 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
+        // For each vnode, construct an iterator.
+        // TODO: if there're some vnodes continuously in the range and we don't care about order, we
+        // can use a single iterator.
         let mut iterators = Vec::with_capacity(self.vnodes.num_high_bits());
 
         for vnode in self
