@@ -9,10 +9,10 @@ cd "$DIR"
 cat ../rust-toolchain
 # shellcheck disable=SC2155
 export RUST_TOOLCHAIN=$(cat ../rust-toolchain)
-export BUILD_ENV_VERSION=v20220623
+export BUILD_ENV_VERSION=v20220623-v2
 export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 
-echo "--- Arch"
+echo "+++ Arch"
 arch
 
 echo "--- Check docker-compose"
@@ -40,12 +40,12 @@ set -ex
 
 echo "--- Docker build"
 if [[ -z ${BUILDKITE} ]]; then
-    export DOCKER_BUILD_PROGRESS="--progress=plain"
-else
     export DOCKER_BUILD_PROGRESS="--progress=auto"
+else
+    export DOCKER_BUILD_PROGRESS="--progress=plain"
 fi
 
-docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --build-arg "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}" .
+docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --no-cache --build-arg "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}" .
 
 echo "--- Docker push"
 docker push ${BUILD_TAG}
