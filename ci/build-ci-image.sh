@@ -9,7 +9,7 @@ cd "$DIR"
 cat ../rust-toolchain
 # shellcheck disable=SC2155
 export RUST_TOOLCHAIN=$(cat ../rust-toolchain)
-export BUILD_ENV_VERSION=v20220621
+export BUILD_ENV_VERSION=v20220622
 export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 
 echo "--- Arch"
@@ -22,6 +22,14 @@ echo "--- Check image existence"
 set +e
 if docker manifest inspect ${BUILD_TAG}; then
     echo "${BUILD_TAG} already exists - please change build env version"
+    exit 1
+fi
+set -e
+
+echo "--- Check docker-compose"
+set +e
+if ! grep docker-compose.yml ${BUILD_TAG}; then
+    echo "${BUILD_TAG} is not set up for docker-compose, please modify docker-compose.yml."
     exit 1
 fi
 set -e
