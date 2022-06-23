@@ -435,6 +435,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
+
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
