@@ -104,7 +104,7 @@ impl CellSerializer for DedupPkCellBasedRowSerializer {
         self.inner.serialize(pk, row)
     }
 
-    /// Remove dup pk datums + serialize_without_filter
+    /// Remove dup pk datums + `serialize_without_filter`
     fn serialize_without_filter(
         &mut self,
         pk: &[u8],
@@ -114,7 +114,7 @@ impl CellSerializer for DedupPkCellBasedRowSerializer {
         self.inner.serialize_without_filter(pk, row)
     }
 
-    /// Remove dup pk datums + serialize_cell_key
+    /// Remove dup pk datums + `serialize_cell_key`
     fn serialize_cell_key(&mut self, pk: &[u8], row: &Row) -> Result<Vec<KeyBytes>> {
         let row = self.remove_dup_pk_datums_by_ref(row);
         self.inner.serialize_cell_key(pk, &row)
