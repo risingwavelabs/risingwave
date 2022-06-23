@@ -23,5 +23,5 @@ pub fn valid_table_name(table_name: &String) -> bool {
     lazy_static! {
         static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__INTERNAL_.*_\d+").unwrap();
     }
-    !INTERNAL_TABLE_NAME.is_match(&table_name)
+    !INTERNAL_TABLE_NAME.is_match(table_name)
 }
