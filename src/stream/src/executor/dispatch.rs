@@ -29,6 +29,7 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tokio::sync::mpsc::Sender;
 use tracing::event;
 
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
 use crate::task::{ActorId, DispatcherId, SharedContext};
 
@@ -147,6 +148,7 @@ struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
     actor_id: u32,
     context: Arc<SharedContext>,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl DispatchExecutorInner {
@@ -162,6 +164,12 @@ impl DispatchExecutorInner {
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Chunk(chunk) => {
+                let actor_id_str = self.actor_id.to_string();
+                self.metrics
+                    .actor_out_record_cnt
+                    .with_label_values(&[&actor_id_str])
+                    .inc_by(chunk.cardinality().try_into().unwrap());
+
                 if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
                     self.single_inner_mut().dispatch_data(chunk).await?;
@@ -268,6 +276,7 @@ impl DispatchExecutor {
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
         context: Arc<SharedContext>,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
             input,
@@ -275,6 +284,7 @@ impl DispatchExecutor {
                 dispatchers,
                 actor_id,
                 context,
+                metrics,
             },
         }
     }
@@ -928,12 +938,15 @@ mod tests {
             rx,
             ActorContext::create(),
             0,
+            0,
+            Arc::new(StreamingMetrics::unused()),
         ));
         let data_sink = Arc::new(Mutex::new(vec![]));
         let actor_id = 233;
         let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
         let dispatcher_id = 666;
+        let metrics = Arc::new(StreamingMetrics::unused());
 
         let executor = Box::new(DispatchExecutor::new(
             input,
@@ -943,6 +956,7 @@ mod tests {
             ))],
             actor_id,
             ctx.clone(),
+            metrics,
         ))
         .execute();
         pin_mut!(executor);
