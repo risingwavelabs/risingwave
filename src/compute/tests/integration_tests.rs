@@ -205,6 +205,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         keyspace,
         column_descs.clone(),
         vec![OrderType::Ascending],
+        vec![0],
         None,
     );
 
@@ -400,12 +401,7 @@ async fn test_row_seq_scan() -> Result<()> {
         None,
         vec![0_usize],
     );
-    let table = CellBasedTable::new(
-        keyspace,
-        column_descs.clone(),
-        vec![OrderType::Ascending],
-        None,
-    );
+    let table = state.cell_based_table().clone();
 
     let epoch: u64 = 0;
 

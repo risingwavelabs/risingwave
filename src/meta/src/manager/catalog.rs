@@ -18,7 +18,10 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use itertools::Itertools;
+use risingwave_common::catalog::{
+    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER, PG_CATALOG_SCHEMA_NAME,
+};
 use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
@@ -64,6 +67,7 @@ where
     async fn init(&self) -> Result<()> {
         let mut database = Database {
             name: DEFAULT_DATABASE_NAME.to_string(),
+            owner: DEFAULT_SUPPER_USER.to_string(),
             ..Default::default()
         };
         if !self.core.lock().await.has_database(&database) {
@@ -81,18 +85,21 @@ where
             .collect::<Vec<Database>>();
         assert_eq!(1, databases.len());
 
-        let mut schema = Schema {
-            name: DEFAULT_SCHEMA_NAME.to_string(),
-            database_id: databases[0].id,
-            ..Default::default()
-        };
-        if !self.core.lock().await.has_schema(&schema) {
-            schema.id = self
-                .env
-                .id_gen_manager()
-                .generate::<{ IdCategory::Schema }>()
-                .await? as u32;
-            self.create_schema(&schema).await?;
+        for name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
+            let mut schema = Schema {
+                name: name.to_string(),
+                database_id: databases[0].id,
+                owner: DEFAULT_SUPPER_USER.to_string(),
+                ..Default::default()
+            };
+            if !self.core.lock().await.has_schema(&schema) {
+                schema.id = self
+                    .env
+                    .id_gen_manager()
+                    .generate::<{ IdCategory::Schema }>()
+                    .await? as u32;
+                self.create_schema(&schema).await?;
+            }
         }
         Ok(())
     }
@@ -111,14 +118,39 @@ where
     pub async fn create_database(&self, database: &Database) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.has_database(database) {
-            database.insert(self.env.meta_store()).await?;
-            core.add_database(database);
+            let mut transaction = Transaction::default();
+            database.upsert_in_transaction(&mut transaction)?;
+            let mut schemas = vec![];
+            for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
+                let schema = Schema {
+                    id: self
+                        .env
+                        .id_gen_manager()
+                        .generate::<{ IdCategory::Schema }>()
+                        .await? as u32,
+                    database_id: database.id,
+                    name: schema_name.to_string(),
+                    owner: database.owner.clone(),
+                };
+                schema.upsert_in_transaction(&mut transaction)?;
+                schemas.push(schema);
+            }
+            self.env.meta_store().txn(transaction).await?;
 
-            let version = self
+            core.add_database(database);
+            let mut version = self
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
                 .await;
+            for schema in schemas {
+                core.add_schema(&schema);
+                version = self
+                    .env
+                    .notification_manager()
+                    .notify_frontend(Operation::Add, Info::Schema(schema))
+                    .await;
+            }
 
             Ok(version)
         } else {
@@ -132,7 +164,19 @@ where
         let mut core = self.core.lock().await;
         let database = Database::select(self.env.meta_store(), &database_id).await?;
         if let Some(database) = database {
-            Database::delete(self.env.meta_store(), &database_id).await?;
+            let schemas = Schema::list(self.env.meta_store()).await?;
+            let schemas = schemas
+                .iter()
+                .filter(|schema| {
+                    schema.database_id == database_id && schema.name == PG_CATALOG_SCHEMA_NAME
+                })
+                .collect_vec();
+            assert_eq!(1, schemas.len());
+            let mut transaction = Transaction::default();
+            database.delete_in_transaction(&mut transaction)?;
+            schemas[0].delete_in_transaction(&mut transaction)?;
+            self.env.meta_store().txn(transaction).await?;
+            core.drop_schema(schemas[0]);
             core.drop_database(&database);
 
             let version = self

@@ -317,7 +317,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub async fn flush(&mut self) -> RwResult<()> {
         self.metrics.flush();
         self.state_table
-            .commit_with_value_meta(self.current_epoch)
+            .commit(self.current_epoch)
             .await
             .map_err(RwError::from)
     }

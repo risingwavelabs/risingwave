@@ -18,10 +18,11 @@ use std::ops::Bound;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::RowSeqScanNode;
-use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc};
+use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
+use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use crate::catalog::ColumnId;
 use crate::expr::Literal;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
@@ -66,7 +67,11 @@ impl BatchSeqScan {
     pub fn clone_with_dist(&self) -> Self {
         Self::new_inner(
             self.logical.clone(),
-            Distribution::SomeShard,
+            if self.logical.is_sys_table() {
+                Distribution::Single
+            } else {
+                Distribution::SomeShard
+            },
             self.scan_range.clone(),
         )
     }
@@ -157,20 +162,23 @@ impl ToBatchProst for BatchSeqScan {
             .map(ProstColumnDesc::from)
             .collect();
 
-        NodeBody::RowSeqScan(RowSeqScanNode {
-            table_desc: Some(CellBasedTableDesc {
-                table_id: self.logical.table_desc().table_id.into(),
-                order_key: self
+        if self.logical.is_sys_table() {
+            NodeBody::SysRowSeqScan(SysRowSeqScanNode {
+                table_name: self.logical.table_name().to_string(),
+                column_descs,
+            })
+        } else {
+            NodeBody::RowSeqScan(RowSeqScanNode {
+                table_desc: Some(self.logical.table_desc().to_protobuf()),
+                column_ids: self
                     .logical
-                    .table_desc()
-                    .order_desc
+                    .output_column_ids()
                     .iter()
-                    .map(|v| v.into())
+                    .map(ColumnId::get_id)
                     .collect(),
-            }),
-            column_descs,
-            scan_range: Some(self.scan_range.to_protobuf()),
-        })
+                scan_range: Some(self.scan_range.to_protobuf()),
+            })
+        }
     }
 }
 

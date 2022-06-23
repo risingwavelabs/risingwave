@@ -17,7 +17,7 @@ use std::sync::Arc;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
+use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement, WithProperties};
 
 use crate::session::{OptimizerContext, SessionImpl};
 
@@ -120,8 +120,9 @@ pub(super) async fn handle(
             or_replace: false,
             name,
             query,
+            with_options,
             ..
-        } => create_mv::handle_create_mv(context, name, query).await,
+        } => create_mv::handle_create_mv(context, name, query, WithProperties(with_options)).await,
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,
