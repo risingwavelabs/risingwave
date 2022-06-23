@@ -36,7 +36,7 @@ if docker manifest inspect "${BUILD_TAG}"; then
     echo "${BUILD_TAG} already exists -- skipping build image"
     exit 0
 fi
-set -e
+set -ex
 
 echo "--- Docker build"
 if [[ -z ${BUILDKITE} ]]; then
