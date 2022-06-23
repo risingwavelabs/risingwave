@@ -23,3 +23,6 @@ pub const QUERY_MODE: &str = "QUERY_MODE";
 
 /// To force the usage of delta join in streaming execution.
 pub const DELTA_JOIN: &str = "RW_FORCE_DELTA_JOIN";
+
+/// see <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>
+pub const EXTRA_FLOAT_DIGITS: &str = "EXTRA_FLOAT_DIGITS";

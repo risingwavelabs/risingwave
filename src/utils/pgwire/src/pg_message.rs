@@ -114,10 +114,6 @@ impl FeDescribeMessage {
         let kind = buf.get_u8();
         let query_name = read_null_terminated(&mut buf)?;
 
-        if kind != b'S' {
-            unimplemented!("only prepared statement Describe is implemented");
-        }
-
         Ok(FeMessage::Describe(FeDescribeMessage { query_name, kind }))
     }
 }
