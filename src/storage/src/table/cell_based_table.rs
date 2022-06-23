@@ -243,7 +243,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
                 .to_vnode(),
             None => DEFAULT_VNODE,
         };
-        // This table should only to used to access entries with vnode specified in `self.vnodes`.
+        // This table should only be used to access entries with vnode specified in `self.vnodes`.
         assert!(self.vnodes.is_set(vnode as usize).unwrap());
         vnode
     }
@@ -303,7 +303,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
 
         let result = deserializer.take();
         Ok(result.map(|(vnode, _pk, row)| {
-            // This table should only to used to access entries with vnode specified in
+            // This table should only be used to access entries with vnode specified in
             // `self.vnodes`.
             assert!(self.vnodes.is_set(vnode as usize).unwrap());
             row
@@ -324,7 +324,7 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
                 .to_vnode(),
             None => DEFAULT_VNODE,
         };
-        // This table should only to used to access entries with vnode specified in `self.vnodes`.
+        // This table should only be used to access entries with vnode specified in `self.vnodes`.
         assert!(self.vnodes.is_set(vnode as usize).unwrap());
         vnode
     }
