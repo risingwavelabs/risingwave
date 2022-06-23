@@ -33,7 +33,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::jitter;
-use tracing::{debug, error};
+use tracing::error;
 
 use super::local_version::{LocalVersion, PinnedVersion, ReadVersion};
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
