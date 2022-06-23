@@ -2,8 +2,8 @@ cargo-cache: &cargo-cache
   id: cache
   key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
   restore-keys:
-    - 'v1-cache-{{ id }}-{{ runner.os }}-'
-    - 'v1-cache-{{ id }}-'
+    - "v1-cache-{{ id }}-{{ runner.os }}-"
+    - "v1-cache-{{ id }}-"
   backend: s3
   s3:
     bucket: ci-cache-bucket
@@ -13,7 +13,7 @@ cargo-cache: &cargo-cache
     - ".cargo/git/db"
 
 steps:
-  - label: "triggering build ci image"
+  - label: "build ci image"
     plugins:
       - chronotc/monorepo-diff#v2.3.0:
           diff: "git diff --name-only HEAD~1"
@@ -22,7 +22,6 @@ steps:
               config:
                 command: "ci/build-ci-image.sh"
                 label: "ci build images"
-
   - wait
 
   - label: "build"
