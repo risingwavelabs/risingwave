@@ -122,7 +122,7 @@ impl ArrayBuilder for StructArrayBuilder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StructArray {
     bitmap: Bitmap,
     children: Vec<ArrayRef>,

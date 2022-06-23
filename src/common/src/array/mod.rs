@@ -33,6 +33,7 @@ pub mod struct_array;
 mod utf8_array;
 mod value_reader;
 
+use std::borrow::Cow;
 use std::convert::From;
 use std::hash::Hasher;
 use std::sync::Arc;
@@ -274,7 +275,7 @@ macro_rules! for_all_variants {
 macro_rules! array_impl_enum {
     ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         /// `ArrayImpl` embeds all possible array in `array` module.
-        #[derive(Debug)]
+        #[derive(Clone, Debug)]
         pub enum ArrayImpl {
             $( $variant_name($array) ),*
         }
@@ -589,6 +590,20 @@ pub type ArrayRef = Arc<ArrayImpl>;
 impl PartialEq for ArrayImpl {
     fn eq(&self, other: &Self) -> bool {
         self.iter().eq(other.iter())
+    }
+}
+
+pub struct MarkedArrayRef<'a> {
+    arr: &'a ArrayImpl,
+    vis: &'a Vis,
+}
+
+impl<'a> MarkedArrayRef<'a> {
+    pub fn compact(self) -> ArrayResult<Cow<'a, ArrayImpl>> {
+        match self.vis {
+            Vis::Bitmap(b) => Ok(Cow::Owned(self.arr.compact(b, b.num_high_bits())?)),
+            Vis::Compact(_) => Ok(Cow::Borrowed(self.arr)),
+        }
     }
 }
 

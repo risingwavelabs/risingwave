@@ -25,7 +25,7 @@ use crate::array::{ArrayBuilderImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::Decimal;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DecimalArray {
     bitmap: Bitmap,
     data: Vec<Decimal>,

@@ -38,7 +38,7 @@ use std::sync::Arc;
 pub use agg::AggKind;
 pub use expr_input_ref::InputRefExpression;
 pub use expr_literal::*;
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk, Row, MarkedArrayRef};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
@@ -65,6 +65,10 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
 
     /// Evaluate the expression in row-based execution.
     fn eval_row(&self, input: &Row) -> Result<Datum>;
+
+    fn eval_v2(&self, _input: &DataChunk) -> Result<MarkedArrayRef<'_>> {
+        todo!()
+    }
 
     fn boxed(self) -> BoxedExpression
     where

@@ -14,7 +14,7 @@
 
 use std::iter::TrustedLen;
 
-use super::Array;
+use super::{Array, Vis};
 use crate::array::ArrayImpl;
 use crate::types::DatumRef;
 
@@ -78,6 +78,35 @@ impl<'a> Iterator for ArrayImplIterator<'a> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let size = self.data.len() - self.pos;
+        (size, Some(size))
+    }
+}
+
+pub struct MarkedArayRefIter<'a> {
+    vis: &'a Vis,
+    arr: &'a ArrayImpl,
+    pos: usize,
+}
+
+impl<'a> Iterator for MarkedArayRefIter<'a> {
+    type Item = DatumRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.pos < self.arr.len() {
+            if self.vis.is_set(self.pos).unwrap() {
+                let item = self.arr.value_at(self.pos);
+                self.pos += 1;
+                return Some(item)
+            }
+
+            self.pos += 1;
+        }
+
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.vis.len() - self.pos;
         (size, Some(size))
     }
 }
