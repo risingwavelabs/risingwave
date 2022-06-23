@@ -478,6 +478,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 #[cfg(test)]
 mod tests {
     use tokio::time::sleep;
+
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
