@@ -20,7 +20,7 @@ use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{Datum, VirtualNode};
+use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
@@ -115,7 +115,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         cell: impl AsRef<[u8]>,
     ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
         let raw_key = raw_key.as_ref();
-        if raw_key.len() < if WITH_VNODE { 2 } else { 0 } + 4 {
+        if raw_key.len() < if WITH_VNODE { VIRTUAL_NODE_SIZE } else { 0 } + 4 {
             // vnode + cell_id
             return Err(ErrorCode::InternalError(format!(
                 "corrupted key: {:?}",
@@ -126,7 +126,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
 
         let (vnode, key_bytes) = if WITH_VNODE {
             let (vnode_bytes, key_bytes) = raw_key.split_at(2);
-            let vnode = u16::from_be_bytes(vnode_bytes.try_into().unwrap());
+            let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
             (vnode, key_bytes)
         } else {
             (DEFAULT_VNODE, raw_key)

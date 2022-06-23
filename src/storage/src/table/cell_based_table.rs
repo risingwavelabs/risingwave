@@ -241,7 +241,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
                 .hash_by_indices(indices, &CRC32FastBuilder {})
                 .unwrap()
                 .to_vnode(),
-            None => return DEFAULT_VNODE,
+            None => DEFAULT_VNODE,
         };
         // This table should only to used to access entries with vnode specified in `self.vnodes`.
         assert!(self.vnodes.is_set(vnode as usize).unwrap());
@@ -251,7 +251,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
     /// `vnode | pk`
     fn serialize_pk_with_vnode(&self, pk: &Row) -> Vec<u8> {
         let mut output = Vec::new();
-        output.put_u16(self.compute_vnode_by_pk(pk));
+        output.put_slice(&self.compute_vnode_by_pk(pk).to_be_bytes());
         self.pk_serializer.serialize(pk, &mut output);
         output
     }
@@ -322,7 +322,7 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
                 .hash_by_indices(indices, &CRC32FastBuilder {})
                 .unwrap()
                 .to_vnode(),
-            None => return DEFAULT_VNODE,
+            None => DEFAULT_VNODE,
         };
         // This table should only to used to access entries with vnode specified in `self.vnodes`.
         assert!(self.vnodes.is_set(vnode as usize).unwrap());
