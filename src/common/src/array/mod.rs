@@ -600,6 +600,20 @@ pub struct MarkedArrayRef<'a> {
 }
 
 impl<'a> MarkedArrayRef<'a> {
+    pub fn from_owned_array(arr: ArrayImpl, vis: &'a Vis) -> Self {
+        Self {
+            arr: Cow::Owned(arr),
+            vis,
+        }
+    }
+
+    pub fn from_ref(arr: &'a ArrayImpl, vis: &'a Vis) -> Self {
+        Self {
+            arr: Cow::Borrowed(arr),
+            vis,
+        }
+    }
+
     pub fn compact(self) -> ArrayResult<Cow<'a, ArrayImpl>> {
         match self.vis {
             Vis::Bitmap(b) => Ok(Cow::Owned(self.arr.compact(b, b.num_high_bits())?)),

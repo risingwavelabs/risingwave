@@ -66,7 +66,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Evaluate the expression in row-based execution.
     fn eval_row(&self, input: &Row) -> Result<Datum>;
 
-    fn eval_v2(&self, _input: &DataChunk) -> Result<MarkedArrayRef<'_>> {
+    fn eval_v2<'a>(&self, _input: &'a DataChunk) -> Result<MarkedArrayRef<'a>> {
         todo!()
     }
 

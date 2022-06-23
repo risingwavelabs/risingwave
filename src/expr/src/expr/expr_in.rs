@@ -16,7 +16,9 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk, Row};
+use risingwave_common::array::{
+    ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk, MarkedArrayRef, Row,
+};
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
@@ -64,6 +66,19 @@ impl Expression for InExpression {
             output_array.append(Some(ret))?;
         }
         Ok(Arc::new(output_array.finish()?.into()))
+    }
+
+    fn eval_v2<'a>(&self, input: &'a DataChunk) -> Result<MarkedArrayRef<'a>> {
+        let input_array = self.left.eval_v2(input)?;
+        let mut output_array = BoolArrayBuilder::new(input.capacity())?;
+        for data in input_array.iter() {
+            let ret = self.exists(&data.to_owned_datum());
+            output_array.append(Some(ret))?;
+        }
+        Ok(MarkedArrayRef::from_owned_array(
+            output_array.finish()?.into(),
+            input.vis(),
+        ))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

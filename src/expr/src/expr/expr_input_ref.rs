@@ -16,7 +16,7 @@ use std::convert::TryFrom;
 use std::ops::Index;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk, MarkedArrayRef, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -52,6 +52,12 @@ impl Expression for InputRefExpression {
             }
             None => Ok(array),
         }
+    }
+
+    fn eval_v2<'a>(&self, input: &'a DataChunk) -> Result<MarkedArrayRef<'a>> {
+        let arr = input.column_at(self.idx).array_ref();
+        let vis = input.vis();
+        Ok(MarkedArrayRef::from_ref(arr, vis))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
