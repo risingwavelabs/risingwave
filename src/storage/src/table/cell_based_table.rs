@@ -17,6 +17,7 @@ use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use auto_enums::auto_enum;
 use bytes::BufMut;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -456,11 +457,15 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             iterators.push(iter);
         }
 
+        #[auto_enum(futures::Stream)]
         let iter = match iterators.len() {
             0 => unreachable!(),
             1 => iterators.into_iter().next().unwrap(),
-            _ if ordered => todo!("merge multiple vnode ranges"),
-            _ => todo!("concat multiple vnode ranges"),
+            // Concat all iterators if not to preserve order.
+            _ if !ordered => futures::stream::iter(iterators).flatten(),
+            // Merge all iterators if to preserve order.
+            #[never]
+            _ => todo!("merge multiple vnode ranges"),
         };
 
         Ok(iter)
