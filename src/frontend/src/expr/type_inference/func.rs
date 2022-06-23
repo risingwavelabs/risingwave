@@ -69,10 +69,8 @@ fn infer_type_name<'a, 'b>(
         .map(std::ops::Deref::deref)
         .unwrap_or_default();
 
-    // Binary operators have a special unknown rule for exact match.
-    // ~~But it is just speed up and does not affect correctness.~~
-    // Exact match has to be prioritized here over rule `f`, which allows casting
-    // and resolves `int < unknown` to {`int < float8`, `int < int`, etc}
+    // Binary operators have a special unknown rule for exact match. We do not distinguish operators
+    // from functions as of now.
     if inputs.len() == 2 {
         let t = match (inputs[0].is_null(), inputs[1].is_null()) {
             (true, true) => None,
@@ -81,9 +79,7 @@ fn infer_type_name<'a, 'b>(
             (false, false) => None,
         };
         if let Some(t) = t {
-            let exact = candidates
-                .iter()
-                .find(|sig| sig.inputs_type[0] == t && sig.inputs_type[1] == t);
+            let exact = candidates.iter().find(|sig| sig.inputs_type == [t, t]);
             if let Some(sig) = exact {
                 return Ok(sig);
             }
@@ -114,7 +110,7 @@ fn infer_type_name<'a, 'b>(
         [] => unreachable!(),
         [sig] => Ok(sig),
         _ => Err(ErrorCode::BindError(format!(
-            "multi func match: {:?} {:?}",
+            "function {:?}{:?} is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
             func_type,
             inputs.iter().map(|e| e.return_type()).collect_vec(),
         ))
