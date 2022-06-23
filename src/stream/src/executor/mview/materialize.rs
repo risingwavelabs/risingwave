@@ -127,9 +127,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 }
                 Message::Barrier(b) => {
                     // FIXME(ZBW): use a better error type
-                    self.state_table
-                        .commit_with_value_meta(b.epoch.prev)
-                        .await?;
+                    self.state_table.commit(b.epoch.prev).await?;
                     Message::Barrier(b)
                 }
             }

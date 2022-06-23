@@ -27,7 +27,7 @@ use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::StateStore;
-use crate::table::cell_based_table::CellBasedTable;
+use crate::table::cell_based_table::{CellBasedTable, DEFAULT_VNODE};
 use crate::table::state_table::StateTable;
 use crate::table::TableIter;
 use crate::Keyspace;
@@ -1241,7 +1241,7 @@ async fn test_dedup_cell_based_table_iter_with(
             .collect_vec());
 
         let bytes = cell_based_row_serializer
-            .serialize(&pk_bytes, partial_row)
+            .serialize(DEFAULT_VNODE, &pk_bytes, partial_row)
             .unwrap();
 
         // ---------- Batch-write
