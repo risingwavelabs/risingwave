@@ -45,6 +45,7 @@ twox-hash = "1"
 url = "2"
 value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
+regex = "1"
 
 [dev-dependencies]
 rand = "0.8"

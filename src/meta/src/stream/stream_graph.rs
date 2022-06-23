@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{generate_intertable_name, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -539,10 +539,6 @@ impl StreamGraphBuilder {
         actor_id: LocalActorId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
     ) -> Result<(StreamNode, Vec<Table>)> {
-        fn generate_intertable_name(mview_name: &String, table_id: u32) -> String {
-            format!("__INTERNAL_{}_{}", mview_name, table_id)
-        }
-
         let table_id_offset = ctx.table_id_offset;
         let mut internal_tables = vec![];
         match stream_node.get_node_body()? {

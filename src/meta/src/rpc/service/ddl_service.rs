@@ -627,16 +627,16 @@ where
     }
 
     /// Fill in mview's vnode mapping so that frontend will know the data distribution.
-    fn set_table_mapping(&self, mview: &mut Table) -> RwResult<()> {
+    fn set_table_mapping(&self, table: &mut Table) -> RwResult<()> {
         let vnode_mapping = self
             .env
             .hash_mapping_manager_ref()
-            .get_table_hash_mapping(&mview.id);
+            .get_table_hash_mapping(&table.id);
         match vnode_mapping {
             Some(vnode_mapping) => {
                 let (original_indices, data) = compress_data(&vnode_mapping);
-                mview.mapping = Some(ParallelUnitMapping {
-                    table_id: mview.id,
+                table.mapping = Some(ParallelUnitMapping {
+                    table_id: table.id,
                     original_indices,
                     data,
                 });
