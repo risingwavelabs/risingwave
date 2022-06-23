@@ -2,8 +2,8 @@ cargo-cache: &cargo-cache
   id: cache
   key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
   restore-keys:
-    - 'v1-cache-{{ id }}-{{ runner.os }}-'
-    - 'v1-cache-{{ id }}-'
+    - "v1-cache-{{ id }}-{{ runner.os }}-"
+    - "v1-cache-{{ id }}-"
   backend: s3
   s3:
     bucket: ci-cache-bucket
@@ -100,6 +100,9 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
+      - test-collector#v1.0.0:
+          files: "target/nextest/ci/junit.xml"
+          format: "junit"
     timeout_in_minutes: 15
 
   - label: "pre unit test"

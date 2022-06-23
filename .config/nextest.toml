@@ -8,3 +8,7 @@ final-status-level = "slow"
 retries = 0
 failure-output = "immediate-final"
 fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"
+report-name = "nextest-run"
