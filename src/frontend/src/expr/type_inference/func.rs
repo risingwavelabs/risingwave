@@ -134,6 +134,16 @@ fn is_preferred(t: DataTypeName) -> bool {
     )
 }
 
+/// Checks if `source` can be implicitly casted to `target`. Generally we do not consider it being a
+/// valid cast when they are of the same type, because it may deserve special treatment. This is
+/// also the behavior of underlying [`cast_ok_base`].
+///
+/// Sometimes it is more convenient to include equality when checking whether a formal paramater can
+/// accept an actual argument. So we introduced `eq_ok` to control this behavior.
+fn implicit_ok(source: DataTypeName, target: DataTypeName, eq_ok: bool) -> bool {
+    eq_ok && source == target || cast_ok_base(source, target, CastContext::Implicit)
+}
+
 /// Find the top `candidates` that match `inputs` on most non-null positions. This covers Rule 2,
 /// 4a, 4c and 4d in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
 ///
@@ -176,7 +186,7 @@ fn top_matches<'a, 'b>(
             let Some(actual) = actual else { continue };
             if formal == actual {
                 n_exact += 1;
-            } else if !cast_ok_base(*actual, *formal, CastContext::Implicit) {
+            } else if !implicit_ok(*actual, *formal, false) {
                 castable = false;
                 break;
             }
@@ -248,8 +258,8 @@ fn narrow_category<'a, 'b>(
             // - Category conflict err can only be solved by a later varchar. Skip this candidate.
             let Ok(selected) = category else { continue };
             // least_restrictive or mark temporary conflict err
-            if selected == formal || cast_ok_base(formal, selected, CastContext::Implicit) {
-            } else if cast_ok_base(selected, formal, CastContext::Implicit) {
+            if implicit_ok(formal, selected, true) {
+            } else if implicit_ok(selected, formal, false) {
                 category = Ok(formal);
             } else {
                 category = Err(());
@@ -271,16 +281,14 @@ fn narrow_category<'a, 'b>(
                     // selection.
                     let Some(selected) = category else { return true };
                     *formal == *selected
-                        || !is_preferred(*selected)
-                            && cast_ok_base(*formal, *selected, CastContext::Implicit)
+                        || !is_preferred(*selected) && implicit_ok(*formal, *selected, false)
                 })
         })
         .copied()
         .collect_vec();
-    if !cands_temp.is_empty() {
-        cands_temp
-    } else {
-        candidates
+    match cands_temp.is_empty() {
+        true => candidates,
+        false => cands_temp,
     }
 }
 
@@ -320,7 +328,7 @@ fn narrow_same_type<'a, 'b>(
         .filter(|sig| {
             sig.inputs_type
                 .iter()
-                .all(|formal| cast_ok_base(same_type, *formal, CastContext::Implicit))
+                .all(|formal| implicit_ok(same_type, *formal, true))
         })
         .copied()
         .collect_vec();
