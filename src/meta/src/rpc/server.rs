@@ -476,8 +476,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
 #[cfg(test)]
 mod tests {
-    use std::thread::sleep;
-
+    use tokio::time::sleep;
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -496,7 +495,7 @@ mod tests {
         )
         .await
         .unwrap();
-        sleep(Duration::from_secs(4));
+        sleep(Duration::from_secs(4)).await;
         let info2 = AddressInfo {
             addr: "node2".to_string(),
             ..Default::default()
@@ -512,7 +511,7 @@ mod tests {
         assert!(ret.is_err());
         closer.send(()).unwrap();
         handle.await.unwrap();
-        sleep(Duration::from_secs(3));
+        sleep(Duration::from_secs(3)).await;
         rpc_serve_with_store(
             meta_store.clone(),
             info2,
