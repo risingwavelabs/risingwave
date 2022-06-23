@@ -44,6 +44,7 @@ use crate::{Keyspace, StateStore, StateStoreIter};
 pub type DedupPkCellBasedTable<S> = CellBasedTableExtended<S, DedupPkCellBasedRowSerializer>;
 
 impl<S: StateStore> DedupPkCellBasedTable<S> {
+    /// Instantiates a new [`DedupPkCellBasedTable`]
     pub fn new_dedup_pk_cell_based_table(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,
@@ -69,6 +70,7 @@ impl<S: StateStore> DedupPkCellBasedTable<S> {
 pub type CellBasedTable<S> = CellBasedTableExtended<S, CellBasedRowSerializer>;
 
 impl<S: StateStore> CellBasedTable<S> {
+    /// Instantiates a new [`CellBasedTable`]
     pub fn new(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,
@@ -88,6 +90,7 @@ impl<S: StateStore> CellBasedTable<S> {
         )
     }
 
+    /// Instantiates a new partial [`CellBasedTable`]
     pub fn new_partial(
         keyspace: Keyspace<S>,
         table_columns: Vec<ColumnDesc>,
@@ -167,7 +170,8 @@ fn err(rw: impl Into<RwError>) -> StorageError {
 }
 
 impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
-    /// Create a [`CellBasedTable`] given a complete set of `columns`.
+    /// Create a [`CellBasedTableExtended`] given a complete set of `columns`.
+    /// This is parameterized on cell based row serializer.
     pub fn new_extended(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,
@@ -189,8 +193,9 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER> {
         )
     }
 
-    /// Create a [`CellBasedTable`] given a complete set of `columns` and a partial set of
+    /// Create a [`CellBasedTableExtended`] given a complete set of `columns` and a partial set of
     /// `column_ids`. The output will only contains columns with the given ids in the same order.
+    /// This is parameterized on cell based row serializer.
     pub fn new_partial_extended(
         keyspace: Keyspace<S>,
         table_columns: Vec<ColumnDesc>,
