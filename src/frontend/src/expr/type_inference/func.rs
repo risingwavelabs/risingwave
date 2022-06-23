@@ -166,33 +166,22 @@ fn top_matches<'a, 'b>(
 ) -> Vec<&'a FuncSign> {
     let mut best_exact = 0;
     let mut best_preferred = 0;
-    let mut best_candidate = Vec::new();
+    let mut best_candidates = Vec::new();
 
     for sig in candidates {
         let mut n_exact = 0;
         let mut n_preferred = 0;
         let mut castable = true;
-        for (a, p) in inputs.iter().zip_eq(&sig.inputs_type) {
-            if a.is_some() {
-                let at = a.unwrap();
-                if at == *p {
-                    n_exact += 1;
-                } else if !cast_ok_base(at, *p, CastContext::Implicit) {
-                    castable = false;
-                    break;
-                }
-                // Only count non-nulls. Example:
-                // ```
-                // create function xxx(text, int, int) returns text language sql return 1;
-                // create function xxx(int, text, int) returns text language sql return 2;
-                // create function xxx(int, int, int) returns text language sql return 3;
-                // select xxx(null, null, null);
-                // select xxx(null, null, 1::smallint);  -- 3
-                // ```
-                // If we count null positions, the first 2 wins because text is preferred.
-                if is_preferred(*p) {
-                    n_preferred += 1;
-                }
+        for (formal, actual) in sig.inputs_type.iter().zip_eq(inputs) {
+            let Some(actual) = actual else { continue };
+            if formal == actual {
+                n_exact += 1;
+            } else if !cast_ok_base(*actual, *formal, CastContext::Implicit) {
+                castable = false;
+                break;
+            }
+            if is_preferred(*formal) {
+                n_preferred += 1;
             }
         }
         if !castable {
@@ -201,13 +190,13 @@ fn top_matches<'a, 'b>(
         if n_exact > best_exact || n_exact == best_exact && n_preferred > best_preferred {
             best_exact = n_exact;
             best_preferred = n_preferred;
-            best_candidate.clear();
+            best_candidates.clear();
         }
         if n_exact == best_exact && n_preferred == best_preferred {
-            best_candidate.push(sig);
+            best_candidates.push(sig);
         }
     }
-    best_candidate
+    best_candidates
 }
 
 /// Attempt to narrow down candidates by selecting type catagories for unknowns. This covers Rule 4e
