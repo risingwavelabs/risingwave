@@ -87,7 +87,7 @@ steps:
           environment:
             - CODECOV_TOKEN
       - test-collector#v1.0.0:
-          files: "junit-*.xml"
+          files: "target/nextest/ci/junit-*.xml"
           format: "junit"
     timeout_in_minutes: 15
 
