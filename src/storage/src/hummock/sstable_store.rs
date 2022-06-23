@@ -17,10 +17,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
-use futures::future::{try_join_all, FutureExt};
+use futures::future::try_join_all;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStoreRef};
-use tokio::sync::oneshot::{channel, Sender};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
@@ -28,12 +27,12 @@ use crate::monitor::StoreLocalStatistic;
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 64 * 1024 * 1024; // 64MB
+const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
 pub type TableHolder = CachableEntry<HummockSSTableId, Box<Sstable>>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
@@ -97,15 +96,9 @@ impl SstableStore {
         }
 
         if let CachePolicy::Fill = policy {
-            for (block_idx, meta) in sst.meta.block_metas.iter().enumerate() {
-                let offset = meta.offset as usize;
-                let len = meta.len as usize;
-                self.add_block_cache(sst.id, block_idx as u64, data.slice(offset..offset + len))
-                    .unwrap();
-            }
+            self.meta_cache
+                .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst));
         }
-        self.meta_cache
-            .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst));
 
         Ok(())
     }

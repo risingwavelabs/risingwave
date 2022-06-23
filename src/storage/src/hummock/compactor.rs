@@ -547,11 +547,12 @@ impl Compactor {
         };
 
         let get_id_time = Arc::new(AtomicU64::new(0));
-        let cache_policy = if self.compact_task.target_level == 0 {
-            CachePolicy::Fill
-        } else {
-            CachePolicy::NotFill
-        };
+        let cache_policy =
+            if self.compact_task.target_level == 0 && !self.context.is_share_buffer_compact {
+                CachePolicy::Fill
+            } else {
+                CachePolicy::NotFill
+            };
         let target_file_size = std::cmp::min(
             self.compact_task.target_file_size as usize,
             self.context.options.sstable_size_mb as usize * (1 << 20),

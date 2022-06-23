@@ -79,7 +79,7 @@ impl SSTableIterator {
             self.block_iter = None;
         } else {
             let block = if idx < self.sst.value().blocks.len() {
-                BlockHolder::from_ref_block(&self.sst.value().blocks[idx])
+                BlockHolder::from_ref_block(self.sst.value().blocks[idx].clone())
             } else {
                 self.sstable_store
                     .get(

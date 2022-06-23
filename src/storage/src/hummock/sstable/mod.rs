@@ -18,6 +18,7 @@
 mod block;
 
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 pub use block::*;
 mod block_iterator;
@@ -54,7 +55,7 @@ const VERSION: u32 = 1;
 pub struct Sstable {
     pub id: HummockSSTableId,
     pub meta: SstableMeta,
-    pub blocks: Vec<Box<Block>>,
+    pub blocks: Vec<Arc<Block>>,
 }
 
 impl Debug for Sstable {
@@ -84,7 +85,7 @@ impl Sstable {
         for block_meta in &meta.block_metas {
             let end_offset = (block_meta.offset + block_meta.len) as usize;
             let block = Block::decode(data.slice(block_meta.offset as usize..end_offset))?;
-            blocks.push(Box::new(block));
+            blocks.push(Arc::new(block));
         }
         Ok(Self { id, meta, blocks })
     }
