@@ -22,47 +22,55 @@ use risingwave_common::array::Row;
 use super::PkAndRowStream;
 use crate::table::cell_based_table::StorageError;
 
-struct Node<I: PkAndRowStream> {
-    iter: I,
+struct Node<S: PkAndRowStream> {
+    stream: S,
+
+    /// The next item polled from `stream` previously. Since the `eq` and `cmp` must be synchronous
+    /// functions, we need to implement peeking manually.
     peeked: (Vec<u8>, Row),
 }
 
-impl<I: PkAndRowStream> PartialEq for Node<I> {
+impl<S: PkAndRowStream> PartialEq for Node<S> {
     fn eq(&self, other: &Self) -> bool {
         match self.peeked.0 == other.peeked.0 {
-            true => panic!("primary key should be unique"),
+            true => unreachable!("primary keys from different iters should be unique"),
             false => false,
         }
     }
 }
-impl<I: PkAndRowStream> Eq for Node<I> {}
+impl<S: PkAndRowStream> Eq for Node<S> {}
 
-impl<I: PkAndRowStream> PartialOrd for Node<I> {
+impl<S: PkAndRowStream> PartialOrd for Node<S> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
-impl<I: PkAndRowStream> Ord for Node<I> {
+impl<S: PkAndRowStream> Ord for Node<S> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // The heap is a max heap, so we need to reverse the order.
         self.peeked.0.cmp(&other.peeked.0).reverse()
     }
 }
 
+/// Merge multiple streams of primary keys and rows into a single stream, sorted by primary key.
+/// We should ensure that the primary keys from different streams are unique.
 #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
-pub(super) async fn merge_sort<I>(iterators: Vec<I>)
+pub(super) async fn merge_sort<S>(streams: Vec<S>)
 where
-    I: PkAndRowStream + Unpin,
+    S: PkAndRowStream + Unpin,
 {
-    let mut heap = BinaryHeap::with_capacity(iterators.len());
-    for mut iter in iterators {
-        if let Some(peeked) = iter.next().await.transpose()? {
-            heap.push(Node { iter, peeked });
+    let mut heap = BinaryHeap::with_capacity(streams.len());
+    for mut stream in streams {
+        if let Some(peeked) = stream.next().await.transpose()? {
+            heap.push(Node { stream, peeked });
         }
     }
 
     while let Some(mut node) = heap.peek_mut() {
-        yield match node.iter.next().await.transpose()? {
+        yield match node.stream.next().await.transpose()? {
+            // There still remains data in the stream, take and update the peeked value.
             Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked),
+            // This stream is exhausted, remove it from the heap.
             None => PeekMut::pop(node).peeked,
         };
     }
@@ -82,7 +90,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_sort() {
-        let iterators = vec![
+        let streams = vec![
             futures::stream::iter(vec![
                 gen_pk_and_row(0),
                 gen_pk_and_row(3),
@@ -100,9 +108,10 @@ mod tests {
                 gen_pk_and_row(5),
                 gen_pk_and_row(8),
             ]),
+            futures::stream::iter(vec![]), // empty stream
         ];
 
-        let merge_sorted = merge_sort(iterators);
+        let merge_sorted = merge_sort(streams);
 
         #[for_await]
         for (i, result) in merge_sorted.enumerate() {
