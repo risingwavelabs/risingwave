@@ -86,9 +86,8 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-            - BUILDKITE_ANALYTICS_TOKEN
       - test-collector#v1.0.0:
-          files: "target/nextest/ci/junit.xml"
+          files: "junit-*.xml"
           format: "junit"
     timeout_in_minutes: 15
 
