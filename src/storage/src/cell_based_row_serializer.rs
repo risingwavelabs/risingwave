@@ -22,26 +22,21 @@ use risingwave_common::util::ordered::{
 
 type KeyBytes = Vec<u8>;
 type ValueBytes = Vec<u8>;
+
 #[derive(Clone)]
-pub struct CellBasedRowSerializer {}
-impl Default for CellBasedRowSerializer {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct CellBasedRowSerializer {
+    pub column_ids: Vec<ColumnId>,
 }
+
 impl CellBasedRowSerializer {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(column_ids: Vec<ColumnId>) -> Self {
+        Self { column_ids }
     }
 
-    /// Serialize key and value.
-    pub fn serialize(
-        &mut self,
-        pk: &[u8],
-        row: Row,
-        column_ids: &[ColumnId],
-    ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
-        let res = serialize_pk_and_row(pk, &row, column_ids)?
+    /// Serialize key and value. The `row` must be in the same order with the column ids in this
+    /// serializer.
+    pub fn serialize(&mut self, pk: &[u8], row: Row) -> Result<Vec<(KeyBytes, ValueBytes)>> {
+        let res = serialize_pk_and_row(pk, &row, &self.column_ids)?
             .into_iter()
             .flatten()
             .collect_vec();
@@ -55,22 +50,16 @@ impl CellBasedRowSerializer {
         &mut self,
         pk: &[u8],
         row: Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
-        let res = serialize_pk_and_row(pk, &row, column_ids)?;
+        let res = serialize_pk_and_row(pk, &row, &self.column_ids)?;
         Ok(res)
     }
 
     /// Different from [`CellBasedRowSerializer::serialize`], only serialize key into cell key (With
     /// column id appended).
-    pub fn serialize_cell_key(
-        &mut self,
-        pk: &[u8],
-        row: &Row,
-        column_ids: &[ColumnId],
-    ) -> Result<Vec<KeyBytes>> {
-        let mut results = Vec::with_capacity(column_ids.len());
-        for (index, col_id) in column_ids.iter().enumerate() {
+    pub fn serialize_cell_key(&mut self, pk: &[u8], row: &Row) -> Result<Vec<KeyBytes>> {
+        let mut results = Vec::with_capacity(self.column_ids.len());
+        for (index, col_id) in self.column_ids.iter().enumerate() {
             if row[index].is_none() {
                 continue;
             }

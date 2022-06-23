@@ -94,7 +94,7 @@ impl Binder {
         // generate_series ( start i32, stop i32, step i32 )
         if args.len() != 3 {
             return Err(ErrorCode::BindError(
-                "the length of args of generate series funciton should be 3".to_string(),
+                "the length of args of generate series function should be 3".to_string(),
             )
             .into());
         }
