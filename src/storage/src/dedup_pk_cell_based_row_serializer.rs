@@ -129,11 +129,12 @@ impl CellSerializer for DedupPkCellBasedRowSerializer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use itertools::Itertools;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::DataType;
+
+    use super::*;
     use crate::cell_based_row_deserializer::make_cell_based_row_deserializer;
 
     #[test]
@@ -146,7 +147,8 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::from(3), DataType::Float64), // test memcmp != value enc.
         ];
         let column_ids = column_descs.iter().map(|c| c.column_id).collect_vec();
-        let mut serializer = DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs, &column_ids);
+        let mut serializer =
+            DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs, &column_ids);
         let pk = vec![];
         let input = Row(vec![
             Some(1_i32.into()),
@@ -169,7 +171,9 @@ mod tests {
         ];
         let mut compact_deserializer = make_cell_based_row_deserializer(compact_descs);
         for (pk_with_cell_id, cell) in &actual {
-            compact_deserializer.deserialize(pk_with_cell_id, cell).unwrap();
+            compact_deserializer
+                .deserialize(pk_with_cell_id, cell)
+                .unwrap();
         }
         let (_k, row) = compact_deserializer.take().unwrap();
         let compact_expected = Row(vec![
@@ -181,7 +185,9 @@ mod tests {
 
         let mut normal_deserializer = make_cell_based_row_deserializer(column_descs);
         for (pk_with_cell_id, cell) in actual {
-            normal_deserializer.deserialize(pk_with_cell_id, cell).unwrap();
+            normal_deserializer
+                .deserialize(pk_with_cell_id, cell)
+                .unwrap();
         }
         let (_k, row) = normal_deserializer.take().unwrap();
         let normal_expected = Row(vec![
