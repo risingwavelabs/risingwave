@@ -28,7 +28,7 @@ set -e
 
 echo "--- Check docker-compose"
 set +e
-if ! grep docker-compose.yml ${BUILD_TAG}; then
+if ! grep "${BUILD_TAG}" docker-compose.yml; then
     echo "${BUILD_TAG} is not set up for docker-compose, please modify docker-compose.yml."
     exit 1
 fi
