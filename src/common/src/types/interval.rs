@@ -371,8 +371,8 @@ impl Display for IntervalUnit {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::ordered_float::OrderedFloat;
     use super::*;
+    use crate::types::ordered_float::OrderedFloat;
 
     #[test]
     fn test_to_string() {
