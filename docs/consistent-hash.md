@@ -12,7 +12,7 @@ In RisingWave, we adopt consistent-hash-based strategy to solve the two problems
 
 ### Actor Scheduling
 
-First, we need to introduce a little about how we schedule the actors. Each worker node in RisingWave cluster will have a number of parallel units, which could be interpreted as CPU cores. Parallel unit is the minimal scheduling unit in RisingWave. Each actor will be scheduled to exactly one parallel unit.
+First, we need to introduce a little about how we schedule the actors. Each worker node in RisingWave cluster will have a number of parallel units, which is the physical location of the actors. Parallel unit is the minimal scheduling unit in RisingWave. Each actor will be scheduled to exactly one parallel unit.
 
 ### Consistent Hash Mapping
 
@@ -20,7 +20,7 @@ Then comes the consistent hash part, where we will construct a mapping that dete
 
 For all data $k \in U_k$, we apply a hash function $v = H(k)$, where $v$ falls to a limited range. The hash function ensures that all $k$ are hashed **uniformly** to that range. We call $v$ vnode, as is shown as the squares in the figure below.
 
-All vnodes are mapped to parallel units in the cluster evenly. As is shown in the figure below, we have $3$ parallel units, each taking $\frac{1}{3}$ of total vnodes. The vnode mapping is constructed and maintained by [meta](./architecture-design.md#architecture).
+All vnodes are mapped to parallel units in the cluster evenly. As is shown in the figure below, we have 3 parallel units, each taking $\frac{1}{3}$ of total vnodes. The vnode mapping is constructed and maintained by [meta](./architecture-design.md#architecture).
 
 <!-- Now we have vnodes corresponding to disjoint sets of keys, which naturally forms a data partition pattern. That is to say, one vnode could be viewed as a minimal data partition unit, and we could aggregate several vnodes together to get a larger data partition. -->
 
