@@ -125,8 +125,8 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 }
 
-/// `CellBasedTableExtended` is the interface accessing relational data in KV(`StateStore`) with encoding
-/// format: [keyspace | pk | `column_id` (4B)] -> value.
+/// `CellBasedTableExtended` is the interface accessing relational data in KV(`StateStore`) with
+/// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation.
 /// It is parameterized by its encoding, by specifying cell serializer and deserializers.
 /// TODO: Parameterize on CellDeserializer.
