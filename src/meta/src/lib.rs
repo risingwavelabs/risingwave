@@ -34,8 +34,10 @@
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
 #![feature(drain_filter)]
+#![feature(custom_test_frameworks)]
 #![feature(lint_reasons)]
 #![cfg_attr(coverage, feature(no_coverage))]
+#![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
 extern crate core;
 
@@ -136,6 +138,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
         let checkpoint_interval =
             Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
+        let in_flight_barrier_nums = compute_config.streaming.in_flight_barrier_nums as usize;
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -153,6 +156,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
                 checkpoint_interval,
+                in_flight_barrier_nums,
             },
         )
         .await
