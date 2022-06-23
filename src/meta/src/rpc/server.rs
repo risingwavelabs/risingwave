@@ -20,7 +20,7 @@ use etcd_client::{Client as EtcdClient, ConnectOptions};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
@@ -58,6 +58,7 @@ pub enum MetaStoreBackend {
     Mem,
 }
 
+#[derive(Clone)]
 pub struct AddressInfo {
     pub addr: String,
     pub listen_addr: SocketAddr,
@@ -154,15 +155,16 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         if !old_leader_lease.is_empty() {
             let lease_info = MetaLeaseInfo::decode(&mut old_leader_lease.as_slice()).unwrap();
 
-            if lease_info.lease_expire_time < now.as_secs()
+            if lease_info.lease_expire_time > now.as_secs()
                 && lease_info.leader.as_ref().unwrap().node_address != addr
             {
-                tracing::warn!(
-                    "the lease {:?} does not expire, now time: {}.",
+                let err_info = format!(
+                    "the lease {:?} does not expire, now time: {}",
                     lease_info,
-                    now.as_secs()
+                    now.as_secs(),
                 );
-                continue;
+                tracing::error!("{}", err_info);
+                return Err(RwError::from(ErrorCode::MetaError(err_info)));
             }
         }
         let lease_id = if !old_leader_info.is_empty() {
@@ -187,6 +189,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 META_CF_NAME.to_string(),
                 META_LEADER_KEY.as_bytes().to_vec(),
                 old_leader_info,
+            );
+            txn.put(
+                META_CF_NAME.to_string(),
+                META_LEADER_KEY.as_bytes().to_vec(),
+                leader_info.encode_to_vec(),
             );
         } else {
             if let Err(e) = meta_store
@@ -218,9 +225,12 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let leader = leader_info.clone();
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(Duration::from_secs(lease_time));
+            let mut ticker = tokio::time::interval(Duration::from_secs(lease_time / 2));
             loop {
                 let mut txn = Transaction::default();
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards");
                 let lease_info = MetaLeaseInfo {
                     leader: Some(leader_info.clone()),
                     lease_register_time: now.as_secs(),
@@ -249,10 +259,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         }
                     }
                 }
-
                 tokio::select! {
-                        biased;
-                    // Shutdown
                     _ = &mut shutdown_rx => {
                         tracing::info!("Barrier manager is shutting down");
                         return;
@@ -465,4 +472,55 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     Ok((join_handle, shutdown_send))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::thread::sleep;
+
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_leader_lease() {
+        let info = AddressInfo {
+            addr: "node1".to_string(),
+            ..Default::default()
+        };
+        let meta_store = Arc::new(MemStore::default());
+        let (handle, closer) = rpc_serve_with_store(
+            meta_store.clone(),
+            info,
+            Duration::from_secs(10),
+            2,
+            MetaOpts::default(),
+        )
+        .await
+        .unwrap();
+        sleep(Duration::from_secs(4));
+        let info2 = AddressInfo {
+            addr: "node2".to_string(),
+            ..Default::default()
+        };
+        let ret = rpc_serve_with_store(
+            meta_store.clone(),
+            info2.clone(),
+            Duration::from_secs(10),
+            2,
+            MetaOpts::default(),
+        )
+        .await;
+        assert!(ret.is_err());
+        closer.send(()).unwrap();
+        handle.await.unwrap();
+        sleep(Duration::from_secs(3));
+        rpc_serve_with_store(
+            meta_store.clone(),
+            info2,
+            Duration::from_secs(10),
+            2,
+            MetaOpts::default(),
+        )
+        .await
+        .unwrap();
+    }
 }
