@@ -40,6 +40,7 @@ use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::StorageValue;
+use crate::store::WriteOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 mod iter_utils;
@@ -337,7 +338,10 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            epoch,
+            table_id: self.keyspace.table_id(),
+        });
         let mut local = batch.prefixify(&self.keyspace);
 
         for (pk, row_op) in buffer {
@@ -397,7 +401,7 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
                 }
             }
         }
-        batch.ingest(epoch).await?;
+        batch.ingest().await?;
         Ok(())
     }
 }
