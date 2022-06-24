@@ -91,6 +91,7 @@ risedev:
     - use: meta-node
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
+      max-idle-secs-to-exit: 1800
     - use: compute-node
     - use: frontend
 
