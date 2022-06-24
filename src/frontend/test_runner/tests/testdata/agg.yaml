@@ -319,7 +319,7 @@
     StreamMaterialize { columns: [agg#0(hidden), a1, a2], pk_columns: [] }
       StreamSimpleAgg { aggs: [sum($0), min($1), max($2)] }
         StreamExchange { dist: Single }
-          StreamAppendOnlySimpleAgg { aggs: [count, min($0), max($1)] }
+          StreamAppendOnlyLocalSimpleAgg { aggs: [count, min($0), max($1)] }
             StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
     /* simple-stream-agg with non-append-only min-max should use 1-phase agg */

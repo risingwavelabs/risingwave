@@ -34,5 +34,5 @@
     StreamMaterialize { columns: [agg#0(hidden), max_v1], pk_columns: [] }
       StreamSimpleAgg { aggs: [sum($0), max($1)] }
         StreamExchange { dist: Single }
-          StreamAppendOnlySimpleAgg { aggs: [count, max($0)] }
+          StreamAppendOnlyLocalSimpleAgg { aggs: [count, max($0)] }
             StreamTableScan { table: t1, columns: [v1, _row_id], pk_indices: [1] }
