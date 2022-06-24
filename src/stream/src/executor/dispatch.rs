@@ -539,8 +539,11 @@ impl Dispatcher for HashDataDispatcher {
                 .map(|hash| *hash as usize % VIRTUAL_NODE_COUNT)
                 .collect::<Vec<_>>();
 
+            tracing::warn!("{}\n {:?} => {:?}", chunk.to_pretty_string(), &self.keys, hash_values);
+
             let (ops, columns, visibility) = chunk.into_inner();
 
+            // TODO: use bitmap builder
             let mut vis_maps = vec![vec![]; num_outputs];
             let mut last_hash_value_when_update_delete: usize = 0;
             let mut new_ops: Vec<Op> = Vec::with_capacity(ops.len());

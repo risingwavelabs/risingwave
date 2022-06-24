@@ -253,17 +253,18 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             DEFAULT_VNODE
         } else {
             row.hash_by_indices(indices, &CRC32FastBuilder {})
-                .unwrap()
                 .to_vnode()
         };
-        tracing::warn!("{:?}, {:?} => {}", row, indices, vnode);
+
+        if vnode != 0 {
+            tracing::warn!("{:?}, {:?} => {}", row, indices, vnode);
+        }
 
         // This table should only be used to access entries with vnode specified in `self.vnodes`.
         assert!(
             self.vnodes.is_set(vnode as usize).unwrap(),
-            "vnode {} should not be accessed by this table: {:?}",
+            "vnode {} should not be accessed by this table",
             vnode,
-            self.vnodes
         );
         vnode
     }
