@@ -81,7 +81,11 @@ impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table. This function will return a Cow. If the value is from
     /// memtable, it will be a [`Cow::Borrowed`]. If is from cell based table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Cow<Row>>> {
+    pub async fn get_row<'a>(
+        &'a self,
+        pk: &'_ Row,
+        epoch: u64,
+    ) -> StorageResult<Option<Cow<'a, Row>>> {
         let pk_bytes = serialize_pk(pk, self.pk_serializer());
         let mem_table_res = self.mem_table.get_row_op(&pk_bytes);
         match mem_table_res {

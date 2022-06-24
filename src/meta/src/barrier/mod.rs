@@ -366,7 +366,7 @@ where
                 biased;
                 // Shutdown
                 _ = &mut shutdown_rx => {
-                    tracing::info!("Barrier manager inject is shutting down");
+                    tracing::info!("Barrier manager is stopped");
                     return;
                 }
                 result = barrier_complete_rx.recv() => {
