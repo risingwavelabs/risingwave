@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
@@ -21,6 +21,9 @@ pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
 
 pub trait CellSerializer {
+    /// Constructs a new serializer.
+    fn create(pk_indices: &[usize], column_descs: &[ColumnDesc], column_ids: &[ColumnId]) -> Self;
+
     /// Serialize key and value.
     fn serialize(
         &mut self,

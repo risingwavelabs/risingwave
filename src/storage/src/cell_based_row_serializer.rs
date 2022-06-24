@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::ordered::serialize_pk_and_row;
@@ -33,6 +33,16 @@ impl CellBasedRowSerializer {
 }
 
 impl CellSerializer for CellBasedRowSerializer {
+    fn create(
+        _pk_indices: &[usize],
+        _column_descs: &[ColumnDesc],
+        column_ids: &[ColumnId],
+    ) -> Self {
+        Self {
+            column_ids: column_ids.to_vec(),
+        }
+    }
+
     /// Serialize key and value. The `row` must be in the same order with the column ids in this
     /// serializer.
     fn serialize(

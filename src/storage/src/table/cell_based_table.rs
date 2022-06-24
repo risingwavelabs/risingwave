@@ -53,91 +53,11 @@ pub const DEFAULT_VNODE: VirtualNode = 0;
 pub type DedupPkCellBasedTable<S, const T: AccessType> =
     CellBasedTableExtended<S, DedupPkCellBasedRowSerializer, T>;
 
-impl<S: StateStore> DedupPkCellBasedTable<S, READ_WRITE> {
-    /// Instantiates a new [`DedupPkCellBasedTable`]
-    pub fn new_dedup_pk_cell_based_table(
-        keyspace: Keyspace<S>,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        dist_key_indices: Option<Vec<usize>>,
-    ) -> Self {
-        let column_ids = columns.iter().map(|c| c.column_id).collect_vec();
-        let row_serializer = DedupPkCellBasedRowSerializer::new(&pk_indices, &columns, &column_ids);
-
-        Self::new_inner(
-            keyspace,
-            columns,
-            column_ids,
-            order_types,
-            pk_indices,
-            dist_key_indices,
-            row_serializer,
-        )
-    }
-}
-
 /// [`CellBasedTable`] is the interface accessing relational data in KV(`StateStore`) with encoding
 /// format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation
 pub type CellBasedTable<S, const T: AccessType> =
     CellBasedTableExtended<S, CellBasedRowSerializer, T>;
-
-impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
-    /// Instantiates a new [`CellBasedTable`]
-    pub fn new(
-        keyspace: Keyspace<S>,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        dist_key_indices: Option<Vec<usize>>,
-    ) -> Self {
-        let column_ids = columns.iter().map(|c| c.column_id).collect_vec();
-        let row_serializer = CellBasedRowSerializer::new(column_ids.clone());
-
-        Self::new_extended(
-            keyspace,
-            columns,
-            order_types,
-            pk_indices,
-            dist_key_indices,
-            row_serializer,
-        )
-    }
-
-    pub fn new_for_test(
-        keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new(keyspace, column_descs, order_types, pk_indices, None)
-    }
-}
-
-impl<S: StateStore> CellBasedTable<S, READ_ONLY> {
-    /// Instantiates a new partial [`CellBasedTable`]
-    pub fn new_partial(
-        keyspace: Keyspace<S>,
-        table_columns: Vec<ColumnDesc>,
-        column_ids: Vec<ColumnId>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        dist_key_indices: Option<Vec<usize>>,
-    ) -> Self {
-        let row_serializer = CellBasedRowSerializer::new(column_ids.clone());
-
-        Self::new_partial_extended(
-            keyspace,
-            table_columns,
-            column_ids,
-            order_types,
-            pk_indices,
-            dist_key_indices,
-            row_serializer,
-        )
-    }
-}
 
 /// `CellBasedTableExtended` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
@@ -205,13 +125,12 @@ fn err(rw: impl Into<RwError>) -> StorageError {
 impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER, READ_WRITE> {
     /// Create a [`CellBasedTableExtended`] given a complete set of `columns`.
     /// This is parameterized on cell based row serializer.
-    pub(super) fn new_extended(
+    pub fn new(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         dist_key_indices: Option<Vec<usize>>,
-        row_serializer: SER,
     ) -> Self {
         let column_ids = columns.iter().map(|c| c.column_id).collect();
 
@@ -222,8 +141,16 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER, READ_WRI
             order_types,
             pk_indices,
             dist_key_indices,
-            row_serializer,
         )
+    }
+
+    pub fn new_for_test(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new(keyspace, column_descs, order_types, pk_indices, None)
     }
 }
 
@@ -231,14 +158,13 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER, READ_ONL
     /// Create a read-only [`CellBasedTableExtended`] given a complete set of `columns` and a
     /// partial set of `column_ids`. The output will only contains columns with the given ids in
     /// the same order.
-    pub(super) fn new_partial_extended(
+    pub fn new_partial(
         keyspace: Keyspace<S>,
         table_columns: Vec<ColumnDesc>,
         column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         dist_key_indices: Option<Vec<usize>>,
-        row_serializer: SER,
     ) -> Self {
         Self::new_inner(
             keyspace,
@@ -247,7 +173,6 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER, READ_ONL
             order_types,
             pk_indices,
             dist_key_indices,
-            row_serializer,
         )
     }
 }
@@ -269,8 +194,9 @@ impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableExte
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         #[allow(unused_assignments)] mut dist_key_indices: Option<Vec<usize>>,
-        row_serializer: SER,
     ) -> Self {
+        let row_serializer = SER::create(&pk_indices, &table_columns, &column_ids);
+
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
         let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);

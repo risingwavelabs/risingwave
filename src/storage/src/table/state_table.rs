@@ -25,9 +25,7 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::{
-    CellBasedTable, CellBasedTableExtended, DedupPkCellBasedTable, READ_WRITE,
-};
+use super::cell_based_table::{CellBasedTableExtended, DedupPkCellBasedTable, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::cell_serializer::CellSerializer;
@@ -53,7 +51,7 @@ impl<S: StateStore> DedupPkStateTable<S> {
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: DedupPkCellBasedTable::new_dedup_pk_cell_based_table(
+            cell_based_table: DedupPkCellBasedTable::new(
                 keyspace,
                 column_descs,
                 order_types,
@@ -67,27 +65,6 @@ impl<S: StateStore> DedupPkStateTable<S> {
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 pub type StateTable<S> = StateTableExtended<S, CellBasedRowSerializer>;
 
-impl<S: StateStore> StateTable<S> {
-    pub fn new(
-        keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        dist_key_indices: Option<Vec<usize>>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self {
-            mem_table: MemTable::new(),
-            cell_based_table: CellBasedTable::new(
-                keyspace,
-                column_descs,
-                order_types,
-                pk_indices,
-                dist_key_indices,
-            ),
-        }
-    }
-}
-
 /// `StateTableExtended` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `CellSerializer` for row to cell serializing.
 #[derive(Clone)]
@@ -100,23 +77,21 @@ pub struct StateTableExtended<S: StateStore, SER: CellSerializer> {
 }
 
 impl<S: StateStore, SER: CellSerializer> StateTableExtended<S, SER> {
-    pub fn new_extended(
+    pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
-        cell_based_row_serializer: SER,
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTableExtended::new_extended(
+            cell_based_table: CellBasedTableExtended::new(
                 keyspace,
                 column_descs,
                 order_types,
                 pk_indices,
                 dist_key_indices,
-                cell_based_row_serializer,
             ),
         }
     }

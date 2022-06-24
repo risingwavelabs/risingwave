@@ -40,11 +40,7 @@ pub struct DedupPkCellBasedRowSerializer {
 
 impl DedupPkCellBasedRowSerializer {
     /// Constructs a new [`DedupPkCellBasedRowSerializer`].
-    pub fn new(
-        pk_indices: &[usize],
-        column_descs: &Vec<ColumnDesc>,
-        column_ids: &[ColumnId],
-    ) -> Self {
+    pub fn new(pk_indices: &[usize], column_descs: &[ColumnDesc], column_ids: &[ColumnId]) -> Self {
         let pk_indices = pk_indices.iter().cloned().collect::<HashSet<_>>();
         let dedup_datum_indices = (0..column_descs.len())
             .filter(|i| {
@@ -71,6 +67,7 @@ impl DedupPkCellBasedRowSerializer {
     }
 
     /// Filters out duplicate pk datums by reference.
+    #[allow(dead_code)]
     fn remove_dup_pk_datums_by_ref(&self, row: &Row) -> Row {
         Row(
             Self::filter_by_dedup_datum_indices(&self.dedup_datum_indices, row.0.iter())
@@ -99,6 +96,10 @@ impl DedupPkCellBasedRowSerializer {
 }
 
 impl CellSerializer for DedupPkCellBasedRowSerializer {
+    fn create(pk_indices: &[usize], column_descs: &[ColumnDesc], column_ids: &[ColumnId]) -> Self {
+        Self::new(pk_indices, column_descs, column_ids)
+    }
+
     /// Remove dup pk datums + serialize
     fn serialize(
         &mut self,
