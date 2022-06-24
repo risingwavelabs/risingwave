@@ -163,7 +163,7 @@ message CompactionGroup {
     uint32 ttl = 1;
   }
 
-  map<uint32, TableOption> table_options = 4;
+  map<uint32, TableOption> table_id_to_options = 4;
 }
 
 message CompactTaskAssignment {

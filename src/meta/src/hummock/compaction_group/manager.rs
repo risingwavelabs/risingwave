@@ -269,7 +269,7 @@ impl CompactionGroupManagerInner {
                 .ok_or(Error::InvalidCompactionGroup(*compaction_group_id))?;
             compaction_group.member_prefixes.insert(*prefix);
             compaction_group
-                .table_options
+                .table_id_to_options
                 .insert(prefix.into(), table_option.clone());
         }
         let mut trx = Transaction::default();
@@ -301,7 +301,7 @@ impl CompactionGroupManagerInner {
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
             compaction_group.member_prefixes.remove(prefix);
             let table_id: u32 = prefix.into();
-            compaction_group.table_options.remove(&table_id);
+            compaction_group.table_id_to_options.remove(&table_id);
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
@@ -337,7 +337,7 @@ impl CompactionGroupManagerInner {
         table_id: u32,
     ) -> Result<TableOption> {
         let compaction_group = self.compaction_group(compaction_group_id)?;
-        match compaction_group.table_options().get(&table_id) {
+        match compaction_group.table_id_to_options().get(&table_id) {
             Some(table_option) => Ok(table_option.clone()),
 
             None => Ok(TableOption::default()),
@@ -378,7 +378,7 @@ mod tests {
             inner
                 .compaction_groups
                 .iter()
-                .map(|(_, cg)| cg.table_options().len())
+                .map(|(_, cg)| cg.table_id_to_options().len())
                 .sum::<usize>()
         };
 

@@ -29,7 +29,7 @@ pub struct CompactionGroup {
     group_id: CompactionGroupId,
     member_prefixes: HashSet<Prefix>,
     compaction_config: CompactionConfig,
-    table_options: HashMap<u32, TableOption>,
+    table_id_to_options: HashMap<u32, TableOption>,
 }
 
 impl CompactionGroup {
@@ -38,7 +38,7 @@ impl CompactionGroup {
             group_id,
             member_prefixes: Default::default(),
             compaction_config,
-            table_options: HashMap::default(),
+            table_id_to_options: HashMap::default(),
         }
     }
 
@@ -54,8 +54,8 @@ impl CompactionGroup {
         &self.compaction_config
     }
 
-    pub fn table_options(&self) -> &HashMap<u32, TableOption> {
-        &self.table_options
+    pub fn table_id_to_options(&self) -> &HashMap<u32, TableOption> {
+        &self.table_id_to_options
     }
 
     pub fn build_table_option(table_properties: &HashMap<String, String>) -> TableOption {
@@ -104,8 +104,8 @@ impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
                 .as_ref()
                 .cloned()
                 .unwrap(),
-            table_options: compaction_group
-                .table_options
+            table_id_to_options: compaction_group
+                .table_id_to_options
                 .iter()
                 .map(|id_to_table_option| (*id_to_table_option.0, id_to_table_option.1.into()))
                 .collect::<HashMap<_, _>>(),
@@ -119,8 +119,8 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
             id: compaction_group.group_id,
             member_prefixes: compaction_group.member_prefixes.iter().map_into().collect(),
             compaction_config: Some(compaction_group.compaction_config.clone()),
-            table_options: compaction_group
-                .table_options
+            table_id_to_options: compaction_group
+                .table_id_to_options
                 .iter()
                 .map(|id_to_table_option| (*id_to_table_option.0, id_to_table_option.1.into()))
                 .collect::<HashMap<_, _>>(),
@@ -151,6 +151,8 @@ impl MetadataModel for CompactionGroup {
     }
 }
 
+// TODO: TableOption is deplicated with the properties in table catalog, We can refactor later to
+// directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct TableOption {
     ttl: u32,
