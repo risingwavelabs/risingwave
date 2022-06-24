@@ -121,8 +121,32 @@ fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::CellBasedTable(rw.into())
 }
 
+impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
+    /// Create a read-only [`CellBasedTableBase`] given a complete set of `columns` and a partial
+    /// set of `column_ids`. The output will only contains columns with the given ids in the same
+    /// order.
+    /// This is parameterized on cell based row serializer.
+    pub fn new_partial(
+        keyspace: Keyspace<S>,
+        table_columns: Vec<ColumnDesc>,
+        column_ids: Vec<ColumnId>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        dist_key_indices: Option<Vec<usize>>,
+    ) -> Self {
+        Self::new_inner(
+            keyspace,
+            table_columns,
+            column_ids,
+            order_types,
+            pk_indices,
+            dist_key_indices,
+        )
+    }
+}
+
 impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
-    /// Create a [`CellBasedTableBase`] given a complete set of `columns`.
+    /// Create a read-write [`CellBasedTableBase`] given a complete set of `columns`.
     /// This is parameterized on cell based row serializer.
     pub fn new(
         keyspace: Keyspace<S>,
@@ -150,29 +174,6 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> 
         pk_indices: Vec<usize>,
     ) -> Self {
         Self::new(keyspace, column_descs, order_types, pk_indices, None)
-    }
-}
-
-impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
-    /// Create a read-only [`CellBasedTableBase`] given a complete set of `columns` and a
-    /// partial set of `column_ids`. The output will only contains columns with the given ids in
-    /// the same order.
-    pub fn new_partial(
-        keyspace: Keyspace<S>,
-        table_columns: Vec<ColumnDesc>,
-        column_ids: Vec<ColumnId>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        dist_key_indices: Option<Vec<usize>>,
-    ) -> Self {
-        Self::new_inner(
-            keyspace,
-            table_columns,
-            column_ids,
-            order_types,
-            pk_indices,
-            dist_key_indices,
-        )
     }
 }
 
