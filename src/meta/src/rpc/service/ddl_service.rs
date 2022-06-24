@@ -229,6 +229,8 @@ where
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
+        self.env.idle_manager().record_activity();
+
         let req = request.into_inner();
         let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
         let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
@@ -318,6 +320,8 @@ where
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         use risingwave_common::catalog::TableId;
+
+        self.env.idle_manager().record_activity();
 
         let table_id = request.into_inner().table_id;
         // 1. Drop table in catalog. Ref count will be checked.
