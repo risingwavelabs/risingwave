@@ -96,7 +96,7 @@ impl<S: StateStore, SER: CellSerializer> StateTableBase<S, SER> {
         }
     }
 
-    /// Get the underlying [`CellBasedTable`]. Should only be used for tests.
+    /// Get the underlying [`CellBasedTableBase`]. Should only be used for tests.
     pub fn cell_based_table(&self) -> &CellBasedTableBase<S, SER, READ_WRITE> {
         &self.cell_based_table
     }
