@@ -40,7 +40,10 @@ use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::StorageValue;
+use crate::store::WriteOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
+
+mod iter_utils;
 
 pub type AccessType = bool;
 pub const READ_ONLY: AccessType = false;
@@ -335,7 +338,10 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            epoch,
+            table_id: self.keyspace.table_id(),
+        });
         let mut local = batch.prefixify(&self.keyspace);
 
         for (pk, row_op) in buffer {
@@ -395,7 +401,7 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
                 }
             }
         }
-        batch.ingest(epoch).await?;
+        batch.ingest().await?;
         Ok(())
     }
 }
@@ -464,8 +470,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
             // Concat all iterators if not to preserve order.
             _ if !ordered => futures::stream::iter(iterators).flatten(),
             // Merge all iterators if to preserve order.
-            #[never]
-            _ => todo!("merge multiple vnode ranges"),
+            _ => iter_utils::merge_sort(iterators.into_iter().map(Box::pin).collect()),
         };
 
         Ok(iter)
