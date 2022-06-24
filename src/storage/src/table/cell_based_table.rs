@@ -51,21 +51,20 @@ pub const READ_WRITE: AccessType = true;
 pub const DEFAULT_VNODE: VirtualNode = 0;
 
 pub type DedupPkCellBasedTable<S, const T: AccessType> =
-    CellBasedTableExtended<S, DedupPkCellBasedRowSerializer, T>;
+    CellBasedTableBase<S, DedupPkCellBasedRowSerializer, T>;
 
 /// [`CellBasedTable`] is the interface accessing relational data in KV(`StateStore`) with encoding
 /// format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation
-pub type CellBasedTable<S, const T: AccessType> =
-    CellBasedTableExtended<S, CellBasedRowSerializer, T>;
+pub type CellBasedTable<S, const T: AccessType> = CellBasedTableBase<S, CellBasedRowSerializer, T>;
 
-/// `CellBasedTableExtended` is the interface accessing relational data in KV(`StateStore`) with
+/// [`CellBasedTableBase`] is the interface accessing relational data in KV(`StateStore`) with
 /// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation.
 /// It is parameterized by its encoding, by specifying cell serializer and deserializers.
 /// TODO: Parameterize on `CellDeserializer`.
 #[derive(Clone)]
-pub struct CellBasedTableExtended<S: StateStore, SER: CellSerializer, const T: AccessType> {
+pub struct CellBasedTableBase<S: StateStore, SER: CellSerializer, const T: AccessType> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
@@ -111,7 +110,7 @@ pub struct CellBasedTableExtended<S: StateStore, SER: CellSerializer, const T: A
 }
 
 impl<S: StateStore, SER: CellSerializer, const T: AccessType> std::fmt::Debug
-    for CellBasedTableExtended<S, SER, T>
+    for CellBasedTableBase<S, SER, T>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CellBasedTable").finish_non_exhaustive()
@@ -122,8 +121,8 @@ fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::CellBasedTable(rw.into())
 }
 
-impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER, READ_WRITE> {
-    /// Create a [`CellBasedTableExtended`] given a complete set of `columns`.
+impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
+    /// Create a [`CellBasedTableBase`] given a complete set of `columns`.
     /// This is parameterized on cell based row serializer.
     pub fn new(
         keyspace: Keyspace<S>,
@@ -154,8 +153,8 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER, READ_WRI
     }
 }
 
-impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER, READ_ONLY> {
-    /// Create a read-only [`CellBasedTableExtended`] given a complete set of `columns` and a
+impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
+    /// Create a read-only [`CellBasedTableBase`] given a complete set of `columns` and a
     /// partial set of `column_ids`. The output will only contains columns with the given ids in
     /// the same order.
     pub fn new_partial(
@@ -178,15 +177,15 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER, READ_ONL
 }
 
 /// Allow transforming a `READ_WRITE` instance to a `READ_ONLY` one.
-impl<S: StateStore, SER: CellSerializer> From<CellBasedTableExtended<S, SER, READ_WRITE>>
-    for CellBasedTableExtended<S, SER, READ_ONLY>
+impl<S: StateStore, SER: CellSerializer> From<CellBasedTableBase<S, SER, READ_WRITE>>
+    for CellBasedTableBase<S, SER, READ_ONLY>
 {
-    fn from(rw: CellBasedTableExtended<S, SER, READ_WRITE>) -> Self {
+    fn from(rw: CellBasedTableBase<S, SER, READ_WRITE>) -> Self {
         Self { ..rw }
     }
 }
 
-impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableExtended<S, SER, T> {
+impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
     fn new_inner(
         keyspace: Keyspace<S>,
         table_columns: Vec<ColumnDesc>,
@@ -254,7 +253,7 @@ impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableExte
 }
 
 /// Get
-impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableExtended<S, SER, T> {
+impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
         let vnode = match self.dist_key_in_pk_indices.as_ref() {
@@ -333,7 +332,7 @@ impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableExte
 }
 
 /// Write
-impl<S: StateStore, SER: CellSerializer> CellBasedTableExtended<S, SER, READ_WRITE> {
+impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
     /// Get vnode value with full row.
     fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
         // With `READ_WRITE`, the output columns should be exactly same with the table columns, so
@@ -439,7 +438,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableExtended<S, SER, T> {
+impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
     /// Get multiple [`CellBasedIter`] based on the specified vnodes, and merge or concat them by
     /// given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(

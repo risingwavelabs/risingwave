@@ -25,7 +25,7 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::{CellBasedTableExtended, DedupPkCellBasedTable, READ_WRITE};
+use super::cell_based_table::{CellBasedTableBase, DedupPkCellBasedTable, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::cell_serializer::CellSerializer;
@@ -35,7 +35,7 @@ use crate::{Keyspace, StateStore};
 
 /// Identical to `StateTable`. Used when we want to
 /// rows to have dedup pk cell encoding.
-pub type DedupPkStateTable<S> = StateTableExtended<S, DedupPkCellBasedRowSerializer>;
+pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
 
 /// Constructor for `DedupPkStateTable`.
 /// We instantiate `DedupPkCellBasedRowSerializer` with `pk_indices`
@@ -63,20 +63,20 @@ impl<S: StateStore> DedupPkStateTable<S> {
 }
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
-pub type StateTable<S> = StateTableExtended<S, CellBasedRowSerializer>;
+pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 
-/// `StateTableExtended` is the interface accessing relational data in KV(`StateStore`) with
+/// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `CellSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTableExtended<S: StateStore, SER: CellSerializer> {
+pub struct StateTableBase<S: StateStore, SER: CellSerializer> {
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTableExtended<S, SER, READ_WRITE>,
+    cell_based_table: CellBasedTableBase<S, SER, READ_WRITE>,
 }
 
-impl<S: StateStore, SER: CellSerializer> StateTableExtended<S, SER> {
+impl<S: StateStore, SER: CellSerializer> StateTableBase<S, SER> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
@@ -86,7 +86,7 @@ impl<S: StateStore, SER: CellSerializer> StateTableExtended<S, SER> {
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTableExtended::new(
+            cell_based_table: CellBasedTableBase::new(
                 keyspace,
                 column_descs,
                 order_types,
@@ -97,7 +97,7 @@ impl<S: StateStore, SER: CellSerializer> StateTableExtended<S, SER> {
     }
 
     /// Get the underlying [`CellBasedTable`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &CellBasedTableExtended<S, SER, READ_WRITE> {
+    pub fn cell_based_table(&self) -> &CellBasedTableBase<S, SER, READ_WRITE> {
         &self.cell_based_table
     }
 
