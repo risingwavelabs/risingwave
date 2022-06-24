@@ -68,6 +68,10 @@ impl From<&Prefix> for Vec<u8> {
 /// A compaction task's `StaticCompactionGroupId` indicates the compaction group that all its input
 /// SSTs belong to.
 pub enum StaticCompactionGroupId {
+    /// All shared buffer local compaction task goes to here. Meta service will never see this
+    /// value. Note that currently we've restricted the compaction task's input by `via
+    /// compact_shared_buffer_by_compaction_group`
+    SharedBuffer = 1,
     /// All states goes to here by default.
     StateDefault = 2,
     /// All MVs goes to here.

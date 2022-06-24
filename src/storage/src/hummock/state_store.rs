@@ -81,6 +81,10 @@ impl HummockStorage {
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
+        let compaction_group_id = match read_options.table_id {
+            None => None,
+            Some(ref table_id) => Some(self.get_compaction_group_id(*table_id).await?),
+        };
         let iter_read_options = Arc::new(IterReadOptions::default());
         let mut overlapped_iters = vec![];
 
@@ -107,7 +111,7 @@ impl HummockStorage {
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
-        for level in pinned_version.levels() {
+        for level in pinned_version.levels(compaction_group_id) {
             let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
@@ -191,6 +195,10 @@ impl HummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let epoch = read_options.epoch;
+        let compaction_group_id = match read_options.table_id {
+            None => None,
+            Some(ref table_id) => Some(self.get_compaction_group_id(*table_id).await?),
+        };
         let mut stats = StoreLocalStatistic::default();
         let (shared_buffer_data, pinned_version) = self.read_filter(read_options, &(key..=key))?;
 
@@ -247,7 +255,7 @@ impl HummockStorage {
             }
         }
 
-        for level in pinned_version.levels() {
+        for level in pinned_version.levels(compaction_group_id) {
             if level.table_infos.is_empty() {
                 continue;
             }
@@ -372,9 +380,10 @@ impl StateStore for HummockStorage {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
             let size = self
                 .local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, false)
+                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, false)
                 .await?;
             Ok(size)
         }
@@ -388,8 +397,9 @@ impl StateStore for HummockStorage {
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
             self.local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, true)
+                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, true)
                 .await?;
 
             Ok(())

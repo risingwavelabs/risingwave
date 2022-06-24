@@ -23,7 +23,6 @@ use prost::Message;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
     HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo,
@@ -134,7 +133,6 @@ macro_rules! commit_multi_var {
 #[derive(Default)]
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
-    // TODO #2065: split levels by compaction group id in `HummockVersion`
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
@@ -556,11 +554,6 @@ where
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: Option<ManualCompactionOption>,
     ) -> Result<Option<CompactTask>> {
-        // TODO #2065: Remove this line after split levels by compaction group.
-        // All SSTs belongs to `StateDefault` currently.
-        if compaction_group_id != u64::from(StaticCompactionGroupId::StateDefault) {
-            return Ok(None);
-        }
         let start_time = Instant::now();
         let mut compaction_guard = self.compaction.write().await;
         let compaction = compaction_guard.deref_mut();
@@ -815,6 +808,7 @@ where
                     compact_task.compaction_group_id,
                 ))?,
             self.versioning.read().await.current_version_ref(),
+            compact_task.compaction_group_id,
         );
 
         self.try_send_compaction_request(compact_task.compaction_group_id);
@@ -834,9 +828,6 @@ where
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
-        // TODO #2065: add SSTs to corresponding compaction groups' levels.
-        let sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
-
         let mut versioning_guard = self.versioning.write().await;
         let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
@@ -860,7 +851,7 @@ where
         // happens, we temporarily set a large value for etcd's max-txn-ops. But we need to
         // formally fix this because the performance degradation is not acceptable anyway.
         let mut total_files_size = 0;
-        for sst in &sstables {
+        for sst in sstables.iter().map(|(_, sst)| sst) {
             match sstable_id_infos.get_mut(&sst.id) {
                 None => {
                     return Err(Error::InternalError(format!(
@@ -887,19 +878,23 @@ where
             }
         }
 
+        let mut modified_compaction_groups = HashSet::new();
+        for (compaction_group_id, sst) in sstables {
+            modified_compaction_groups.insert(compaction_group_id);
+            let version_first_level = new_hummock_version
+                .get_compaction_group_levels_mut(compaction_group_id)
+                .first_mut()
+                .expect("Expect at least one level");
+            assert_eq!(version_first_level.level_idx, 0);
+            assert_eq!(
+                version_first_level.level_type,
+                LevelType::Overlapping as i32
+            );
+            version_first_level.table_infos.push(sst);
+            version_first_level.total_file_size += total_files_size;
+        }
+
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        // TODO #2065: use correct compaction group id
-        let version_first_level = new_hummock_version
-            .get_compaction_group_levels_mut(StaticCompactionGroupId::StateDefault.into())
-            .first_mut()
-            .expect("Expect at least one level");
-        assert_eq!(version_first_level.level_idx, 0);
-        assert_eq!(
-            version_first_level.level_type,
-            LevelType::Overlapping as i32
-        );
-        version_first_level.table_infos.extend(sstables);
-        version_first_level.total_file_size += total_files_size;
         new_hummock_version.max_committed_epoch = epoch;
         commit_multi_var!(
             self,
@@ -924,8 +919,8 @@ where
         drop(versioning_guard);
 
         // commit_epoch may contains SSTs from any compaction group
-        for id in self.compaction.read().await.compaction_statuses.keys() {
-            self.try_send_compaction_request(*id);
+        for id in modified_compaction_groups {
+            self.try_send_compaction_request(id);
         }
 
         #[cfg(test)]

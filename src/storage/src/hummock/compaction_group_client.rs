@@ -24,27 +24,41 @@ use tokio::sync::RwLock;
 
 use crate::hummock::{HummockError, HummockResult};
 
-/// `CompactionGroupClient` maintains compaction group metadata cache.
-pub struct CompactionGroupClient {
+#[async_trait::async_trait]
+pub trait CompactionGroupClient: Send + Sync + 'static {
+    /// Fast path.
+    async fn try_get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId>;
+    /// Slow path.
+    async fn get_compaction_group_id(
+        &self,
+        prefix: Prefix,
+    ) -> HummockResult<Option<CompactionGroupId>>;
+}
+
+/// `CompactionGroupClientImpl` maintains compaction group metadata cache.
+pub struct CompactionGroupClientImpl {
     inner: RwLock<CompactionGroupClientInner>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
 
-impl CompactionGroupClient {
+impl CompactionGroupClientImpl {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>) -> Self {
         Self {
             inner: Default::default(),
             hummock_meta_client,
         }
     }
+}
 
+#[async_trait::async_trait]
+impl CompactionGroupClient for CompactionGroupClientImpl {
     /// Tries to get from local cache
-    pub async fn try_get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId> {
+    async fn try_get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId> {
         self.inner.read().await.get(&prefix)
     }
 
     /// Tries to get from meta service
-    pub async fn get_compaction_group_id(
+    async fn get_compaction_group_id(
         &self,
         prefix: Prefix,
     ) -> HummockResult<Option<CompactionGroupId>> {
@@ -87,5 +101,32 @@ impl CompactionGroupClientInner {
             let prefix: [u8; 4] = prefix.try_into().expect("invalid prefix");
             self.index.insert(Prefix::from(prefix), cg_id);
         }
+    }
+}
+
+pub struct DummyCompactionGroupClient {
+    /// Always return this `compaction_group_id`.
+    compaction_group_id: CompactionGroupId,
+}
+
+impl DummyCompactionGroupClient {
+    pub fn new(compaction_group_id: CompactionGroupId) -> Self {
+        Self {
+            compaction_group_id,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl CompactionGroupClient for DummyCompactionGroupClient {
+    async fn try_get_compaction_group_id(&self, _prefix: Prefix) -> Option<CompactionGroupId> {
+        Some(self.compaction_group_id)
+    }
+
+    async fn get_compaction_group_id(
+        &self,
+        prefix: Prefix,
+    ) -> HummockResult<Option<CompactionGroupId>> {
+        Ok(self.try_get_compaction_group_id(prefix).await)
     }
 }

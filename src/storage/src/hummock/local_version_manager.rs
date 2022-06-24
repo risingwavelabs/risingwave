@@ -21,9 +21,8 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -228,6 +227,7 @@ impl LocalVersionManager {
     pub async fn write_shared_buffer(
         &self,
         epoch: HummockEpoch,
+        compaction_group_id: CompactionGroupId,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         is_remote_batch: bool,
     ) -> HummockResult<usize> {
@@ -242,7 +242,6 @@ impl LocalVersionManager {
             }
         }
 
-        // TODO #2065: use correct compaction group id
         let batch = SharedBufferBatch::new_with_size(
             sorted_items,
             epoch,
@@ -252,7 +251,7 @@ impl LocalVersionManager {
             } else {
                 self.buffer_tracker.upload_size.clone()
             },
-            StaticCompactionGroupId::StateDefault.into(),
+            compaction_group_id,
         );
 
         // Try get shared buffer with version read lock
@@ -628,7 +627,12 @@ mod tests {
         // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
         for i in 0..2 {
             local_version_manager
-                .write_shared_buffer(epochs[i], batches[i].clone(), false)
+                .write_shared_buffer(
+                    epochs[i],
+                    StaticCompactionGroupId::StateDefault.into(),
+                    batches[i].clone(),
+                    false,
+                )
                 .await
                 .unwrap();
             let local_version = local_version_manager.get_local_version();
@@ -712,7 +716,12 @@ mod tests {
         // Fill shared buffer with dummy batches
         for i in 0..2 {
             local_version_manager
-                .write_shared_buffer(epochs[i], kvs[i].clone(), false)
+                .write_shared_buffer(
+                    epochs[i],
+                    StaticCompactionGroupId::StateDefault.into(),
+                    kvs[i].clone(),
+                    false,
+                )
                 .await
                 .unwrap();
             let local_version = local_version_manager.get_local_version();

@@ -29,6 +29,7 @@ mod tests {
     use risingwave_pb::hummock::HummockVersion;
     use risingwave_rpc_client::HummockMetaClient;
 
+    use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
     use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::HummockStorage;
@@ -56,6 +57,9 @@ mod tests {
             sstable_store,
             hummock_meta_client.clone(),
             Arc::new(StateStoreMetrics::unused()),
+            Arc::new(DummyCompactionGroupClient::new(
+                StaticCompactionGroupId::StateDefault.into(),
+            )),
         )
         .await
         .unwrap()

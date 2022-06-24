@@ -240,7 +240,7 @@ impl Compactor {
             task_status: false,
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
-            compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
+            compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
             existing_table_ids: vec![],
             target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
             compression_algorithm: 0,
