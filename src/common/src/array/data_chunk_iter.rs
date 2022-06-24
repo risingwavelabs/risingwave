@@ -23,7 +23,7 @@ use crate::array::DataChunk;
 use crate::error::Result as RwResult;
 use crate::hash::HashCode;
 use crate::types::{
-    deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
+    deserialize_datum_from, deserialize_datum_not_null_from, hash_datum, serialize_datum_into,
     serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
 };
 use crate::util::sort_util::OrderType;
@@ -296,7 +296,7 @@ impl Row {
     {
         let mut hasher = hash_builder.build_hasher();
         for datum in &self.0 {
-            datum.hash(&mut hasher);
+            hash_datum(datum, &mut hasher);
         }
         HashCode(hasher.finish())
     }
@@ -306,19 +306,16 @@ impl Row {
         &self,
         hash_indices: &[usize],
         hash_builder: &H,
-    ) -> super::ArrayResult<HashCode>
+    ) -> HashCode
     where
         H: BuildHasher,
     {
         let mut hasher = hash_builder.build_hasher();
         for idx in hash_indices {
-            let datum = self.0.get(*idx);
-            match datum {
-                Some(datum) => datum.hash(&mut hasher),
-                None => bail!("index {} out of row bound", idx),
-            }
+            let datum = &self.0[*idx];
+            hash_datum(datum, &mut hasher);
         }
-        Ok(HashCode(hasher.finish()))
+        HashCode(hasher.finish())
     }
 
     /// Get an owned `Row` by the given `indices` from current row.
