@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::RequiredDist;
 
 #[derive(Debug, Clone)]
 pub struct StreamLocalSimpleAgg {
@@ -34,13 +34,10 @@ impl StreamLocalSimpleAgg {
         let pk_indices = logical.base.pk_indices.to_vec();
         let input = logical.input();
         let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::Single => Distribution::Single,
-            _ => panic!(),
-        };
+        debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
         // Simple agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, input_dist.clone(), false);
         StreamLocalSimpleAgg { base, logical }
     }
 
@@ -76,8 +73,7 @@ impl ToStreamProst for StreamLocalSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let (internal_tables, column_mapping) = self.logical.infer_internal_table_catalog();
-        // TODO: local or global simple agg?
-        ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
+        ProstStreamNode::LocalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
