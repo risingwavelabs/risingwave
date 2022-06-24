@@ -14,6 +14,7 @@
 
 use std::env;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::StorageConfig;
@@ -24,12 +25,17 @@ use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
 };
 use risingwave_storage::StateStoreImpl;
+use tokio::sync::oneshot::Sender;
+use tokio::task::JoinHandle;
 
 use super::MetaServiceOpts;
 
 pub struct HummockServiceOpts {
     pub meta_opts: MetaServiceOpts,
     pub hummock_url: String,
+
+    heartbeat_handle: Option<JoinHandle<()>>,
+    heartbeat_shutdown_sender: Option<Sender<()>>,
 }
 
 pub struct Metrics {
@@ -59,13 +65,20 @@ impl HummockServiceOpts {
         Ok(Self {
             meta_opts,
             hummock_url,
+            heartbeat_handle: None,
+            heartbeat_shutdown_sender: None,
         })
     }
 
     pub async fn create_hummock_store_with_metrics(
-        &self,
+        &mut self,
     ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>, Metrics)> {
         let meta_client = self.meta_opts.create_meta_client().await?;
+
+        let (heartbeat_handle, heartbeat_shutdown_sender) =
+            MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000));
+        self.heartbeat_handle = Some(heartbeat_handle);
+        self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 
         // FIXME: allow specify custom config
         let config = StorageConfig {
@@ -101,9 +114,23 @@ impl HummockServiceOpts {
     }
 
     pub async fn create_hummock_store(
-        &self,
+        &mut self,
     ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
         let (meta_client, hummock_client, _) = self.create_hummock_store_with_metrics().await?;
         Ok((meta_client, hummock_client))
+    }
+
+    pub async fn shutdown(&mut self) {
+        if let (Some(sender), Some(handle)) = (
+            self.heartbeat_shutdown_sender.take(),
+            self.heartbeat_handle.take(),
+        ) {
+            if let Err(err) = sender.send(()) {
+                tracing::warn!("Failed to send shutdown: {:?}", err);
+            }
+            if let Err(err) = handle.await {
+                tracing::warn!("Failed to join shutdown: {:?}", err);
+            }
+        }
     }
 }

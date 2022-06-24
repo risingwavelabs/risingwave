@@ -14,7 +14,7 @@
                 appendOnly: true
                 batchPlan:
                   tableDesc:
-                    tableId: 2
+                    tableId: 4
                     columns:
                       - columnType:
                           typeName: INT64
@@ -50,7 +50,7 @@
                 name: _row_id
             chain:
               tableRefId:
-                tableId: 2
+                tableId: 4
               upstreamFields:
                 - dataType:
                     typeName: INT64
@@ -119,6 +119,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -156,7 +157,7 @@
             appendOnly: true
             batchPlan:
               tableDesc:
-                tableId: 2
+                tableId: 4
                 columns:
                   - columnType:
                       typeName: INT64
@@ -192,7 +193,7 @@
             name: _row_id
         chain:
           tableRefId:
-            tableId: 2
+            tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -231,6 +232,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -268,7 +270,7 @@
             appendOnly: true
             batchPlan:
               tableDesc:
-                tableId: 2
+                tableId: 4
                 columns:
                   - columnType:
                       typeName: INT64
@@ -309,7 +311,7 @@
             name: _row_id
         chain:
           tableRefId:
-            tableId: 2
+            tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -352,6 +354,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -391,7 +394,7 @@
                     appendOnly: true
                     batchPlan:
                       tableDesc:
-                        tableId: 2
+                        tableId: 4
                         columns:
                           - columnType:
                               typeName: INT64
@@ -427,7 +430,7 @@
                     name: _row_id
                 chain:
                   tableRefId:
-                    tableId: 2
+                    tableId: 4
                   upstreamFields:
                     - dataType:
                         typeName: INT64
@@ -512,6 +515,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -545,7 +549,7 @@
                             appendOnly: true
                             batchPlan:
                               tableDesc:
-                                tableId: 2
+                                tableId: 4
                                 columns:
                                   - columnType:
                                       typeName: INT64
@@ -591,7 +595,7 @@
                             name: _row_id
                         chain:
                           tableRefId:
-                            tableId: 2
+                            tableId: 4
                           upstreamFields:
                             - dataType:
                                 typeName: INT64
@@ -795,6 +799,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:

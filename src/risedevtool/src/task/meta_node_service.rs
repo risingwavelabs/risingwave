@@ -86,8 +86,7 @@ impl MetaNodeService {
 
         if let Some(sec) = config.max_idle_secs_to_exit {
             if sec > 0 {
-                cmd.arg("--dangerous-max-idle-secs")
-                    .arg(format!("{}", sec));
+                cmd.arg("--dangerous-max-idle-secs").arg(format!("{}", sec));
             }
         }
 

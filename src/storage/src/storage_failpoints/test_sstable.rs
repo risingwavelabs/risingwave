@@ -30,7 +30,7 @@ use crate::monitor::StoreLocalStatistic;
 
 #[tokio::test]
 #[cfg(feature = "failpoints")]
-async fn test_failpoint_table_read() {
+async fn test_failpoints_table_read() {
     let mem_read_err_fp = "mem_read_err";
     // build remote table
     let sstable_store = mock_sstable_store();
@@ -73,7 +73,7 @@ async fn test_failpoint_table_read() {
 
 #[tokio::test]
 #[cfg(feature = "failpoints")]
-async fn test_failpoint_vacuum_and_metadata() {
+async fn test_failpoints_vacuum_and_metadata() {
     let metadata_upload_err = "metadata_upload_err";
     let mem_upload_err = "mem_upload_err";
     let mem_delete_err = "mem_delete_err";

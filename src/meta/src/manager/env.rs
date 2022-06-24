@@ -73,23 +73,28 @@ pub struct MetaOpts {
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
+    pub in_flight_barrier_nums: usize,
 }
 
 impl Default for MetaOpts {
     fn default() -> Self {
         Self {
             enable_recovery: false,
-            checkpoint_interval: Duration::from_millis(100),
+            checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
+            in_flight_barrier_nums: 40,
         }
     }
 }
+
 impl MetaOpts {
-    pub fn for_test(enable_recovery: bool, checkpoint_interval: u64) -> Self {
+    /// some test need `enable_recovery=true`
+    pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
-            checkpoint_interval: Duration::from_millis(checkpoint_interval),
+            checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
+            in_flight_barrier_nums: 40,
         }
     }
 }

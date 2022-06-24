@@ -26,6 +26,7 @@ mod order_by;
 mod project;
 mod row_seq_scan;
 mod sort_agg;
+mod sys_row_seq_scan;
 mod table_function;
 #[cfg(test)]
 pub mod test_utils;
@@ -62,6 +63,7 @@ pub use trace::*;
 pub use update::*;
 pub use values::*;
 
+use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -185,6 +187,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
             NodeBody::TableFunction => TableFunctionExecutorBuilder,
             NodeBody::HopWindow => HopWindowExecutor,
+            NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();
