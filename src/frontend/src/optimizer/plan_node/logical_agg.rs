@@ -26,7 +26,7 @@ use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
+    PredicatePushdown, StreamHashAgg, StreamLocalSimpleAgg, StreamSimpleAgg, ToBatch, ToStream,
 };
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
