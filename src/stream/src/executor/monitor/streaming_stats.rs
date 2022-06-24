@@ -35,6 +35,8 @@ pub struct StreamingMetrics {
     pub actor_poll_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_idle_duration: GenericGaugeVec<AtomicF64>,
     pub actor_idle_cnt: GenericGaugeVec<AtomicI64>,
+    pub actor_in_record_cnt: GenericCounterVec<AtomicU64>,
+    pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -172,6 +174,22 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let actor_in_record_cnt = register_int_counter_vec_with_registry!(
+            "stream_actor_in_record_cnt",
+            "Total number of rows actor received",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_out_record_cnt = register_int_counter_vec_with_registry!(
+            "stream_actor_out_record_cnt",
+            "Total number of rows actor sent",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
             "Join executor lookup miss duration",
@@ -213,6 +231,8 @@ impl StreamingMetrics {
             actor_poll_cnt,
             actor_idle_duration,
             actor_idle_cnt,
+            actor_in_record_cnt,
+            actor_out_record_cnt,
             source_output_row_count,
             exchange_recv_size,
             join_lookup_miss_count,

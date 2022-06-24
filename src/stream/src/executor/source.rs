@@ -29,7 +29,6 @@ use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::{Mutex, Notify};
-use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
@@ -146,60 +145,47 @@ impl SourceReader {
     #[try_stream(ok = StreamChunkWithState, error = RwError)]
     async fn stream_reader(
         stream_reader: Arc<Mutex<Option<Box<SourceStreamReaderImpl>>>>,
-        notifier: Arc<Notify>,
-        expected_barrier_latency_ms: u64,
+        #[expect(unused_variables)] notifier: Arc<Notify>,
+        #[expect(unused_variables)] expected_barrier_latency_ms: u64,
         mut abort_notifier: UnboundedReceiver<()>,
     ) {
         'outer: loop {
-            let now = Instant::now();
+            let mut reader = stream_reader.lock().await.take().unwrap();
+            let chunk_result: Option<Result<StreamChunkWithState>>;
 
-            // We allow data to flow for `expected_barrier_latency_ms` milliseconds.
-            while now.elapsed().as_millis() < expected_barrier_latency_ms as u128 {
-                let mut reader = stream_reader.lock().await.take().unwrap();
-                let chunk_result: Option<Result<StreamChunkWithState>>;
+            {
+                let chunk_future = reader.next();
+                let abort_future = abort_notifier.recv();
 
-                {
-                    let chunk_future = reader.next();
-                    let abort_future = abort_notifier.recv();
+                pin_mut!(chunk_future);
+                pin_mut!(abort_future);
 
-                    pin_mut!(chunk_future);
-                    pin_mut!(abort_future);
-
-                    match futures::future::select(chunk_future, abort_future).await {
-                        futures::future::Either::Left((chunk, _)) => {
-                            chunk_result = Some(chunk);
-                        }
-                        futures::future::Either::Right(_) => {
-                            chunk_result = None;
-                        }
+                match futures::future::select(chunk_future, abort_future).await {
+                    futures::future::Either::Left((chunk, _)) => {
+                        chunk_result = Some(chunk);
+                    }
+                    futures::future::Either::Right(_) => {
+                        chunk_result = None;
                     }
                 }
-
-                let mut reader_guard = stream_reader.lock().await;
-                if reader_guard.is_none() {
-                    *reader_guard = Some(reader);
-                } else {
-                    continue;
-                }
-                drop(reader_guard);
-                if let Some(chunk) = chunk_result {
-                    match chunk {
-                        Ok(c) => yield c,
-                        Err(e) => {
-                            error!("hang up stream reader due to polling error: {}", e);
-                            break 'outer;
-                        }
-                    }
-                };
             }
 
-            // Here we consider two cases:
-            //
-            // 1. Barrier arrived before waiting for notified. In this case, this await will
-            // complete instantly, and we will continue to produce new data.
-            // 2. Barrier arrived after waiting for notified. Then source will be stalled.
-
-            notifier.notified().await;
+            let mut reader_guard = stream_reader.lock().await;
+            if reader_guard.is_none() {
+                *reader_guard = Some(reader);
+            } else {
+                continue;
+            }
+            drop(reader_guard);
+            if let Some(chunk) = chunk_result {
+                match chunk {
+                    Ok(c) => yield c,
+                    Err(e) => {
+                        error!("hang up stream reader due to polling error: {}", e);
+                        break 'outer;
+                    }
+                }
+            };
         }
 
         futures::future::pending().await

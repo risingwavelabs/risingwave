@@ -74,7 +74,7 @@ pub struct LocalStreamManagerCore {
     state_store: StateStoreImpl,
 
     /// Metrics of the stream manager
-    streaming_metrics: Arc<StreamingMetrics>,
+    pub(crate) streaming_metrics: Arc<StreamingMetrics>,
 
     /// The pool of compute clients.
     ///
@@ -458,6 +458,7 @@ impl LocalStreamManagerCore {
             dispatcher_impls,
             actor_id,
             self.context.clone(),
+            self.streaming_metrics.clone(),
         ))
     }
 

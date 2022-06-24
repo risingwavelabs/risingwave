@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod catalog;
-mod env;
-mod hash_mapping;
-mod id;
-mod idle;
-mod notification;
-mod user;
+use lazy_static::lazy_static;
+use regex::Regex;
 
-pub use catalog::*;
-pub use env::*;
-pub use hash_mapping::*;
-pub use id::*;
-pub use idle::*;
-pub use notification::*;
-pub use user::*;
+pub fn generate_intertable_name(mview_name: &String, table_id: u32) -> String {
+    format!("__INTERNAL_{}_{}", mview_name, table_id)
+}
+
+pub fn valid_table_name(table_name: &str) -> bool {
+    lazy_static! {
+        static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__INTERNAL_.*_\d+").unwrap();
+    }
+    !INTERNAL_TABLE_NAME.is_match(table_name)
+}

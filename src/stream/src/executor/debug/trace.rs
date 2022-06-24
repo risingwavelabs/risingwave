@@ -24,6 +24,11 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ExecutorInfo, Message, MessageStream};
 use crate::task::ActorId;
 
+/// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries and
+/// might affect the prometheus performance. If you only need actor input and output rows data, see
+/// `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
+const ENABLE_EXECUTOR_ROW_COUNT: bool = false;
+
 /// Streams wrapped by `trace` will print data passing in the stream graph to stdout.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn trace(
@@ -52,10 +57,12 @@ pub async fn trace(
     while let Some(message) = input.next().instrument(span()).await.transpose()? {
         if let Message::Chunk(chunk) = &message {
             if chunk.cardinality() > 0 {
-                metrics
-                    .executor_row_count
-                    .with_label_values(&[&actor_id_string, &executor_id_string])
-                    .inc_by(chunk.cardinality() as u64);
+                if ENABLE_EXECUTOR_ROW_COUNT {
+                    metrics
+                        .executor_row_count
+                        .with_label_values(&[&actor_id_string, &executor_id_string])
+                        .inc_by(chunk.cardinality() as u64);
+                }
                 event!(tracing::Level::TRACE, prev = %info.identity, msg = "chunk", "input = \n{:#?}", chunk);
             }
         }
@@ -77,12 +84,14 @@ pub async fn metrics(
     pin_mut!(input);
 
     while let Some(message) = input.next().await.transpose()? {
-        if let Message::Chunk(chunk) = &message {
-            if chunk.cardinality() > 0 {
-                metrics
-                    .executor_row_count
-                    .with_label_values(&[&actor_id_string, &executor_id_string])
-                    .inc_by(chunk.cardinality() as u64);
+        if ENABLE_EXECUTOR_ROW_COUNT {
+            if let Message::Chunk(chunk) = &message {
+                if chunk.cardinality() > 0 {
+                    metrics
+                        .executor_row_count
+                        .with_label_values(&[&actor_id_string, &executor_id_string])
+                        .inc_by(chunk.cardinality() as u64);
+                }
             }
         }
 
