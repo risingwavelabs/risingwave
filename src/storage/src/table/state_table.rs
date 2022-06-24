@@ -16,10 +16,12 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{Index, RangeBounds};
+use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
@@ -41,21 +43,42 @@ pub struct StateTable<S: StateStore> {
 }
 
 impl<S: StateStore> StateTable<S> {
+    /// Note: `dist_key_indices` is ignored, use `new_with_distribution` instead.
+    // TODO: remove this after all state table usages are replaced by `new_with_distribution`.
     pub fn new(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
-        dist_key_indices: Option<Vec<usize>>,
+        _dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            keyspace,
+            columns,
+            order_types,
+            pk_indices,
+            vec![],
+            CellBasedTable::<S, READ_WRITE>::fallback_vnodes(),
+        )
+    }
+
+    pub fn new_with_distribution(
+        keyspace: Keyspace<S>,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        dist_key_indices: Vec<usize>,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
                 keyspace,
-                column_descs,
+                columns,
                 order_types,
                 pk_indices,
                 dist_key_indices,
+                vnodes,
             ),
         }
     }
