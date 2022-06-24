@@ -133,12 +133,21 @@ impl LogicalAgg {
         for agg_call in &self.agg_calls {
             let mut internal_pk_indices = vec![];
             let mut columns = vec![];
+            let mut column_names = HashMap::new(); // avoid duplicate column name
             let mut order_desc = vec![];
             for &idx in &self.group_keys {
                 let column_id = columns.len() as i32;
                 internal_pk_indices.push(column_id as usize); // Currently our column index is same as column id
                 column_mapping.insert(idx, column_id);
-                let column_desc = ColumnDesc::from_field_with_column_id(&fields[idx], column_id);
+                let mut column_desc =
+                    ColumnDesc::from_field_with_column_id(&fields[idx], column_id);
+                let column_name = column_desc.name.clone();
+                if let Some(occurence) = column_names.get_mut(&column_name) {
+                    column_desc.name = format!("{}_{}", column_name, occurence);
+                    *occurence += 1;
+                } else {
+                    column_names.insert(column_name, 0);
+                }
                 columns.push(ColumnCatalog {
                     column_desc: column_desc.clone(),
                     is_hidden: false,
@@ -189,6 +198,7 @@ impl LogicalAgg {
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
                 vnode_mapping: None,
+                properties: HashMap::default(),
             });
         }
         (table_catalogs, column_mapping)

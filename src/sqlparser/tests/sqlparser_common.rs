@@ -413,13 +413,6 @@ fn parse_select_count_distinct() {
 }
 
 #[test]
-fn parse_not() {
-    let sql = "SELECT id FROM customer WHERE NOT salary = ''";
-    let _ast = verified_only_select(sql);
-    // TODO: add assertions
-}
-
-#[test]
 fn parse_invalid_infix_not() {
     let res = parse_sql_statements("SELECT c FROM t WHERE c NOT (");
     assert_eq!(
@@ -538,6 +531,8 @@ fn parse_compound_expr_2() {
 fn parse_unary_math() {
     use self::Expr::*;
     let sql = "- a + - b";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("(- a) + (- b)", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(UnaryOp {
@@ -550,7 +545,7 @@ fn parse_unary_math() {
                 expr: Box::new(Identifier(Ident::new("b"))),
             }),
         },
-        verified_expr(sql)
+        ast
     );
 }
 
@@ -603,8 +598,10 @@ fn parse_is_not_distinct_from() {
 fn parse_not_precedence() {
     // NOT has higher precedence than OR/AND, so the following must parse as (NOT true) OR true
     let sql = "NOT true OR true";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("(NOT true) OR true", &ast.to_string());
     assert_matches!(
-        verified_expr(sql),
+        ast,
         Expr::BinaryOp {
             op: BinaryOperator::Or,
             ..
@@ -614,8 +611,10 @@ fn parse_not_precedence() {
     // But NOT has lower precedence than comparison operators, so the following parses as NOT (a IS
     // NULL)
     let sql = "NOT a IS NULL";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("NOT (a IS NULL)", &ast.to_string());
     assert_matches!(
-        verified_expr(sql),
+        ast,
         Expr::UnaryOp {
             op: UnaryOperator::Not,
             ..
@@ -639,8 +638,10 @@ fn parse_not_precedence() {
 
     // NOT has lower precedence than LIKE, so the following parses as NOT ('a' NOT LIKE 'b')
     let sql = "NOT 'a' NOT LIKE 'b'";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("NOT ('a' NOT LIKE 'b')", &ast.to_string());
     assert_eq!(
-        verified_expr(sql),
+        ast,
         Expr::UnaryOp {
             op: UnaryOperator::Not,
             expr: Box::new(Expr::BinaryOp {
@@ -1554,7 +1555,7 @@ fn parse_alter_table_constraints() {
     check_one("PRIMARY KEY (foo, bar)");
     check_one("UNIQUE (id)");
     check_one("FOREIGN KEY (foo, bar) REFERENCES AnotherTable(foo, bar)");
-    check_one("CHECK ((end_date > start_date) OR end_date IS NULL)");
+    check_one("CHECK ((end_date > start_date) OR (end_date IS NULL))");
 
     fn check_one(constraint_text: &str) {
         match verified_stmt(&format!("ALTER TABLE tab ADD {}", constraint_text)) {

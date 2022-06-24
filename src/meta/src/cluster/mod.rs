@@ -218,7 +218,7 @@ where
                     _ = min_interval.tick() => {},
                     // Shutdown
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Heartbeat checker is shutting down");
+                        tracing::info!("Heartbeat checker is stopped");
                         return;
                     }
                 }

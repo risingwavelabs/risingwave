@@ -239,7 +239,7 @@ impl HummockStorage {
                                 )
                                 .await?
                             {
-                                return Ok(Some(v));
+                                return Ok(v);
                             }
                         }
                     }
@@ -269,7 +269,7 @@ impl HummockStorage {
                         )
                         .await?
                     {
-                        return Ok(Some(v));
+                        return Ok(v);
                     }
                 }
             }

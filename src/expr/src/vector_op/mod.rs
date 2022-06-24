@@ -37,6 +37,7 @@ pub mod substr;
 pub mod to_char;
 pub mod translate;
 pub mod trim;
+pub mod trim_characters;
 pub mod tumble;
 pub mod upper;
 
