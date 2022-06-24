@@ -36,13 +36,13 @@ impl StreamLocalSimpleAgg {
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
-        // Simple agg executor might change the append-only behavior of the stream.
+        let append_only = input.append_only();
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             pk_indices,
             input_dist.clone(),
-            false,
+            append_only,
         );
         StreamLocalSimpleAgg { base, logical }
     }
