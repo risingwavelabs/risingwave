@@ -42,6 +42,10 @@ impl IdleManager {
         }
     }
 
+    pub fn get_config_max_idle(&self) -> Duration {
+        Duration::from_millis(self.config_max_idle_ms)
+    }
+
     fn offset_ms_now(&self) -> u64 {
         let now = Instant::now();
         if now <= self.instant_base {
@@ -75,6 +79,11 @@ impl IdleManager {
         check_interval: Duration,
         idle_send: tokio::sync::oneshot::Sender<()>,
     ) -> (JoinHandle<()>, Sender<()>) {
+        let dur = idle_manager.get_config_max_idle();
+        if !dur.is_zero() {
+            tracing::warn!("--dangerous-max-idle-secs is set. The meta server will be automatically stopped after idle for {:?}.", dur)
+        }
+
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval = tokio::time::interval(check_interval);
