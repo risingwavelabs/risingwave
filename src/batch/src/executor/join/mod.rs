@@ -18,10 +18,13 @@ mod hash_join_state;
 pub mod nested_loop_join;
 mod row_level_iter;
 mod sort_merge_join;
+mod lookup_join;
 
 pub use chunked_data::*;
 pub use hash_join::*;
 pub use nested_loop_join::*;
+use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 pub use sort_merge_join::*;
 
@@ -98,4 +101,39 @@ impl Default for JoinType {
     fn default() -> Self {
         Inner
     }
+}
+
+/// The layout be like:
+///
+/// [ `left` chunk     |  `right` chunk     ]
+///
+/// # Arguments
+///
+/// * `left` Data chunk padded to the left half of result data chunk..
+/// * `right` Data chunk padded to the right half of result data chunk.
+///
+/// Note: Use this function with careful: It is not designed to be a general concatenate of two
+/// chunk: Usually one side should be const row chunk and the other side is normal chunk.
+/// Currently only feasible to use in join executor.
+/// If two normal chunk, the result is undefined.
+fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
+    assert_eq!(left.capacity(), right.capacity());
+    let mut concated_columns = Vec::with_capacity(left.columns().len() + right.columns().len());
+    concated_columns.extend_from_slice(left.columns());
+    concated_columns.extend_from_slice(right.columns());
+    // Only handle one side is constant row chunk: One of visibility must be None.
+    let vis = match (left.vis(), right.vis()) {
+        (Vis::Compact(_), _) => right.vis().clone(),
+        (_, Vis::Compact(_)) => left.vis().clone(),
+        (Vis::Bitmap(_), Vis::Bitmap(_)) => {
+            return Err(ErrorCode::NotImplemented(
+                "The concatenate behaviour of two chunk with visibility is undefined"
+                    .to_string(),
+                None.into(),
+            )
+                .into())
+        }
+    };
+    let data_chunk = DataChunk::new(concated_columns, vis);
+    Ok(data_chunk)
 }

@@ -29,7 +29,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
-use crate::executor::join::JoinType;
+use crate::executor::join::{concatenate, JoinType};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -364,7 +364,7 @@ impl NestedLoopJoinExecutor {
                 build_side_chunk.capacity(),
                 &self.probe_side_schema,
             )?;
-            let new_chunk = Self::concatenate(&const_row_chunk, build_side_chunk)?;
+            let new_chunk = concatenate(&const_row_chunk, build_side_chunk)?;
             // Join with current row.
             let sel_vector = self.join_expr.eval(&new_chunk)?;
             let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().try_into()?);
@@ -545,40 +545,6 @@ impl NestedLoopJoinExecutor {
         Ok(None)
     }
 
-    /// The layout be like:
-    ///
-    /// [ `left` chunk     |  `right` chunk     ]
-    ///
-    /// # Arguments
-    ///
-    /// * `left` Data chunk padded to the left half of result data chunk..
-    /// * `right` Data chunk padded to the right half of result data chunk.
-    ///
-    /// Note: Use this function with careful: It is not designed to be a general concatenate of two
-    /// chunk: Usually one side should be const row chunk and the other side is normal chunk.
-    /// Currently only feasible to use in join executor.
-    /// If two normal chunk, the result is undefined.
-    fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
-        assert_eq!(left.capacity(), right.capacity());
-        let mut concated_columns = Vec::with_capacity(left.columns().len() + right.columns().len());
-        concated_columns.extend_from_slice(left.columns());
-        concated_columns.extend_from_slice(right.columns());
-        // Only handle one side is constant row chunk: One of visibility must be None.
-        let vis = match (left.vis(), right.vis()) {
-            (Vis::Compact(_), _) => right.vis().clone(),
-            (_, Vis::Compact(_)) => left.vis().clone(),
-            (Vis::Bitmap(_), Vis::Bitmap(_)) => {
-                return Err(ErrorCode::NotImplemented(
-                    "The concatenate behaviour of two chunk with visibility is undefined"
-                        .to_string(),
-                    None.into(),
-                )
-                .into())
-            }
-        };
-        let data_chunk = DataChunk::new(concated_columns, vis);
-        Ok(data_chunk)
-    }
 }
 #[cfg(test)]
 mod tests {
@@ -594,7 +560,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::join::nested_loop_join::{NestedLoopJoinExecutor, RowLevelIter};
-    use crate::executor::join::JoinType;
+    use crate::executor::join::{concatenate, JoinType};
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
 
@@ -618,7 +584,7 @@ mod tests {
             columns.clone(),
             Vis::Bitmap((bool_vec.clone()).try_into().unwrap()),
         );
-        let chunk = NestedLoopJoinExecutor::concatenate(&chunk1, &chunk2).unwrap();
+        let chunk = concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
         assert_eq!(chunk.capacity(), chunk2.capacity());
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
