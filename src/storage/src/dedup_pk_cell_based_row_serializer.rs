@@ -18,6 +18,7 @@ use std::iter::Iterator;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
+use risingwave_common::types::VirtualNode;
 
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::cell_serializer::{CellSerializer, KeyBytes, ValueBytes};
@@ -99,25 +100,25 @@ impl DedupPkCellBasedRowSerializer {
 
 impl CellSerializer for DedupPkCellBasedRowSerializer {
     /// Remove dup pk datums + serialize
-    fn serialize(&mut self, pk: &[u8], row: Row) -> Result<Vec<(KeyBytes, ValueBytes)>> {
+    fn serialize(
+        &mut self,
+        vnode: VirtualNode,
+        pk: &[u8],
+        row: Row,
+    ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
         let row = self.remove_dup_pk_datums(row);
-        self.inner.serialize(pk, row)
+        self.inner.serialize(vnode, pk, row)
     }
 
     /// Remove dup pk datums + `serialize_without_filter`
     fn serialize_without_filter(
         &mut self,
+        vnode: VirtualNode,
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
         let row = self.remove_dup_pk_datums(row);
-        self.inner.serialize_without_filter(pk, row)
-    }
-
-    /// Remove dup pk datums + `serialize_cell_key`
-    fn serialize_cell_key(&mut self, pk: &[u8], row: &Row) -> Result<Vec<KeyBytes>> {
-        let row = self.remove_dup_pk_datums_by_ref(row);
-        self.inner.serialize_cell_key(pk, &row)
+        self.inner.serialize_without_filter(vnode, pk, row)
     }
 
     /// Get column ids used by cell serializer to serialize.
@@ -136,6 +137,7 @@ mod tests {
 
     use super::*;
     use crate::cell_based_row_deserializer::make_cell_based_row_deserializer;
+    use crate::table::cell_based_table::DEFAULT_VNODE;
 
     #[test]
     fn test_dedup_pk_serialization() {
@@ -156,7 +158,7 @@ mod tests {
             Some(111_i32.into()),
             Some(1111_f64.into()),
         ]);
-        let actual = serializer.serialize(&pk, input).unwrap();
+        let actual = serializer.serialize(DEFAULT_VNODE, &pk, input).unwrap();
         // datums not in pk (2)
         // + datums whose memcmp not equal to value enc (1)
         // + delimiter cell (1)
@@ -175,7 +177,7 @@ mod tests {
                 .deserialize(pk_with_cell_id, cell)
                 .unwrap();
         }
-        let (_k, row) = compact_deserializer.take().unwrap();
+        let (_vnode, _k, row) = compact_deserializer.take().unwrap();
         let compact_expected = Row(vec![
             Some(1_i32.into()),
             Some(111_i32.into()),
@@ -189,7 +191,7 @@ mod tests {
                 .deserialize(pk_with_cell_id, cell)
                 .unwrap();
         }
-        let (_k, row) = normal_deserializer.take().unwrap();
+        let (_vnode, _k, row) = normal_deserializer.take().unwrap();
         let normal_expected = Row(vec![
             Some(1_i32.into()),
             None,

@@ -15,26 +15,29 @@
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
+use risingwave_common::types::VirtualNode;
 
 pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
 
 pub trait CellSerializer {
     /// Serialize key and value.
-    fn serialize(&mut self, pk: &[u8], row: Row) -> Result<Vec<(KeyBytes, ValueBytes)>>;
+    fn serialize(
+        &mut self,
+        vnode: VirtualNode,
+        pk: &[u8],
+        row: Row,
+    ) -> Result<Vec<(KeyBytes, ValueBytes)>>;
 
     /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
     /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
     /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
     fn serialize_without_filter(
         &mut self,
+        vnode: VirtualNode,
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>>;
-
-    /// Different from [`CellSerializer::serialize`], only serialize key into cell key (With
-    /// column id appended).
-    fn serialize_cell_key(&mut self, pk: &[u8], row: &Row) -> Result<Vec<KeyBytes>>;
 
     /// Get column ids used by cell serializer to serialize.
     /// TODO: This should probably not be exposed to user.

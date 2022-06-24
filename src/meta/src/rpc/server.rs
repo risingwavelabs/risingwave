@@ -188,6 +188,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 META_LEADER_KEY.as_bytes().to_vec(),
                 old_leader_info,
             );
+            txn.put(
+                META_CF_NAME.to_string(),
+                META_LEADER_KEY.as_bytes().to_vec(),
+                leader_info.encode_to_vec(),
+            );
         } else {
             if let Err(e) = meta_store
                 .put_cf(
@@ -254,7 +259,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         biased;
                     // Shutdown
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Barrier manager is shutting down");
+                        tracing::info!("Stop register leader info");
                         return;
                     }
                     // Wait for the minimal interval,
@@ -430,6 +435,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
+
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
