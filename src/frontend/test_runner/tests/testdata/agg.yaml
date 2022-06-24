@@ -150,7 +150,7 @@
     StreamMaterialize { columns: [agg#0(hidden), cnt, sum], pk_columns: [] }
       StreamSimpleAgg { aggs: [sum($0), sum($1), sum($2)] }
         StreamExchange { dist: Single }
-          StreamSimpleAgg { aggs: [count, count($0), sum($0)] }
+          StreamLocalSimpleAgg { aggs: [count, count($0), sum($0)] }
             StreamProject { exprs: [($0 + $1), $2] }
               StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
@@ -273,7 +273,7 @@
       StreamSimpleAgg { aggs: [count, sum($1)] }
         StreamSimpleAgg { aggs: [sum($0), sum($1)] }
           StreamExchange { dist: Single }
-            StreamSimpleAgg { aggs: [count, sum($0)] }
+            StreamLocalSimpleAgg { aggs: [count, sum($0)] }
               StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     /* simple-agg with some shard distribution */
@@ -288,7 +288,7 @@
     StreamMaterialize { columns: [agg#0(hidden), s1], pk_columns: [] }
       StreamSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
-          StreamSimpleAgg { aggs: [count, sum($0)] }
+          StreamLocalSimpleAgg { aggs: [count, sum($0)] }
             StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     /* simple-agg with hash shard distribution */
@@ -306,7 +306,7 @@
     StreamMaterialize { columns: [agg#0(hidden), s1], pk_columns: [] }
       StreamSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
-          StreamSimpleAgg { aggs: [count, sum($0)] }
+          StreamLocalSimpleAgg { aggs: [count, sum($0)] }
             StreamProject { exprs: [$2, $0] }
               StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
                 StreamExchange { dist: HashShard([0]) }
