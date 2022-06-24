@@ -1798,7 +1798,7 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
     }];
 
     // ---------- Init state table interface
-    let mut state = DedupPkStateTable::new_dedup_pk_state_table(
+    let mut state = DedupPkStateTable::new(
         keyspace.clone(),
         actual_column_descs.clone(),
         order_types.clone(),
