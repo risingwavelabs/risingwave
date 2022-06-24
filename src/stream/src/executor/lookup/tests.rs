@@ -23,6 +23,7 @@ use risingwave_common::util::ordered::{deserialize_column_id, SENTINEL_CELL_ID};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::store::ReadOptions;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::lookup::impl_::LookupExecutorParams;
@@ -240,7 +241,18 @@ async fn test_lookup_this_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
 
-    for (k, v) in store.scan::<_, Vec<u8>>(.., None, u64::MAX).await.unwrap() {
+    for (k, v) in store
+        .scan::<_, Vec<u8>>(
+            ..,
+            None,
+            ReadOptions {
+                epoch: u64::MAX,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap()
+    {
         // Do not deserialize datum for SENTINEL_CELL_ID cuz the value length is 0.
         if deserialize_column_id(&k[k.len() - 4..]).unwrap() != SENTINEL_CELL_ID {
             println!(

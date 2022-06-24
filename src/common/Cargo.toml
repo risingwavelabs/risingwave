@@ -28,6 +28,7 @@ parking_lot = "0.12"
 paste = "1"
 prometheus = { version = "0.13" }
 prost = "0.10"
+regex = "1"
 risingwave_pb = { path = "../prost" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }

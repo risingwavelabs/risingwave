@@ -74,7 +74,7 @@ pub struct LocalStreamManagerCore {
     state_store: StateStoreImpl,
 
     /// Metrics of the stream manager
-    streaming_metrics: Arc<StreamingMetrics>,
+    pub(crate) streaming_metrics: Arc<StreamingMetrics>,
 
     /// The pool of compute clients.
     ///
@@ -174,6 +174,13 @@ impl LocalStreamManager {
         Ok(())
     }
 
+    /// drain collect rx less than `prev_epoch` in barrier manager.
+    pub fn drain_collect_rx(&self, prev_epoch: u64) {
+        let core = self.core.lock();
+        let mut barrier_manager = core.context.lock_barrier_manager();
+        barrier_manager.drain_collect_rx(prev_epoch);
+    }
+
     /// Use `prev_epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
     pub async fn collect_barrier_and_sync(
@@ -250,6 +257,7 @@ impl LocalStreamManager {
             span: tracing::Span::none(),
         };
 
+        self.drain_collect_rx(barrier.epoch.prev);
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
         self.collect_barrier_and_sync(barrier.epoch.prev, false)
             .await;
@@ -450,6 +458,7 @@ impl LocalStreamManagerCore {
             dispatcher_impls,
             actor_id,
             self.context.clone(),
+            self.streaming_metrics.clone(),
         ))
     }
 
