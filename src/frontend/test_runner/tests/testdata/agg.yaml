@@ -317,7 +317,7 @@
     select min(v1) as a1, max(v2) as a2 from t;
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), a1, a2], pk_columns: [] }
-      StreamSimpleAgg { aggs: [sum($0), min($1), max($2)] }
+      StreamAppendOnlySimpleAgg { aggs: [sum($0), min($1), max($2)] }
         StreamExchange { dist: Single }
           StreamAppendOnlyLocalSimpleAgg { aggs: [count, min($0), max($1)] }
             StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
