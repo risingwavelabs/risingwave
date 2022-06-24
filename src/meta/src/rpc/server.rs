@@ -259,7 +259,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         biased;
                     // Shutdown
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Barrier manager is stopped");
+                        tracing::info!("Register leader info is stopped");
                         return;
                     }
                     // Wait for the minimal interval,
