@@ -83,8 +83,6 @@ impl OrderedRowSerializer {
     }
 
     pub fn serialize(&self, row: &Row, append_to: &mut Vec<u8>) {
-        println!("serialize pk {:#?}", row);
-        println!("with order types {:#?}", self.order_types);
         self.serialize_datums(row.values(), append_to)
     }
 
