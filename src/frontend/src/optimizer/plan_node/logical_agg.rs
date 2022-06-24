@@ -728,7 +728,7 @@ impl ToStream for LogicalAgg {
             {
                 // partial agg
                 let partial_agg_plan =
-                    StreamSimpleAgg::new(self.clone_with_input(input_stream)).into();
+                    StreamLocalSimpleAgg::new(self.clone_with_input(input_stream)).into();
 
                 // insert exchange
                 let exchange = StreamExchange::new(partial_agg_plan, Distribution::Single).into();

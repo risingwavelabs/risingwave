@@ -20,6 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::optimizer::property::Distribution;
 
 #[derive(Debug, Clone)]
 pub struct StreamSimpleAgg {
@@ -33,15 +34,13 @@ impl StreamSimpleAgg {
         let pk_indices = logical.base.pk_indices.to_vec();
         let input = logical.input();
         let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Single => Distribution::Single,
+            _ => panic!(),
+        };
 
         // Simple agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            pk_indices,
-            input_dist.clone(),
-            false,
-        );
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
         StreamSimpleAgg { base, logical }
     }
 
