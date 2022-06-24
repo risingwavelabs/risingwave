@@ -445,7 +445,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let (idle_send, mut idle_recv) = tokio::sync::oneshot::channel();
     sub_tasks.push(
-        IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(1), idle_send)
+        IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
             .await,
     );
 
