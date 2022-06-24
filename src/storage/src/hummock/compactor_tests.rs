@@ -25,6 +25,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{get_epoch, get_table_id};
+    use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
@@ -235,8 +236,16 @@ mod tests {
         }
 
         // 2. get compact task
+        let manual_compcation_option = ManualCompactionOption {
+            level: 0,
+            ..Default::default()
+        };
+        // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .manual_get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                manual_compcation_option,
+            )
             .await
             .unwrap()
             .unwrap();
@@ -293,7 +302,7 @@ mod tests {
 
         let drop_table_id = 1;
         let existing_table_ids = 2;
-        let kv_count = 128;
+        let kv_count = 1024;
         let mut epoch: u64 = 1;
         for index in 0..kv_count {
             let table_id = if index % 2 == 0 {
@@ -324,8 +333,16 @@ mod tests {
         }
 
         // 2. get compact task
+        let manual_compcation_option = ManualCompactionOption {
+            level: 0,
+            ..Default::default()
+        };
+        // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .manual_get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                manual_compcation_option,
+            )
             .await
             .unwrap()
             .unwrap();
@@ -429,16 +446,18 @@ mod tests {
         let existing_table_id = 2;
         let kv_count = 128;
         let mut epoch: u64 = 1;
+        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         for _ in 0..kv_count {
-            let table_id = existing_table_id;
-            let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
-            let mut write_batch = keyspace.state_store().start_write_batch();
-            let mut local = write_batch.prefixify(&keyspace);
             epoch += 1;
+            let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
+                epoch,
+                table_id: Default::default(),
+            });
+            let mut local = write_batch.prefixify(&keyspace);
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
-            write_batch.ingest(epoch).await.unwrap();
+            write_batch.ingest().await.unwrap();
 
             storage.sync(Some(epoch)).await.unwrap();
             hummock_meta_client
@@ -450,12 +469,20 @@ mod tests {
                 .unwrap();
         }
 
+        let manual_compcation_option = ManualCompactionOption {
+            level: 0,
+            ..Default::default()
+        };
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .manual_get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                manual_compcation_option,
+            )
             .await
             .unwrap()
             .unwrap();
+
         compact_task.existing_table_ids.push(existing_table_id);
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
@@ -498,7 +525,7 @@ mod tests {
                 .meta
                 .key_count;
         }
-        assert_eq!(ttl_expire, key_count);
+        assert_eq!(ttl_expire, key_count); // ttl will clean the key (which epoch < epoch - ttl)
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
@@ -514,7 +541,17 @@ mod tests {
             .try_update_pinned_version(version);
 
         // 6. scan kv to check key table_id
-        let scan_result = storage.scan::<_, Vec<u8>>(.., None, epoch).await.unwrap();
+        let scan_result = storage
+            .scan::<_, Vec<u8>>(
+                ..,
+                None,
+                ReadOptions {
+                    epoch,
+                    table_id: Default::default(),
+                },
+            )
+            .await
+            .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
             let table_id = get_table_id(&k).unwrap();
