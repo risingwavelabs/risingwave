@@ -418,11 +418,6 @@ where
         &self,
         mut fragment_graph: StreamFragmentGraph,
         id: TableId,
-        // schema_id: SchemaId,
-        // database_id: DatabaseId,
-        // table_name: String,
-        // affiliated_source: Option<Source>,
-        // table_properties: HashMap<String, String>,
         mut ctx: CreateMaterializedViewContext,
     ) -> RwResult<Vec<Table>> {
         use risingwave_common::catalog::TableId;
@@ -457,14 +452,6 @@ where
             .cluster_manager
             .get_parallel_unit_count(Some(ParallelUnitType::Hash))
             .await;
-        // let mut ctx = CreateMaterializedViewContext {
-        //     affiliated_source,
-        //     schema_id,
-        //     database_id,
-        //     mview_name: table_name,
-        //     table_properties,
-        //     ..Default::default()
-        // };
 
         let mut actor_graph_builder =
             ActorGraphBuilder::new(self.env.id_gen_manager_ref(), &fragment_graph, &mut ctx)
