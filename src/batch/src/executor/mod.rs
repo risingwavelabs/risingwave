@@ -33,6 +33,7 @@ mod top_n;
 mod trace;
 mod update;
 mod values;
+mod expand;
 
 use async_recursion::async_recursion;
 pub use delete::*;
@@ -61,6 +62,7 @@ pub use top_n::*;
 pub use trace::*;
 pub use update::*;
 pub use values::*;
+pub use expand::*;
 
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
@@ -187,6 +189,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::TableFunction => TableFunctionExecutorBuilder,
             NodeBody::HopWindow => HopWindowExecutor,
             NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
+            NodeBody::Expand => ExpandExecutor,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();

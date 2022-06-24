@@ -222,6 +222,7 @@ mod batch_table_function;
 mod batch_topn;
 mod batch_update;
 mod batch_values;
+mod batch_expand;
 mod logical_agg;
 mod logical_apply;
 mod logical_delete;
@@ -271,6 +272,7 @@ pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
+pub use batch_expand::BatchExpand;
 pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
@@ -357,6 +359,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, TopN }
             , { Batch, HopWindow }
             , { Batch, TableFunction }
+            , { Batch, Expand }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -399,7 +402,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, MultiJoin }
             , { Logical, Expand }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
-            // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
+            // if we dont support that, we don't need LogicalSort, just require the Order at the top of query
         }
     };
 }
@@ -427,6 +430,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Update }
             , { Batch, HopWindow }
             , { Batch, TableFunction }
+            , { Batch, Expand }
         }
     };
 }

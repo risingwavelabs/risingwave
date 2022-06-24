@@ -19,7 +19,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
 use super::{
-    ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    BatchExpand, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
+    ToStream,
 };
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
@@ -154,7 +155,9 @@ impl PredicatePushdown for LogicalExpand {
 
 impl ToBatch for LogicalExpand {
     fn to_batch(&self) -> Result<PlanRef> {
-        todo!()
+        let new_input = self.input.to_batch()?;
+        let new_logical = self.clone_with_input(new_input);
+        Ok(BatchExpand::new(new_logical).into())
     }
 }
 
@@ -172,6 +175,7 @@ impl ToStream for LogicalExpand {
 mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+
     use crate::optimizer::plan_node::{LogicalExpand, LogicalValues, PlanTreeNodeUnary};
     use crate::session::OptimizerContext;
 
@@ -219,5 +223,3 @@ mod tests {
         assert_eq!(values.schema().fields()[0], fields[1]);
     }
 }
-
-
