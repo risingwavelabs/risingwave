@@ -16,6 +16,7 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
+use crate::manager::MetaSrvEnv;
 use crate::storage::MetaStore;
 use crate::stream::GlobalStreamManagerRef;
 
@@ -26,6 +27,7 @@ pub struct StreamServiceImpl<S>
 where
     S: MetaStore,
 {
+    env: MetaSrvEnv<S>,
     global_stream_manager: GlobalStreamManagerRef<S>,
 }
 
@@ -33,8 +35,9 @@ impl<S> StreamServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(global_stream_manager: GlobalStreamManagerRef<S>) -> Self {
+    pub fn new(env: MetaSrvEnv<S>, global_stream_manager: GlobalStreamManagerRef<S>) -> Self {
         StreamServiceImpl {
+            env,
             global_stream_manager,
         }
     }
@@ -47,6 +50,7 @@ where
 {
     #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
+        self.env.idle_manager().record_activity();
         let _req = request.into_inner();
 
         self.global_stream_manager.flush().await?;

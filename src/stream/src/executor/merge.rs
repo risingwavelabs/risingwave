@@ -106,6 +106,9 @@ pub struct MergeExecutor {
 
     /// Actor operator context
     status: OperatorInfoStatus,
+
+    /// Metrics
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl MergeExecutor {
@@ -116,6 +119,7 @@ impl MergeExecutor {
         inputs: Vec<Receiver<Message>>,
         actor_context: ActorContextRef,
         receiver_id: u64,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
             upstreams: inputs,
@@ -126,6 +130,7 @@ impl MergeExecutor {
                 identity: "MergeExecutor".to_string(),
             },
             status: OperatorInfoStatus::new(actor_context, receiver_id),
+            metrics,
         }
     }
 }
@@ -138,7 +143,20 @@ impl Executor for MergeExecutor {
         let status = self.status;
         let select_all = SelectReceivers::new(self.actor_id, status, upstreams);
         // Channels that're blocked by the barrier to align.
-        select_all.boxed()
+        let actor_id_str = self.actor_id.to_string();
+        let metrics = self.metrics.clone();
+        select_all
+            .map(move |msg| {
+                if let Ok(Message::Chunk(chunk)) = &msg {
+                    metrics
+                        .actor_in_record_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .inc_by(chunk.cardinality() as _);
+                }
+
+                msg
+            })
+            .boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -214,6 +232,7 @@ impl Stream for SelectReceivers {
                         }
                         Message::Chunk(chunk) => {
                             let message = Message::Chunk(chunk);
+
                             self.status.next_message(&message);
                             self.last_base = (idx + 1) % self.upstreams.len();
                             return Poll::Ready(Some(Ok(message)));
@@ -284,8 +303,16 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger =
-            MergeExecutor::new(Schema::default(), vec![], 0, rxs, ActorContext::create(), 0);
+        let metrics = Arc::new(StreamingMetrics::unused());
+        let merger = MergeExecutor::new(
+            Schema::default(),
+            vec![],
+            0,
+            rxs,
+            ActorContext::create(),
+            0,
+            metrics,
+        );
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();

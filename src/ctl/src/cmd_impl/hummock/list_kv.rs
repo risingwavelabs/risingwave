@@ -19,7 +19,7 @@ use risingwave_storage::StateStore;
 use crate::common::HummockServiceOpts;
 
 pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
-    let hummock_opts = HummockServiceOpts::from_env()?;
+    let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (_, hummock) = hummock_opts.create_hummock_store().await?;
     if epoch == u64::MAX {
         tracing::info!("using u64::MAX as epoch");
@@ -56,5 +56,6 @@ pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
         println!("{} {:?} => {:?}", print_string, k, v)
     }
 
+    hummock_opts.shutdown().await;
     Ok(())
 }
