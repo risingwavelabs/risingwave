@@ -22,6 +22,8 @@ use risingwave_common::array::Row;
 use super::PkAndRowStream;
 use crate::table::cell_based_table::StorageError;
 
+/// We use a binary heap to merge the results of the different streams in order.
+/// This is the node type of the heap.
 struct Node<S: PkAndRowStream> {
     stream: S,
 
