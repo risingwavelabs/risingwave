@@ -2,8 +2,8 @@ cargo-cache: &cargo-cache
   id: cache
   key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
   restore-keys:
-    - 'v1-cache-{{ id }}-{{ runner.os }}-'
-    - 'v1-cache-{{ id }}-'
+    - "v1-cache-{{ id }}-{{ runner.os }}-"
+    - "v1-cache-{{ id }}-"
   backend: s3
   s3:
     bucket: ci-cache-bucket
@@ -95,11 +95,15 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             CODECOV_TOKEN: my-codecov-token
+            BUILDKITE_ANALYTICS_TOKEN: buildkite-test-analytics-token
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
+      - test-collector#v1.0.0:
+          files: "target/nextest/ci/junit-*.xml"
+          format: "junit"
     timeout_in_minutes: 15
 
   - label: "pre unit test"
