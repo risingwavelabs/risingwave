@@ -57,11 +57,7 @@ impl StreamLocalSimpleAgg {
 
 impl fmt::Display for StreamLocalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlyLocalSimpleAgg")
-        } else {
-            f.debug_struct("StreamLocalSimpleAgg")
-        };
+        let mut builder = f.debug_struct("StreamLocalSimpleAgg");
         builder.field("aggs", &self.agg_calls());
         builder.finish()
     }
