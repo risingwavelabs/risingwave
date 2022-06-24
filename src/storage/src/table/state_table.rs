@@ -37,31 +37,6 @@ use crate::{Keyspace, StateStore};
 /// rows to have dedup pk cell encoding.
 pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
 
-/// Constructor for `DedupPkStateTable`.
-/// We instantiate `DedupPkCellBasedRowSerializer` with `pk_indices`
-/// and `column_descs` here. These are used to determine which
-/// pk datums to filter out.
-impl<S: StateStore> DedupPkStateTable<S> {
-    pub fn new_dedup_pk_state_table(
-        keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        dist_key_indices: Option<Vec<usize>>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self {
-            mem_table: MemTable::new(),
-            cell_based_table: DedupPkCellBasedTable::new(
-                keyspace,
-                column_descs,
-                order_types,
-                pk_indices,
-                dist_key_indices,
-            ),
-        }
-    }
-}
-
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
 pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 
