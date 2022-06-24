@@ -43,13 +43,22 @@ pub struct StateTable<S: StateStore> {
 }
 
 impl<S: StateStore> StateTable<S> {
-    /// Note: `dist_key_indices` is ignored, use `new_with_distribution` instead.
+    /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
     // TODO: remove this after all state table usages are replaced by `new_with_distribution`.
     pub fn new(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         _dist_key_indices: Option<Vec<usize>>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_without_distribution(keyspace, columns, order_types, pk_indices)
+    }
+
+    pub fn new_without_distribution(
+        keyspace: Keyspace<S>,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
         Self::new_with_distribution(

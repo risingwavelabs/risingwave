@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::any::Any;
+use std::sync::Arc;
 
 pub use agg_call::*;
 pub use agg_state::*;
@@ -400,38 +401,51 @@ pub fn generate_column_descs(
 /// Generate state table for agg executor.
 /// Relational pk = `table_desc.len` - 1.
 pub fn generate_state_table<S: StateStore>(
-    ks: Keyspace<S>,
+    keyspace: Keyspace<S>,
     agg_call: &AggCall,
     group_keys: &[usize],
     pk_indices: &[usize],
     agg_schema: &Schema,
     input_ref: &dyn Executor,
+    vnodes: Option<Arc<Bitmap>>,
 ) -> StateTable<S> {
-    let table_desc = generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
+    let columns = generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
     // Always leave 1 space for agg call value.
-    let relational_pk_len = table_desc.len() - 1;
-    let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
-    StateTable::new(
-        ks,
-        table_desc,
-        // Primary key do not includes group key.
-        vec![
-            // Now we only infer order type for min/max in a naive way.
-            if agg_call.kind == AggKind::Max {
-                OrderType::Descending
-            } else {
-                OrderType::Ascending
-            };
-            relational_pk_len
-        ],
-        if dist_keys.is_empty() {
-            None
+    let relational_pk_len = columns.len() - 1;
+
+    let order_types = vec![
+        // Now we only infer order type for min/max in a naive way.
+        if agg_call.kind == AggKind::Max {
+            OrderType::Descending
         } else {
-            Some(dist_keys)
-        },
-        (0..relational_pk_len).collect(),
-    )
+            OrderType::Ascending
+        };
+        relational_pk_len
+    ];
+    let pk_indices = (0..relational_pk_len).collect();
+    let dist_key_indices: Vec<usize> = (0..group_keys.len()).collect();
+
+    if let Some(vnodes) = vnodes {
+        // Hash Agg
+        assert!(!dist_key_indices.is_empty());
+        StateTable::new_with_distribution(
+            keyspace,
+            columns,
+            order_types,
+            pk_indices,
+            dist_key_indices,
+            vnodes,
+        )
+    } else {
+        // Simple Agg (or Hash Agg in test code)
+        // FIXME: the dist key indices should be empty if vnodes is None in production. This is
+        // for compatibility with the test code.
+        #[cfg(not(debug_assertions))]
+        assert!(dist_key_indices.is_empty());
+        StateTable::new_without_distribution(keyspace, columns, order_types, pk_indices)
+    }
 }
+
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
 pub async fn generate_managed_agg_state<S: StateStore>(

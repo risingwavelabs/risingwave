@@ -110,6 +110,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &input_info.pk_indices,
                 &schema,
                 input.as_ref(),
+                None,
             ));
         }
 

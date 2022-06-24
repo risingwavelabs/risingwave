@@ -15,7 +15,9 @@
 //! Global Streaming Hash Aggregators
 
 use std::marker::PhantomData;
+use std::sync::Arc;
 
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 
@@ -32,6 +34,7 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     keyspace: Vec<Keyspace<S>>,
     pk_indices: PkIndices,
     executor_id: u64,
+    vnodes: Arc<Bitmap>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -46,6 +49,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.pk_indices,
             args.executor_id,
             args.key_indices,
+            Some(args.vnodes),
         )?
         .boxed())
     }
@@ -91,6 +95,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             keyspace,
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
+            vnodes: params.vnode_bitmap.expect("vnodes not set").into(),
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }

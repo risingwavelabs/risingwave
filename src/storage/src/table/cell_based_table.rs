@@ -158,13 +158,13 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
 
     pub fn new_for_test(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
         Self::new(
             keyspace,
-            column_descs,
+            columns,
             order_types,
             pk_indices,
             vec![],
@@ -256,8 +256,15 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
                 .unwrap()
                 .to_vnode()
         };
+        tracing::warn!("{:?}, {:?} => {}", row, indices, vnode);
+
         // This table should only be used to access entries with vnode specified in `self.vnodes`.
-        assert!(self.vnodes.is_set(vnode as usize).unwrap());
+        assert!(
+            self.vnodes.is_set(vnode as usize).unwrap(),
+            "vnode {} should not be accessed by this table: {:?}",
+            vnode,
+            self.vnodes
+        );
         vnode
     }
 

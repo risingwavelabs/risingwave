@@ -112,6 +112,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
+        // FIXME: the vnodes must be Some in production. This is for compatibility with the test
+        // code.
+        vnodes: Option<Arc<Bitmap>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
@@ -125,6 +128,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 &input_info.pk_indices,
                 &schema,
                 input.as_ref(),
+                vnodes.clone(),
             ));
         }
 
@@ -494,6 +498,7 @@ mod tests {
                 args.pk_indices,
                 args.executor_id,
                 args.key_indices,
+                None,
             )?))
         }
     }
