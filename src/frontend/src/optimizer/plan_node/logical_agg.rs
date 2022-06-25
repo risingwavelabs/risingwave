@@ -31,8 +31,8 @@ use super::{
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject, StreamExchange};
-use crate::optimizer::property::{Distribution, RequiredDist};
+use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Aggregation Call
@@ -202,6 +202,31 @@ impl LogicalAgg {
             });
         }
         (table_catalogs, column_mapping)
+    }
+
+    /// Two phase streaming agg.
+    /// Should only be used iff input is distributed.
+    /// input must be converted to stream form.
+    fn gen_two_phase_streaming_agg_plan(&self, input_stream: PlanRef) -> Result<PlanRef> {
+        // partial agg
+        let partial_agg_plan =
+            StreamLocalSimpleAgg::new(self.clone_with_input(input_stream)).into();
+
+        let input =
+            RequiredDist::single().enforce_if_not_satisfies(partial_agg_plan, &Order::any())?;
+
+        // insert total agg
+        let total_agg_types = self
+            .agg_calls()
+            .iter()
+            .enumerate()
+            .map(|(partial_output_idx, agg_call)| {
+                agg_call.partial_to_total_agg_call(partial_output_idx)
+            })
+            .collect();
+        let total_agg_logical_plan =
+            LogicalAgg::new(total_agg_types, self.group_keys().to_vec(), input);
+        Ok(StreamSimpleAgg::new(total_agg_logical_plan).into())
     }
 }
 
@@ -704,48 +729,20 @@ impl ToStream for LogicalAgg {
         let input = self.input();
         // simple-agg
         if self.group_keys().is_empty() {
-            let mut has_min_or_max_agg_calls = false;
-            for c in &self.agg_calls {
-                match c.agg_kind {
-                    AggKind::Min | AggKind::Max => {
-                        has_min_or_max_agg_calls = true;
-                        break;
-                    }
-                    _ => continue,
-                }
-            }
+            let has_min_or_max_agg_calls = self
+                .agg_calls
+                .iter()
+                .any(|c| matches!(c.agg_kind, AggKind::Min | AggKind::Max));
 
             let input_stream = input.to_stream()?;
-            let is_append_only = input_stream.append_only();
             let input_distribution = input_stream.distribution();
 
             // simple 2-phase-agg
             if input_distribution.satisfies(&RequiredDist::AnyShard)
-                // TODO: non-append-only min/max is not supported yet,
-                // since min/max is a table rather than single value for local agg.
-                // see: https://github.com/singularity-data/risingwave/issues/2997#issuecomment-1156139576
-                && (is_append_only || !has_min_or_max_agg_calls)
+                // TODO: Min/max will be supported by stateful local agg eventually.
+                && !has_min_or_max_agg_calls
             {
-                // partial agg
-                let partial_agg_plan =
-                    StreamLocalSimpleAgg::new(self.clone_with_input(input_stream)).into();
-
-                // insert exchange
-                let exchange = StreamExchange::new(partial_agg_plan, Distribution::Single).into();
-
-                // insert total agg
-                let total_agg_types = self
-                    .agg_calls()
-                    .iter()
-                    .enumerate()
-                    .map(|(partial_output_idx, agg_call)| {
-                        agg_call.partial_to_total_agg_call(partial_output_idx)
-                    })
-                    .collect();
-                let total_agg_logical =
-                    LogicalAgg::new(total_agg_types, self.group_keys().to_vec(), exchange);
-                Ok(StreamSimpleAgg::new(total_agg_logical).into())
-
+                self.gen_two_phase_streaming_agg_plan(input_stream)
             // simple 1-phase-agg
             } else {
                 Ok(StreamSimpleAgg::new(self.clone_with_input(

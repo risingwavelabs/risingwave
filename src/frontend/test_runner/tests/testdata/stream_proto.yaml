@@ -444,7 +444,6 @@
                       columnIds:
                         - 1
                         - 0
-                appendOnly: true
                 fields:
                   - dataType:
                       typeName: INT64
@@ -494,7 +493,6 @@
                       distributionKeys:
                         - 1
                       owner: root
-            appendOnly: true
             fields:
               - dataType:
                   typeName: INT64
@@ -556,7 +554,6 @@
                       typeName: INT64
                       isNullable: true
               owner: root
-          isAppendOnly: true
     fields:
       - dataType:
           typeName: INT64

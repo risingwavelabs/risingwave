@@ -36,10 +36,10 @@ impl StreamLocalSimpleAgg {
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
-        // Single-value local simple agg only produces inserts
-        // it should be append-only, even if input is non-append.
-        // N.B. This assumes input is valid - non-append-only min/max is rejected.
-        let append_only = true;
+        // Although output are only inserts,
+        // this stream cannot be materialized,
+        // so its `append_only` property is false.
+        let append_only = false;
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
