@@ -216,7 +216,7 @@ mod default {
     }
 
     pub fn block_size_kb() -> u32 {
-        16
+        1024
     }
 
     pub fn bloom_false_positive() -> f64 {
