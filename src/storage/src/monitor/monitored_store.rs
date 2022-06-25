@@ -14,7 +14,6 @@
 
 use std::ops::RangeBounds;
 use std::sync::Arc;
-use std::time::Instant;
 
 use bytes::Bytes;
 use futures::Future;
