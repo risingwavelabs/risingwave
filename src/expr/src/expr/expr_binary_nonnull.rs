@@ -407,12 +407,6 @@ pub fn new_binary_expr(
                     { interval, float32, interval, interval_float_div },
                     { interval, float64, interval, interval_float_div },
                     { interval, decimal, interval, interval_float_div },
-                    { int16, interval, interval, float_interval_div },
-                    { int32, interval, interval, float_interval_div },
-                    { int64, interval, interval, float_interval_div },
-                    { float32, interval, interval, float_interval_div },
-                    { float64, interval, interval, float_interval_div },
-                    { decimal, interval, interval, float_interval_div },
                 },
             }
         }

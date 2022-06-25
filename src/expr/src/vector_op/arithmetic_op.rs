@@ -209,14 +209,6 @@ where
     l.div_float(r).ok_or(ExprError::NumericOutOfRange)
 }
 
-#[inline(always)]
-pub fn float_interval_div<T1, T2, T3>(l: T1, r: IntervalUnit) -> Result<IntervalUnit>
-where
-    T1: TryInto<OrderedF64> + Debug,
-{
-    interval_float_div::<T2, T1, T3>(r, l)
-}
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;

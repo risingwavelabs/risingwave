@@ -196,8 +196,8 @@ impl IntervalUnit {
         }
 
         let months = (self.months as f64) / rhs;
-        let days = (self.days as f64) / rhs;
-        let ms = (self.ms as f64) / rhs;
+        let days = (self.days as f64) / rhs + (months % 1.0) * 30.0;
+        let ms = ((self.ms as f64) / rhs + (days % 1.0) * 24.0 * 60.0 * 60.0 * 1000.0).round();
 
         Some(IntervalUnit {
             months: (months as i32),
@@ -414,15 +414,15 @@ mod tests {
     fn test_div_float() {
         let cases_int = [
             ((10, 8, 6), 2, Some((5, 4, 3))),
-            ((17, 22, 33), 3, Some((5, 7, 11))),
-            ((1, 1, 1), 10, Some((0, 0, 0))),
+            ((1, 2, 33), 3, Some((0, 10, 57600011))),
+            ((1, 0, 11), 10, Some((0, 3, 1))),
             ((5, 6, 7), 0, None),
         ];
 
         let cases_float = [
             ((10, 8, 6), 2.0f32, Some((5, 4, 3))),
-            ((17, 22, 33), 3.0f32, Some((5, 7, 11))),
-            ((10, 13, 18), 2.5f32, Some((4, 5, 7))),
+            ((1, 2, 33), 3.0f32, Some((0, 10, 57600011))),
+            ((10, 15, 100), 2.5f32, Some((4, 6, 40))),
             ((5, 6, 7), 0.0f32, None),
         ];
 
