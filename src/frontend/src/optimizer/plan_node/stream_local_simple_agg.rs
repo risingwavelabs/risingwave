@@ -20,28 +20,34 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::RequiredDist;
 
 #[derive(Debug, Clone)]
-pub struct StreamSimpleAgg {
+pub struct StreamLocalSimpleAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
 }
 
-impl StreamSimpleAgg {
+impl StreamLocalSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
         let input = logical.input();
         let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::Single => Distribution::Single,
-            _ => panic!(),
-        };
+        debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
-        // Simple agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
-        StreamSimpleAgg { base, logical }
+        // Although output are only inserts,
+        // this stream cannot be materialized,
+        // so its `append_only` property is false.
+        let append_only = false;
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            pk_indices,
+            input_dist.clone(),
+            append_only,
+        );
+        StreamLocalSimpleAgg { base, logical }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -49,19 +55,15 @@ impl StreamSimpleAgg {
     }
 }
 
-impl fmt::Display for StreamSimpleAgg {
+impl fmt::Display for StreamLocalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlySimpleAgg")
-        } else {
-            f.debug_struct("StreamSimpleAgg")
-        };
+        let mut builder = f.debug_struct("StreamLocalSimpleAgg");
         builder.field("aggs", &self.agg_calls());
         builder.finish()
     }
 }
 
-impl PlanTreeNodeUnary for StreamSimpleAgg {
+impl PlanTreeNodeUnary for StreamLocalSimpleAgg {
     fn input(&self) -> PlanRef {
         self.logical.input()
     }
@@ -70,13 +72,13 @@ impl PlanTreeNodeUnary for StreamSimpleAgg {
         Self::new(self.logical.clone_with_input(input))
     }
 }
-impl_plan_tree_node_for_unary! { StreamSimpleAgg }
+impl_plan_tree_node_for_unary! { StreamLocalSimpleAgg }
 
-impl ToStreamProst for StreamSimpleAgg {
+impl ToStreamProst for StreamLocalSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let (internal_tables, column_mapping) = self.logical.infer_internal_table_catalog();
-        ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
+        ProstStreamNode::LocalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
