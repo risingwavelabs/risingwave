@@ -729,18 +729,17 @@ impl ToStream for LogicalAgg {
         let input = self.input();
         // simple-agg
         if self.group_keys().is_empty() {
-            let has_min_or_max_agg_calls = self
+            // TODO: Other agg calls will be supported by stateful local agg eventually.
+            let agg_calls_can_use_two_phase = self
                 .agg_calls
                 .iter()
-                .any(|c| matches!(c.agg_kind, AggKind::Min | AggKind::Max));
+                .all(|c| matches!(c.agg_kind, AggKind::Count | AggKind::Sum));
 
             let input_stream = input.to_stream()?;
             let input_distribution = input_stream.distribution();
 
             // simple 2-phase-agg
-            if input_distribution.satisfies(&RequiredDist::AnyShard)
-                // TODO: Min/max will be supported by stateful local agg eventually.
-                && !has_min_or_max_agg_calls
+            if input_distribution.satisfies(&RequiredDist::AnyShard) && agg_calls_can_use_two_phase
             {
                 self.gen_two_phase_streaming_agg_plan(input_stream)
             // simple 1-phase-agg
