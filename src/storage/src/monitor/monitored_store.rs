@@ -56,15 +56,21 @@ where
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
+        // start time takes iterator build time into account
+        let start_time = minstant::Instant::now();
+
+        // wait for iterator creation (e.g. seek)
         let iter = iter
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
+        // create a monitored iterator to collect metrics
         let monitored = MonitoredStateStoreIter {
             inner: iter,
             total_items: 0,
             total_size: 0,
-            start_time: Instant::now(),
+            start_time,
+            scan_time: minstant::Instant::now(),
             stats: self.stats.clone(),
         };
         Ok(monitored)
@@ -256,7 +262,8 @@ pub struct MonitoredStateStoreIter<I> {
     inner: I,
     total_items: usize,
     total_size: usize,
-    start_time: Instant,
+    start_time: minstant::Instant,
+    scan_time: minstant::Instant,
     stats: Arc<StateStoreMetrics>,
 }
 
@@ -293,6 +300,9 @@ impl<I> Drop for MonitoredStateStoreIter<I> {
         self.stats
             .iter_duration
             .observe(self.start_time.elapsed().as_secs_f64());
+        self.stats
+            .iter_scan_duration
+            .observe(self.scan_time.elapsed().as_secs_f64());
         self.stats.iter_item.observe(self.total_items as f64);
         self.stats.iter_size.observe(self.total_size as f64);
     }
