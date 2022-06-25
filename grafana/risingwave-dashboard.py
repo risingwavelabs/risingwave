@@ -588,7 +588,8 @@ def section_hummock(panels):
         panels.timeseries_latency("Read Duration - Iter", [
             *quantile(lambda quantile, legend:
                       panels.target(
-                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}",
+                          legend == "max"
                       ),
                       [90, 99, 999, "max"]),
             panels.target(
@@ -598,7 +599,8 @@ def section_hummock(panels):
         panels.timeseries_latency("Read Duration - Iter Pure Scan", [
             *quantile(lambda quantile, legend:
                       panels.target(
-                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_scan_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_scan_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}",
+                          legend == "max"
                       ),
                       [90, 99, 999, "max"]),
             panels.target(
