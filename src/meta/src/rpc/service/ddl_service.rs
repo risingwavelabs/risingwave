@@ -28,13 +28,12 @@ use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{
-    CatalogManagerRef, DatabaseId, IdCategory, MetaSrvEnv, SchemaId, SourceId, TableId,
-};
+use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableId};
 use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuilder, FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef,
+    ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
+    SourceManagerRef,
 };
 
 #[derive(Clone)]
@@ -231,6 +230,8 @@ where
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
+        self.env.idle_manager().record_activity();
+
         let req = request.into_inner();
         let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
         let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
@@ -287,15 +288,16 @@ where
             .map_err(tonic_err)?;
 
         // 3. Create mview in stream manager. The id in stream node will be filled.
+        let ctx = CreateMaterializedViewContext {
+            schema_id: mview.schema_id,
+            database_id: mview.database_id,
+            mview_name: mview.name.clone(),
+            table_properties: mview.properties.clone(),
+            affiliated_source: None,
+            ..Default::default()
+        };
         let internal_tables = match self
-            .create_mview_on_compute_node(
-                fragment_graph,
-                id,
-                mview.schema_id,
-                mview.database_id,
-                mview.name.clone(),
-                None,
-            )
+            .create_mview_on_compute_node(fragment_graph, id, ctx)
             .await
         {
             Err(e) => {
@@ -332,6 +334,8 @@ where
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         use risingwave_common::catalog::TableId;
+
+        self.env.idle_manager().record_activity();
 
         let table_id = request.into_inner().table_id;
         // 1. Drop table in catalog. Ref count will be checked.
@@ -414,14 +418,9 @@ where
         &self,
         mut fragment_graph: StreamFragmentGraph,
         id: TableId,
-        schema_id: SchemaId,
-        database_id: DatabaseId,
-        table_name: String,
-        affiliated_source: Option<Source>,
+        mut ctx: CreateMaterializedViewContext,
     ) -> RwResult<Vec<Table>> {
         use risingwave_common::catalog::TableId;
-
-        use crate::stream::CreateMaterializedViewContext;
 
         // Fill in the correct mview id for stream node.
         fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
@@ -453,13 +452,6 @@ where
             .cluster_manager
             .get_parallel_unit_count(Some(ParallelUnitType::Hash))
             .await;
-        let mut ctx = CreateMaterializedViewContext {
-            affiliated_source,
-            schema_id,
-            database_id,
-            mview_name: table_name,
-            ..Default::default()
-        };
 
         let mut actor_graph_builder =
             ActorGraphBuilder::new(self.env.id_gen_manager_ref(), &fragment_graph, &mut ctx)
@@ -566,15 +558,17 @@ where
 
         // Create mview on compute node.
         // Noted that this progress relies on the source just created, so we pass it here.
+        let ctx = CreateMaterializedViewContext {
+            schema_id: source.schema_id,
+            database_id: source.database_id,
+            mview_name: source.name.clone(),
+            table_properties: mview.properties.clone(),
+            affiliated_source: Some(source.clone()),
+            ..Default::default()
+        };
+
         let internal_tables = match self
-            .create_mview_on_compute_node(
-                fragment_graph,
-                mview_id,
-                source.schema_id,
-                source.database_id,
-                source.name.clone(),
-                Some(source.clone()),
-            )
+            .create_mview_on_compute_node(fragment_graph, mview_id, ctx)
             .await
         {
             Err(e) => {
