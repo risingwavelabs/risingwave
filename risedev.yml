@@ -108,6 +108,21 @@ risedev:
       listen-address: "0.0.0.0"
       address: "127.0.0.1"
 
+  # The profile for the online playground
+  online-docker-playground:
+    - use: meta-node
+      enable-dashboard-v2: false
+      unsafe-disable-recovery: true
+      max-idle-secs-to-exit: 1800
+      listen-address: "0.0.0.0"
+      address: "127.0.0.1"
+    - use: compute-node
+      listen-address: "0.0.0.0"
+      address: "127.0.0.1"
+    - use: frontend
+      listen-address: "0.0.0.0"
+      address: "127.0.0.1"
+
   ######################################
   ### Configurations used in Compose ###
   ######################################

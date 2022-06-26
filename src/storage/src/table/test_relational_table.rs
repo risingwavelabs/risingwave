@@ -27,7 +27,7 @@ use crate::cell_serializer::CellSerializer;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
 use crate::storage_value::{StorageValue, ValueMeta};
-use crate::store::StateStore;
+use crate::store::{StateStore, WriteOptions};
 use crate::table::cell_based_table::{CellBasedTable, DEFAULT_VNODE};
 use crate::table::state_table::{DedupPkStateTable, StateTable};
 use crate::table::TableIter;
@@ -1215,7 +1215,10 @@ async fn test_dedup_cell_based_table_iter_with(
     let keyspace = Keyspace::table_root(state_store.clone(), &TableId::from(0x1111));
     let epoch: u64 = 0;
 
-    let mut batch = keyspace.state_store().start_write_batch();
+    let mut batch = keyspace.state_store().start_write_batch(WriteOptions {
+        epoch,
+        table_id: Default::default(),
+    });
     let mut local = batch.prefixify(&keyspace);
 
     // ---------- Init write serializer
@@ -1252,7 +1255,7 @@ async fn test_dedup_cell_based_table_iter_with(
     }
 
     // commit batch
-    batch.ingest(epoch).await.unwrap();
+    batch.ingest().await.unwrap();
 
     let mut actual_rows = vec![];
 

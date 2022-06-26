@@ -42,7 +42,10 @@ use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::StorageValue;
+use crate::store::WriteOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
+
+mod iter_utils;
 
 pub type AccessType = bool;
 pub const READ_ONLY: AccessType = false;
@@ -258,10 +261,7 @@ impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
         let vnode = match self.dist_key_in_pk_indices.as_ref() {
-            Some(indices) => pk
-                .hash_by_indices(indices, &CRC32FastBuilder {})
-                .unwrap()
-                .to_vnode(),
+            Some(indices) => pk.hash_by_indices(indices, &CRC32FastBuilder {}).to_vnode(),
             None => DEFAULT_VNODE,
         };
         // This table should only be used to access entries with vnode specified in `self.vnodes`.
@@ -341,7 +341,6 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> 
         let vnode = match self.dist_key_indices.as_ref() {
             Some(indices) => row
                 .hash_by_indices(indices, &CRC32FastBuilder {})
-                .unwrap()
                 .to_vnode(),
             None => DEFAULT_VNODE,
         };
@@ -356,7 +355,10 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> 
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            epoch,
+            table_id: self.keyspace.table_id(),
+        });
         let mut local = batch.prefixify(&self.keyspace);
 
         for (pk, row_op) in buffer {
@@ -416,7 +418,7 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> 
                 }
             }
         }
-        batch.ingest(epoch).await?;
+        batch.ingest().await?;
         Ok(())
     }
 }
@@ -485,8 +487,7 @@ impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase
             // Concat all iterators if not to preserve order.
             _ if !ordered => futures::stream::iter(iterators).flatten(),
             // Merge all iterators if to preserve order.
-            #[never]
-            _ => todo!("merge multiple vnode ranges"),
+            _ => iter_utils::merge_sort(iterators.into_iter().map(Box::pin).collect()),
         };
 
         Ok(iter)
