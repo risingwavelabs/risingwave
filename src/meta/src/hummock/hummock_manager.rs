@@ -23,6 +23,7 @@ use prost::Message;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
     HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo,
@@ -828,6 +829,20 @@ where
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
+        // Verify all table_ids have already been registered to compaction group manager.
+        for (compaction_group_id, sst) in &sstables {
+            let compaction_group = self
+                .compaction_group_manager
+                .compaction_group(*compaction_group_id)
+                .await
+                .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id));
+            for table_id in &sst.table_ids {
+                assert!(compaction_group
+                    .member_prefixes()
+                    .contains(&Prefix::from(*table_id)));
+            }
+        }
+
         let mut versioning_guard = self.versioning.write().await;
         let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
@@ -1448,5 +1463,9 @@ where
         let compaction_guard = self.compaction.read().await;
         let assignment_ref = &compaction_guard.compact_task_assignment;
         assignment_ref.get(&task_id).cloned()
+    }
+
+    pub fn compaction_group_manager_ref_for_test(&self) -> CompactionGroupManagerRef<S> {
+        self.compaction_group_manager.clone()
     }
 }

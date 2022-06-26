@@ -17,15 +17,19 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::compaction_group::{Prefix, StaticCompactionGroupId};
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSSTableId, LocalSstableInfo,
+};
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction_group::manager::CompactionGroupManager;
+use crate::hummock::compaction_group::manager::{
+    CompactionGroupManager, CompactionGroupManagerRef,
+};
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
@@ -52,6 +56,12 @@ where
         hummock_manager.get_new_table_id().await.unwrap(),
     ];
     let test_tables = generate_test_tables(epoch, table_ids);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &test_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&test_tables))
         .await
@@ -72,6 +82,12 @@ where
         epoch,
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &test_tables_2,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.task_status = true;
     hummock_manager
@@ -86,6 +102,12 @@ where
         epoch,
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &test_tables_3,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&test_tables_3))
         .await
@@ -111,6 +133,62 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
         });
     }
     sst_info
+}
+
+pub async fn register_sstable_infos_to_compaction_group<S>(
+    compaction_group_manager_ref: CompactionGroupManagerRef<S>,
+    sstable_infos: &[SstableInfo],
+    compaction_group_id: CompactionGroupId,
+) where
+    S: MetaStore,
+{
+    let table_ids = sstable_infos
+        .iter()
+        .flat_map(|sstable_info| &sstable_info.table_ids)
+        .dedup()
+        .cloned()
+        .collect_vec();
+    register_table_ids_to_compaction_group(
+        compaction_group_manager_ref,
+        &table_ids,
+        compaction_group_id,
+    )
+    .await;
+}
+
+pub async fn register_table_ids_to_compaction_group<S>(
+    compaction_group_manager_ref: CompactionGroupManagerRef<S>,
+    table_ids: &[u32],
+    compaction_group_id: CompactionGroupId,
+) where
+    S: MetaStore,
+{
+    compaction_group_manager_ref
+        .register_for_test(
+            &table_ids
+                .iter()
+                .map(|table_id| (Prefix::from(*table_id), compaction_group_id))
+                .collect_vec(),
+        )
+        .await
+        .unwrap();
+}
+
+pub async fn unregister_table_ids_from_compaction_group<S>(
+    compaction_group_manager_ref: CompactionGroupManagerRef<S>,
+    table_ids: &[u32],
+) where
+    S: MetaStore,
+{
+    compaction_group_manager_ref
+        .unregister_for_test(
+            &table_ids
+                .iter()
+                .map(|table_id| Prefix::from(*table_id))
+                .collect_vec(),
+        )
+        .await
+        .unwrap();
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.

@@ -179,6 +179,22 @@ impl<S: MetaStore> CompactionGroupManager<S> {
 
         Ok(prefix_set.into_iter().map(u32::from).collect())
     }
+
+    pub async fn register_for_test(&self, pairs: &[(Prefix, CompactionGroupId)]) -> Result<()> {
+        self.inner
+            .write()
+            .await
+            .register(pairs, self.env.meta_store())
+            .await
+    }
+
+    pub async fn unregister_for_test(&self, prefixes: &[Prefix]) -> Result<()> {
+        self.inner
+            .write()
+            .await
+            .unregister(prefixes, self.env.meta_store())
+            .await
+    }
 }
 
 #[derive(Default)]
