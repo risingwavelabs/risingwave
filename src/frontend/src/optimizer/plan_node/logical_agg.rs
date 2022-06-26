@@ -26,13 +26,13 @@ use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
+    PredicatePushdown, StreamHashAgg, StreamLocalSimpleAgg, StreamSimpleAgg, ToBatch, ToStream,
 };
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::RequiredDist;
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Aggregation Call
@@ -202,6 +202,31 @@ impl LogicalAgg {
             });
         }
         (table_catalogs, column_mapping)
+    }
+
+    /// Two phase streaming agg.
+    /// Should only be used iff input is distributed.
+    /// input must be converted to stream form.
+    fn gen_two_phase_streaming_agg_plan(&self, input_stream: PlanRef) -> Result<PlanRef> {
+        // partial agg
+        let partial_agg_plan =
+            StreamLocalSimpleAgg::new(self.clone_with_input(input_stream)).into();
+
+        let input =
+            RequiredDist::single().enforce_if_not_satisfies(partial_agg_plan, &Order::any())?;
+
+        // insert total agg
+        let total_agg_types = self
+            .agg_calls()
+            .iter()
+            .enumerate()
+            .map(|(partial_output_idx, agg_call)| {
+                agg_call.partial_to_total_agg_call(partial_output_idx)
+            })
+            .collect();
+        let total_agg_logical_plan =
+            LogicalAgg::new(total_agg_types, self.group_keys().to_vec(), input);
+        Ok(StreamSimpleAgg::new(total_agg_logical_plan).into())
     }
 }
 
@@ -701,21 +726,38 @@ impl ToBatch for LogicalAgg {
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self) -> Result<PlanRef> {
+        let input = self.input();
+        // simple-agg
         if self.group_keys().is_empty() {
-            Ok(StreamSimpleAgg::new(
-                self.clone_with_input(
-                    self.input()
-                        .to_stream_with_dist_required(&RequiredDist::single())?,
-                ),
-            )
-            .into())
+            // TODO: Other agg calls will be supported by stateful local agg eventually.
+            let agg_calls_can_use_two_phase = self
+                .agg_calls
+                .iter()
+                .all(|c| matches!(c.agg_kind, AggKind::Count | AggKind::Sum));
+
+            let input_stream = input.to_stream()?;
+            let input_distribution = input_stream.distribution();
+
+            // simple 2-phase-agg
+            if input_distribution.satisfies(&RequiredDist::AnyShard) && agg_calls_can_use_two_phase
+            {
+                self.gen_two_phase_streaming_agg_plan(input_stream)
+            // simple 1-phase-agg
+            } else {
+                Ok(StreamSimpleAgg::new(self.clone_with_input(
+                    input.to_stream_with_dist_required(&RequiredDist::single())?,
+                ))
+                .into())
+            }
+
+        // hash-agg
         } else {
-            Ok(StreamHashAgg::new(
-                self.clone_with_input(self.input().to_stream_with_dist_required(
-                    &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
-                )?),
+            Ok(
+                StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
+                    &RequiredDist::shard_by_key(input.schema().len(), self.group_keys()),
+                )?))
+                .into(),
             )
-            .into())
         }
     }
 

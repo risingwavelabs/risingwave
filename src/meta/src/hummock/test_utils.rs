@@ -30,6 +30,7 @@ use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::manager::{
     CompactionGroupManager, CompactionGroupManagerRef,
 };
+use crate::hummock::compaction_group::TableOption;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
@@ -167,7 +168,13 @@ pub async fn register_table_ids_to_compaction_group<S>(
         .register_for_test(
             &table_ids
                 .iter()
-                .map(|table_id| (Prefix::from(*table_id), compaction_group_id))
+                .map(|table_id| {
+                    (
+                        Prefix::from(*table_id),
+                        compaction_group_id,
+                        TableOption::default(),
+                    )
+                })
                 .collect_vec(),
         )
         .await
