@@ -20,6 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::prefixed_range;
 
 use crate::error::StorageResult;
+use crate::store::ReadOptions;
 use crate::{StateStore, StateStoreIter};
 
 /// Provides API to read key-value pairs of a prefix in the storage backend.
@@ -29,6 +30,8 @@ pub struct Keyspace<S: StateStore> {
 
     /// Encoded representation for all segments.
     prefix: Vec<u8>,
+
+    table_id: TableId,
 }
 
 impl<S: StateStore> Keyspace<S> {
@@ -46,7 +49,11 @@ impl<S: StateStore> Keyspace<S> {
             buf.put_u32(id.table_id);
             buf.to_vec()
         };
-        Self { store, prefix }
+        Self {
+            store,
+            prefix,
+            table_id: *id,
+        }
     }
 
     /// Appends more bytes to the prefix and returns a new `Keyspace`
@@ -57,6 +64,7 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store: self.store.clone(),
             prefix,
+            table_id: self.table_id,
         }
     }
 
@@ -78,7 +86,15 @@ impl<S: StateStore> Keyspace<S> {
     /// Treats the keyspace as a single key, and gets its value.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
     pub async fn value(&self, epoch: u64) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefix, epoch).await
+        self.store
+            .get(
+                &self.prefix,
+                ReadOptions {
+                    epoch,
+                    table_id: Some(self.table_id),
+                },
+            )
+            .await
     }
 
     /// Concatenates this keyspace and the given key to produce a prefixed key.
@@ -89,7 +105,15 @@ impl<S: StateStore> Keyspace<S> {
     /// Gets from the keyspace with the `prefixed_key` of given key.
     /// The returned value is based on a snapshot corresponding to the given `epoch`.
     pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefixed_key(key), epoch).await
+        self.store
+            .get(
+                &self.prefixed_key(key),
+                ReadOptions {
+                    epoch,
+                    table_id: Some(self.table_id),
+                },
+            )
+            .await
     }
 
     /// Scans `limit` keys from the keyspace and get their values.
@@ -119,7 +143,17 @@ impl<S: StateStore> Keyspace<S> {
         B: AsRef<[u8]> + Send,
     {
         let range = prefixed_range(range, &self.prefix);
-        let mut pairs = self.store.scan(range, limit, epoch).await?;
+        let mut pairs = self
+            .store
+            .scan(
+                range,
+                limit,
+                ReadOptions {
+                    epoch,
+                    table_id: Some(self.table_id),
+                },
+            )
+            .await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -146,7 +180,16 @@ impl<S: StateStore> Keyspace<S> {
         B: AsRef<[u8]> + Send,
     {
         let range = prefixed_range(range, &self.prefix);
-        let iter = self.store.iter(range, epoch).await?;
+        let iter = self
+            .store
+            .iter(
+                range,
+                ReadOptions {
+                    epoch,
+                    table_id: Some(self.table_id),
+                },
+            )
+            .await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),
@@ -157,6 +200,10 @@ impl<S: StateStore> Keyspace<S> {
     /// Gets the underlying state store.
     pub fn state_store(&self) -> S {
         self.store.clone()
+    }
+
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 }
 

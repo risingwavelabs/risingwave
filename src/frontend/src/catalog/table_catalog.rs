@@ -60,6 +60,8 @@ pub struct TableCatalog {
     /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
     /// table.
     pub vnode_mapping: Option<Vec<ParallelUnitId>>,
+
+    pub properties: HashMap<String, String>,
 }
 
 impl TableCatalog {
@@ -141,6 +143,7 @@ impl TableCatalog {
             appendonly: self.appendonly,
             owner: self.owner.clone(),
             mapping: None,
+            properties: HashMap::default(),
         }
     }
 }
@@ -181,10 +184,11 @@ impl From<ProstTable> for TableCatalog {
             })
             .collect();
 
-        let vnode_mapping = decompress_data(
-            &tb.mapping.as_ref().unwrap().original_indices,
-            &tb.mapping.as_ref().unwrap().data,
-        );
+        let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
+            decompress_data(&mapping.original_indices, &mapping.data)
+        } else {
+            vec![]
+        };
 
         Self {
             id: id.into(),
@@ -206,6 +210,7 @@ impl From<ProstTable> for TableCatalog {
             appendonly: tb.appendonly,
             owner: tb.owner,
             vnode_mapping: Some(vnode_mapping),
+            properties: tb.properties,
         }
     }
 }
@@ -218,6 +223,8 @@ impl From<&ProstTable> for TableCatalog {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
@@ -285,6 +292,7 @@ mod tests {
                 original_indices,
                 data,
             }),
+            properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
         }
         .into();
 
@@ -334,6 +342,7 @@ mod tests {
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
                 vnode_mapping: Some(mapping),
+                properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
             }
         );
     }

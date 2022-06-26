@@ -458,6 +458,7 @@ mod tests {
 
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
+            false,
             Rc::new(TableDesc {
                 table_id: 0.into(),
                 pks: vec![],

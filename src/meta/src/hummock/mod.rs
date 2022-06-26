@@ -95,6 +95,7 @@ where
                     }
                 }
                 _ = &mut shutdown_rx => {
+                    tracing::info!("Membership Change Subscriber is stopped");
                     return;
                 }
             };
@@ -156,7 +157,7 @@ where
                 _ = min_trigger_interval.tick() => {},
                 // Shutdown vacuum
                 _ = &mut shutdown_rx => {
-                    tracing::info!("Vacuum is shutting down");
+                    tracing::info!("Vacuum is stopped");
                     return;
                 }
             }

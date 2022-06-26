@@ -19,6 +19,7 @@ use bytes::Bytes;
 use log::error;
 use risingwave_common::error::{internal_error, Result as RwResult};
 use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::WriteOptions;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::{SplitImpl, SplitMetaData};
@@ -62,7 +63,10 @@ impl<S: StateStore> SourceStateHandler<S> {
             // TODO should be a clear Error Code
             Err(anyhow!("states require not null"))
         } else {
-            let mut write_batch = self.keyspace.state_store().start_write_batch();
+            let mut write_batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+                epoch,
+                table_id: self.keyspace.table_id(),
+            });
             let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
                 let value = state.encode_to_bytes();
@@ -70,7 +74,7 @@ impl<S: StateStore> SourceStateHandler<S> {
                 local_batch.put(state.id(), StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
-            let ingest_rs = write_batch.ingest(epoch).await;
+            let ingest_rs = write_batch.ingest().await;
             match ingest_rs {
                 Err(e) => {
                     error!(

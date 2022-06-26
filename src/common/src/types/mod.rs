@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -20,7 +21,7 @@ use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
-use crate::array::{ArrayError, ArrayResult};
+use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
 mod native_type;
 mod ops;
 mod scalar_impl;
@@ -63,6 +64,7 @@ pub type ParallelUnitId = u32;
 // VirtualNode (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
 // consistent hashing.
 pub type VirtualNode = u16;
+pub const VIRTUAL_NODE_SIZE: usize = 2;
 pub const VNODE_BITS: usize = 11;
 pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
 
@@ -529,7 +531,7 @@ macro_rules! impl_convert {
 
 for_all_scalar_variants! { impl_convert }
 
-// Implement `From<raw float>` for `ScalarImpl` manually/
+// Implement `From<raw float>` for `ScalarImpl` manually
 impl From<f32> for ScalarImpl {
     fn from(f: f32) -> Self {
         Self::Float32(f.into())
@@ -570,30 +572,43 @@ macro_rules! impl_scalar_impl_ref_conversion {
 
 for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 
-// FIXME: should implement Hash and Eq all by deriving
-// TODO: may take type information into consideration later
+/// Should behave the same as [`crate::array::Array::hash_at`] for non-null items.
 #[expect(clippy::derive_hash_xor_eq)]
-impl std::hash::Hash for ScalarImpl {
+impl Hash for ScalarImpl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         macro_rules! impl_all_hash {
             ([$self:ident], $({ $variant_type:ty, $scalar_type:ident } ),*) => {
                 match $self {
+                    // Primitive types
                     $( Self::$scalar_type(inner) => {
                         NativeType::hash_wrapper(inner, state);
                     }, )*
-                    Self::Bool(b) => b.hash(state),
-                    Self::Utf8(s) => s.hash(state),
-                    Self::Decimal(decimal) => decimal.hash(state),
                     Self::Interval(interval) => interval.hash(state),
                     Self::NaiveDate(naivedate) => naivedate.hash(state),
-                    Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
                     Self::NaiveTime(naivetime) => naivetime.hash(state),
-                    Self::Struct(v) => v.hash(state),
-                    Self::List(v) => v.hash(state),
+                    Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
+
+                    // Manually implemented
+                    Self::Bool(b) => b.hash(state),
+                    Self::Utf8(s) => state.write(s.as_bytes()),
+                    Self::Decimal(decimal) => decimal.normalize().hash(state),
+                    Self::Struct(v) => v.hash(state), // TODO: check if this is consistent with `StructArray::hash_at`
+                    Self::List(v) => v.hash(state),   // TODO: check if this is consistent with `ListArray::hash_at`
                 }
             };
         }
         for_all_native_types! { impl_all_hash, self }
+    }
+}
+
+/// Feeds the raw scalar of `datum` to the given `state`, which should behave the same as
+/// [`crate::array::Array::hash_at`]. NULL value will be carefully handled.
+///
+/// Caveats: this relies on the above implementation of [`Hash`].
+pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
+    match datum {
+        Some(scalar) => scalar.hash(state),
+        None => NULL_VAL_FOR_HASH.hash(state),
     }
 }
 

@@ -17,11 +17,11 @@ use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::cell_based_table::{CellBasedTable, READ_ONLY};
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::Keyspace;
 
-pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStore> {
+pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStore, READ_ONLY> {
     let state_store = MemoryStateStore::new();
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
@@ -54,5 +54,6 @@ pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStor
             .unwrap();
     }
     state.commit(epoch).await.unwrap();
-    table
+
+    table.into()
 }

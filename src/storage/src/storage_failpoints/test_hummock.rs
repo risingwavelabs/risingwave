@@ -23,11 +23,12 @@ use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::hummock::HummockStorage;
 use crate::storage_value::StorageValue;
+use crate::store::{ReadOptions, WriteOptions};
 use crate::StateStore;
 
 #[tokio::test]
 #[cfg(all(test, feature = "failpoints"))]
-async fn test_failpoint_state_store_read_upload() {
+async fn test_failpoints_state_store_read_upload() {
     let mem_upload_err = "mem_upload_err";
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
@@ -63,13 +64,41 @@ async fn test_failpoint_state_store_read_upload() {
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage.ingest_batch(batch1, 1).await.unwrap();
+    hummock_storage
+        .ingest_batch(
+            batch1,
+            WriteOptions {
+                epoch: 1,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
 
     // Get the value after flushing to remote.
-    let value = hummock_storage.get(&anchor, 1).await.unwrap().unwrap();
+    let value = hummock_storage
+        .get(
+            &anchor,
+            ReadOptions {
+                epoch: 1,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(value, Bytes::from("111"));
     // // Write second batch.
-    hummock_storage.ingest_batch(batch2, 3).await.unwrap();
+    hummock_storage
+        .ingest_batch(
+            batch2,
+            WriteOptions {
+                epoch: 3,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
 
     // sync epoch1 test the read_error
     hummock_storage.sync(Some(1)).await.unwrap();
@@ -89,12 +118,37 @@ async fn test_failpoint_state_store_read_upload() {
     sstable_store.clear_block_cache();
     fail::cfg(mem_read_err, "return").unwrap();
 
-    let result = hummock_storage.get(&anchor, 2).await;
+    let result = hummock_storage
+        .get(
+            &anchor,
+            ReadOptions {
+                epoch: 2,
+                table_id: Default::default(),
+            },
+        )
+        .await;
     assert!(result.is_err());
-    let result = hummock_storage.iter(..=b"ee".to_vec(), 2).await;
+    let result = hummock_storage
+        .iter(
+            ..=b"ee".to_vec(),
+            ReadOptions {
+                epoch: 2,
+                table_id: Default::default(),
+            },
+        )
+        .await;
     assert!(result.is_err());
 
-    let value = hummock_storage.get(b"ee".as_ref(), 2).await.unwrap();
+    let value = hummock_storage
+        .get(
+            b"ee".as_ref(),
+            ReadOptions {
+                epoch: 2,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
     assert!(value.is_none());
     fail::remove(mem_read_err);
     // test the upload_error
@@ -116,9 +170,28 @@ async fn test_failpoint_state_store_read_upload() {
         .await;
     fail::remove(mem_upload_err);
 
-    let value = hummock_storage.get(&anchor, 5).await.unwrap().unwrap();
+    let value = hummock_storage
+        .get(
+            &anchor,
+            ReadOptions {
+                epoch: 5,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(value, Bytes::from("111"));
-    let mut iters = hummock_storage.iter(..=b"ee".to_vec(), 5).await.unwrap();
+    let mut iters = hummock_storage
+        .iter(
+            ..=b"ee".to_vec(),
+            ReadOptions {
+                epoch: 5,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
     let len = count_iter(&mut iters).await;
     assert_eq!(len, 2);
 }

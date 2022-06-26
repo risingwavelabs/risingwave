@@ -279,7 +279,7 @@ impl MetaClient {
                     _ = min_interval_ticker.tick() => {},
                     // Shutdown
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Heartbeat loop is shutting down");
+                        tracing::info!("Heartbeat loop is stopped");
                         return;
                     }
                 }

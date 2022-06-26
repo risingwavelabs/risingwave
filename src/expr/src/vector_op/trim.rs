@@ -28,7 +28,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_trim() -> Result<()> {
+    fn test_trim() {
         let cases = [
             (" Hello\tworld\t", "Hello\tworld"),
             (" 空I ❤️ databases空 ", "空I ❤️ databases空"),
@@ -37,11 +37,10 @@ mod tests {
         for (s, expected) in cases {
             let builder = Utf8ArrayBuilder::new(1).unwrap();
             let writer = builder.writer();
-            let guard = trim(s, writer)?;
+            let guard = trim(s, writer).unwrap();
             let array = guard.into_inner().finish().unwrap();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
         }
-        Ok(())
     }
 }
