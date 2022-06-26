@@ -100,7 +100,7 @@ fn cast(lit: LiteralExpression, return_ty: DataType) -> Datum {
     if data_ty == return_ty {
         return data;
     }
-    
+
     let data_chunk = DataChunk::from_rows(&[Row(vec![data])], &[data_ty.clone()]).unwrap();
     let expr = ExprNode {
         expr_type: Type::Cast as i32,
