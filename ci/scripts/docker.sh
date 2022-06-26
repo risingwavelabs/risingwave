@@ -18,7 +18,7 @@ for component in "${components[@]}"
 do
   echo "--- docker build and tag : ${component}"
   docker build -f docker/Dockerfile -t "${ghcraddr}/${component}:latest" --target "${component}" .
-  if [ "${BUILDKITE_PIPELINE_NAME}" == "main-cron" ]; then
+  if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
     # If this is a main-cron build, tag the image with the date.
     TAG="${ghcraddr}/${component}:nightly-${date}"
     docker tag "${ghcraddr}/${component}:latest" "$TAG"
@@ -49,7 +49,7 @@ if [ "$PUSH_GHCR" = true ]; then
   for component in "${components[@]}"
   do
     docker push "${ghcraddr}/${component}:latest"
-    if [ "${BUILDKITE_PIPELINE_NAME}" == "main-cron" ]; then
+    if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
       # If this is a main-cron build, tag the image with the date.
       TAG="${ghcraddr}/${component}:nightly-${date}"
       docker push "$TAG"
