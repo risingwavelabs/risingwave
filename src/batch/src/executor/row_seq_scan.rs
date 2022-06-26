@@ -20,11 +20,13 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::LiteralExpression;
+use risingwave_expr::expr::{build_from_prost, make_input_ref, Expression, LiteralExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
+use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::{
     BatchDedupPkIter, CellBasedIter, CellBasedTable,
@@ -93,20 +95,47 @@ fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
         && matches!(bounds.end_bound(), Bound::Unbounded)
 }
 
-fn get_scan_bound(scan_range: ScanRange) -> (Row, impl RangeBounds<Datum>) {
+fn cast(lit: LiteralExpression, return_ty: DataType) -> Datum {
+    let (data, data_ty) = (lit.literal(), lit.return_type());
+    if data_ty == return_ty {
+        return data;
+    }
+    
+    let data_chunk = DataChunk::from_rows(&[Row(vec![data])], &[data_ty.clone()]).unwrap();
+    let expr = ExprNode {
+        expr_type: Type::Cast as i32,
+        return_type: Some(return_ty.to_protobuf()),
+        rex_node: Some(RexNode::FuncCall(FunctionCall {
+            children: vec![make_input_ref(0, data_ty.prost_type_name())],
+        })),
+    };
+    let vec_executor = build_from_prost(&expr).unwrap();
+    let array = vec_executor.eval(&data_chunk).unwrap();
+    array.iter().next().unwrap().to_owned_datum()
+}
+
+fn get_scan_bound(
+    scan_range: ScanRange,
+    mut pk_types: impl Iterator<Item = DataType>,
+) -> (Row, impl RangeBounds<Datum>) {
     let pk_prefix_value = Row(scan_range
         .eq_conds
         .iter()
-        .map(|v| LiteralExpression::try_from(v).unwrap().literal())
+        .map(|v| {
+            let lit = LiteralExpression::try_from(v).unwrap();
+            let ty = pk_types.next().unwrap();
+            cast(lit, ty)
+        })
         .collect_vec());
     if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
         return (pk_prefix_value, (Bound::Unbounded, Bound::Unbounded));
     }
 
+    let bound_ty = pk_types.next().unwrap();
     let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
-        let datum = LiteralExpression::try_from(bound.value.as_ref().unwrap())
-            .unwrap()
-            .literal();
+        let lit = LiteralExpression::try_from(bound.value.as_ref().unwrap()).unwrap();
+
+        let datum = cast(lit, bound_ty.clone());
         if bound.inclusive {
             Bound::Included(datum)
         } else {
@@ -174,7 +203,16 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .collect_vec();
 
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
-        let (pk_prefix_value, next_col_bounds) = get_scan_bound(scan_range.clone());
+        let (pk_prefix_value, next_col_bounds) = get_scan_bound(
+            scan_range.clone(),
+            pk_descs
+                .iter()
+                .map(|desc| desc.column_desc.data_type.clone()),
+        );
+        warn!(
+            "scan_range: {:#?}\npk_prefix_value: {:#?}",
+            scan_range, pk_prefix_value
+        );
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
