@@ -151,21 +151,19 @@ impl HashMappingManagerCore {
         let mut init_bound = 0;
 
         parallel_units.iter().for_each(|parallel_unit| {
-            let parallel_unit_id = parallel_unit.id;
             let vnode_count = if one_more_count > 0 {
                 one_more_count -= 1;
                 hash_shard_size + 1
             } else {
                 hash_shard_size
             };
+            let parallel_unit_id = parallel_unit.id;
             init_bound += vnode_count;
             vnode_mapping.resize(init_bound, parallel_unit_id);
             let vnodes = (init_bound - vnode_count..init_bound)
                 .map(|id| id as VirtualNode)
                 .collect();
             owner_mapping.insert(parallel_unit_id, vnodes);
-
-            init_bound += hash_shard_size;
         });
 
         let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();

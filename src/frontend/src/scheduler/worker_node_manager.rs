@@ -89,9 +89,8 @@ impl WorkerNodeManager {
         let mut pu_to_worker: HashMap<ParallelUnitId, WorkerNode> = HashMap::new();
         for node in &*current_nodes {
             for pu in &node.parallel_units {
-                pu_to_worker
-                    .insert(pu.id, node.clone())
-                    .expect("duplicate parallel unit id");
+                let res = pu_to_worker.insert(pu.id, node.clone());
+                assert!(res.is_none(), "duplicate parallel unit id");
             }
         }
 

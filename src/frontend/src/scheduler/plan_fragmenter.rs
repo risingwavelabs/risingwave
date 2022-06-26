@@ -231,7 +231,10 @@ impl QueryStageBuilder {
             id: self.id,
             root: self.root.unwrap(),
             exchange_info: self.exchange_info,
-            parallelism: self.parallelism,
+            parallelism: match &self.table_scan_info {
+                None => self.parallelism,
+                Some(info) => info.vnode_ranges_mapping.len() as u32,
+            },
             table_scan_info: self.table_scan_info,
         });
 
