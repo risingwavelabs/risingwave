@@ -5,6 +5,9 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
+echo "+++ Running deterministic simulation test"
+echo "This test won't compile because madsim doesn't support tokio::net yet. Tracking issue: https://github.com/singularity-data/risingwave/issues/3467"
+
 echo "--- Generate RiseDev CI config"
 cp risedev-components.ci.env risedev-components.user.env
 
