@@ -90,8 +90,10 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
             table_option.clone(),
         ));
+        tracing::info!("register MV {}", table_fragments.table_id().table_id);
         // internal states
         for table_id in table_fragments.internal_table_ids() {
+            tracing::info!("register state {}", table_id);
             assert_ne!(table_id, table_fragments.table_id().table_id);
             pairs.push((
                 Prefix::from(table_id),
@@ -128,6 +130,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         table_properties: &HashMap<String, String>,
     ) -> Result<()> {
         let table_option = CompactionGroup::build_table_option(table_properties);
+        tracing::info!("register source {}", source_id);
         self.inner
             .write()
             .await
@@ -151,10 +154,17 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     }
 
     /// Unregisters stale members
+    ///
+    /// Valid members includes:
+    /// - MV fragments.
+    /// - Source.
+    /// - Source in fragments. It's possible a source is dropped while associated fragments still
+    ///   exist. See `SourceManager::drop_source`.
     pub async fn purge_stale_members(
         &self,
         table_fragments_list: &[TableFragments],
         source_ids: &[SourceId],
+        source_ids_in_fragments: &[SourceId],
     ) -> Result<()> {
         let mut guard = self.inner.write().await;
         let registered_members = guard
@@ -173,6 +183,8 @@ impl<S: MetaStore> CompactionGroupManager<S> {
                     .collect_vec()
             })
             .chain(source_ids.iter().cloned())
+            .chain(source_ids_in_fragments.iter().cloned())
+            .dedup()
             .collect_vec();
         let to_unregister = registered_members
             .into_iter()
@@ -524,12 +536,12 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge_stale_members(&[table_fragment_2], &[])
+            .purge_stale_members(&[table_fragment_2], &[], &[])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
-            .purge_stale_members(&[], &[])
+            .purge_stale_members(&[], &[], &[])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 0);
@@ -565,7 +577,7 @@ mod tests {
 
         // Test purge_stale_members: source
         compaction_group_manager
-            .purge_stale_members(&[], &[source_3])
+            .purge_stale_members(&[], &[source_3], &[])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 1);

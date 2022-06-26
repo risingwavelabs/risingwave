@@ -384,6 +384,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .into_iter()
                 .map(|source| source.id)
                 .collect_vec(),
+            &source_manager.get_source_ids_in_fragments().await,
         )
         .await
         .unwrap();

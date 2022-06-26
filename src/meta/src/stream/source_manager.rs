@@ -652,19 +652,20 @@ where
                 "dropping source {}, but associated fragments still exists",
                 source_id
             );
-        }
-
-        // Unregister afterwards and is safeguarded by CompactionGroupManager::purge_stale_members.
-        if let Err(e) = self
-            .compaction_group_manager
-            .unregister_source(source_id)
-            .await
-        {
-            tracing::warn!(
-                "Failed to unregister source {}. It wll be unregistered eventually.\n{:#?}",
-                source_id,
-                e
-            );
+        } else {
+            // Unregister afterwards and is safeguarded by
+            // CompactionGroupManager::purge_stale_members.
+            if let Err(e) = self
+                .compaction_group_manager
+                .unregister_source(source_id)
+                .await
+            {
+                tracing::warn!(
+                    "Failed to unregister source {}. It wll be unregistered eventually.\n{:#?}",
+                    source_id,
+                    e
+                );
+            }
         }
 
         Ok(())
@@ -720,5 +721,15 @@ where
                 );
             }
         }
+    }
+
+    pub async fn get_source_ids_in_fragments(&self) -> Vec<SourceId> {
+        self.core
+            .lock()
+            .await
+            .source_fragments
+            .keys()
+            .cloned()
+            .collect_vec()
     }
 }
