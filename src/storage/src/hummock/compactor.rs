@@ -23,7 +23,8 @@ use dyn_clone::DynClone;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::config::{CompactionFilterFlag, StorageConfig};
+use risingwave_common::config::constant::hummock::{CompactionFilterFlag, TABLE_OPTION_DUMMY_TTL};
+use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -141,13 +142,11 @@ pub struct TTLCompactionFilter {
 
 impl CompactionFilter for TTLCompactionFilter {
     fn filter(&self, key: &[u8]) -> bool {
-        const DUMMY_TTL: u32 = 0;
-
         let (table_id, epoch) = extract_table_id_and_epoch(key);
         match table_id {
             Some(table_id) => match self.table_id_to_ttl.get(&table_id) {
                 Some(ttl_u32) => {
-                    assert!(*ttl_u32 != DUMMY_TTL);
+                    assert!(*ttl_u32 != TABLE_OPTION_DUMMY_TTL);
                     epoch + (*ttl_u32) as u64 > self.expire
                 }
                 None => true,

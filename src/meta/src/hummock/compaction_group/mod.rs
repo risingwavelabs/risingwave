@@ -18,6 +18,7 @@ use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::config::constant::hummock;
 use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
@@ -61,9 +62,7 @@ impl CompactionGroup {
     pub fn build_table_option(table_properties: &HashMap<String, String>) -> TableOption {
         // now we only support ttl for TableOption
         let mut result = TableOption::default();
-
-        const PROPERTIES_TTL_KEY: &str = "ttl";
-        match table_properties.get(PROPERTIES_TTL_KEY) {
+        match table_properties.get(hummock::PROPERTIES_TTL_KEY) {
             Some(ttl_string) => {
                 match ttl_string.trim().parse::<u32>() {
                     Ok(ttl_u32) => result.ttl = Some(ttl_u32),
@@ -158,7 +157,7 @@ pub struct TableOption {
 
 impl From<&risingwave_pb::hummock::TableOption> for TableOption {
     fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
-        let ttl = if table_option.ttl == 0 {
+        let ttl = if table_option.ttl == hummock::TABLE_OPTION_DUMMY_TTL {
             None
         } else {
             Some(table_option.ttl)
