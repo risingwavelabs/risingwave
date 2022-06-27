@@ -75,11 +75,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .try_collect()?;
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
-        let keyspace: Vec<Keyspace<_>> = node
-            .internal_tables
-            .iter()
-            .map(|table| Keyspace::table_root(store.clone(), &TableId::new(table.id)))
-            .collect();
         let input = params.input.remove(0);
         let keys = key_indices
             .iter()
@@ -89,7 +84,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         let agg_calls_len = agg_calls.len();
         // Create internal tables used by hash agg.
         let mut state_tables = Vec::with_capacity(agg_calls_len);
-        for (ks, table_catalog) in keyspace.iter().zip_eq(node.internal_tables.iter()) {
+        for table_catalog in &node.internal_tables {
             // Parse info from proto and create state table.
             let state_table = {
                 let table_columns = table_catalog
@@ -117,7 +112,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                     .map(|pk_index| *pk_index as usize)
                     .collect();
                 StateTable::new(
-                    ks.clone(),
+                    Keyspace::table_root(store.clone(), &TableId::new(table_catalog.id)),
                     table_columns,
                     order_types,
                     Some(dist_key_indices),
