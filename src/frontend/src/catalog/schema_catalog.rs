@@ -14,10 +14,10 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::catalog::{valid_table_name, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::catalog::{
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
 };
-use risingwave_common::catalog::{valid_table_name, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::sink_catalog::SinkCatalog;
@@ -171,7 +171,7 @@ impl SchemaCatalog {
     pub fn get_sink_by_name(&self, sink_name: &str) -> Option<&SinkCatalog> {
         self.sink_by_name.get(sink_name)
     }
-    
+
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
         self.system_table_by_name.get(table_name)
     }

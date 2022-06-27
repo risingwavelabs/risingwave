@@ -19,7 +19,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::error::{Result,};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 /// The local sink manager on the compute node.

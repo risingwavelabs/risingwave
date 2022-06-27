@@ -294,10 +294,7 @@ impl StreamServiceImpl {
     async fn create_sink_inner(&self, sink: &Sink) -> RwResult<()> {
         let id = TableId::new(sink.id); // TODO: use SinkId instead
 
-        self.env
-                    .sink_manager()
-                    .create_sink(&id)
-                    .await?;
+        self.env.sink_manager().create_sink(&id).await?;
 
         Ok(())
     }

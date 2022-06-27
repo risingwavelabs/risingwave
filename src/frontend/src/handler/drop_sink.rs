@@ -28,14 +28,14 @@ pub async fn handle_drop_sink(
     let (schema_name, sink_name) = Binder::resolve_table_name(sink_name)?;
 
     let catalog_reader = session.env().catalog_reader();
-    
+
     check_source(catalog_reader, session.clone(), &schema_name, &sink_name)?;
 
     let sink = catalog_reader
         .read_guard()
         .get_sink_by_name(session.database(), &schema_name, &sink_name)?
         .clone();
-    
+
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_sink(sink.id).await?;
 

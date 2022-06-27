@@ -33,7 +33,7 @@ use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
     ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
-    SourceManagerRef, SinkManagerRef,
+    SinkManagerRef, SourceManagerRef,
 };
 
 #[derive(Clone)]

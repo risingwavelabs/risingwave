@@ -18,16 +18,16 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::catalog::{Sink as ProstSink};
+use risingwave_pb::catalog::Sink as ProstSink;
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_sqlparser::ast::{CreateSinkStatement, ObjectName, SqlOption, Value};
 
 use super::create_table::bind_sql_columns;
 use crate::binder::Binder;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;
 
@@ -53,7 +53,7 @@ pub(crate) fn make_prost_sink(
         database_id,
         name,
         materialized_view,
-        properties
+        properties,
     })
 }
 
@@ -69,24 +69,36 @@ fn handle_sink_with_properties(options: Vec<SqlOption>) -> Result<HashMap<String
         .collect()
 }
 
-pub fn gen_create_sink_plan(session: &SessionImpl, context: OptimizerContextRef, stmt: CreateSinkStatement) -> Result<(PlanRef, ProstSink)> {
+pub fn gen_create_sink_plan(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    stmt: CreateSinkStatement,
+) -> Result<(PlanRef, ProstSink)> {
     let (schema_name, table_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
     let (database_id, schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
-        .check_relation_name_duplicated(session.database(), &schema_name, &stmt.sink_name.to_string())?;
-    
+        .check_relation_name_duplicated(
+            session.database(),
+            &schema_name,
+            &stmt.sink_name.to_string(),
+        )?;
+
     let relation = {
         let mut binder = Binder::new(
             session.env().catalog_reader().read_guard(),
             session.database().to_string(),
         );
-        binder.bind_table_or_source(&schema_name, stmt.materialized_view.to_string().as_str(), None)?
+        binder.bind_table_or_source(
+            &schema_name,
+            stmt.materialized_view.to_string().as_str(),
+            None,
+        )?
     };
 
     let plan = Planner::new(context).plan_relation(relation)?;
-    
+
     let sink = make_prost_sink(
         &session,
         stmt.sink_name,
@@ -111,8 +123,6 @@ pub async fn handle_create_sink(
         (sink, graph)
     };
 
-    
-    
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_sink(sink).await?;
 
