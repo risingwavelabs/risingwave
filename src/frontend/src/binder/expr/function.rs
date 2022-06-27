@@ -101,6 +101,15 @@ impl Binder {
                 "char_length" => ExprType::CharLength,
                 "character_length" => ExprType::CharLength,
                 "repeat" => ExprType::Repeat,
+                // special
+                "pg_typeof" if inputs.len() == 1 => {
+                    let input = &inputs[0];
+                    let v = match input.is_unknown() {
+                        true => "unknown".into(),
+                        false => format!("{:?}", input.return_type()),
+                    };
+                    return Ok(ExprImpl::literal_varchar(v));
+                }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),

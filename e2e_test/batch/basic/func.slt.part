@@ -168,3 +168,13 @@ query T
 select substr(NULL, 1);
 ----
 NULL
+
+query T
+select pg_typeof('123');
+----
+unknown
+
+query T
+select pg_typeof(round(null));
+----
+Float64

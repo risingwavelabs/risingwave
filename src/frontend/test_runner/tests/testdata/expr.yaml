@@ -304,3 +304,13 @@
   batch_plan: |
     BatchProject { exprs: [Substr(null:Varchar, 1:Int32)] }
       BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof('123');
+  batch_plan: |
+    BatchProject { exprs: ['unknown':Varchar] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof(round(null));
+  batch_plan: |
+    BatchProject { exprs: ['Float64':Varchar] }
+      BatchValues { rows: [[]] }
