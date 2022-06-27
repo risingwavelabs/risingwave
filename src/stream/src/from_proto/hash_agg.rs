@@ -16,7 +16,7 @@
 
 use std::marker::PhantomData;
 
-use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::StateTable;
@@ -95,18 +95,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 let table_columns = table_catalog
                     .columns
                     .iter()
-                    .map(|col| {
-                        ColumnDesc::unnamed(
-                            col.column_desc.as_ref().unwrap().column_id.into(),
-                            col.column_desc
-                                .as_ref()
-                                .unwrap()
-                                .column_type
-                                .as_ref()
-                                .unwrap()
-                                .into(),
-                        )
-                    })
+                    .map(|col| col.column_desc.as_ref().unwrap().into())
                     .collect();
                 let order_types = table_catalog
                     .orders

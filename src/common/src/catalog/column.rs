@@ -189,7 +189,7 @@ impl ColumnDesc {
     }
 }
 
-impl From<ProstColumnDesc> for ColumnDesc {
+impl std::convert::From<ProstColumnDesc> for ColumnDesc {
     fn from(prost: ProstColumnDesc) -> Self {
         let field_descs: Vec<ColumnDesc> = prost
             .field_descs
@@ -206,7 +206,7 @@ impl From<ProstColumnDesc> for ColumnDesc {
     }
 }
 
-impl From<&ProstColumnDesc> for ColumnDesc {
+impl std::convert::From<&ProstColumnDesc> for ColumnDesc {
     fn from(prost: &ProstColumnDesc) -> Self {
         prost.clone().into()
     }
