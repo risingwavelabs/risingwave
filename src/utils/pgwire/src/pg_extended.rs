@@ -262,7 +262,7 @@ impl PgPortal {
 
         Ok(PgResponse::new(
             self.stmt_type.unwrap(),
-            data_set.len().try_into().unwrap(),
+            data_set.len() as _,
             data_set,
             vec![],
             row_end,

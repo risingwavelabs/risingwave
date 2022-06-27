@@ -410,6 +410,7 @@ pub fn generate_state_table<S: StateStore>(
     let table_desc = generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
     // Always leave 1 space for agg call value.
     let relational_pk_len = table_desc.len() - 1;
+    let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
     StateTable::new(
         ks,
         table_desc,
@@ -423,7 +424,11 @@ pub fn generate_state_table<S: StateStore>(
             };
             relational_pk_len
         ],
-        None,
+        if dist_keys.is_empty() {
+            None
+        } else {
+            Some(dist_keys)
+        },
         (0..relational_pk_len).collect(),
     )
 }

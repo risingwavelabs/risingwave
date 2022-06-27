@@ -220,6 +220,25 @@ impl DynamicLevelSelector {
         ctx.score_levels.sort_by(|a, b| b.0.cmp(&a.0));
         ctx
     }
+
+    fn set_compaction_config_for_level(&self, input: &mut SearchResult, base_level: usize) {
+        if input.select_level.level_idx == 0 && input.target_level.level_idx == 0 {
+            // TODO: reduce `target_file_size` after we implement sub-level.
+            input.target_file_size = self.config.min_compaction_bytes;
+        } else if input.select_level.level_idx == 0 {
+            input.target_file_size = self.config.target_file_size_base;
+        } else {
+            assert!(input.target_level.level_idx as usize >= base_level);
+            input.target_file_size = self.config.target_file_size_base
+                << (input.target_level.level_idx as usize - base_level);
+        }
+        if input.target_level.level_idx == 0 {
+            input.compression_algorithm = self.config.compression_algorithm[0].clone();
+        } else {
+            let idx = input.target_level.level_idx as usize - base_level + 1;
+            input.compression_algorithm = self.config.compression_algorithm[idx].clone();
+        }
+    }
 }
 
 impl LevelSelector for DynamicLevelSelector {
@@ -244,12 +263,7 @@ impl LevelSelector for DynamicLevelSelector {
             }
             let picker = self.create_compaction_picker(select_level, target_level, task_id);
             if let Some(mut ret) = picker.pick_compaction(levels, level_handlers) {
-                if ret.target_level.level_idx == 0 {
-                    ret.compression_algorithm = self.config.compression_algorithm[0].clone();
-                } else {
-                    let idx = ret.target_level.level_idx as usize - ctx.base_level + 1;
-                    ret.compression_algorithm = self.config.compression_algorithm[idx].clone();
-                }
+                self.set_compaction_config_for_level(&mut ret, ctx.base_level);
                 return Some(ret);
             }
         }
@@ -278,12 +292,7 @@ impl LevelSelector for DynamicLevelSelector {
         );
 
         let mut ret = picker.pick_compaction(levels, level_handlers)?;
-        if ret.target_level.level_idx == 0 {
-            ret.compression_algorithm = self.config.compression_algorithm[0].clone();
-        } else {
-            let idx = ret.target_level.level_idx as usize - ctx.base_level + 1;
-            ret.compression_algorithm = self.config.compression_algorithm[idx].clone();
-        }
+        self.set_compaction_config_for_level(&mut ret, ctx.base_level);
         Some(ret)
     }
 
@@ -297,6 +306,7 @@ pub mod tests {
     use std::ops::Range;
 
     use itertools::Itertools;
+    use risingwave_common::config::CompactionFilterFlag;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
     use risingwave_pb::hummock::{LevelType, SstableInfo};
 
@@ -449,13 +459,17 @@ pub mod tests {
         assert_eq!(compaction.select_level.table_infos.len(), 10);
         assert_eq!(compaction.target_level.table_infos.len(), 0);
 
+        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         let config = CompactionConfigBuilder::new_with(config)
             .min_compaction_bytes(1)
             .max_bytes_for_level_base(100)
             .level0_tigger_file_numer(8)
+            .compaction_filter_mask(compaction_filter_flag.into())
             .build();
-        let selector =
-            DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
+        let selector = DynamicLevelSelector::new(
+            Arc::new(config.clone()),
+            Arc::new(RangeOverlapStrategy::default()),
+        );
         let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers)
@@ -464,6 +478,7 @@ pub mod tests {
         assert_eq!(compaction.target_level.level_idx, 2);
         assert_eq!(compaction.select_level.table_infos.len(), 10);
         assert_eq!(compaction.target_level.table_infos.len(), 3);
+        assert_eq!(compaction.target_file_size, config.target_file_size_base);
 
         levels_handlers[0].remove_task(1);
         levels_handlers[2].remove_task(1);
@@ -476,7 +491,11 @@ pub mod tests {
         assert_eq!(compaction.target_level.level_idx, 4);
         assert_eq!(compaction.select_level.table_infos.len(), 1);
         assert_eq!(compaction.target_level.table_infos.len(), 1);
-
+        assert_eq!(
+            compaction.target_file_size,
+            config.target_file_size_base * 4
+        );
+        assert_eq!(compaction.compression_algorithm.as_str(), "Lz4",);
         // no compaction need to be scheduled because we do not calculate the size of pending files
         // to score.
         let compaction = selector.pick_compaction(2, &levels, &mut levels_handlers);

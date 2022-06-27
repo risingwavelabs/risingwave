@@ -25,7 +25,7 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::CellBasedTable;
+use super::cell_based_table::{CellBasedTable, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
@@ -37,7 +37,7 @@ pub struct StateTable<S: StateStore> {
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTable<S>,
+    cell_based_table: CellBasedTable<S, READ_WRITE>,
 }
 
 impl<S: StateStore> StateTable<S> {
@@ -61,7 +61,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Get the underlying [`CellBasedTable`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &CellBasedTable<S> {
+    pub fn cell_based_table(&self) -> &CellBasedTable<S, READ_WRITE> {
         &self.cell_based_table
     }
 
@@ -81,7 +81,11 @@ impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table. This function will return a Cow. If the value is from
     /// memtable, it will be a [`Cow::Borrowed`]. If is from cell based table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Cow<Row>>> {
+    pub async fn get_row<'a>(
+        &'a self,
+        pk: &'_ Row,
+        epoch: u64,
+    ) -> StorageResult<Option<Cow<'a, Row>>> {
         let pk_bytes = serialize_pk(pk, self.pk_serializer());
         let mem_table_res = self.mem_table.get_row_op(&pk_bytes);
         match mem_table_res {
@@ -141,14 +145,6 @@ impl<S: StateStore> StateTable<S> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.cell_based_table
             .batch_write_rows(mem_table, new_epoch)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn commit_with_value_meta(&mut self, new_epoch: u64) -> StorageResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.cell_based_table
-            .batch_write_rows_with_value_meta(mem_table, new_epoch)
             .await?;
         Ok(())
     }

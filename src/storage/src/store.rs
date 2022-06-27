@@ -16,6 +16,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::LocalSstableInfo;
 
 use crate::error::StorageResult;
@@ -78,7 +79,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_>;
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -89,7 +90,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         &self,
         key_range: R,
         limit: Option<usize>,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -99,7 +100,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         &self,
         key_range: R,
         limit: Option<usize>,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -117,20 +118,20 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_>;
 
     /// Functions the same as `ingest_batch`, except that data won't be persisted.
     fn replicate_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        write_options: WriteOptions,
     ) -> Self::ReplicateBatchFuture<'_>;
 
     /// Opens and returns an iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.
-    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
@@ -138,14 +139,18 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Opens and returns a backward iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
-    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(
+        &self,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
     /// Creates a `WriteBatch` associated with this state store.
-    fn start_write_batch(&self) -> WriteBatch<Self> {
-        WriteBatch::new(self.clone())
+    fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<Self> {
+        WriteBatch::new(self.clone(), write_options)
     }
 
     /// Waits until the epoch is committed and its data is ready to read.
@@ -172,4 +177,16 @@ pub trait StateStoreIter: Send + 'static {
     type NextFuture<'a>: Future<Output = StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_>;
+}
+
+#[derive(Default, Clone)]
+pub struct ReadOptions {
+    pub epoch: u64,
+    pub table_id: Option<TableId>,
+}
+
+#[derive(Default, Clone)]
+pub struct WriteOptions {
+    pub epoch: u64,
+    pub table_id: TableId,
 }

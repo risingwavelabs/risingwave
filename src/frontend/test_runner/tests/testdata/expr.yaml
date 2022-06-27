@@ -287,3 +287,13 @@
   batch_plan: |
     BatchProject { exprs: [ConcatOp(':':Varchar, true:Boolean::Varchar)] }
       BatchValues { rows: [[]] }
+- sql: |
+    select substr('hello', NULL);
+  batch_plan: |
+    BatchProject { exprs: [Substr('hello':Varchar, null:Int32)] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select substr(NULL, 1);
+  batch_plan: |
+    BatchProject { exprs: [Substr(null:Varchar, 1:Int32)] }
+      BatchValues { rows: [[]] }

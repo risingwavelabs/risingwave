@@ -19,7 +19,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{OrderedColumnDesc, Schema};
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::cell_based_table::{CellBasedTable, READ_ONLY};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
@@ -29,7 +29,7 @@ use crate::executor::BoxedMessageStream;
 
 pub struct BatchQueryExecutor<S: StateStore> {
     /// The [`CellBasedTable`] that needs to be queried
-    table: CellBasedTable<S>,
+    table: CellBasedTable<S, READ_ONLY>,
 
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
@@ -54,7 +54,7 @@ where
     const DEFAULT_BATCH_SIZE: usize = 100;
 
     pub fn new(
-        table: CellBasedTable<S>,
+        table: CellBasedTable<S, READ_ONLY>,
         batch_size: Option<usize>,
         info: ExecutorInfo,
         key_indices: Vec<usize>,

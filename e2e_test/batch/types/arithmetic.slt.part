@@ -52,3 +52,23 @@ query T
 select time '10:23';
 ----
 10:23:00
+
+query T
+select interval '14000' / int '14';
+----
+00:16:40
+
+query T
+select interval '20' / float '12.5'
+----
+00:00:1.6
+
+query T
+select interval '12 days' / 4.2;
+----
+2 days 20:34:17.143
+
+query T
+SELECT interval '1 month' / 2000;
+----
+00:21:36
