@@ -70,6 +70,12 @@ impl BufferTracker {
         block_write_threshold: usize,
         buffer_event_sender: Arc<mpsc::UnboundedSender<SharedBufferEvent>>,
     ) -> Self {
+        assert!(
+            flush_threshold <= block_write_threshold,
+            "flush threshold {} is not less than block write threshold {}",
+            flush_threshold,
+            block_write_threshold
+        );
         info!(
             "buffer tracker init: flush threshold {}, block write threshold {}",
             flush_threshold, block_write_threshold
@@ -167,10 +173,10 @@ impl LocalVersionManager {
                 version_update_notifier_tx,
             },
             buffer_tracker: BufferTracker::new(
-                capacity,
                 // 0.8 * capacity
                 // TODO: enable setting the ratio with config
                 capacity * 4 / 5,
+                capacity,
                 Arc::new(buffer_event_sender),
             ),
             write_conflict_detector: write_conflict_detector.clone(),
