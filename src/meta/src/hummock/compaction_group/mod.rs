@@ -158,15 +158,15 @@ pub struct TableOption {
     ttl: u32,
 }
 
-impl From<&risingwave_pb::hummock::compaction_group::TableOption> for TableOption {
-    fn from(table_option: &risingwave_pb::hummock::compaction_group::TableOption) -> Self {
+impl From<&risingwave_pb::hummock::TableOption> for TableOption {
+    fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
         Self {
             ttl: table_option.ttl,
         }
     }
 }
 
-impl From<&TableOption> for risingwave_pb::hummock::compaction_group::TableOption {
+impl From<&TableOption> for risingwave_pb::hummock::TableOption {
     fn from(table_option: &TableOption) -> Self {
         Self {
             ttl: table_option.ttl,
