@@ -60,9 +60,6 @@ impl HummockSnapshotManager {
             let query_ids = core_guard.epoch_to_query_ids.get_mut(&epoch);
             if let Some(query_ids) = query_ids {
                 query_ids.remove(query_id);
-                if query_ids.is_empty() && epoch == core_guard.last_pinned {
-                    core_guard.is_outdated = true;
-                }
             }
 
             // Check the min epoch, if the epoch has no query running on it, this should be the min
