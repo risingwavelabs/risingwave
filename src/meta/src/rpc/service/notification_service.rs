@@ -99,7 +99,6 @@ where
                     source,
                     table,
                     users,
-                    view: Default::default(),
                 };
                 tx.send(Ok(SubscribeResponse {
                     status: None,

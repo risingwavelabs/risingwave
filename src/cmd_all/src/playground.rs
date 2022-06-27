@@ -124,7 +124,12 @@ pub async fn playground() -> Result<()> {
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
                 tracing::info!("opts: {:#?}", opts);
-                let _meta_handle = tokio::spawn(async move { risingwave_meta::start(opts).await });
+                let _meta_handle = tokio::spawn(async move {
+                    risingwave_meta::start(opts).await;
+                    tracing::info!("meta is stopped, shutdown all nodes");
+                    // As a playground, it's fine to just kill everything.
+                    std::process::exit(0);
+                });
                 // wait for the service to be ready
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }

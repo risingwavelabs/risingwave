@@ -14,6 +14,7 @@ publish = false
 ### BEGIN HAKARI SECTION
 [dependencies]
 anyhow = { version = "1", features = ["backtrace", "std"] }
+auto_enums = { version = "0.7", features = ["futures", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
 bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
@@ -69,6 +70,8 @@ uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", 
 
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace", "std"] }
+auto_enums = { version = "0.7", features = ["futures", "std"] }
+auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "futures03", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
 bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
