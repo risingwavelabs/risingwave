@@ -109,6 +109,11 @@ impl ExprImpl {
         matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
     }
 
+    /// Check whether self is a literal NULL or literal string.
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, ExprImpl::Literal(literal) if literal.return_type() == DataType::Varchar)
+    }
+
     /// Shorthand to create cast expr to `target` type in implicit context.
     pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl> {
         FunctionCall::new_cast(self, target, CastContext::Implicit)
