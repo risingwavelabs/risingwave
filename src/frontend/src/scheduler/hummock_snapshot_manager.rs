@@ -13,11 +13,14 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 use log::error;
 use tokio::sync::Mutex;
+use tokio_retry::strategy::jitter;
 
+use super::SchedulerError;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::SchedulerError::PinSnapshot;
@@ -40,16 +43,6 @@ impl HummockSnapshotManager {
 
     pub async fn get_epoch(&self, query_id: QueryId) -> SchedulerResult<u64> {
         let mut core_guard = self.core.lock().await;
-        if core_guard.is_outdated {
-            let epoch = self
-                .meta_client
-                .pin_snapshot(core_guard.last_pinned)
-                .await
-                .map_err(|_e| PinSnapshot(query_id.clone(), core_guard.last_pinned))?;
-            core_guard.is_outdated = false;
-            core_guard.last_pinned = epoch;
-            core_guard.epoch_to_query_ids.insert(epoch, HashSet::new());
-        }
         let last_pinned = core_guard.last_pinned;
         core_guard
             .epoch_to_query_ids
@@ -108,18 +101,96 @@ impl HummockSnapshotManager {
         Ok(())
     }
 
-    /// Used in `ObserverManager`.
-    pub async fn update_snapshot_status(&self, epoch: u64) {
-        let mut core_guard = self.core.lock().await;
-        if core_guard.last_pinned < epoch {
-            core_guard.is_outdated = true;
+    /// Pin a epoch with retry.
+    ///
+    /// Return:
+    ///   - `Some(Ok(u64))` if success
+    ///   - `Some(Err(SchedulerError::PinSnapshot))` if exceed the retry limit
+    ///   - `None` if meet the break condition
+    async fn pin_epoch_with_retry(
+        meta_client: Arc<dyn FrontendMetaClient>,
+        last_pinned: u64,
+        max_retry: usize,
+        break_condition: impl Fn() -> bool,
+    ) -> Option<Result<u64, SchedulerError>> {
+        let max_retry_interval = Duration::from_secs(10);
+        let mut retry_backoff = tokio_retry::strategy::ExponentialBackoff::from_millis(10)
+            .max_delay(max_retry_interval)
+            .map(jitter);
+        let mut retry_count = 0;
+        loop {
+            if retry_count > max_retry {
+                break Some(Err(PinSnapshot(last_pinned, max_retry.try_into().unwrap())));
+            }
+            if break_condition() {
+                break None;
+            }
+            match meta_client.pin_snapshot(last_pinned).await {
+                Ok(version) => {
+                    break Some(Ok(version));
+                }
+                Err(err) => {
+                    let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
+                    tracing::warn!(
+                        "Failed to pin epoch {:?}. Will retry after about {} milliseconds",
+                        err,
+                        retry_after.as_millis()
+                    );
+                    tokio::time::sleep(retry_after).await;
+                }
+            }
+            retry_count += 1;
+        }
+    }
+
+    async fn start_pin_worker(
+        local_snapshot_manager_weak: Weak<HummockSnapshotManager>,
+        meta_client: Arc<dyn FrontendMetaClient>,
+    ) {
+        let min_execute_interval = Duration::from_millis(100);
+        let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
+        min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            min_execute_interval_tick.tick().await;
+            let local_snapshot_manager = match local_snapshot_manager_weak.upgrade() {
+                None => {
+                    tracing::info!("Shutdown hummock pin worker");
+                    return;
+                }
+                Some(local_snapshot_manager) => local_snapshot_manager,
+            };
+
+            let last_epoch = local_snapshot_manager.core.lock().await.last_pinned;
+
+            match Self::pin_epoch_with_retry(meta_client.clone(), last_epoch, usize::MAX, || {
+                // Should stop when the `local_version_manager` in this thread is the only
+                // strong reference to the object.
+                local_snapshot_manager_weak.strong_count() == 1
+            })
+            .await
+            {
+                Some(Ok(pinned_epoch)) => {
+                    let mut core_guard = local_snapshot_manager.core.lock().await;
+                    if core_guard.last_pinned < pinned_epoch {
+                        core_guard.last_pinned = pinned_epoch;
+                    }
+                }
+                Some(Err(_)) => {
+                    unreachable!(
+                        "since the max_retry is `usize::MAX`, this should never return `Err`"
+                    );
+                }
+                None => {
+                    tracing::info!("Shutdown snapshot pin worker");
+                    return;
+                }
+            };
         }
     }
 }
 
 #[derive(Default)]
 struct HummockSnapshotManagerCore {
-    is_outdated: bool,
     last_pinned: u64,
     /// Record the query ids that pin each snapshot.
     /// Send an `unpin_snapshot` RPC when a snapshot is not pinned any more.
@@ -130,7 +201,6 @@ impl HummockSnapshotManagerCore {
     fn new() -> Self {
         Self {
             // Initialize by setting `is_outdated` to `true`.
-            is_outdated: true,
             ..Default::default()
         }
     }

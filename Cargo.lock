@@ -4260,6 +4260,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror",
+ "tokio-retry",
  "tracing",
  "uuid 1.1.2",
  "workspace-hack",
