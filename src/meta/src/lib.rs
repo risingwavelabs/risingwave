@@ -105,6 +105,11 @@ pub struct MetaNodeOpts {
 
     #[clap(long, default_value = "10")]
     meta_leader_lease_secs: u64,
+
+    /// After specified seconds of idle (no mview or flush), the process will be exited.
+    /// It is mainly useful for playgrounds.
+    #[clap(long)]
+    dangerous_max_idle_secs: Option<u64>,
 }
 
 fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
@@ -138,6 +143,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
         let checkpoint_interval =
             Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
+        let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = compute_config.streaming.in_flight_barrier_nums as usize;
 
         tracing::info!("Meta server listening at {}", listen_addr);
@@ -156,11 +162,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
                 checkpoint_interval,
+                max_idle_ms,
                 in_flight_barrier_nums,
             },
         )
         .await
         .unwrap();
         join_handle.await.unwrap();
+        tracing::info!("Meta server is stopped");
     })
 }

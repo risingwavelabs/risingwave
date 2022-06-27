@@ -202,7 +202,7 @@ where
                                 v
                             })
                             .map(|x| {
-                                // NOTE Make sure the type_description include all generic parametre
+                                // NOTE Make sure the type_description include all generic parameter
                                 // description we needed.
                                 assert!(((x - 1) as usize) < types.len());
                                 PgFieldDescriptor::new(

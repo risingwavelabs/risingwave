@@ -182,10 +182,11 @@ impl From<ProstTable> for TableCatalog {
             })
             .collect();
 
-        let vnode_mapping = decompress_data(
-            &tb.mapping.as_ref().unwrap().original_indices,
-            &tb.mapping.as_ref().unwrap().data,
-        );
+        let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
+            decompress_data(&mapping.original_indices, &mapping.data)
+        } else {
+            vec![]
+        };
 
         Self {
             id: id.into(),
