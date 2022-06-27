@@ -213,8 +213,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
         let hash_codes = data_chunk.get_hash_values(key_indices, CRC32FastBuilder)?;
-        let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone())
-            .map_err(StreamExecutorError::eval_error)?;
+        let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
         let (columns, vis) = data_chunk.into_parts();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
