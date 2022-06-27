@@ -44,7 +44,6 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
         Ok(HashAggExecutor::<K, S>::new(
             args.input,
             args.agg_calls,
-            // args.keyspace,
             args.pk_indices,
             args.executor_id,
             args.key_indices,
