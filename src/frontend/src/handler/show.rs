@@ -101,6 +101,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
                     PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
                     PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
                 ],
+                true,
             ));
         }
     };
@@ -115,6 +116,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
         rows.len() as i32,
         rows,
         vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
+        true,
     ))
 }
 

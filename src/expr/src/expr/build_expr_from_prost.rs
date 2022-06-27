@@ -17,7 +17,10 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::expr_binary_bytes::{new_repeat, new_substr_start, new_to_char};
+use crate::expr::expr_binary_bytes::{
+    new_ltrim_characters, new_repeat, new_rtrim_characters, new_substr_start, new_to_char,
+    new_trim_characters,
+};
 use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
@@ -99,26 +102,44 @@ pub fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 
 pub fn build_trim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
-    // TODO: add expr with the delimiter parameter
-    ensure!(children.len() == 1);
-    let child = expr_build_from_prost(&children[0])?;
-    Ok(new_trim_expr(child, ret_type))
+    ensure!(!children.is_empty() && children.len() <= 2);
+    let original = expr_build_from_prost(&children[0])?;
+    match children.len() {
+        1 => Ok(new_trim_expr(original, ret_type)),
+        2 => {
+            let characters = expr_build_from_prost(&children[1])?;
+            Ok(new_trim_characters(original, characters, ret_type))
+        }
+        _ => unreachable!(),
+    }
 }
 
 pub fn build_ltrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
-    // TODO: add expr with the delimiter parameter
-    ensure!(children.len() == 1);
-    let child = expr_build_from_prost(&children[0])?;
-    Ok(new_ltrim_expr(child, ret_type))
+    ensure!(!children.is_empty() && children.len() <= 2);
+    let original = expr_build_from_prost(&children[0])?;
+    match children.len() {
+        1 => Ok(new_ltrim_expr(original, ret_type)),
+        2 => {
+            let characters = expr_build_from_prost(&children[1])?;
+            Ok(new_ltrim_characters(original, characters, ret_type))
+        }
+        _ => unreachable!(),
+    }
 }
 
 pub fn build_rtrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
-    // TODO: add expr with the delimiter parameter
-    ensure!(children.len() == 1);
-    let child = expr_build_from_prost(&children[0])?;
-    Ok(new_rtrim_expr(child, ret_type))
+    ensure!(!children.is_empty() && children.len() <= 2);
+    let original = expr_build_from_prost(&children[0])?;
+    match children.len() {
+        1 => Ok(new_rtrim_expr(original, ret_type)),
+        2 => {
+            let characters = expr_build_from_prost(&children[1])?;
+            Ok(new_rtrim_characters(original, characters, ret_type))
+        }
+        _ => unreachable!(),
+    }
 }
 
 pub fn build_replace_expr(prost: &ExprNode) -> Result<BoxedExpression> {

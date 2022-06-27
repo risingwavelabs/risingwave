@@ -20,8 +20,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundTableFunction, BoundWindowTableFunction,
-    FunctionType, Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableFunction,
+    BoundWindowTableFunction, FunctionType, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -34,6 +34,7 @@ impl Planner {
     pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
             Relation::BaseTable(t) => self.plan_base_table(*t),
+            Relation::SystemTable(st) => self.plan_sys_table(*st),
             // TODO: order is ignored in the subquery
             Relation::Subquery(q) => Ok(self.plan_query(q.query)?.as_subplan()),
             Relation::Join(join) => self.plan_join(*join),
@@ -46,9 +47,21 @@ impl Planner {
         }
     }
 
+    pub(crate) fn plan_sys_table(&mut self, sys_table: BoundSystemTable) -> Result<PlanRef> {
+        Ok(LogicalScan::create(
+            sys_table.name,
+            true,
+            Rc::new(sys_table.sys_table_catalog.table_desc()),
+            vec![],
+            self.ctx(),
+        )
+        .into())
+    }
+
     pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
         Ok(LogicalScan::create(
             base_table.name,
+            false,
             Rc::new(base_table.table_catalog.table_desc()),
             base_table
                 .table_indexes

@@ -18,7 +18,6 @@ pub use agg_call::*;
 pub use agg_state::*;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
@@ -141,10 +140,10 @@ pub fn create_streaming_agg_state(
                     }
                 )*
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingApproxCountDistinct::new_with_datum(datum))
+                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new_with_datum(datum))
                 }
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
-                    Box::new(StreamingApproxCountDistinct::new())
+                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new())
                 }
                 (other_agg, other_input, other_return, _) => panic!(
                     "streaming agg state not implemented: {:?} {:?} {:?}",
@@ -411,6 +410,7 @@ pub fn generate_state_table<S: StateStore>(
     let table_desc = generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
     // Always leave 1 space for agg call value.
     let relational_pk_len = table_desc.len() - 1;
+    let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
     StateTable::new(
         ks,
         table_desc,
@@ -424,7 +424,11 @@ pub fn generate_state_table<S: StateStore>(
             };
             relational_pk_len
         ],
-        None,
+        if dist_keys.is_empty() {
+            None
+        } else {
+            Some(dist_keys)
+        },
         (0..relational_pk_len).collect(),
     )
 }
@@ -433,7 +437,6 @@ pub fn generate_state_table<S: StateStore>(
 pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
-    keyspace: &[Keyspace<S>],
     pk_data_types: PkDataTypes,
     epoch: u64,
     key_hash_code: Option<HashCode>,
@@ -445,20 +448,9 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     const_assert_eq!(ROW_COUNT_COLUMN, 0);
     let mut row_count = None;
 
-    for ((idx, agg_call), keyspace) in agg_calls.iter().enumerate().zip_eq(keyspace) {
-        // TODO: in pure in-memory engine, we should not do this serialization.
-
-        // The prefix of the state is `table_id/[group_key]`
-        let keyspace = if let Some(key) = key {
-            let bytes = key.serialize().unwrap();
-            keyspace.append(bytes)
-        } else {
-            keyspace.clone()
-        };
-
+    for (idx, agg_call) in agg_calls.iter().enumerate() {
         let mut managed_state = ManagedStateImpl::create_managed_state(
             agg_call.clone(),
-            keyspace,
             row_count,
             pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
@@ -470,7 +462,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
 
         if idx == ROW_COUNT_COLUMN {
             // For the rowcount state, we should record the rowcount.
-            let output = managed_state.get_output(epoch).await?;
+            let output = managed_state.get_output(epoch, &state_tables[idx]).await?;
             row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
         }
 

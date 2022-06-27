@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_common::catalog::RESERVED_PG_SCHEMA_PREFIX;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
@@ -28,6 +29,14 @@ pub async fn handle_create_schema(
     let session = context.session_ctx;
     let (database_name, schema_name) =
         Binder::resolve_schema_name(session.database(), schema_name)?;
+
+    if schema_name.starts_with(RESERVED_PG_SCHEMA_PREFIX) {
+        return Err(ErrorCode::ProtocolError(format!(
+            "unacceptable schema name \"{}\", The prefix \"{}\" is reserved for system schemas",
+            schema_name, RESERVED_PG_SCHEMA_PREFIX
+        ))
+        .into());
+    }
 
     let db_id = {
         let catalog_reader = session.env().catalog_reader();

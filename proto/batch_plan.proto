@@ -11,8 +11,13 @@ option optimize_for = SPEED;
 
 message RowSeqScanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
-  repeated plan_common.ColumnDesc column_descs = 2;
+  repeated int32 column_ids = 2;
   ScanRange scan_range = 3;
+}
+
+message SysRowSeqScanNode {
+  string table_name = 1;
+  repeated plan_common.ColumnDesc column_descs = 2;
 }
 
 // The range to scan, which specifies a consecutive range of the PK
@@ -96,6 +101,7 @@ message LimitNode {
 message NestedLoopJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode join_cond = 2;
+  repeated uint32 output_indices = 3;
 }
 
 message HashAggNode {
@@ -113,6 +119,7 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
+  repeated uint32 output_indices = 5;
 }
 
 message SortMergeJoinNode {
@@ -120,6 +127,7 @@ message SortMergeJoinNode {
   repeated int32 left_keys = 2;
   repeated int32 right_keys = 3;
   plan_common.OrderType direction = 4;
+  repeated uint32 output_indices = 5;
 }
 
 message HopWindowNode {
@@ -201,6 +209,7 @@ message PlanNode {
     SortMergeJoinNode sort_merge_join = 22;
     HopWindowNode hop_window = 25;
     TableFunctionNode table_function = 26;
+    SysRowSeqScanNode sys_row_seq_scan = 27;
   }
   string identity = 24;
 }

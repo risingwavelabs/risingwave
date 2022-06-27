@@ -1,12 +1,6 @@
 version: "3.9"
 services:
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220618
-#    build:
-#      context: ..
-#      dockerfile: ./ci/Dockerfile
-#      target: risingwave-build-env
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220623-v2
     volumes:
       - ..:/risingwave
-
-

@@ -2806,6 +2806,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f17df307904acd05aa8e32e97bb20f2a0df1728bbc2d771ae8f9a90463441e9"
+dependencies = [
+ "bitflags",
+ "cfg-if 1.0.0",
+ "libc",
+ "memoffset 0.6.5",
+]
+
+[[package]]
 name = "nom"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3886,6 +3898,7 @@ dependencies = [
 name = "risingwave_cmd"
 version = "0.1.9"
 dependencies = [
+ "anyhow",
  "clap 3.1.18",
  "log",
  "madsim",
@@ -3932,6 +3945,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "auto_enums",
+ "bitflags",
  "byteorder",
  "bytes",
  "chrono",
@@ -3955,6 +3969,7 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
+ "regex",
  "risingwave_pb",
  "rust_decimal",
  "serde",
@@ -4018,6 +4033,7 @@ dependencies = [
  "madsim",
  "madsim-tokio",
  "madsim-tonic",
+ "maplit",
  "memcomparable",
  "num-traits",
  "paste",
@@ -4027,6 +4043,7 @@ dependencies = [
  "rdkafka",
  "risingwave_batch",
  "risingwave_common",
+ "risingwave_connector",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_sink",
@@ -4119,11 +4136,16 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap 3.1.18",
+ "futures",
+ "madsim-tokio",
  "risingwave_common",
+ "risingwave_frontend",
  "risingwave_hummock_sdk",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "size",
  "tracing",
  "workspace-hack",
 ]
@@ -4291,6 +4313,7 @@ dependencies = [
  "derivative",
  "either",
  "etcd-client",
+ "fail",
  "futures",
  "hex",
  "hyper",
@@ -4314,6 +4337,7 @@ dependencies = [
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_test_runner",
  "serde",
  "serde_derive",
  "serde_json",
@@ -4545,11 +4569,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_sqlsmith"
+version = "0.1.9"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap 3.1.18",
+ "env_logger",
+ "lazy_static",
+ "log",
+ "madsim",
+ "madsim-tokio",
+ "paste",
+ "rand 0.8.5",
+ "risingwave_frontend",
+ "risingwave_sqlparser",
+ "tokio-postgres",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_storage"
 version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",
+ "auto_enums",
  "byteorder",
  "bytes",
  "chrono",
@@ -4557,6 +4602,7 @@ dependencies = [
  "criterion",
  "crossbeam",
  "dashmap",
+ "dyn-clone",
  "either",
  "enum-as-inner",
  "fail",
@@ -4574,6 +4620,7 @@ dependencies = [
  "madsim-tonic",
  "memcomparable",
  "moka",
+ "nix",
  "num-integer",
  "num-traits",
  "parking_lot",
@@ -4632,6 +4679,7 @@ dependencies = [
  "madsim",
  "madsim-tokio",
  "madsim-tonic",
+ "maplit",
  "memcomparable",
  "num-traits",
  "parking_lot",
@@ -4643,6 +4691,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_sink",
@@ -5018,6 +5067,15 @@ name = "siphasher"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bd3e3206899af3f8b12af284fafc038cc1dc2b41d1b89dd17297221c5d225de"
+
+[[package]]
+name = "size"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fb3f61ca4410df5894add0b47d4d2c882c837dfa660d579c9b3fd29b1ce3a0e"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "skeptic"
@@ -6072,6 +6130,8 @@ name = "workspace-hack"
 version = "0.1.9"
 dependencies = [
  "anyhow",
+ "auto_enums",
+ "auto_enums_derive",
  "axum",
  "bstr",
  "bytes",

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::config::CompactionFilterFlag;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
 
@@ -21,6 +22,7 @@ const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
 const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 16;
+const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
 const MAX_LEVEL: u64 = 6;
 
 pub struct CompactionConfigBuilder {
@@ -38,7 +40,21 @@ impl CompactionConfigBuilder {
                 min_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
                 level0_tigger_file_numer: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
                 level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
-                compaction_mode: CompactionMode::ConsistentHash as i32,
+                target_file_size_base: DEFAULT_TARGET_FILE_SIZE_BASE,
+                compaction_mode: CompactionMode::Range as i32,
+                // support compression setting per level
+                // L0 and L1 do not use compression algorithms
+                // L2 - L4 use Lz4, else use Zstd
+                compression_algorithm: vec![
+                    "None".to_string(),
+                    "None".to_string(),
+                    "Lz4".to_string(),
+                    "Lz4".to_string(),
+                    "Lz4".to_string(),
+                    "Zstd".to_string(),
+                    "Zstd".to_string(),
+                ],
+                compaction_filter_mask: (CompactionFilterFlag::NONE).into(),
             },
         }
     }
@@ -62,13 +78,9 @@ macro_rules! builder_field {
     ($( $name:ident: $type:ty ),* ,) => {
         impl CompactionConfigBuilder {
             $(
-                pub fn $name(&self, v:$type) -> Self {
-                    Self {
-                        config: CompactionConfig {
-                            $name: v,
-                            ..self.config
-                        },
-                    }
+                pub fn $name(mut self, v:$type) -> Self {
+                    self.config.$name = v;
+                    self
                 }
             )*
         }
@@ -84,4 +96,6 @@ builder_field! {
     level0_tigger_file_numer: u64,
     level0_tier_compact_file_number: u64,
     compaction_mode: i32,
+    compression_algorithm: Vec<String>,
+    compaction_filter_mask: u32,
 }

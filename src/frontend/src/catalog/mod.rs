@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use thiserror::Error;
@@ -20,11 +20,15 @@ pub(crate) mod catalog_service;
 
 pub(crate) mod column_catalog;
 pub(crate) mod database_catalog;
+pub(crate) mod pg_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
 pub(crate) mod sink_catalog;
 pub(crate) mod source_catalog;
+pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
+
+pub use table_catalog::TableCatalog;
 
 pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
@@ -42,6 +46,18 @@ pub fn check_valid_column_name(column_name: &str) -> Result<()> {
             ROWID_PREFIX
         ))
         .into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Check if modifications happen to system catalog.
+pub fn check_schema_writable(schema: &str) -> Result<()> {
+    if schema == PG_CATALOG_SCHEMA_NAME {
+        Err(ErrorCode::ProtocolError(format!(
+            "permission denied to write on \"{}\", System catalog modifications are currently disallowed.",
+            schema
+        )).into())
     } else {
         Ok(())
     }

@@ -30,7 +30,9 @@ use rand::RngCore;
 use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::session_config::{DELTA_JOIN, IMPLICIT_FLUSH, QUERY_MODE};
+use risingwave_common::session_config::{
+    APPLICATION_NAME, DELTA_JOIN, EXTRA_FLOAT_DIGITS, IMPLICIT_FLUSH, QUERY_MODE,
+};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -62,6 +64,8 @@ pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
+    /// For debugging purposes, store the SQL string in Context
+    pub sql: Arc<str>,
 }
 
 #[derive(Clone, Debug)]
@@ -93,10 +97,11 @@ impl OptimizerContextRef {
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
+            sql,
         }
     }
 
@@ -106,6 +111,7 @@ impl OptimizerContext {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
+            sql: Arc::from(""),
         }
         .into()
     }
@@ -217,7 +223,7 @@ impl FrontendEnv {
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
-        let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
+        let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
@@ -319,10 +325,23 @@ impl FrontendEnv {
     }
 }
 
+pub struct AuthContext {
+    pub database: String,
+    pub user_name: String,
+}
+
+impl AuthContext {
+    pub fn new(database: String, user_name: String) -> Self {
+        Self {
+            database,
+            user_name,
+        }
+    }
+}
+
 pub struct SessionImpl {
     env: FrontendEnv,
-    database: String,
-    user_name: String,
+    auth_context: Arc<AuthContext>,
     // Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
@@ -357,6 +376,8 @@ fn build_default_session_config_map() -> HashMap<String, String> {
     m.insert(IMPLICIT_FLUSH.to_ascii_lowercase(), "false".to_string());
     m.insert(DELTA_JOIN.to_ascii_lowercase(), "false".to_string());
     m.insert(QUERY_MODE.to_ascii_lowercase(), "distributed".to_string());
+    m.insert(EXTRA_FLOAT_DIGITS.to_ascii_lowercase(), "1".to_string());
+    m.insert(APPLICATION_NAME.to_ascii_lowercase(), "".to_string());
     m
 }
 
@@ -369,14 +390,12 @@ lazy_static::lazy_static! {
 impl SessionImpl {
     pub fn new(
         env: FrontendEnv,
-        database: String,
-        user_name: String,
+        auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
     ) -> Self {
         Self {
             env,
-            database,
-            user_name,
+            auth_context,
             user_authenticator,
             config_map: Self::init_config_map(),
         }
@@ -386,8 +405,10 @@ impl SessionImpl {
     pub fn mock() -> Self {
         Self {
             env: FrontendEnv::mock(),
-            database: DEFAULT_DATABASE_NAME.to_string(),
-            user_name: DEFAULT_SUPPER_USER.to_string(),
+            auth_context: Arc::new(AuthContext::new(
+                DEFAULT_DATABASE_NAME.to_string(),
+                DEFAULT_SUPPER_USER.to_string(),
+            )),
             user_authenticator: UserAuthenticator::None,
             config_map: Self::init_config_map(),
         }
@@ -397,12 +418,16 @@ impl SessionImpl {
         &self.env
     }
 
+    pub fn auth_context(&self) -> Arc<AuthContext> {
+        self.auth_context.clone()
+    }
+
     pub fn database(&self) -> &str {
-        &self.database
+        &self.auth_context.database
     }
 
     pub fn user_name(&self) -> &str {
-        &self.user_name
+        &self.auth_context.user_name
     }
 
     /// Set configuration values in this session.
@@ -467,7 +492,7 @@ impl SessionManager for SessionManagerImpl {
                     format!("User {} is not allowed to login", user_name),
                 )));
             }
-            let authenticator = match &user.auth_info {
+            let user_authenticator = match &user.auth_info {
                 None => UserAuthenticator::None,
                 Some(auth_info) => {
                     if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
@@ -494,9 +519,11 @@ impl SessionManager for SessionManagerImpl {
 
             Ok(SessionImpl::new(
                 self.env.clone(),
-                database.to_string(),
-                user_name.to_string(),
-                authenticator,
+                Arc::new(AuthContext::new(
+                    database.to_string(),
+                    user_name.to_string(),
+                )),
+                user_authenticator,
             )
             .into())
         } else {
@@ -538,18 +565,19 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
-        // With pgwire, there would be at most 1 statement in the vec.
-        assert!(stmts.len() <= 1);
         if stmts.is_empty() {
-            return Ok(PgResponse::new(
+            return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
-                0,
-                vec![],
-                vec![],
+            ));
+        }
+        if stmts.len() > 1 {
+            return Ok(PgResponse::empty_result_with_notice(
+                pgwire::pg_response::StatementType::EMPTY,
+                "cannot insert multiple commands into statement".to_string(),
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt).await.map_err(|e| {
+        let rsp = handle(self, stmt, sql).await.map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
@@ -565,13 +593,17 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
-        // With pgwire, there would be at most 1 statement in the vec.
-        assert!(stmts.len() <= 1);
         if stmts.is_empty() {
             return Ok(vec![]);
         }
+        if stmts.len() > 1 {
+            return Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "cannot insert multiple commands into statement",
+            )));
+        }
         let stmt = stmts.swap_remove(0);
-        let rsp = infer(self, stmt).map_err(|e| {
+        let rsp = infer(self, stmt, sql).map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
@@ -584,8 +616,8 @@ impl Session for SessionImpl {
 }
 
 /// Returns row description of the statement
-fn infer(session: Arc<SessionImpl>, stmt: Statement) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session);
+fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
+    let context = OptimizerContext::new(session, Arc::from(sql));
     let session = context.session_ctx.clone();
 
     let bound = {

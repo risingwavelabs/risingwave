@@ -25,7 +25,7 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::CellBasedTable;
+use super::cell_based_table::{CellBasedTable, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::{Keyspace, StateStore};
@@ -37,12 +37,7 @@ pub struct StateTable<S: StateStore> {
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTable<S>,
-
-    /// Serializer for pk
-    pk_serializer: OrderedRowSerializer,
-
-    pk_indices: Vec<usize>,
+    cell_based_table: CellBasedTable<S, READ_WRITE>,
 }
 
 impl<S: StateStore> StateTable<S> {
@@ -53,24 +48,30 @@ impl<S: StateStore> StateTable<S> {
         dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let pk_serializer = OrderedRowSerializer::new(order_types);
-
         Self {
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
                 keyspace,
                 column_descs,
-                Some(pk_serializer.clone()),
+                order_types,
+                pk_indices,
                 dist_key_indices,
             ),
-            pk_serializer,
-            pk_indices,
         }
     }
 
+    /// Get the underlying [`CellBasedTable`]. Should only be used for tests.
+    pub fn cell_based_table(&self) -> &CellBasedTable<S, READ_WRITE> {
+        &self.cell_based_table
+    }
+
+    fn pk_serializer(&self) -> &OrderedRowSerializer {
+        self.cell_based_table.pk_serializer()
+    }
+
     // TODO: remove, should not be exposed to user
-    pub fn get_pk_indices(&self) -> &[usize] {
-        &self.pk_indices
+    pub fn pk_indices(&self) -> &[usize] {
+        self.cell_based_table.pk_indices()
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -80,9 +81,12 @@ impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table. This function will return a Cow. If the value is from
     /// memtable, it will be a [`Cow::Borrowed`]. If is from cell based table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Cow<Row>>> {
-        // TODO: change to Cow to avoid unnecessary clone.
-        let pk_bytes = serialize_pk(pk, &self.pk_serializer);
+    pub async fn get_row<'a>(
+        &'a self,
+        pk: &'_ Row,
+        epoch: u64,
+    ) -> StorageResult<Option<Cow<'a, Row>>> {
+        let pk_bytes = serialize_pk(pk, self.pk_serializer());
         let mem_table_res = self.mem_table.get_row_op(&pk_bytes);
         match mem_table_res {
             Some(row_op) => match row_op {
@@ -106,11 +110,11 @@ impl<S: StateStore> StateTable<S> {
     /// the table.
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
         let mut datums = vec![];
-        for pk_index in &self.pk_indices {
+        for pk_index in self.pk_indices() {
             datums.push(value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, &self.pk_serializer);
+        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.insert(pk_bytes, value);
         Ok(())
     }
@@ -119,20 +123,20 @@ impl<S: StateStore> StateTable<S> {
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
         let mut datums = vec![];
-        for pk_index in &self.pk_indices {
+        for pk_index in self.pk_indices() {
             datums.push(old_value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, &self.pk_serializer);
+        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.delete(pk_bytes, old_value);
         Ok(())
     }
 
     /// Update a row. The old and new value should have the same pk.
     pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
-        let pk = old_value.by_indices(&self.pk_indices);
-        debug_assert_eq!(pk, new_value.by_indices(&self.pk_indices));
-        let pk_bytes = serialize_pk(&pk, &self.pk_serializer);
+        let pk = old_value.by_indices(self.pk_indices());
+        debug_assert_eq!(pk, new_value.by_indices(self.pk_indices()));
+        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.update(pk_bytes, old_value, new_value);
         Ok(())
     }
@@ -141,14 +145,6 @@ impl<S: StateStore> StateTable<S> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.cell_based_table
             .batch_write_rows(mem_table, new_epoch)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn commit_with_value_meta(&mut self, new_epoch: u64) -> StorageResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.cell_based_table
-            .batch_write_rows_with_value_meta(mem_table, new_epoch)
             .await?;
         Ok(())
     }
@@ -190,10 +186,10 @@ impl<S: StateStore> StateTable<S> {
     {
         let encoded_start_key = pk_bounds
             .start_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), &self.pk_serializer));
+            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
         let encoded_end_key = pk_bounds
             .end_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), &self.pk_serializer));
+            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
         let encoded_key_range = (encoded_start_key, encoded_end_key);
 
         self.iter_with_encoded_key_range(encoded_key_range, epoch)
@@ -206,8 +202,7 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let order_types = &self.pk_serializer.clone().into_order_types()[0..pk_prefix.size()];
-        let prefix_serializer = OrderedRowSerializer::new(order_types.into());
+        let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
 

@@ -131,7 +131,6 @@ message MetaSnapshot {
   repeated catalog.Schema schema = 3;
   repeated catalog.Source source = 4;
   repeated catalog.Table table = 5;
-  repeated catalog.VirtualTable view = 6;
   repeated user.UserInfo users = 7;
 }
 

@@ -20,7 +20,7 @@ message SstableInfo {
   uint64 id = 1;
   KeyRange key_range = 2;
   uint64 file_size = 3;
-  repeated common.VNodeBitmap vnode_bitmaps = 4;
+  repeated uint32 table_ids = 4;
   uint64 unit_id = 5;
 }
 
@@ -42,8 +42,12 @@ message UncommittedEpoch {
 }
 
 message HummockVersion {
+  message Levels {
+    repeated Level levels = 1;
+  }
   uint64 id = 1;
-  repeated Level levels = 2;
+  // Levels of each compaction group
+  map<uint64, Levels> levels = 2;
   uint64 max_committed_epoch = 4;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
@@ -107,6 +111,10 @@ message KeyRange {
   bool inf = 3;
 }
 
+message TableOption {
+  uint32 ttl = 1;
+}
+
 message CompactTask {
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated Level input_ssts = 1;
@@ -130,6 +138,10 @@ message CompactTask {
   uint64 compaction_group_id = 12;
   // existing_table_ids for compaction drop key
   repeated uint32 existing_table_ids = 13;
+  uint32 compression_algorithm = 14;
+  uint64 target_file_size = 15;
+  uint32 compaction_filter_mask = 16;
+  map<uint32, TableOption> table_options = 17;
 }
 
 message LevelHandler {
@@ -152,6 +164,7 @@ message CompactionGroup {
   uint64 id = 1;
   repeated bytes member_prefixes = 2;
   CompactionConfig compaction_config = 3;
+  map<uint32, TableOption> table_id_to_options = 4;
 }
 
 message CompactTaskAssignment {
@@ -227,10 +240,22 @@ message GetCompactionGroupsResponse {
 
 message TriggerManualCompactionRequest {
   uint64 compaction_group_id = 1;
+  KeyRange key_range = 2;
+  uint32 table_id = 3;
+  uint32 level = 4;
 }
 
 message TriggerManualCompactionResponse {
   common.Status status = 1;
+}
+
+message ListSstableIdInfosRequest {
+  uint64 version_id = 1;
+}
+
+message ListSstableIdInfosResponse {
+  common.Status status = 1;
+  repeated SstableIdInfo sstable_id_infos = 2;
 }
 
 service HummockManagerService {
@@ -245,6 +270,7 @@ service HummockManagerService {
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
+  rpc ListSstableIdInfos(ListSstableIdInfosRequest) returns (ListSstableIdInfosResponse);
 }
 
 service CompactorService {}
@@ -262,4 +288,7 @@ message CompactionConfig {
   uint64 level0_tigger_file_numer = 6;
   uint64 level0_tier_compact_file_number = 7;
   CompactionMode compaction_mode = 8;
+  repeated string compression_algorithm = 9;
+  uint64 target_file_size_base = 10;
+  uint32 compaction_filter_mask = 11;
 }

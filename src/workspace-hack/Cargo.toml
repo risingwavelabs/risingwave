@@ -14,6 +14,7 @@ publish = false
 ### BEGIN HAKARI SECTION
 [dependencies]
 anyhow = { version = "1", features = ["backtrace", "std"] }
+auto_enums = { version = "0.7", features = ["futures", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
 bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
@@ -35,7 +36,7 @@ hashbrown = { version = "0.11", features = ["ahash", "inline-more", "nightly", "
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
-libc = { version = "0.2", features = ["std"] }
+libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
@@ -69,6 +70,8 @@ uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", 
 
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace", "std"] }
+auto_enums = { version = "0.7", features = ["futures", "std"] }
+auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "futures03", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
 bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
@@ -91,7 +94,7 @@ hashbrown = { version = "0.11", features = ["ahash", "inline-more", "nightly", "
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
-libc = { version = "0.2", features = ["std"] }
+libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }

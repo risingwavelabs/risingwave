@@ -16,11 +16,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use risingwave_common::hash::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{ParallelUnitId, VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::ParallelUnit;
 
 use super::TableId;
-use crate::cluster::ParallelUnitId;
 use crate::model::FragmentId;
 
 pub type HashMappingManagerRef = Arc<HashMappingManager>;
@@ -109,7 +108,7 @@ impl HashMappingManager {
 
 /// `HashMappingInfo` stores the vnode mapping and some other helpers for maintaining a
 /// load-balanced vnode mapping.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct HashMappingInfo {
     /// Hash mapping from virtual node to parallel unit.
     vnode_mapping: Vec<ParallelUnitId>,
@@ -180,6 +179,7 @@ impl HashMappingManagerCore {
             owner_mapping,
             load_balancer,
         };
+
         self.hash_mapping_infos.insert(fragment_id, mapping_info);
 
         vnode_mapping
@@ -222,7 +222,7 @@ impl HashMappingManagerCore {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ParallelUnit, ParallelUnitType};
 
     use super::{HashMappingInfo, HashMappingManager};

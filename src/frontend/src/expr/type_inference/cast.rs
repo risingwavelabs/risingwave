@@ -18,7 +18,7 @@ use itertools::Itertools as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{name_of, DataTypeName};
+use super::DataTypeName;
 use crate::expr::{Expr as _, ExprImpl};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -30,9 +30,9 @@ use crate::expr::{Expr as _, ExprImpl};
 pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
     if lhs == rhs {
         Ok(lhs)
-    } else if cast_ok(&lhs, &rhs, &CastContext::Implicit) {
+    } else if cast_ok(&lhs, &rhs, CastContext::Implicit) {
         Ok(rhs)
-    } else if cast_ok(&rhs, &lhs, &CastContext::Implicit) {
+    } else if cast_ok(&rhs, &lhs, CastContext::Implicit) {
         Ok(lhs)
     } else {
         Err(ErrorCode::BindError(format!("types {:?} and {:?} cannot be matched", lhs, rhs)).into())
@@ -68,17 +68,30 @@ pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<
 /// The context a cast operation is invoked in. An implicit cast operation is allowed in a context
 /// that allows explicit casts, but not vice versa. See details in
 /// [PG](https://www.postgresql.org/docs/current/catalog-pg-cast.html).
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum CastContext {
     Implicit,
     Assign,
     Explicit,
 }
 
+impl From<&CastContext> for String {
+    fn from(c: &CastContext) -> Self {
+        match c {
+            CastContext::Implicit => "IMPLICIT".to_string(),
+            CastContext::Assign => "ASSIGN".to_string(),
+            CastContext::Explicit => "EXPLICIT".to_string(),
+        }
+    }
+}
+
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
-pub fn cast_ok(source: &DataType, target: &DataType, allows: &CastContext) -> bool {
-    let k = (name_of(source), name_of(target));
-    matches!(CAST_MAP.get(&k), Some(context) if context <= allows)
+pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> bool {
+    cast_ok_base(source.into(), target.into(), allows)
+}
+
+pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastContext) -> bool {
+    matches!(CAST_MAP.get(&(source, target)), Some(context) if *context <= allows)
 }
 
 fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
@@ -156,6 +169,13 @@ fn insert_cast_seq(
     }
 }
 
+pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
+    CAST_MAP
+        .iter()
+        .map(|((src, target), ctx)| (*src, *target, *ctx))
+        .collect_vec()
+}
+
 lazy_static::lazy_static! {
     static ref CAST_MAP: HashMap<(DataTypeName, DataTypeName), CastContext> = {
         build_cast_map()
@@ -189,7 +209,7 @@ mod tests {
             .map(|source| {
                 all_types
                     .iter()
-                    .map(|target| match cast_ok(source, target, &allows) {
+                    .map(|target| match cast_ok(source, target, allows) {
                         false => ' ',
                         true => 'T',
                     })

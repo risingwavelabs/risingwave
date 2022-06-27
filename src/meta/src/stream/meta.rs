@@ -16,18 +16,17 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::try_match_expand;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
-use crate::cluster::{ParallelUnitId, WorkerId};
+use crate::cluster::WorkerId;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
@@ -85,11 +84,6 @@ where
 
         Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
 
-        let table_fragments_list = table_fragments.values().collect_vec();
-        compaction_group_manager
-            .purge_stale_members(&table_fragments_list)
-            .await?;
-
         Ok(Self {
             meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
@@ -137,7 +131,11 @@ where
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
     /// state is `ActorState::Inactive`.
-    pub async fn start_create_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+    pub async fn start_create_table_fragments(
+        &self,
+        table_fragment: TableFragments,
+        table_properties: HashMap<String, String>,
+    ) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
         match map.entry(table_fragment.table_id()) {
@@ -147,10 +145,9 @@ where
             )))),
             Entry::Vacant(v) => {
                 // Register to compaction group beforehand.
-                // If any following operation fails, the registration will be eventually reverted by
-                // CompactionGroupManager::purge_stale_members.
+                // If any following operation fails, the registration will be eventually reverted.
                 self.compaction_group_manager
-                    .register_table_fragments(&table_fragment)
+                    .register_table_fragments(&table_fragment, &table_properties)
                     .await?;
 
                 table_fragment.insert(&*self.meta_store).await?;
@@ -174,7 +171,11 @@ where
                     .unregister_table_fragments(&table_fragments)
                     .await
                 {
-                    tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
+                    tracing::warn!(
+                        "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                        table_id,
+                        e
+                    );
                 }
                 Ok(())
             }
@@ -288,7 +289,11 @@ where
                 .unregister_table_fragments(&table_fragments)
                 .await
             {
-                tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
+                tracing::warn!(
+                    "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                    table_id,
+                    e
+                );
             }
             Ok(())
         } else {

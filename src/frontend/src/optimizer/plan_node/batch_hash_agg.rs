@@ -43,7 +43,7 @@ impl BatchHashAgg {
                 .rewrite_provided_distribution(input_dist),
             Distribution::SomeShard => Distribution::SomeShard,
         };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchHashAgg { base, logical }
     }
 
@@ -86,7 +86,7 @@ impl_plan_tree_node_for_unary! { BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self.input().to_distributed_with_required(
-            Order::any(),
+            &Order::any(),
             &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
         )?;
         Ok(self.clone_with_input(new_input).into())
@@ -115,7 +115,8 @@ impl ToLocalBatch for BatchHashAgg {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
 
-        let new_input = RequiredDist::single().enforce_if_not_satisfies(new_input, Order::any())?;
+        let new_input =
+            RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
     }

@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Sub};
 
@@ -34,16 +36,15 @@ use super::*;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-///
-/// FIXME: if this derives `PartialEq` and `PartialOrd`, caller must guarantee the fields are valid.
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
-)]
+/// FIXME: the comparison of memcomparable encoding will be just compare these three numbers.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct IntervalUnit {
     months: i32,
     days: i32,
     ms: i64,
 }
+
+const DAY_MS: i64 = 86400000;
 
 impl IntervalUnit {
     pub fn new(months: i32, days: i32, ms: i64) -> Self {
@@ -93,6 +94,17 @@ impl IntervalUnit {
                 read_interval_unit(&mut cursor)
             }
         }
+    }
+
+    /// Justify interval, convert 1 month to 30 days and 86400 ms to 1 day.
+    /// If day is positive, complement the ms negative value.
+    /// These rules only use in interval comparison.
+    pub fn justify_interval(&mut self) {
+        let month = (self.months * 30) as i64 * DAY_MS;
+        self.ms = self.ms + month + (self.days) as i64 * DAY_MS;
+        self.days = (self.ms / DAY_MS) as i32;
+        self.ms %= DAY_MS;
+        self.months = 0;
     }
 
     #[must_use]
@@ -171,6 +183,29 @@ impl IntervalUnit {
         Some(IntervalUnit { months, days, ms })
     }
 
+    /// Divides [`IntervalUnit`] by an integer/float with zero check.
+    pub fn div_float<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+
+        if rhs == 0.0 {
+            return None;
+        }
+
+        let months = (self.months as f64) / rhs;
+        let days = (self.days as f64) / rhs + (months % 1.0) * 30.0;
+        let ms = ((self.ms as f64) / rhs + (days % 1.0) * 24.0 * 60.0 * 60.0 * 1000.0).round();
+
+        Some(IntervalUnit {
+            months: (months as i32),
+            days: (days as i32),
+            ms: (ms as i64),
+        })
+    }
+
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
     pub fn exact_div(&self, rhs: &Self) -> Option<i64> {
         let mut res = None;
@@ -236,6 +271,46 @@ impl Add for IntervalUnit {
     }
 }
 
+impl PartialOrd for IntervalUnit {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self.eq(other) {
+            Some(Ordering::Equal)
+        } else {
+            let diff = *self - *other;
+            let days = (diff.months * 30 + diff.days) as i64;
+            Some((days * DAY_MS + diff.ms).cmp(&0))
+        }
+    }
+}
+
+impl Hash for IntervalUnit {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let mut interval = *self;
+        interval.justify_interval();
+        interval.months.hash(state);
+        interval.ms.hash(state);
+        interval.days.hash(state);
+    }
+}
+
+impl PartialEq for IntervalUnit {
+    fn eq(&self, other: &Self) -> bool {
+        let mut interval = *self;
+        interval.justify_interval();
+        let mut other = *other;
+        other.justify_interval();
+        interval.days == other.days && interval.ms == other.ms
+    }
+}
+
+impl Eq for IntervalUnit {}
+
+impl Ord for IntervalUnit {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
 impl CheckedAdd for IntervalUnit {
     fn checked_add(&self, other: &Self) -> Option<Self> {
         let months = self.months.checked_add(other.months)?;
@@ -297,6 +372,7 @@ impl Display for IntervalUnit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ordered_float::OrderedFloat;
 
     #[test]
     fn test_to_string() {
@@ -331,6 +407,48 @@ mod tests {
                 println!("Failed on {}.exact_div({})", lhs, rhs);
                 break;
             }
+        }
+    }
+
+    #[test]
+    fn test_div_float() {
+        let cases_int = [
+            ((10, 8, 6), 2, Some((5, 4, 3))),
+            ((1, 2, 33), 3, Some((0, 10, 57600011))),
+            ((1, 0, 11), 10, Some((0, 3, 1))),
+            ((5, 6, 7), 0, None),
+        ];
+
+        let cases_float = [
+            ((10, 8, 6), 2.0f32, Some((5, 4, 3))),
+            ((1, 2, 33), 3.0f32, Some((0, 10, 57600011))),
+            ((10, 15, 100), 2.5f32, Some((4, 6, 40))),
+            ((5, 6, 7), 0.0f32, None),
+        ];
+
+        for (lhs, rhs, expected) in cases_int {
+            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+
+            let actual = lhs.div_float(rhs as i16);
+            assert_eq!(actual, expected);
+
+            let actual = lhs.div_float(rhs as i32);
+            assert_eq!(actual, expected);
+
+            let actual = lhs.div_float(rhs as i64);
+            assert_eq!(actual, expected);
+        }
+
+        for (lhs, rhs, expected) in cases_float {
+            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+
+            let actual = lhs.div_float(OrderedFloat::<f32>(rhs));
+            assert_eq!(actual, expected);
+
+            let actual = lhs.div_float(OrderedFloat::<f64>(rhs as f64));
+            assert_eq!(actual, expected);
         }
     }
 }

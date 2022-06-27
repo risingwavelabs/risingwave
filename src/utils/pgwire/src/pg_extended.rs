@@ -13,14 +13,19 @@
 // limitations under the License.
 
 use std::ops::Sub;
+use std::sync::Arc;
+use std::vec::IntoIter;
 
 use bytes::Bytes;
 use regex::Regex;
 
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_protocol::cstr_to_str;
+use crate::pg_response::{PgResponse, StatementType};
+use crate::pg_server::{BoxedError, Session, SessionManager};
+use crate::types::Row;
 
-/// Parse params accoring the type description.
+/// Parse params according the type description.
 ///
 /// # Example
 ///
@@ -31,7 +36,7 @@ use crate::pg_protocol::cstr_to_str;
 /// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
 /// ```
 fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Vec<String> {
-    assert!(type_description.len() == raw_params.len());
+    assert_eq!(type_description.len(), raw_params.len());
 
     raw_params
         .iter()
@@ -118,17 +123,38 @@ impl PgStatement {
         self.row_description.clone()
     }
 
-    pub fn instance(&self, name: String, params: &[Bytes]) -> PgPortal {
+    async fn infer_row_description<SM: SessionManager>(
+        session: Arc<SM::Session>,
+        sql: &str,
+    ) -> Result<Vec<PgFieldDescriptor>, ()> {
+        if sql.len() > 6 && sql[0..6].eq_ignore_ascii_case("select") {
+            return session.infer_return_type(sql).await.map_err(|_e| ());
+        }
+        Ok(vec![])
+    }
+
+    pub async fn instance<SM: SessionManager>(
+        &self,
+        session: Arc<SM::Session>,
+        portal_name: String,
+        params: &[Bytes],
+    ) -> Result<PgPortal, ()> {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
         if params.is_empty() {
-            return PgPortal {
-                name,
+            let row_description =
+                Self::infer_row_description::<SM>(session, statement.as_str()).await?;
+
+            return Ok(PgPortal {
+                name: portal_name,
                 query_string: self.query_string.clone(),
-            };
+                result_cache: None,
+                stmt_type: None,
+                row_description,
+            });
         }
 
-        // 1. Identify all the $n.
+        // 1. Identify all the $n. For example, "SELECT $3, $2, $1" -> [3, 2, 1].
         let parameter_pattern = Regex::new(r"\$[0-9][0-9]*").unwrap();
         let generic_params: Vec<usize> = parameter_pattern
             .find_iter(statement.as_str())
@@ -141,17 +167,24 @@ impl PgStatement {
             })
             .collect();
 
-        // 2. parse params.
+        // 2. Parse params bytes into string form according to type.
         let params = parse_params(&self.type_description, params);
 
-        // 3. replace params.
+        // 3. Replace generic params in statement to real value. For example, "SELECT $3, $2, $1" ->
+        // "SELECT 'A', 'B', 'C'".
         let instance_query_string = replace_params(statement, &generic_params, &params);
 
-        // 4. Create a new portal.
-        PgPortal {
-            name,
+        // 4. Get row_description and return portal.
+        let row_description =
+            Self::infer_row_description::<SM>(session, instance_query_string.as_str()).await?;
+
+        Ok(PgPortal {
+            name: portal_name,
             query_string: Bytes::from(instance_query_string),
-        }
+            result_cache: None,
+            stmt_type: None,
+            row_description,
+        })
     }
 }
 
@@ -159,11 +192,20 @@ impl PgStatement {
 pub struct PgPortal {
     name: String,
     query_string: Bytes,
+    result_cache: Option<IntoIter<Row>>,
+    stmt_type: Option<StatementType>,
+    row_description: Vec<PgFieldDescriptor>,
 }
 
 impl PgPortal {
-    pub fn new(name: String, query_string: Bytes) -> Self {
-        PgPortal { name, query_string }
+    pub fn new(name: String, query_string: Bytes, row_description: Vec<PgFieldDescriptor>) -> Self {
+        PgPortal {
+            name,
+            query_string,
+            result_cache: None,
+            stmt_type: None,
+            row_description,
+        }
     }
 
     pub fn name(&self) -> String {
@@ -172,6 +214,59 @@ impl PgPortal {
 
     pub fn query_string(&self) -> Bytes {
         self.query_string.clone()
+    }
+
+    pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
+        self.row_description.clone()
+    }
+
+    pub async fn execute<SM: SessionManager>(
+        &mut self,
+        session: Arc<SM::Session>,
+        row_limit: usize,
+    ) -> Result<PgResponse, BoxedError> {
+        if self.result_cache.is_none() {
+            let process_res = session
+                .run_statement(cstr_to_str(&self.query_string).unwrap())
+                .await;
+
+            // Return result directly if
+            // - it's not a query result.
+            // - query result needn't cache. (row_limit == 0).
+            if !(process_res.is_ok() && process_res.as_ref().unwrap().is_query()) || row_limit == 0
+            {
+                return process_res;
+            }
+
+            // Return result need to cache.
+            self.stmt_type = Some(process_res.as_ref().unwrap().get_stmt_type());
+            self.result_cache = Some(process_res.unwrap().values().into_iter());
+        }
+
+        // Consume row_limit row.
+        let mut data_set = vec![];
+        let mut row_end = false;
+        for _ in 0..row_limit {
+            let data = self.result_cache.as_mut().unwrap().next();
+            match data {
+                Some(d) => {
+                    data_set.push(d);
+                }
+                None => {
+                    row_end = true;
+                    self.result_cache = None;
+                    break;
+                }
+            }
+        }
+
+        Ok(PgResponse::new(
+            self.stmt_type.unwrap(),
+            data_set.len() as _,
+            data_set,
+            vec![],
+            row_end,
+        ))
     }
 }
 
@@ -189,14 +284,14 @@ mod tests {
             let params = parse_params(&type_description, &raw_params);
 
             let res = replace_params("SELECT $3,$2,$1".to_string(), &[1, 2, 3], &params);
-            assert!(res == "SELECT 'C','B','A'");
+            assert_eq!(res, "SELECT 'C','B','A'");
 
             let res = replace_params(
                 "SELECT $2,$3,$1  ,$3 ,$2 ,$1     ;".to_string(),
                 &[1, 2, 3],
                 &params,
             );
-            assert!(res == "SELECT 'B','C','A'  ,'C' ,'B' ,'A'     ;");
+            assert_eq!(res, "SELECT 'B','C','A'  ,'C' ,'B' ,'A'     ;");
         }
 
         {
@@ -221,7 +316,7 @@ mod tests {
                 &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
                 &params,
             );
-            assert!(res == "SELECT 'K','B','A';");
+            assert_eq!(res, "SELECT 'K','B','A';");
         }
 
         {
@@ -247,14 +342,20 @@ mod tests {
                 &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
                 &params,
             );
-            assert!(res == "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;");
+            assert_eq!(
+                res,
+                "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;"
+            );
 
             let res = replace_params(
                 "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  'He1ll2o',1;".to_string(),
                 &[2, 1, 11, 10, 12, 9, 7, 8, 5, 6, 4, 3],
                 &params,
             );
-            assert!(res == "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;");
+            assert_eq!(
+                res,
+                "SELECT 'B','A','K','J' ,'K', 'A','L' , 'B',  'He1ll2o',1;"
+            );
         }
 
         {

@@ -19,17 +19,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
+use dyn_clone::DynClone;
 use futures::future::{try_join_all, BoxFuture};
-use futures::{stream, FutureExt, StreamExt};
+use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::{CompactionFilterFlag, StorageConfig};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{get_epoch, get_table_id, Epoch, FullKey};
+use risingwave_hummock_sdk::key::{
+    extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
+};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
-use risingwave_pb::common::VNodeBitmap;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
 use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
@@ -37,7 +39,10 @@ use tokio::task::JoinHandle;
 
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
-use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
+use super::{
+    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, SSTableIterator,
+    SSTableIteratorType, Sstable,
+};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::group_builder::KeyValueGrouping;
 use crate::hummock::iterator::ReadOptions;
@@ -92,14 +97,17 @@ pub struct CompactorContext {
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
 }
 
-trait CompactionFilter {
+trait CompactionFilter: Send + DynClone {
     fn filter(&self, _: &[u8]) -> bool {
         true
     }
 }
 
-#[derive(Clone, Default)]
+dyn_clone::clone_trait_object!(CompactionFilter);
+
+#[derive(Clone)]
 pub struct DummyCompactionFilter;
+
 impl CompactionFilter for DummyCompactionFilter {}
 
 #[derive(Clone)]
@@ -108,7 +116,6 @@ pub struct StateCleanUpCompactionFilter {
 }
 
 impl StateCleanUpCompactionFilter {
-    #[expect(dead_code)]
     fn new(table_id_set: HashSet<u32>) -> Self {
         StateCleanUpCompactionFilter {
             existing_table_ids: table_id_set,
@@ -127,6 +134,61 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
 }
 
 #[derive(Clone)]
+pub struct TTLCompactionFilter {
+    table_id_to_ttl: HashMap<u32, u32>,
+    expire: u64,
+}
+
+impl CompactionFilter for TTLCompactionFilter {
+    fn filter(&self, key: &[u8]) -> bool {
+        let (table_id, epoch) = extract_table_id_and_epoch(key);
+        match table_id {
+            Some(table_id) => {
+                let ttl = match self.table_id_to_ttl.get(&table_id) {
+                    Some(ttl_u32) => *ttl_u32,
+                    None => 0,
+                };
+
+                if ttl == 0 {
+                    // means not config ttl
+                    return true;
+                }
+
+                epoch + ttl as u64 > self.expire
+            }
+
+            None => true,
+        }
+    }
+}
+
+impl TTLCompactionFilter {
+    fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
+        Self {
+            table_id_to_ttl,
+            expire,
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+struct MultiCompactionFilter {
+    filter_vec: Vec<Box<dyn CompactionFilter>>,
+}
+
+impl CompactionFilter for MultiCompactionFilter {
+    fn filter(&self, key: &[u8]) -> bool {
+        !self.filter_vec.iter().any(|filter| !filter.filter(key))
+    }
+}
+
+impl MultiCompactionFilter {
+    fn register(&mut self, filter: Box<dyn CompactionFilter>) {
+        self.filter_vec.push(filter);
+    }
+}
+
+#[derive(Clone)]
 /// Implementation of Hummock compaction.
 pub struct Compactor {
     /// The context of the compactor.
@@ -138,7 +200,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<VNodeBitmap>)>);
+pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<u32>)>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -149,11 +211,58 @@ impl Compactor {
         }
     }
 
+    /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
+    pub async fn compact_shared_buffer_by_compaction_group(
+        context: Arc<CompactorContext>,
+        payload: UploadTaskPayload,
+    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, u64, Vec<u32>)>> {
+        let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
+        for uncommitted_list in payload {
+            let mut next_inner = HashSet::new();
+            for uncommitted in uncommitted_list {
+                let compaction_group_id = match &uncommitted {
+                    UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
+                    UncommittedData::Batch(batch) => batch.compaction_group_id(),
+                };
+                let group = grouped_payload
+                    .entry(compaction_group_id)
+                    .or_insert_with(std::vec::Vec::new);
+                if !next_inner.contains(&compaction_group_id) {
+                    group.push(vec![]);
+                    next_inner.insert(compaction_group_id);
+                }
+                group.last_mut().unwrap().push(uncommitted);
+            }
+        }
+
+        let mut futures = vec![];
+        for (id, group_payload) in grouped_payload {
+            let id_copy = id;
+            futures.push(
+                Compactor::compact_shared_buffer(context.clone(), group_payload).map_ok(
+                    move |results| {
+                        results
+                            .into_iter()
+                            .map(move |result| (id_copy, result.0, result.1, result.2))
+                            .collect_vec()
+                    },
+                ),
+            );
+        }
+        // Note that the output is reordered compared with input `payload`.
+        let result = try_join_all(futures)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect_vec();
+        Ok(result)
+    }
+
     /// For compaction from shared buffer to level 0, this is the only function gets called.
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
-        payload: &UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, u64, Vec<VNodeBitmap>)>> {
+        payload: UploadTaskPayload,
+    ) -> HummockResult<Vec<(Sstable, u64, Vec<u32>)>> {
         let mut start_user_keys = payload
             .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
@@ -195,6 +304,10 @@ impl Compactor {
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
+            target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
+            compression_algorithm: 0,
+            compaction_filter_mask: 0,
+            table_options: HashMap::default(),
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -212,7 +325,7 @@ impl Compactor {
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let iter = build_ordered_merge_iter::<ForwardIter>(
-                payload,
+                &payload,
                 sstable_store.clone(),
                 stats.clone(),
                 &mut local_stats,
@@ -392,17 +505,33 @@ impl Compactor {
             );
         }
 
-        // TODO #2065: re-enable it after all states are registered correctly.
-        let compaction_filter = DummyCompactionFilter::default();
-        // let compaction_filter =
-        //     StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.
-        // existing_table_ids));
+        let mut multi_filter = MultiCompactionFilter::default();
+        let compaction_filter_flag =
+            CompactionFilterFlag::from_bits(compact_task.compaction_filter_mask)
+                .unwrap_or_default();
+        if compaction_filter_flag.contains(CompactionFilterFlag::STATE_CLEAN) {
+            let state_clean_up_filter = Box::new(StateCleanUpCompactionFilter::new(
+                HashSet::from_iter(compact_task.existing_table_ids),
+            ));
+
+            multi_filter.register(state_clean_up_filter);
+        }
+
+        if compaction_filter_flag.contains(CompactionFilterFlag::TTL) {
+            let id_to_ttl = compact_task
+                .table_options
+                .iter()
+                .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
+                .collect();
+            let ttl_filter = Box::new(TTLCompactionFilter::new(id_to_ttl, compact_task.watermark));
+            multi_filter.register(ttl_filter);
+        }
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let vnode2unit = vnode2unit.clone();
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
-            let filter = compaction_filter.clone();
+            let filter = multi_filter.clone();
             let split_task = async move {
                 let merge_iter = compactor.build_sst_iter().await?;
                 compactor
@@ -458,7 +587,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, unit_id, vnode_bitmaps) in ssts {
+            for (sst, unit_id, table_ids) in ssts {
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -467,7 +596,7 @@ impl Compactor {
                         inf: false,
                     }),
                     file_size: sst.meta.estimated_size as u64,
-                    vnode_bitmaps,
+                    table_ids,
                     unit_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
@@ -519,6 +648,10 @@ impl Compactor {
         };
 
         let get_id_time = Arc::new(AtomicU64::new(0));
+        let target_file_size = std::cmp::min(
+            self.compact_task.target_file_size as usize,
+            self.context.options.sstable_size_mb as usize * (1 << 20),
+        );
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = GroupedSstableBuilder::new(
@@ -526,7 +659,15 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let builder = SSTableBuilder::new(table_id, self.context.options.as_ref().into());
+                let mut options: SSTableBuilderOptions = self.context.options.as_ref().into();
+
+                options.capacity = target_file_size;
+                options.compression_algorithm = match self.compact_task.compression_algorithm {
+                    0 => CompressionAlgorithm::None,
+                    1 => CompressionAlgorithm::Lz4,
+                    _ => CompressionAlgorithm::Zstd,
+                };
+                let builder = SSTableBuilder::new(table_id, options);
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
                 Ok(builder)
             },
@@ -559,7 +700,7 @@ impl Compactor {
         for SealedSstableBuilder {
             id: table_id,
             meta,
-            vnode_bitmaps,
+            table_ids,
             upload_join_handle,
             data_len,
             unit_id,
@@ -567,7 +708,7 @@ impl Compactor {
         {
             let sst = Sstable { id: table_id, meta };
             let len = data_len;
-            ssts.push((sst.clone(), unit_id, vnode_bitmaps));
+            ssts.push((sst.clone(), unit_id, table_ids));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {

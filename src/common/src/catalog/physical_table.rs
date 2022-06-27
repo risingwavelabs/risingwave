@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan_common::ColumnOrder;
+use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnOrder};
 
 use super::{ColumnDesc, OrderedColumnDesc, TableId};
 
@@ -58,5 +58,13 @@ impl TableDesc {
             .iter()
             .map(|col| (col.column_desc.column_id.get_id() as usize))
             .collect()
+    }
+
+    pub fn to_protobuf(&self) -> CellBasedTableDesc {
+        CellBasedTableDesc {
+            table_id: self.table_id.into(),
+            columns: self.columns.iter().map(Into::into).collect(),
+            order_key: self.order_desc.iter().map(|v| v.into()).collect(),
+        }
     }
 }

@@ -143,11 +143,15 @@ impl CompactorManager {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
-    use crate::hummock::test_utils::{generate_test_tables, setup_compute_env};
+    use crate::hummock::test_utils::{
+        generate_test_tables, setup_compute_env, to_local_sstable_info,
+    };
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::storage::MetaStore;
 
@@ -163,7 +167,7 @@ mod tests {
             vec![hummock_manager_ref.get_new_table_id().await.unwrap()],
         );
         hummock_manager_ref
-            .commit_epoch(epoch, original_tables)
+            .commit_epoch(epoch, to_local_sstable_info(&original_tables))
             .await
             .unwrap();
     }
@@ -179,8 +183,12 @@ mod tests {
             is_target_ultimate_and_leveling: false,
             task_status: false,
             vnode_mappings: vec![],
-            compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
+            compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
+            compression_algorithm: 0,
+            target_file_size: 1,
+            compaction_filter_mask: 0,
+            table_options: HashMap::default(),
         }
     }
 

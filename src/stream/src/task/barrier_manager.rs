@@ -14,7 +14,6 @@
 
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::error::Result;
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -29,6 +28,7 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_hummock_sdk::LocalSstableInfo;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
@@ -39,7 +39,7 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 pub struct CollectResult {
     pub create_mview_progress: Vec<ProstCreateMviewProgress>,
 
-    pub synced_sstables: Vec<SstableInfo>,
+    pub synced_sstables: Vec<LocalSstableInfo>,
 }
 
 enum BarrierState {
@@ -173,6 +173,12 @@ impl LocalBarrierManager {
                 )
             })
             .expect("no rx for local mode")
+    }
+
+    /// remove all collect rx less than `prev_epoch`
+    pub fn drain_collect_rx(&mut self, prev_epoch: u64) {
+        self.collect_complete_receiver
+            .drain_filter(|x, _| x < &prev_epoch);
     }
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
