@@ -16,12 +16,10 @@ use risingwave_common::error::{ErrorCode, RwError, TrackingIssue};
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
 
-use crate::scheduler::plan_fragmenter::QueryId;
-
 #[derive(Error, Debug)]
 pub enum SchedulerError {
-    #[error("Pin snapshot error: {0} fails to get epoch {1}")]
-    PinSnapshot(QueryId, u64),
+    #[error("Pin snapshot error: fails to get epoch {0}, max retry reahced {1}")]
+    PinSnapshot(u64, u64),
 
     #[error("Rpc error: {0}")]
     RpcError(#[from] RpcError),
