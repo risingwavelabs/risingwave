@@ -29,14 +29,14 @@ use risingwave_common::error::Result;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::{StateStore};
 
 use super::{
     expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
     StreamExecutorResult,
 };
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, generate_state_table,
+    agg_input_arrays, generate_agg_schema, generate_managed_agg_state,
     AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
@@ -108,25 +108,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
+        state_tables: Vec<StateTable<S>>
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-
-        let mut state_tables = Vec::with_capacity(agg_calls.len());
-        for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
-            state_tables.push(generate_state_table(
-                ks.clone(),
-                agg_call,
-                &key_indices,
-                &input_info.pk_indices,
-                &schema,
-                input.as_ref(),
-            ));
-        }
 
         Ok(Self {
             input,
@@ -466,8 +454,9 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::table::state_table::StateTable;
 
-    use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::aggregation::{AggArgs, AggCall, generate_agg_schema, generate_state_table};
     use crate::executor::test_utils::*;
     use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
 
@@ -480,6 +469,7 @@ mod tests {
         keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
+        state_tables: Vec<StateTable<S>>,
     }
 
     impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
