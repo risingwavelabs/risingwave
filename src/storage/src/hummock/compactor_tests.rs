@@ -21,7 +21,8 @@ mod tests {
     use bytes::Bytes;
     use rand::Rng;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::config::{CompactionFilterFlag, StorageConfig};
+    use risingwave_common::config::constant::hummock::CompactionFilterFlag;
+    use risingwave_common::config::StorageConfig;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{get_epoch, get_table_id};

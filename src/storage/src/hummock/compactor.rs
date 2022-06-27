@@ -23,7 +23,8 @@ use dyn_clone::DynClone;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::config::{CompactionFilterFlag, StorageConfig};
+use risingwave_common::config::constant::hummock::{CompactionFilterFlag, TABLE_OPTION_DUMMY_TTL};
+use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -143,19 +144,13 @@ impl CompactionFilter for TTLCompactionFilter {
     fn filter(&self, key: &[u8]) -> bool {
         let (table_id, epoch) = extract_table_id_and_epoch(key);
         match table_id {
-            Some(table_id) => {
-                let ttl = match self.table_id_to_ttl.get(&table_id) {
-                    Some(ttl_u32) => *ttl_u32,
-                    None => 0,
-                };
-
-                if ttl == 0 {
-                    // means not config ttl
-                    return true;
+            Some(table_id) => match self.table_id_to_ttl.get(&table_id) {
+                Some(ttl_u32) => {
+                    assert!(*ttl_u32 != TABLE_OPTION_DUMMY_TTL);
+                    epoch + (*ttl_u32) as u64 > self.expire
                 }
-
-                epoch + ttl as u64 > self.expire
-            }
+                None => true,
+            },
 
             None => true,
         }
@@ -503,6 +498,7 @@ impl Compactor {
             let id_to_ttl = compact_task
                 .table_options
                 .iter()
+                .filter(|id_to_option| id_to_option.1.ttl > 0)
                 .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
                 .collect();
             let ttl_filter = Box::new(TTLCompactionFilter::new(id_to_ttl, compact_task.watermark));
