@@ -36,6 +36,12 @@ message Level {
   uint64 total_file_size = 4;
 }
 
+message LevelDelta {
+  uint32 level_idx = 1;
+  repeated uint64 removed_table_ids = 2;
+  repeated SstableInfo inserted_table_infos = 3;
+}
+
 message UncommittedEpoch {
   uint64 epoch = 1;
   repeated SstableInfo tables = 2;
@@ -48,6 +54,19 @@ message HummockVersion {
   uint64 id = 1;
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
+  uint64 max_committed_epoch = 4;
+  // Snapshots with epoch less than the safe epoch have been GCed.
+  // Reads against such an epoch will fail.
+  uint64 safe_epoch = 5;
+}
+
+message HummockVersionDelta {
+  message LevelDeltas {
+    repeated LevelDelta level_deltas = 1;
+  }
+  uint64 id = 1;
+  // Levels of each compaction group
+  map<uint64, LevelDeltas> level_deltas = 2;
   uint64 max_committed_epoch = 4;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
