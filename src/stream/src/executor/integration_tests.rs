@@ -45,7 +45,16 @@ async fn test_merger_sum_aggr() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = ReceiverExecutor::new(schema, vec![], input_rx, ActorContext::create(), 0);
+        let metrics = Arc::new(StreamingMetrics::unused());
+        let input = ReceiverExecutor::new(
+            schema,
+            vec![],
+            input_rx,
+            ActorContext::create(),
+            0,
+            0,
+            metrics,
+        );
         let append_only = false;
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
@@ -92,6 +101,7 @@ async fn test_merger_sum_aggr() {
     let mut outputs = vec![];
 
     let ctx = Arc::new(SharedContext::for_test());
+    let metrics = Arc::new(StreamingMetrics::unused());
 
     // create 17 local aggregation actors
     for _ in 0..17 {
@@ -113,6 +123,8 @@ async fn test_merger_sum_aggr() {
         rx,
         ActorContext::create(),
         0,
+        0,
+        Arc::new(StreamingMetrics::unused()),
     ));
     let dispatcher = DispatchExecutor::new(
         receiver_op,
@@ -121,6 +133,7 @@ async fn test_merger_sum_aggr() {
         ))],
         0,
         ctx,
+        metrics,
     );
     let context = SharedContext::for_test().into();
     let actor = Actor::new(
@@ -132,8 +145,17 @@ async fn test_merger_sum_aggr() {
     );
     handles.push(tokio::spawn(actor.run()));
 
+    let metrics = Arc::new(StreamingMetrics::unused());
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema, vec![], 0, outputs, ActorContext::create(), 0);
+    let merger = MergeExecutor::new(
+        schema,
+        vec![],
+        0,
+        outputs,
+        ActorContext::create(),
+        0,
+        metrics,
+    );
 
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;

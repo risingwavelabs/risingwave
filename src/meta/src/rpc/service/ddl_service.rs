@@ -32,7 +32,8 @@ use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableI
 use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuilder, FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef,
+    ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
+    SourceManagerRef,
 };
 
 #[derive(Clone)]
@@ -229,10 +230,11 @@ where
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
+        self.env.idle_manager().record_activity();
+
         let req = request.into_inner();
         let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
         let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
-
         // 0. Generate an id from mview.
         let id = self
             .env
@@ -286,23 +288,37 @@ where
             .map_err(tonic_err)?;
 
         // 3. Create mview in stream manager. The id in stream node will be filled.
-        if let Err(e) = self
-            .create_mview_on_compute_node(fragment_graph, id, None)
+        let ctx = CreateMaterializedViewContext {
+            schema_id: mview.schema_id,
+            database_id: mview.database_id,
+            mview_name: mview.name.clone(),
+            table_properties: mview.properties.clone(),
+            affiliated_source: None,
+            ..Default::default()
+        };
+        let internal_tables = match self
+            .create_mview_on_compute_node(fragment_graph, id, ctx)
             .await
         {
-            self.catalog_manager
-                .cancel_create_table_procedure(&mview)
-                .await
-                .map_err(tonic_err)?;
-            return Err(e.into());
-        } else {
-            self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
-        }
-
+            Err(e) => {
+                self.catalog_manager
+                    .cancel_create_table_procedure(&mview)
+                    .await
+                    .map_err(tonic_err)?;
+                return Err(e.into());
+            }
+            Ok(mut inner_internal_tables) => {
+                self.set_table_mapping(&mut mview).map_err(tonic_err)?;
+                for inner_table in &mut inner_internal_tables {
+                    self.set_table_mapping(inner_table).map_err(tonic_err)?;
+                }
+                inner_internal_tables
+            }
+        };
         // 4. Finally, update the catalog.
         let version = self
             .catalog_manager
-            .finish_create_table_procedure(&mview)
+            .finish_create_table_procedure(internal_tables, &mview)
             .await
             .map_err(tonic_err)?;
 
@@ -318,6 +334,8 @@ where
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         use risingwave_common::catalog::TableId;
+
+        self.env.idle_manager().record_activity();
 
         let table_id = request.into_inner().table_id;
         // 1. Drop table in catalog. Ref count will be checked.
@@ -400,11 +418,9 @@ where
         &self,
         mut fragment_graph: StreamFragmentGraph,
         id: TableId,
-        affiliated_source: Option<Source>,
-    ) -> RwResult<()> {
+        mut ctx: CreateMaterializedViewContext,
+    ) -> RwResult<Vec<Table>> {
         use risingwave_common::catalog::TableId;
-
-        use crate::stream::CreateMaterializedViewContext;
 
         // Fill in the correct mview id for stream node.
         fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
@@ -436,10 +452,6 @@ where
             .cluster_manager
             .get_parallel_unit_count(Some(ParallelUnitType::Hash))
             .await;
-        let mut ctx = CreateMaterializedViewContext {
-            affiliated_source,
-            ..Default::default()
-        };
 
         let mut actor_graph_builder =
             ActorGraphBuilder::new(self.env.id_gen_manager_ref(), &fragment_graph, &mut ctx)
@@ -458,7 +470,7 @@ where
             })
             .collect();
 
-        let graph = actor_graph_builder
+        let (graph, internal_tables) = actor_graph_builder
             .generate_graph(
                 self.env.id_gen_manager_ref(),
                 self.fragment_manager.clone(),
@@ -479,7 +491,7 @@ where
             .create_materialized_view(table_fragments, ctx)
             .await?;
 
-        Ok(())
+        Ok(internal_tables)
     }
 
     async fn create_materialized_source_inner(
@@ -546,24 +558,40 @@ where
 
         // Create mview on compute node.
         // Noted that this progress relies on the source just created, so we pass it here.
-        if let Err(e) = self
-            .create_mview_on_compute_node(fragment_graph, mview_id, Some(source.clone()))
+        let ctx = CreateMaterializedViewContext {
+            schema_id: source.schema_id,
+            database_id: source.database_id,
+            mview_name: source.name.clone(),
+            table_properties: mview.properties.clone(),
+            affiliated_source: Some(source.clone()),
+            ..Default::default()
+        };
+
+        let internal_tables = match self
+            .create_mview_on_compute_node(fragment_graph, mview_id, ctx)
             .await
         {
-            self.catalog_manager
-                .cancel_create_materialized_source_procedure(&source, &mview)
-                .await?;
-            // drop previously created source
-            self.source_manager.drop_source(source_id).await?;
-            return Err(e);
-        } else {
-            self.set_mview_mapping(&mut mview).map_err(tonic_err)?;
-        }
+            Err(e) => {
+                self.catalog_manager
+                    .cancel_create_materialized_source_procedure(&source, &mview)
+                    .await?;
+                // drop previously created source
+                self.source_manager.drop_source(source_id).await?;
+                return Err(e);
+            }
+            Ok(mut inner_internal_tables) => {
+                self.set_table_mapping(&mut mview).map_err(tonic_err)?;
+                for inner_table in &mut inner_internal_tables {
+                    self.set_table_mapping(inner_table).map_err(tonic_err)?;
+                }
+                inner_internal_tables
+            }
+        };
 
         // Finally, update the catalog.
         let version = self
             .catalog_manager
-            .finish_create_materialized_source_procedure(&source, &mview)
+            .finish_create_materialized_source_procedure(&source, &mview, internal_tables)
             .await?;
 
         Ok((source_id, mview_id, version))
@@ -584,25 +612,28 @@ where
             .await?;
 
         // 2. Drop source and mv separately.
-        self.source_manager.drop_source(source_id).await?;
+        // Note: we need to drop the materialized view to unmap the source_id to fragment_ids in
+        // `SourceManager` before we can drop the source
         self.stream_manager
             .drop_materialized_view(&TableId::new(table_id))
             .await?;
+
+        self.source_manager.drop_source(source_id).await?;
 
         Ok(version)
     }
 
     /// Fill in mview's vnode mapping so that frontend will know the data distribution.
-    fn set_mview_mapping(&self, mview: &mut Table) -> RwResult<()> {
+    fn set_table_mapping(&self, table: &mut Table) -> RwResult<()> {
         let vnode_mapping = self
             .env
             .hash_mapping_manager_ref()
-            .get_table_hash_mapping(&mview.id);
+            .get_table_hash_mapping(&table.id);
         match vnode_mapping {
             Some(vnode_mapping) => {
                 let (original_indices, data) = compress_data(&vnode_mapping);
-                mview.mapping = Some(ParallelUnitMapping {
-                    table_id: mview.id,
+                table.mapping = Some(ParallelUnitMapping {
+                    table_id: table.id,
                     original_indices,
                     data,
                 });

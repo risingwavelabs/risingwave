@@ -20,4 +20,4 @@ pub use reader::*;
 
 const SEQUENCE_FIELD_KIND: &str = "sequence";
 /// default datagen generator next() interval
-const DEFUALT_DATAGEN_INTERVAL: u128 = 1000;
+const DEFAULT_DATAGEN_INTERVAL: u128 = 1000;

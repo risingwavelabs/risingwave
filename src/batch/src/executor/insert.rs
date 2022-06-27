@@ -164,6 +164,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::store::ReadOptions;
     use risingwave_storage::*;
 
     use super::*;
@@ -298,7 +299,16 @@ mod tests {
         // Data will be materialized in associated streaming task.
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
-        let store_content = store.scan(full_range, None, epoch).await?;
+        let store_content = store
+            .scan(
+                full_range,
+                None,
+                ReadOptions {
+                    epoch,
+                    table_id: Default::default(),
+                },
+            )
+            .await?;
         assert!(store_content.is_empty());
 
         handle.await.unwrap();

@@ -32,7 +32,7 @@ pub struct DatagenProperties {
 
     /// default_rows_per_second =10
     /// when the split_num = 3 and default_rows_per_second =10
-    /// there will be three readers that generate respectly 4,3,3 message per second
+    /// there will be three readers that generate respectively 4,3,3 message per second
     #[serde(
         rename = "datagen.rows.per.second",
         default = "default_rows_per_second"

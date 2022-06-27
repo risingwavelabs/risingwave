@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::{TableId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{valid_table_name, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 use risingwave_pb::stream_plan::source_node::SourceType;
 
@@ -92,7 +92,11 @@ impl SchemaCatalog {
     pub fn iter_mv(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_none())
+            .filter(|(_, v)| {
+                v.associated_source_id.is_none()
+                    && v.is_index_on.is_none()
+                    && valid_table_name(&v.name)
+            })
             .map(|(_, v)| v)
     }
 
