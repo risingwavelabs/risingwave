@@ -628,7 +628,7 @@ mod tests {
                 test_user.to_string(),
             )
             .await;
-        assert!(!res.is_err());
+        assert!(res.is_ok());
         let sub_user = user_manager.get_user(&test_sub_user.to_string()).await?;
         assert_eq!(sub_user.grant_privileges.len(), 1);
         // Grant Select/Update/Delete with grant option, while Select is duplicated.
