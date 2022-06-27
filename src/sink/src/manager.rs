@@ -25,14 +25,12 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::ConnectorProperties;
-use risingwave_pb::catalog::StreamSinkInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
 /// The local sink manager on the compute node.
 #[async_trait]
 pub trait SinkManager: Debug + Sync + Send {
-    async fn create_sink(&self, table_id: &TableId, info: StreamSinkInfo) -> Result<()>;
-    fn create_table_sink(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
+    async fn create_sink(&self, table_id: &TableId) -> Result<()>;
 
     fn get_sink(&self, sink_id: &TableId) -> Result<SinkDesc>;
     fn drop_sink(&self, sink_id: &TableId) -> Result<()>;
@@ -79,11 +77,7 @@ pub struct MemSinkManager {
 
 #[async_trait]
 impl SinkManager for MemSinkManager {
-    async fn create_sink(&self, sink_id: &TableId, info: StreamSinkInfo) -> Result<()> {
-        todo!();
-    }
-
-    fn create_table_sink(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
+    async fn create_sink(&self, sink_id: &TableId) -> Result<()> {
         todo!();
     }
 

@@ -52,7 +52,7 @@ impl From<&SourceCatalog> for BoundSource {
 }
 
 impl Binder {
-    pub(super) fn bind_table_or_source(
+    pub fn bind_table_or_source(
         &mut self,
         schema_name: &str,
         table_name: &str,

@@ -35,6 +35,7 @@ mod drop_database;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
+pub mod drop_sink;
 pub mod drop_source;
 pub mod drop_table;
 pub mod drop_user;
@@ -88,6 +89,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, object_name).await,
             ObjectType::Index => drop_index::handle_drop_index(context, object_name).await,
             ObjectType::Source => drop_source::handle_drop_source(context, object_name).await,
+            ObjectType::Sink => drop_sink::handle_drop_sink(context, object_name).await,
             ObjectType::Database => {
                 drop_database::handle_drop_database(
                     context,

@@ -25,15 +25,9 @@ message SourceNode {
   SourceType source_type = 3;
 }
 
-// todo: StreamSourceNode or TableSourceNode
 message SinkNode {
-  enum SinkType {
-    TABLE = 0;
-    SINK = 1;
-  }
   plan_common.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
-  SinkType sink_type = 3;
 }
 
 message ProjectNode {

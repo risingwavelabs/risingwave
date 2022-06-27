@@ -31,7 +31,7 @@ use crate::optimizer::plan_node::{
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
+    pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
             Relation::BaseTable(t) => self.plan_base_table(*t),
             // TODO: order is ignored in the subquery

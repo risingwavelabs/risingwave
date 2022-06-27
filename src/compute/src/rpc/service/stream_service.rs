@@ -284,28 +284,12 @@ impl StreamServiceImpl {
     }
 
     async fn create_sink_inner(&self, sink: &Sink) -> RwResult<()> {
-        use risingwave_pb::catalog::sink::Info;
-
         let id = TableId::new(sink.id); // TODO: use SinkId instead
 
-        match &sink.get_info()? {
-            Info::StreamSink(info) => {
-                self.env
+        self.env
                     .sink_manager()
-                    .create_sink(&id, info.to_owned())
+                    .create_sink(&id)
                     .await?;
-            }
-            Info::TableSink(info) => {
-                let columns = info
-                    .columns
-                    .iter()
-                    .cloned()
-                    .map(|c| c.column_desc.unwrap().into())
-                    .collect_vec();
-
-                self.env.sink_manager().create_table_sink(&id, columns)?;
-            }
-        };
 
         Ok(())
     }
