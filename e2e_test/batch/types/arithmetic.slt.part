@@ -84,6 +84,11 @@ select 4 + Date '2022-06-23';
 2022-06-27
 
 query T
+select Date '2022-06-23' - 4;
+----
+2022-06-19
+
+query T
 select Date '2022-06-23' + TIME '19:24:00';
 ----
 2022-06-23 19:24:00
@@ -97,3 +102,24 @@ query T
 select TIME '18:20:49' -  TIME '16:07:16';
 ----
 02:13:33
+
+query T
+select TIME '18:20:49' -  interval '2' hour;
+----
+16:20:49
+
+query T
+select TIME '18:20:49' -  interval '1' days;
+----
+18:20:48
+
+query T
+select TIME '18:20:49' +  interval '1' days;
+----
+18:20:50
+
+query T
+select TIME '18:20:49' +  interval '1' hour;
+----
+19:20:49
+

@@ -171,7 +171,7 @@ pub fn date_interval_sub<T2, T1, T3>(
 }
 
 #[inline(always)]
-pub fn date_int32_add<T1, T2, T3>(l: NaiveDateWrapper, r: i32) -> Result<NaiveDateWrapper> {
+pub fn date_int_add<T1, T2, T3>(l: NaiveDateWrapper, r: i32) -> Result<NaiveDateWrapper> {
     let date = l.0;
     let date_wrapper = date
         .checked_add_signed(chrono::Duration::days(r as i64))
@@ -181,9 +181,15 @@ pub fn date_int32_add<T1, T2, T3>(l: NaiveDateWrapper, r: i32) -> Result<NaiveDa
 }
 
 #[inline(always)]
-pub fn int32_date_add<T1, T2, T3>(l: i32, r: NaiveDateWrapper) -> Result<NaiveDateWrapper> {
-    date_int32_add::<T2, T1, T3>(r, l)
+pub fn int_date_add<T1, T2, T3>(l: i32, r: NaiveDateWrapper) -> Result<NaiveDateWrapper> {
+    date_int_add::<T2, T1, T3>(r, l)
 }
+
+#[inline(always)]
+pub fn date_int_sub<T1, T2, T3>(l: NaiveDateWrapper, r: i32) -> Result<NaiveDateWrapper> {
+    date_int_add::<T1, T2, T3>(l, -r)
+}
+
 #[inline(always)]
 pub fn timestamp_interval_add<T1, T2, T3>(
     l: NaiveDateTimeWrapper,
@@ -222,8 +228,7 @@ pub fn date_time_add<T1, T2, T3>(
     r: NaiveTimeWrapper,
 ) -> Result<NaiveDateTimeWrapper> {
     let date_time = NaiveDateTime::new(l.0, r.0);
-    let date_time_wrapper = NaiveDateTimeWrapper::new(date_time);
-    Ok(date_time_wrapper)
+    Ok(NaiveDateTimeWrapper::new(date_time))
 }
 
 #[inline(always)]
@@ -239,6 +244,26 @@ pub fn time_time_sub<T1, T2, T3>(l: NaiveTimeWrapper, r: NaiveTimeWrapper) -> Re
     let tmp = l.0 - r.0;
     let ms = tmp.num_milliseconds();
     Ok(IntervalUnit::new(0, 0, ms))
+}
+
+#[inline(always)]
+pub fn time_interval_sub<T1, T2, T3>(
+    l: NaiveTimeWrapper,
+    r: IntervalUnit,
+) -> Result<NaiveTimeWrapper> {
+    let time = l.0;
+    let new_time = time - Duration::milliseconds(r.get_ms());
+    Ok(NaiveTimeWrapper::new(new_time))
+}
+
+#[inline(always)]
+pub fn time_interval_add<T1, T2, T3>(
+    l: NaiveTimeWrapper,
+    r: IntervalUnit,
+) -> Result<NaiveTimeWrapper> {
+    let time = l.0;
+    let new_time = time + Duration::milliseconds(r.get_ms());
+    Ok(NaiveTimeWrapper::new(new_time))
 }
 
 #[inline(always)]
