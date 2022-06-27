@@ -155,6 +155,7 @@ impl MetadataModel for CompactionGroup {
 // directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct TableOption {
+    // TODO: use Option<T> for every table_option item
     ttl: u32,
 }
 
