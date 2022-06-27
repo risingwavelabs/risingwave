@@ -381,7 +381,7 @@ where
 
     fn write_parameter_status_msg_no_flush(&mut self) -> Result<()> {
         self.write_message_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ClientEncoding("utf8"),
+            BeParameterStatusMessage::ClientEncoding("UTF8"),
         ))?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::StandardConformingString("on"),
