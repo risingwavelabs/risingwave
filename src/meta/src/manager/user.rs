@@ -401,6 +401,9 @@ impl<S: MetaStore> UserManager<S> {
         }
         while !users_info.is_empty() {
             let mut now_user = users_info.first_mut().unwrap().clone();
+            if !core.user_grant_relation.contains_key(&now_user.name) {
+                core.user_grant_relation.insert(now_user.name.clone(), HashSet::new());
+            }
             let now_relations = core.user_grant_relation.get(&now_user.name).unwrap();
             let mut recursive_flag = false;
             let mut empty_privilege = false;
@@ -432,7 +435,7 @@ impl<S: MetaStore> UserManager<S> {
                 }
                 for next_user_name in now_relations {
                     if core.user_info.contains_key(next_user_name)
-                        && !visited.contains(&now_user.name)
+                        && !visited.contains(next_user_name)
                     {
                         users_info.push(core.user_info.get(next_user_name).unwrap().clone());
                     }
@@ -528,16 +531,35 @@ mod tests {
     async fn test_user_manager() -> Result<()> {
         let user_manager = UserManager::new(MetaSrvEnv::for_test().await).await?;
         let test_user = "test_user";
+        let test_sub_user = "test_sub_user";
         user_manager.create_user(&make_test_user(test_user)).await?;
+        user_manager
+            .create_user(&make_test_user(test_sub_user))
+            .await?;
         assert!(user_manager
             .create_user(&make_test_user(DEFAULT_SUPPER_USER))
             .await
             .is_err());
 
         let users = user_manager.list_users().await?;
-        assert_eq!(users.len(), 3);
+        assert_eq!(users.len(), 4);
 
         let object = Object::TableId(0);
+        // Grant when grantor does not have privilege.
+        let res = user_manager
+            .grant_privilege(
+                &[test_sub_user.to_string()],
+                &[make_privilege(
+                    object.clone(),
+                    &[Action::Select, Action::Update, Action::Delete],
+                    true,
+                )],
+                test_user.to_string(),
+            )
+            .await;
+        assert!(res.is_err());
+        let sub_user = user_manager.get_user(&test_sub_user.to_string()).await?;
+        assert_eq!(sub_user.grant_privileges.len(), 0);
         // Grant Select/Insert without grant option.
         user_manager
             .grant_privilege(
@@ -558,7 +580,21 @@ mod tests {
             .action_with_opts
             .iter()
             .all(|p| !p.with_grant_option));
-
+        // Grant when grantor does not have privilege's grant option.
+        let res = user_manager
+            .grant_privilege(
+                &[test_sub_user.to_string()],
+                &[make_privilege(
+                    object.clone(),
+                    &[Action::Select, Action::Insert],
+                    true,
+                )],
+                test_user.to_string(),
+            )
+            .await;
+        assert!(res.is_err());
+        let sub_user = user_manager.get_user(&test_sub_user.to_string()).await?;
+        assert_eq!(sub_user.grant_privileges.len(), 0);
         // Grant Select/Insert with grant option.
         user_manager
             .grant_privilege(
@@ -579,7 +615,21 @@ mod tests {
             .action_with_opts
             .iter()
             .all(|p| p.with_grant_option));
-
+        // Grant to subuser
+        let res = user_manager
+            .grant_privilege(
+                &[test_sub_user.to_string()],
+                &[make_privilege(
+                    object.clone(),
+                    &[Action::Select, Action::Insert],
+                    true,
+                )],
+                test_user.to_string(),
+            )
+            .await;
+        assert!(!res.is_err());
+        let sub_user = user_manager.get_user(&test_sub_user.to_string()).await?;
+        assert_eq!(sub_user.grant_privileges.len(), 1);
         // Grant Select/Update/Delete with grant option, while Select is duplicated.
         user_manager
             .grant_privilege(
@@ -600,7 +650,30 @@ mod tests {
             .action_with_opts
             .iter()
             .all(|p| p.with_grant_option));
-
+        
+        // Revoke with restrict
+        let res =         user_manager
+        .revoke_privilege(
+            &[test_user.to_string()],
+            &[make_privilege(
+                object.clone(),
+                &[
+                    Action::Select,
+                    Action::Insert,
+                    Action::Delete,
+                    Action::Update,
+                ],
+                false,
+            )],
+            true,
+            false,
+        )
+        .await;
+        assert!(res.is_err());
+        let sub_user = user_manager.get_user(&test_sub_user.to_string()).await?;
+        assert_eq!(sub_user.grant_privileges.len(), 1);
+        let user = user_manager.get_user(&test_user.to_string()).await?;
+        assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
         // Revoke Select/Update/Delete/Insert with grant option.
         user_manager
             .revoke_privilege(
@@ -625,7 +698,8 @@ mod tests {
             .action_with_opts
             .iter()
             .all(|p| !p.with_grant_option));
-
+        let sub_user = user_manager.get_user(&test_sub_user.to_string()).await?;
+        assert_eq!(sub_user.grant_privileges.len(), 0);
         // Revoke Select/Delete/Insert.
         user_manager
             .revoke_privilege(
