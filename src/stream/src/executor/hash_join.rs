@@ -503,18 +503,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         &mut self.side_l,
                         &mut self.side_r,
                         &self.output_data_types,
+                        &self.output_indices,
                         &mut self.cond,
                         chunk,
                         self.append_only_optimize,
                     ) {
-                        yield chunk.map_err(StreamExecutorError::hash_join_error).map(
-                            |v| match v {
-                                Message::Chunk(chunk) => {
-                                    Message::Chunk(chunk.reorder_columns(&self.output_indices))
-                                }
-                                barrier @ Message::Barrier(_) => barrier,
-                            },
-                        )?;
+                        yield chunk.map_err(StreamExecutorError::hash_join_error)?;
                     }
                 }
                 AlignedMessage::Right(chunk) => {
@@ -523,18 +517,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         &mut self.side_l,
                         &mut self.side_r,
                         &self.output_data_types,
+                        &self.output_indices,
                         &mut self.cond,
                         chunk,
                         self.append_only_optimize,
                     ) {
-                        yield chunk.map_err(StreamExecutorError::hash_join_error).map(
-                            |v| match v {
-                                Message::Chunk(chunk) => {
-                                    Message::Chunk(chunk.reorder_columns(&self.output_indices))
-                                }
-                                barrier @ Message::Barrier(_) => barrier,
-                            },
-                        )?;
+                        yield chunk.map_err(StreamExecutorError::hash_join_error)?;
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {
@@ -605,6 +593,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         mut side_l: &'a mut JoinSide<K, S>,
         mut side_r: &'a mut JoinSide<K, S>,
         output_data_types: &'a [DataType],
+        output_indices: &'a [usize],
         cond: &'a mut Option<RowExpression>,
         chunk: StreamChunk,
         append_only_optimize: bool,
@@ -628,6 +617,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             stream_chunk_builder: StreamChunkBuilder::new(
                 PROCESSING_WINDOW_SIZE,
                 output_data_types,
+                output_indices,
                 update_start_pos,
                 matched_start_pos,
             )?,

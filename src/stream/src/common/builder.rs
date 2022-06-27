@@ -24,6 +24,11 @@ use risingwave_common::types::DataType;
 pub struct StreamChunkBuilder {
     /// operations in the data chunk to build
     ops: Vec<Op>,
+    /// Map the index from the original_indices to output_indices
+    /// For example, if the original schema of the Chunk is [A, B, C, D, E],
+    /// and the output_indices is [2, 5, 0]. Then the `index_mapping` will be
+    /// `[Some(2), None, Some(0), None, Some(1)]`
+    index_mapping: Vec<Option<usize>>,
 
     /// arrays in the data chunk to build
     column_builders: Vec<ArrayBuilderImpl>,
@@ -61,7 +66,8 @@ impl Drop for StreamChunkBuilder {
 impl StreamChunkBuilder {
     pub fn new(
         capacity: usize,
-        data_types: &[DataType],
+        original_data_types: &[DataType],
+        output_indices: &[usize],
         update_start_pos: usize,
         matched_start_pos: usize,
     ) -> Result<Self> {
@@ -73,18 +79,30 @@ impl StreamChunkBuilder {
         assert!(reduced_capacity > 0);
 
         let ops = Vec::with_capacity(reduced_capacity);
-        let column_builders = data_types
+        let data_types_after_mapping = output_indices
+            .iter()
+            .map(|&idx| original_data_types[idx].clone())
+            .collect_vec();
+        let column_builders = data_types_after_mapping
             .iter()
             .map(|datatype| datatype.create_array_builder(reduced_capacity))
             .try_collect()?;
+        let output_mapping = {
+            let mut mapping = vec![None; original_data_types.len()];
+            for (i, &output_index) in output_indices.iter().enumerate() {
+                mapping[output_index] = Some(i);
+            }
+            mapping
+        };
         Ok(Self {
             ops,
             column_builders,
-            data_types: data_types.to_owned(),
+            data_types: data_types_after_mapping,
             update_start_pos,
             matched_start_pos,
             capacity: reduced_capacity,
             size: 0,
+            index_mapping: output_mapping,
         })
     }
 
@@ -114,10 +132,14 @@ impl StreamChunkBuilder {
     ) -> Result<Option<StreamChunk>> {
         self.ops.push(op);
         for (i, d) in row_update.values().enumerate() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(d)?;
+            if let Some(idx) = self.index_mapping[i + self.update_start_pos] {
+                self.column_builders[idx].append_datum_ref(d)?;
+            }
         }
         for (i, d) in row_matched.values().enumerate() {
-            self.column_builders[i + self.matched_start_pos].append_datum(d)?;
+            if let Some(idx) = self.index_mapping[i + self.matched_start_pos] {
+                self.column_builders[idx].append_datum(d)?;
+            }
         }
 
         self.inc_size()
@@ -133,10 +155,14 @@ impl StreamChunkBuilder {
     ) -> Result<Option<StreamChunk>> {
         self.ops.push(op);
         for (i, d) in row_update.values().enumerate() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(d)?;
+            if let Some(idx) = self.index_mapping[i + self.update_start_pos] {
+                self.column_builders[idx].append_datum_ref(d)?;
+            }
         }
         for i in 0..self.column_builders.len() - row_update.size() {
-            self.column_builders[i + self.matched_start_pos].append_datum(&None)?;
+            if let Some(idx) = self.index_mapping[i + self.matched_start_pos] {
+                self.column_builders[idx].append_datum(&None)?;
+            }
         }
 
         self.inc_size()
@@ -148,10 +174,14 @@ impl StreamChunkBuilder {
     pub fn append_row_matched(&mut self, op: Op, row_matched: &Row) -> Result<Option<StreamChunk>> {
         self.ops.push(op);
         for i in 0..self.column_builders.len() - row_matched.size() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(None)?;
+            if let Some(idx) = self.index_mapping[i + self.update_start_pos] {
+                self.column_builders[idx].append_datum_ref(None)?;
+            }
         }
         for i in 0..row_matched.size() {
-            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
+            if let Some(idx) = self.index_mapping[i + self.matched_start_pos] {
+                self.column_builders[idx].append_datum(&row_matched[i])?;
+            }
         }
 
         self.inc_size()

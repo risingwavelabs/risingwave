@@ -312,6 +312,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     let mut builder = StreamChunkBuilder::new(
                         PROCESSING_WINDOW_SIZE,
                         &self.chunk_data_types,
+                        &self.column_mapping,
                         0,
                         self.stream.col_types.len(),
                     )
@@ -329,14 +330,14 @@ impl<S: StateStore> LookupExecutor<S> {
                                 .append_row(*op, &row, &matched_row)
                                 .map_err(StreamExecutorError::eval_error)?
                             {
-                                yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
+                                yield Message::Chunk(chunk);
                             }
                         }
                         // TODO: support outer join (return null if no rows are matched)
                     }
 
                     if let Some(chunk) = builder.take().map_err(StreamExecutorError::eval_error)? {
-                        yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
+                        yield Message::Chunk(chunk);
                     }
                 }
             }
