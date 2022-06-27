@@ -48,7 +48,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.pk_indices,
             args.executor_id,
             args.key_indices,
-            args.state_tables
+            args.state_tables,
         )?
         .boxed())
     }
@@ -93,19 +93,47 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         for (ks, table_catalog) in keyspace.iter().zip_eq(node.internal_tables.iter()) {
             // Parse info from proto and create state table.
             let state_table = {
-                let table_columns = table_catalog.columns.iter().map(|col| ColumnDesc::unnamed(
-                    col.column_desc.as_ref().unwrap().column_id.into(),
-                    col.column_desc.as_ref().unwrap().column_type.as_ref().unwrap().into()
-                )).collect();
-                let order_types = table_catalog.orders.iter().map(|order_type| OrderType::from_prost(&risingwave_pb::plan_common::OrderType::from_i32(*order_type).unwrap())).collect();
-                let dist_key_indices = table_catalog.distribution_keys.iter().map(|dist_index| *dist_index as usize).collect();
-                let pk_indices = table_catalog.pk.iter().map(|pk_index| *pk_index as usize).collect();
+                let table_columns = table_catalog
+                    .columns
+                    .iter()
+                    .map(|col| {
+                        ColumnDesc::unnamed(
+                            col.column_desc.as_ref().unwrap().column_id.into(),
+                            col.column_desc
+                                .as_ref()
+                                .unwrap()
+                                .column_type
+                                .as_ref()
+                                .unwrap()
+                                .into(),
+                        )
+                    })
+                    .collect();
+                let order_types = table_catalog
+                    .orders
+                    .iter()
+                    .map(|order_type| {
+                        OrderType::from_prost(
+                            &risingwave_pb::plan_common::OrderType::from_i32(*order_type).unwrap(),
+                        )
+                    })
+                    .collect();
+                let dist_key_indices = table_catalog
+                    .distribution_keys
+                    .iter()
+                    .map(|dist_index| *dist_index as usize)
+                    .collect();
+                let pk_indices = table_catalog
+                    .pk
+                    .iter()
+                    .map(|pk_index| *pk_index as usize)
+                    .collect();
                 StateTable::new(
                     ks.clone(),
                     table_columns,
                     order_types,
                     Some(dist_key_indices),
-                    pk_indices
+                    pk_indices,
                 )
             };
 
@@ -118,7 +146,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             key_indices,
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
-            state_tables
+            state_tables,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }
