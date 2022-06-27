@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{Action, GrantObjects, Privileges, Statement};
 
 use crate::binder::Binder;
 use crate::session::{OptimizerContext, SessionImpl};
+use crate::user::UserName;
 
 // TODO: add user_privilege mod under user manager and move check and expand logic there, and bitmap
 // impl for privilege check.
@@ -247,19 +248,27 @@ pub async fn handle_revoke_privilege(
         {
             return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
         }
-        if let Some(granted_by) = granted_by {
+        if let Some(ref granted_by) = granted_by {
             if reader.get_user_by_name(&granted_by.value).is_none() {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
             }
             // TODO: check whether if grantor is a super user or have the privilege to grant.
         }
     }
-
     let privileges = make_prost_privilege(&session, privileges, objects)?;
     let user_info_writer = session.env().user_info_writer();
+    let granted_by: Option<UserName> = granted_by.is_some().then(|| granted_by.unwrap().value);
     user_info_writer
-        .revoke_privilege(users, privileges, revoke_grant_option, cascade)
+        .revoke_privilege(
+            users,
+            privileges,
+            granted_by,
+            session.user_name().to_string(),
+            revoke_grant_option,
+            cascade,
+        )
         .await?;
+
     Ok(PgResponse::empty_result(StatementType::REVOKE_PRIVILEGE))
 }
 

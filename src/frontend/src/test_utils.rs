@@ -367,6 +367,8 @@ impl UserInfoWriter for MockUserInfoWriter {
         &self,
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
+        _granted_by: Option<UserName>,
+        _revoke_by: UserName,
         revoke_grant_option: bool,
         _cascade: bool,
     ) -> Result<()> {
