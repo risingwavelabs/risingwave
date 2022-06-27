@@ -418,7 +418,14 @@ impl LocalStreamManagerCore {
                 .iter()
                 .map(|down_id| {
                     let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                    new_output(&self.context, downstream_addr, actor_id, *down_id, self.streaming_metrics.clone(), &mut self.actor_output_buffer_monitor_tasks)
+                    new_output(
+                        &self.context,
+                        downstream_addr,
+                        actor_id,
+                        *down_id,
+                        self.streaming_metrics.clone(),
+                        &mut self.actor_output_buffer_monitor_tasks,
+                    )
                 })
                 .collect::<Result<Vec<_>>>()?;
 
@@ -774,7 +781,10 @@ impl LocalStreamManagerCore {
     fn drop_actor(&mut self, actor_id: ActorId) {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
-        self.actor_coroutine_monitor_tasks.remove(&actor_id).unwrap().abort();
+        self.actor_coroutine_monitor_tasks
+            .remove(&actor_id)
+            .unwrap()
+            .abort();
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
@@ -786,7 +796,10 @@ impl LocalStreamManagerCore {
     fn drop_all_actors(&mut self) {
         for (actor_id, handle) in self.handles.drain() {
             self.context.retain(|&(up_id, _)| up_id != actor_id);
-            self.actor_coroutine_monitor_tasks.remove(&actor_id).unwrap().abort();
+            self.actor_coroutine_monitor_tasks
+                .remove(&actor_id)
+                .unwrap()
+                .abort();
             self.actors.remove(&actor_id);
             // Task should have already stopped when this method is invoked.
             handle.abort();

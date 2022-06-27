@@ -138,11 +138,11 @@ pub fn new_output(
         let full_size = LOCAL_OUTPUT_CHANNEL_SIZE;
         loop {
             let capacity = tx_clone.capacity();
-            
+
             metrics
                 .actor_output_buffer_blocking_time
                 .with_label_values(&[&actor_id_str])
-                .set(capacity as f64/full_size as f64);
+                .set(capacity as f64 / full_size as f64);
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
