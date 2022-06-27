@@ -24,9 +24,9 @@ For all data $k \in U_k$, where $U_k$ is an unbounded set, we apply a hash funct
 
 ![initial data distribution](./images/consistent-hash/data-distribution.svg)
 
-Then we have vnode mapping, which ensures that vnodes are mapped evenly to parallel units in the cluster. That is to say, the number of vnodes that are mapped to each parallel unit should be as close as possible. This is denoted by different colors in the figure above. As is depicted, we have 3 parallel units (shown as circles), each taking $\frac{1}{3}$ of total vnodes. Vnode mapping is [constructed and maintained by meta](https://github.com/singularity-data/risingwave/blob/main/src/meta/src/manager/hash_mapping.rs).
+Then we have vnode mapping, which ensures that vnodes are mapped evenly to parallel units in the cluster. In other words, the number of vnodes that are mapped to each parallel unit should be as close as possible. This is denoted by different colors in the figure above. As is depicted, we have 3 parallel units (shown as circles), each taking $\frac{1}{3}$ of total vnodes. Vnode mapping is [constructed and maintained by meta](https://github.com/singularity-data/risingwave/blob/main/src/meta/src/manager/hash_mapping.rs).
 
-As long as the hash function $H$ could ensure uniformity, the data distribution determined by this strategy would be even across physical resources, even if data in $U_k$ might skew to a certain range. 
+As long as the hash function $H$ could ensure uniformity, the data distribution determined by this strategy would be even across physical resources, even if data in $U_k$ skew to a certain range. 
 
 #### Data Redistribution
 
@@ -55,7 +55,7 @@ Based on our consistent hash design, the dispatcher is informed of the latest vn
 
 In this way, all actors' data (i.e. actors' states) will be distributed according to the vnode mapping constructed by meta. 
 
-When scaling occurs, actors will be re-scheduled accordingly. By modifying the vnode mapping in meta and make streaming act on the new vnode mapping, we could minimize data movement in following aspects:
+When scaling occurs, actors will be re-scheduled accordingly. By modifying the vnode mapping in meta and make streaming act on the new vnode mapping, we could minimize data movement from following aspects:
 
 - The data of existing actors will not be displaced too much. 
 - The block cache of a compute node will not be invalidated too much.
@@ -68,7 +68,7 @@ In vnode mapping, one parallel unit will correspond to several vnodes. Therefore
 
 ### Storage
 
-If we look into the read-write pattern of streaming actors, we'll find that in most cases, actors only need to read the data written by itself (i.e. actor's internal states). That is to say, read data with the same vnodes as it previously writes. 
+If we look into the read-write pattern of streaming actors, we'll find that in most cases, actors only need to read the data written by itself (i.e. actor's internal states). Namely, read data with the same vnodes as it previously writes. 
 
 Therefore, an instinctive way to place data in storage is to **group data by vnodes**. In this way, when actors perform read operation, they could touch as few SST blocks as possible and thus trigger less I/O. 
 
@@ -88,4 +88,4 @@ Now that we have 12 vnodes in total in the example, the data layout in storage w
 
 Note that we only show the logical sequence and aggregation of data in this illustration. The actual data may be separated into different SSTs in Hummock.
 
-Since the way that certain data are hashed to vnode is invariant, the encoding of the data will also be invariant. How we schedule the fragment (e.g. parallelism of the fragment) will not affect data encoding. That is to say, storage will not care about vnode mapping, which is determined by meta and used only by streaming. This is actually a way of decoupling compute layer and storage layer.
+Since the way that certain data are hashed to vnode is invariant, the encoding of the data will also be invariant. How we schedule the fragment (e.g. parallelism of the fragment) will not affect data encoding. In other words, storage will not care about vnode mapping, which is determined by meta and used only by streaming. This is actually a way of decoupling compute layer and storage layer.
