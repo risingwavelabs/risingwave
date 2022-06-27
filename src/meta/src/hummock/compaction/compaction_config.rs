@@ -54,7 +54,9 @@ impl CompactionConfigBuilder {
                     "Zstd".to_string(),
                     "Zstd".to_string(),
                 ],
-                compaction_filter_mask: (CompactionFilterFlag::NONE).into(),
+                compaction_filter_mask: (CompactionFilterFlag::STATE_CLEAN
+                    | CompactionFilterFlag::TTL)
+                    .into(),
             },
         }
     }

@@ -143,19 +143,10 @@ impl CompactionFilter for TTLCompactionFilter {
     fn filter(&self, key: &[u8]) -> bool {
         let (table_id, epoch) = extract_table_id_and_epoch(key);
         match table_id {
-            Some(table_id) => {
-                let ttl = match self.table_id_to_ttl.get(&table_id) {
-                    Some(ttl_u32) => *ttl_u32,
-                    None => 0,
-                };
-
-                if ttl == 0 {
-                    // means not config ttl
-                    return true;
-                }
-
-                epoch + ttl as u64 > self.expire
-            }
+            Some(table_id) => match self.table_id_to_ttl.get(&table_id) {
+                Some(ttl_u32) => epoch + (*ttl_u32) as u64 > self.expire,
+                None => true,
+            },
 
             None => true,
         }
