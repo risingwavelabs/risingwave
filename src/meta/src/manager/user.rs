@@ -393,7 +393,7 @@ impl<S: MetaStore> UserManager<S> {
             .get(&revoke_by)
             .ok_or_else(|| InternalError(format!("Session user {} does not exist", &revoke_by)))
             .cloned()?;
-        let same_user = granted_by.is_some() && granted_by.unwrap() == revoke_by.name;
+        let same_user = granted_by.is_some() && granted_by.unwrap() != revoke_by.name;
         if !revoke_by.is_supper {
             for privilege in revoke_grant_privileges {
                 if let Some(user_privilege) = revoke_by
