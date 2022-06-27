@@ -178,3 +178,19 @@ query T
 select pg_typeof(round(null));
 ----
 double precision
+
+query T
+select pg_typeof(row(true, 1, 'hello'));
+----
+record
+
+query T
+select pg_typeof(array[1, 2]);
+----
+integer[]
+
+# Note that PostgreSQL still displays `integer[]` in this case.
+query T
+select pg_typeof(array[array[1, 2], array[3, 4]]);
+----
+integer[][]
