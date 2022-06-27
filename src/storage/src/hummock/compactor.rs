@@ -19,14 +19,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
+use dyn_clone::DynClone;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::{CompactionFilterFlag, StorageConfig};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{get_epoch, get_table_id, Epoch, FullKey};
+use risingwave_hummock_sdk::key::{
+    extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
+};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
 use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
@@ -94,13 +97,17 @@ pub struct CompactorContext {
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
 }
 
-trait CompactionFilter {
+trait CompactionFilter: Send + DynClone {
     fn filter(&self, _: &[u8]) -> bool {
         true
     }
 }
 
+dyn_clone::clone_trait_object!(CompactionFilter);
+
+#[derive(Clone)]
 pub struct DummyCompactionFilter;
+
 impl CompactionFilter for DummyCompactionFilter {}
 
 #[derive(Clone)]
@@ -123,6 +130,61 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
             None => true,
             Some(table_id) => self.existing_table_ids.contains(&table_id),
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct TTLCompactionFilter {
+    table_id_to_ttl: HashMap<u32, u32>,
+    expire: u64,
+}
+
+impl CompactionFilter for TTLCompactionFilter {
+    fn filter(&self, key: &[u8]) -> bool {
+        let (table_id, epoch) = extract_table_id_and_epoch(key);
+        match table_id {
+            Some(table_id) => {
+                let ttl = match self.table_id_to_ttl.get(&table_id) {
+                    Some(ttl_u32) => *ttl_u32,
+                    None => 0,
+                };
+
+                if ttl == 0 {
+                    // means not config ttl
+                    return true;
+                }
+
+                epoch + ttl as u64 > self.expire
+            }
+
+            None => true,
+        }
+    }
+}
+
+impl TTLCompactionFilter {
+    fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
+        Self {
+            table_id_to_ttl,
+            expire,
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+struct MultiCompactionFilter {
+    filter_vec: Vec<Box<dyn CompactionFilter>>,
+}
+
+impl CompactionFilter for MultiCompactionFilter {
+    fn filter(&self, key: &[u8]) -> bool {
+        !self.filter_vec.iter().any(|filter| !filter.filter(key))
+    }
+}
+
+impl MultiCompactionFilter {
+    fn register(&mut self, filter: Box<dyn CompactionFilter>) {
+        self.filter_vec.push(filter);
     }
 }
 
@@ -244,6 +306,8 @@ impl Compactor {
             existing_table_ids: vec![],
             target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
             compression_algorithm: 0,
+            compaction_filter_mask: 0,
+            table_options: HashMap::default(),
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -441,14 +505,33 @@ impl Compactor {
             );
         }
 
-        let compaction_filter =
-            StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
+        let mut multi_filter = MultiCompactionFilter::default();
+        let compaction_filter_flag =
+            CompactionFilterFlag::from_bits(compact_task.compaction_filter_mask)
+                .unwrap_or_default();
+        if compaction_filter_flag.contains(CompactionFilterFlag::STATE_CLEAN) {
+            let state_clean_up_filter = Box::new(StateCleanUpCompactionFilter::new(
+                HashSet::from_iter(compact_task.existing_table_ids),
+            ));
+
+            multi_filter.register(state_clean_up_filter);
+        }
+
+        if compaction_filter_flag.contains(CompactionFilterFlag::TTL) {
+            let id_to_ttl = compact_task
+                .table_options
+                .iter()
+                .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
+                .collect();
+            let ttl_filter = Box::new(TTLCompactionFilter::new(id_to_ttl, compact_task.watermark));
+            multi_filter.register(ttl_filter);
+        }
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let vnode2unit = vnode2unit.clone();
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
-            let filter = compaction_filter.clone();
+            let filter = multi_filter.clone();
             let split_task = async move {
                 let merge_iter = compactor.build_sst_iter().await?;
                 compactor

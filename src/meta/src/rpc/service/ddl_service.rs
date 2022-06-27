@@ -612,10 +612,13 @@ where
             .await?;
 
         // 2. Drop source and mv separately.
-        self.source_manager.drop_source(source_id).await?;
+        // Note: we need to drop the materialized view to unmap the source_id to fragment_ids in
+        // `SourceManager` before we can drop the source
         self.stream_manager
             .drop_materialized_view(&TableId::new(table_id))
             .await?;
+
+        self.source_manager.drop_source(source_id).await?;
 
         Ok(version)
     }

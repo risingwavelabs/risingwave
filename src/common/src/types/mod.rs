@@ -165,7 +165,7 @@ impl DataType {
         })
     }
 
-    fn prost_type_name(&self) -> TypeName {
+    pub fn prost_type_name(&self) -> TypeName {
         match self {
             DataType::Int16 => TypeName::Int16,
             DataType::Int32 => TypeName::Int32,
