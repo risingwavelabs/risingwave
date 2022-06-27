@@ -140,7 +140,7 @@ pub fn new_output(
             metrics
                 .stream_actor_output_buffer_usage_rate
                 .with_label_values(&[&actor_id_str])
-                .set(tx_clone.capacity() as f64 / full_size);
+                .set(tx_clone.capacity() as f64 * 100.0 / full_size);
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
