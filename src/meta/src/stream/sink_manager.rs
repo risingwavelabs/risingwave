@@ -23,7 +23,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
-use risingwave_pb::catalog::sink::Info;
 use risingwave_pb::catalog::Sink;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;

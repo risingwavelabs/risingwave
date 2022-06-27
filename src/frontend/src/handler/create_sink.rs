@@ -117,10 +117,10 @@ pub async fn handle_create_sink(
 
     let (sink, graph) = {
         let (plan, sink) = gen_create_sink_plan(&session, context.into(), stmt)?;
-        let stream_plan = plan.to_stream_prost();
-        let graph = StreamFragmenter::build_graph(stream_plan);
+        // let stream_plan = plan.to_stream_prost();
+        // let graph = StreamFragmenter::build_graph(stream_plan);
 
-        (sink, graph)
+        (sink, 1)
     };
 
     let catalog_writer = session.env().catalog_writer();
