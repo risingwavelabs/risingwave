@@ -15,9 +15,11 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_hummock_sdk::HummockSSTableId;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use super::SstableMeta;
@@ -32,6 +34,14 @@ pub struct SealedSstableBuilder {
     pub upload_join_handle: JoinHandle<HummockResult<()>>,
     pub data_len: usize,
     pub unit_id: u64,
+}
+
+#[derive(Debug)]
+pub struct UploadRequest {
+    pub id: u64,
+    pub data: Bytes,
+    pub meta: SstableMeta,
+    pub grant_sender: oneshot::Sender<()>,
 }
 
 /// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -51,6 +61,7 @@ pub struct CapacitySplitTableBuilder<B> {
     sstable_store: SstableStoreRef,
 
     uploading_size: Arc<AtomicUsize>,
+    uploading_sender: Option<Arc<mpsc::UnboundedSender<UploadRequest>>>,
 }
 
 impl<B, F> CapacitySplitTableBuilder<B>
@@ -59,7 +70,12 @@ where
     F: Future<Output = HummockResult<SSTableBuilder>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(get_id_and_builder: B, policy: CachePolicy, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        get_id_and_builder: B,
+        policy: CachePolicy,
+        sstable_store: SstableStoreRef,
+        uploading_sender: Option<Arc<mpsc::UnboundedSender<UploadRequest>>>,
+    ) -> Self {
         Self {
             get_id_and_builder,
             sealed_builders: Vec::new(),
@@ -67,6 +83,7 @@ where
             policy,
             sstable_store,
             uploading_size: Arc::new(AtomicUsize::new(0)),
+            uploading_sender,
         }
     }
 
@@ -134,26 +151,40 @@ where
         if let Some(builder) = self.current_builder.take() {
             let (table_id, data, meta, table_ids) = builder.finish();
             let len = data.len();
-            self.uploading_size.fetch_add(len, Ordering::Relaxed);
             let sstable_store = self.sstable_store.clone();
             let meta_clone = meta.clone();
             let policy = self.policy;
             let uploading_size = self.uploading_size.clone();
+            let threshold = usize::MAX;
+            let uploading_sender = self.uploading_sender.clone();
             let upload_join_handle = tokio::spawn(async move {
-                let ret = if policy == CachePolicy::Fill {
-                    let sst = Sstable::new_with_data(table_id, meta_clone, data.clone())?;
-                    sstable_store.put(sst, data, CachePolicy::Fill).await
+                if let Some(sender) = uploading_sender && uploading_size.load(Ordering::Relaxed) > threshold {
+                    let (tx, rx) = oneshot::channel();
+                    sender.send(UploadRequest{
+                        id: table_id,
+                        data,
+                        meta: meta_clone,
+                        grant_sender: tx,
+                    }).unwrap();
+                    rx.await.unwrap();
+                    Ok(())
                 } else {
-                    sstable_store
-                        .put(
-                            Sstable::new(table_id, meta_clone),
-                            data,
-                            CachePolicy::NotFill,
-                        )
-                        .await
-                };
-                uploading_size.fetch_sub(len, Ordering::Relaxed);
-                ret
+                    uploading_size.fetch_add(len, Ordering::Relaxed);
+                    let ret = if policy == CachePolicy::Fill {
+                        let sst = Sstable::new_with_data(table_id, meta_clone, data.clone())?;
+                        sstable_store.put(sst, data, CachePolicy::Fill).await
+                    } else {
+                        sstable_store
+                            .put(
+                                Sstable::new(table_id, meta_clone),
+                                data,
+                                CachePolicy::NotFill,
+                            )
+                            .await
+                    };
+                    uploading_size.fetch_sub(len, Ordering::Relaxed);
+                    ret
+                }
             });
             self.sealed_builders.push(SealedSstableBuilder {
                 id: table_id,
@@ -207,6 +238,7 @@ mod tests {
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
+            None,
         );
         let results = builder.finish();
         assert!(results.is_empty());
@@ -234,6 +266,7 @@ mod tests {
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
+            None,
         );
 
         for i in 0..table_capacity {
@@ -264,6 +297,7 @@ mod tests {
             },
             CachePolicy::NotFill,
             mock_sstable_store(),
+            None,
         );
         let mut epoch = 100;
 
@@ -309,6 +343,7 @@ mod tests {
             },
             CachePolicy::NotFill,
             mock_sstable_store(),
+            None,
         );
 
         builder

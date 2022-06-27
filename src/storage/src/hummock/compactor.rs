@@ -660,6 +660,7 @@ impl Compactor {
             VirtualNodeGrouping::new(vnode2unit),
             cache_policy,
             self.context.sstable_store.clone(),
+            None,
         );
 
         // Monitor time cost building shared buffer to SSTs.
