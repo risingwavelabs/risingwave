@@ -89,7 +89,7 @@ impl StreamingMetrics {
 
         let stream_actor_output_buffer_usage_rate = register_gauge_vec_with_registry!(
             "stream_actor_output_buffer_usage_rate",
-            "Total blocking time (s) of an actor",
+            "Output buffer Usage rate of an actor",
             &["actor_id"],
             registry
         )
