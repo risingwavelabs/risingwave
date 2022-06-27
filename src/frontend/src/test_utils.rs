@@ -338,11 +338,11 @@ impl MockCatalogWriter {
         Ok(source.id)
     }
 
-    fn create_sink_inner(&self, mut sink: ProstSink) -> Result<u32> {
+    fn create_sink_inner(&self, mut sink: ProstSink) -> Result<()> {
         sink.id = self.gen_id();
         self.catalog.write().create_sink(sink.clone());
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
-        Ok(sink.id)
+        Ok(())
     }
 
     fn get_database_id_by_schema(&self, schema_id: u32) -> DatabaseId {

@@ -32,9 +32,10 @@ use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;
 
 pub(crate) fn make_prost_sink(
-    session: &SessionImpl,
-    name: ObjectName,
-    materialized_view: ObjectName,
+    database_id: DatabaseId,
+    schema_id: SchemaId,
+    sink_name: String,
+    mv_name: String,
     properties: HashMap<String, String>,
 ) -> Result<ProstSink> {
     let (schema_name, name) = Binder::resolve_table_name(name)?;

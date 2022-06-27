@@ -22,7 +22,6 @@ use risingwave_pb::catalog::{
     Table as ProstTable,
 };
 
-use super::sink_catalog::SinkCatalog;
 use super::source_catalog::SourceCatalog;
 use super::{CatalogError, SinkId, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;

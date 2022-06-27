@@ -238,7 +238,7 @@ where
         let id = self
             .env
             .id_gen_manager()
-            .generate::<{ IdCategory::Table }>()
+            .generate::<{ IdCategory::Sink }>()
             .await
             .map_err(tonic_err)? as u32;
         sink.id = id;

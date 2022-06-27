@@ -86,7 +86,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
             .get_schema_by_name(session.database(), schema_or_default(&schema))?
-            .iter_source()
+            .iter_sink()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Columns { table } => {

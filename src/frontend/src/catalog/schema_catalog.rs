@@ -20,7 +20,6 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::stream_plan::source_node::SourceType;
 
-use super::sink_catalog::SinkCatalog;
 use super::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -137,13 +136,12 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
-    // /// Iterate all sinks.
-    // pub fn iter_sink(&self) -> impl Iterator<Item = &SinkCatalog> {
-    //     self.sink_by_name
-    //         .iter()
-    //         .filter(|(_, v)| matches!(v.sink_type, SinkType::Sink))
-    //         .map(|(_, v)| v)
-    // }
+    /// Iterate all sinks.
+    pub fn iter_sink(&self) -> impl Iterator<Item = &SinkCatalog> {
+        self.sink_by_name
+            .iter()
+            .map(|(_, v)| v)
+    }
 
     /// Iterate the materialized sources.
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &SourceCatalog> {
