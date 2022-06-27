@@ -238,6 +238,7 @@ pub fn time_time_sub<T1, T2, T3>(l: NaiveTimeWrapper, r: NaiveTimeWrapper) -> Re
     let tmp = l.0 - r.0;
     let ms = tmp.sub(Duration::days(tmp.num_days())).num_milliseconds();
     Ok(IntervalUnit::new(0, 0, ms))
+}
   
 #[inline(always)]
 pub fn interval_float_div<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
