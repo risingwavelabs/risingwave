@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use risingwave_common::catalog::{DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_FOR_PG};
@@ -379,7 +379,7 @@ impl<S: MetaStore> UserManager<S> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
         let mut user_updated = HashMap::new();
-        let mut users_info = Vec::new();
+        let mut users_info: VecDeque<UserInfo> = VecDeque::new();
         let mut visited = HashSet::new();
         for user_name in users {
             let user = core
@@ -387,29 +387,24 @@ impl<S: MetaStore> UserManager<S> {
                 .get(user_name)
                 .ok_or_else(|| InternalError(format!("User {} does not exist", user_name)))
                 .cloned()?;
-            if !core.user_grant_relation.contains_key(user_name) {
-                core.user_grant_relation
-                    .insert(user_name.clone(), HashSet::new());
-            }
             if user.is_supper {
                 return Err(RwError::from(InternalError(format!(
                     "Cannot revoke privilege from supper user {}",
                     user_name
                 ))));
             }
-            users_info.push(user.clone());
+            users_info.push_back(user);
         }
         while !users_info.is_empty() {
-            let mut now_user = users_info.first_mut().unwrap().clone();
-            if !core.user_grant_relation.contains_key(&now_user.name) {
-                core.user_grant_relation
-                    .insert(now_user.name.clone(), HashSet::new());
-            }
-            let now_relations = core.user_grant_relation.get(&now_user.name).unwrap();
+            let mut now_user = users_info.pop_front().unwrap();
+            let now_relations = core
+                .user_grant_relation
+                .get(&now_user.name)
+                .cloned()
+                .unwrap_or_default();
             let mut recursive_flag = false;
             let mut empty_privilege = false;
             let grant_option_now = revoke_grant_option && users.contains(&now_user.name);
-            users_info.remove(0);
             visited.insert(now_user.name.clone());
             revoke_grant_privileges
                 .iter()
@@ -435,10 +430,10 @@ impl<S: MetaStore> UserManager<S> {
                     ))));
                 }
                 for next_user_name in now_relations {
-                    if core.user_info.contains_key(next_user_name)
-                        && !visited.contains(next_user_name)
+                    if core.user_info.contains_key(&next_user_name)
+                        && !visited.contains(&next_user_name)
                     {
-                        users_info.push(core.user_info.get(next_user_name).unwrap().clone());
+                        users_info.push_back(core.user_info.get(&next_user_name).unwrap().clone());
                     }
                 }
                 if empty_privilege {
