@@ -53,7 +53,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::HummockError;
+use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
@@ -486,24 +486,6 @@ impl Compactor {
                 })
                 .collect(),
         );
-        let tables = compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| table.id)
-            .collect_vec();
-        if let Err(e) = compactor
-            .context
-            .sstable_store
-            .prefetch_sstables(tables)
-            .await
-        {
-            tracing::warn!(
-                "Compaction task {} prefetch failed with error: {:#?}",
-                compact_task.task_id,
-                e
-            );
-        }
 
         let mut multi_filter = MultiCompactionFilter::default();
         let compaction_filter_flag =
@@ -648,9 +630,17 @@ impl Compactor {
         };
 
         let get_id_time = Arc::new(AtomicU64::new(0));
+        let max_target_file_size = self.context.options.sstable_size_mb as usize * (1 << 20);
+        let cache_policy = if !self.context.is_share_buffer_compact
+            && (self.compact_task.target_file_size as usize) < max_target_file_size
+        {
+            CachePolicy::Fill
+        } else {
+            CachePolicy::NotFill
+        };
         let target_file_size = std::cmp::min(
             self.compact_task.target_file_size as usize,
-            self.context.options.sstable_size_mb as usize * (1 << 20),
+            max_target_file_size,
         );
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
@@ -672,6 +662,7 @@ impl Compactor {
                 Ok(builder)
             },
             VirtualNodeGrouping::new(vnode2unit),
+            cache_policy,
             self.context.sstable_store.clone(),
         );
 
@@ -706,9 +697,9 @@ impl Compactor {
             unit_id,
         } in sealed_builders
         {
-            let sst = Sstable { id: table_id, meta };
+            let sst = Sstable::new(table_id, meta);
             let len = data_len;
-            ssts.push((sst.clone(), unit_id, table_ids));
+            ssts.push((sst, unit_id, table_ids));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
@@ -767,6 +758,8 @@ impl Compactor {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
         let mut stats = StoreLocalStatistic::default();
         let read_options = Arc::new(ReadOptions { prefetch: true });
+
+        // TODO: check memory limit
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -783,18 +776,18 @@ impl Compactor {
             // 1024) as f64;     read_statistics.cnt += 1;
             // }
 
-            if can_concat(&level.get_table_infos().iter().collect_vec()) {
+            if can_concat(&level.table_infos.iter().collect_vec()) {
                 table_iters.push(Box::new(ConcatIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
                     read_options.clone(),
-                )));
+                )) as BoxedForwardHummockIterator);
             } else {
                 for table_info in &level.table_infos {
                     let table = self
                         .context
                         .sstable_store
-                        .sstable(table_info.id, &mut stats)
+                        .load_table(table_info.id, true, &mut stats)
                         .await?;
                     table_iters.push(Box::new(SSTableIterator::create(
                         table,

@@ -27,3 +27,8 @@ query I
 SELECT round(4.5::float)
 ----
 5
+
+query R
+SELECT round('4.5')
+----
+5
