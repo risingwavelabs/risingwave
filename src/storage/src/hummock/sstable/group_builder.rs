@@ -24,7 +24,7 @@ use risingwave_hummock_sdk::CompactionGroupId;
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, SealedSstableBuilder};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableBuilder};
+use crate::hummock::{CachePolicy, HummockResult, SSTableBuilder};
 
 pub type KeyValueGroupId = u64;
 
@@ -109,6 +109,7 @@ pub struct GroupedSstableBuilder<B, G: KeyValueGrouping> {
     grouping: G,
     builders: HashMap<KeyValueGroupId, CapacitySplitTableBuilder<B>>,
     sstable_store: SstableStoreRef,
+    policy: CachePolicy,
 }
 
 impl<B, G, F> GroupedSstableBuilder<B, G>
@@ -117,12 +118,18 @@ where
     G: KeyValueGrouping,
     F: Future<Output = HummockResult<SSTableBuilder>>,
 {
-    pub fn new(get_id_and_builder: B, grouping: G, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        get_id_and_builder: B,
+        grouping: G,
+        policy: CachePolicy,
+        sstable_store: SstableStoreRef,
+    ) -> Self {
         Self {
             get_id_and_builder,
             grouping,
             builders: Default::default(),
             sstable_store,
+            policy,
         }
     }
 
@@ -144,6 +151,7 @@ where
         let entry = self.builders.entry(group_id).or_insert_with(|| {
             CapacitySplitTableBuilder::new(
                 self.get_id_and_builder.clone(),
+                self.policy,
                 self.sstable_store.clone(),
             )
         });
@@ -206,8 +214,12 @@ mod tests {
         let grouping = KeyValueGroupingImpl::CompactionGroup(CompactionGroupGrouping::new(
             HashMap::from([(prefix.into(), 1 as CompactionGroupId)]),
         ));
-        let mut builder =
-            GroupedSstableBuilder::new(get_id_and_builder, grouping, mock_sstable_store());
+        let mut builder = GroupedSstableBuilder::new(
+            get_id_and_builder,
+            grouping,
+            CachePolicy::Disable,
+            mock_sstable_store(),
+        );
         for i in 0..10 {
             // key value belongs to no compaction group
             builder
@@ -273,8 +285,12 @@ mod tests {
 
         // Test < parallel_unit_number
         let grouping = KeyValueGroupingImpl::VirtualNode(VirtualNodeGrouping::new(vnode2unit));
-        let mut builder =
-            GroupedSstableBuilder::new(get_id_and_builder, grouping.clone(), mock_sstable_store());
+        let mut builder = GroupedSstableBuilder::new(
+            get_id_and_builder,
+            grouping.clone(),
+            CachePolicy::Disable,
+            mock_sstable_store(),
+        );
         for i in 0..2 {
             // key value matches table and mapping
             builder
@@ -298,8 +314,12 @@ mod tests {
         assert!(results.len() < parallel_unit_number as usize);
 
         // Test > parallel_unit_number
-        let mut builder =
-            GroupedSstableBuilder::new(get_id_and_builder, grouping.clone(), mock_sstable_store());
+        let mut builder = GroupedSstableBuilder::new(
+            get_id_and_builder,
+            grouping.clone(),
+            CachePolicy::Disable,
+            mock_sstable_store(),
+        );
         for i in 0..10 {
             // key value matches table and mapping
             builder
@@ -322,8 +342,12 @@ mod tests {
         assert_eq!(results.len(), parallel_unit_number as usize);
 
         // Test no matching table id
-        let mut builder =
-            GroupedSstableBuilder::new(get_id_and_builder, grouping.clone(), mock_sstable_store());
+        let mut builder = GroupedSstableBuilder::new(
+            get_id_and_builder,
+            grouping.clone(),
+            CachePolicy::Disable,
+            mock_sstable_store(),
+        );
         builder
             .add_full_key(
                 FullKey::from_user_key(

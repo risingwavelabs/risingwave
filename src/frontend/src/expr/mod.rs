@@ -44,8 +44,8 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
-    align_types, cast_ok, func_sig_map, infer_type, least_restrictive, CastContext, DataTypeName,
-    FuncSign,
+    align_types, cast_map_array, cast_ok, func_sigs, infer_type, least_restrictive, CastContext,
+    DataTypeName, FuncSign,
 };
 pub use utils::*;
 
@@ -107,6 +107,11 @@ impl ExprImpl {
     /// Check whether self is NULL.
     pub fn is_null(&self) -> bool {
         matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
+    }
+
+    /// Check whether self is a literal NULL or literal string.
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, ExprImpl::Literal(literal) if literal.return_type() == DataType::Varchar)
     }
 
     /// Shorthand to create cast expr to `target` type in implicit context.

@@ -33,7 +33,7 @@ use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[tokio::test]
 #[cfg(feature = "failpoints")]
-async fn test_failpoint_concat_read_err() {
+async fn test_failpoints_concat_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
@@ -94,7 +94,7 @@ async fn test_failpoint_concat_read_err() {
 }
 #[tokio::test]
 #[cfg(feature = "failpoints")]
-async fn test_failpoint_backward_concat_read_err() {
+async fn test_failpoints_backward_concat_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
@@ -151,7 +151,7 @@ async fn test_failpoint_backward_concat_read_err() {
 }
 #[tokio::test]
 #[cfg(feature = "failpoints")]
-async fn test_failpoint_merge_invalid_key() {
+async fn test_failpoints_merge_invalid_key() {
     fail::cfg("disable_block_cache", "return").unwrap();
     fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
@@ -202,7 +202,7 @@ async fn test_failpoint_merge_invalid_key() {
 }
 #[tokio::test]
 #[cfg(feature = "failpoints")]
-async fn test_failpoint_backward_merge_invalid_key() {
+async fn test_failpoints_backward_merge_invalid_key() {
     fail::cfg("disable_block_cache", "return").unwrap();
     fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
@@ -252,7 +252,7 @@ async fn test_failpoint_backward_merge_invalid_key() {
 }
 #[tokio::test]
 #[cfg(feature = "failpoints")]
-async fn test_failpoint_user_read_err() {
+async fn test_failpoints_user_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
@@ -314,7 +314,7 @@ async fn test_failpoint_user_read_err() {
 
 #[tokio::test]
 #[cfg(feature = "failpoints")]
-async fn test_failpoint_backward_user_read_err() {
+async fn test_failpoints_backward_user_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";

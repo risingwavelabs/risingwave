@@ -232,11 +232,13 @@ impl MetaClient {
         users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
+        granted_by: String,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
             users,
             privileges,
             with_grant_option,
+            granted_by,
         };
         let resp = self.inner.grant_privilege(request).await?;
         Ok(resp.version)
@@ -247,11 +249,13 @@ impl MetaClient {
         users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         revoke_grant_option: bool,
+        cascade: bool,
     ) -> Result<u64> {
         let request = RevokePrivilegeRequest {
             users,
             privileges,
             revoke_grant_option,
+            cascade,
         };
         let resp = self.inner.revoke_privilege(request).await?;
         Ok(resp.version)
@@ -279,7 +283,7 @@ impl MetaClient {
                     _ = min_interval_ticker.tick() => {},
                     // Shutdown
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Heartbeat loop is shutting down");
+                        tracing::info!("Heartbeat loop is stopped");
                         return;
                     }
                 }

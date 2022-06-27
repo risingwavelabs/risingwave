@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
@@ -24,8 +25,6 @@ use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
-use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
-use crate::hummock::shared_buffer::{OrderIndex, UploadTaskType};
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
@@ -58,10 +57,14 @@ impl LocalVersion {
         self.shared_buffer.iter()
     }
 
-    pub fn new_shared_buffer(&mut self, epoch: HummockEpoch) -> Arc<RwLock<SharedBuffer>> {
+    pub fn new_shared_buffer(
+        &mut self,
+        epoch: HummockEpoch,
+        global_upload_task_size: Arc<AtomicUsize>,
+    ) -> Arc<RwLock<SharedBuffer>> {
         self.shared_buffer
             .entry(epoch)
-            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::default())))
+            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::new(global_upload_task_size))))
             .clone()
     }
 
@@ -79,30 +82,29 @@ impl LocalVersion {
         });
     }
 
-    pub fn read_version(&self, read_epoch: HummockEpoch) -> ReadVersion {
-        let smallest_uncommitted_epoch = self.pinned_version.max_committed_epoch() + 1;
+    pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
+        let (pinned_version, shared_buffer) = {
+            let guard = this.read();
+            let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
+            let pinned_version = guard.pinned_version.clone();
+            (
+                pinned_version,
+                if read_epoch >= smallest_uncommitted_epoch {
+                    guard
+                        .shared_buffer
+                        .range(smallest_uncommitted_epoch..=read_epoch)
+                        .rev() // Important: order by epoch descendingly
+                        .map(|(_, shared_buffer)| shared_buffer.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            )
+        };
         ReadVersion {
-            shared_buffer: if read_epoch >= smallest_uncommitted_epoch {
-                self.shared_buffer
-                    .range(smallest_uncommitted_epoch..=read_epoch)
-                    .rev() // Important: order by epoch descendingly
-                    .map(|(_, shared_buffer)| shared_buffer.read_arc())
-                    .collect()
-            } else {
-                Vec::new()
-            },
-            pinned_version: self.pinned_version.clone(),
+            shared_buffer: shared_buffer.into_iter().map(|x| x.read_arc()).collect(),
+            pinned_version,
         }
-    }
-
-    pub fn new_upload_task(
-        &self,
-        epoch: HummockEpoch,
-        task_type: UploadTaskType,
-    ) -> Option<(OrderIndex, UploadTaskPayload)> {
-        self.shared_buffer
-            .get(&epoch)
-            .and_then(|shared_buffer| shared_buffer.write().new_upload_task(task_type))
     }
 }
 

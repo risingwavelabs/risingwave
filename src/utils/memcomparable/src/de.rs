@@ -578,7 +578,7 @@ impl<B: Buf> Deserializer<B> {
             }
             scale = 0;
         } else if mantissa % 10 == 0 {
-            // Remove uncessary zeros.
+            // Remove unnecessary zeros.
             // e.g. 0.01_11_10 should be 0.01_11_1
             mantissa /= 10;
             scale -= 1;
