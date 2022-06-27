@@ -34,7 +34,13 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     fn get_task_output(&self, task_output_id: TaskOutputId) -> Result<TaskOutput>;
 
     /// Get system catalog reader, used to read system table.
-    fn sys_catalog_reader_ref(&self) -> Option<SysCatalogReaderRef>;
+    fn catalog_reader_ref(&self) -> Option<SysCatalogReaderRef>;
+
+    fn try_get_catalog_reader_ref(&self) -> Result<SysCatalogReaderRef> {
+        Ok(self
+            .catalog_reader_ref()
+            .ok_or_else(|| InternalError("Sys catalog reader not found".to_string()))?)
+    }
 
     /// Whether `peer_addr` is in same as current task.
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool;
@@ -71,7 +77,7 @@ impl BatchTaskContext for ComputeNodeContext {
             .take_output(&task_output_id.to_prost())
     }
 
-    fn sys_catalog_reader_ref(&self) -> Option<SysCatalogReaderRef> {
+    fn catalog_reader_ref(&self) -> Option<SysCatalogReaderRef> {
         None
     }
 

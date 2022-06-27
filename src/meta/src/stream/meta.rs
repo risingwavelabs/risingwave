@@ -131,7 +131,11 @@ where
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
     /// state is `ActorState::Inactive`.
-    pub async fn start_create_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+    pub async fn start_create_table_fragments(
+        &self,
+        table_fragment: TableFragments,
+        table_properties: HashMap<String, String>,
+    ) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
         match map.entry(table_fragment.table_id()) {
@@ -143,7 +147,7 @@ where
                 // Register to compaction group beforehand.
                 // If any following operation fails, the registration will be eventually reverted.
                 self.compaction_group_manager
-                    .register_table_fragments(&table_fragment)
+                    .register_table_fragments(&table_fragment, &table_properties)
                     .await?;
 
                 table_fragment.insert(&*self.meta_store).await?;
