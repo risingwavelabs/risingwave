@@ -228,23 +228,29 @@ impl SstableStore {
     pub async fn load_table(
         &self,
         sst_id: HummockSSTableId,
-        stats: &mut StoreLocalStatistic,
         load_data: bool,
+        stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
+        let mut meta_data = None;
         loop {
             stats.cache_meta_block_total += 1;
             let entry = self
                 .meta_cache
                 .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || async {
                     stats.cache_meta_block_miss += 1;
-                    let path = self.get_sst_meta_path(sst_id);
-                    let buf = self
-                        .store
-                        .read(&path, None)
-                        .await
-                        .map_err(HummockError::object_io_error)?;
-                    let mut size = buf.len();
-                    let meta = SstableMeta::decode(&mut &buf[..])?;
+                    let meta = match meta_data {
+                        Some(data) => data,
+                        None => {
+                            let path = self.get_sst_meta_path(sst_id);
+                            let buf = self
+                                .store
+                                .read(&path, None)
+                                .await
+                                .map_err(HummockError::object_io_error)?;
+                            SstableMeta::decode(&mut &buf[..])?
+                        }
+                    };
+                    let mut size = meta.encoded_size();
                     let sst = if load_data {
                         size = meta.estimated_size as usize;
                         let data_path = self.get_sst_data_path(sst_id);
@@ -269,6 +275,8 @@ impl SstableStore {
             if !load_data || !entry.value().blocks.is_empty() {
                 return Ok(entry);
             }
+            // remove sst from cache to avoid multiple thread acquire the same sstable.
+            meta_data = Some(entry.value().meta.clone());
             drop(entry);
             self.meta_cache.erase(sst_id, &sst_id);
         }
@@ -279,8 +287,58 @@ impl SstableStore {
         sst_id: HummockSSTableId,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
-        self.load_table(sst_id, stats, false).await
+        self.load_table(sst_id, false, stats).await
     }
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
+    use crate::hummock::iterator::{HummockIterator, ReadOptions};
+    use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
+    use crate::hummock::value::HummockValue;
+    use crate::hummock::{CachePolicy, SSTableIterator, Sstable};
+    use crate::monitor::StoreLocalStatistic;
+
+    #[tokio::test]
+    async fn test_read_whole_data_object() {
+        let sstable_store = mock_sstable_store();
+        let (data, meta, _) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            (0..100).map(|x| {
+                (
+                    iterator_test_key_of(x),
+                    HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec()),
+                )
+            }),
+        );
+        let table = Sstable::new(1, meta.clone());
+        sstable_store
+            .put(table, data, CachePolicy::Fill)
+            .await
+            .unwrap();
+        let mut stats = StoreLocalStatistic::default();
+        let holder = sstable_store.sstable(1, &mut stats).await.unwrap();
+        assert_eq!(holder.value().meta, meta);
+        assert!(holder.value().blocks.is_empty());
+        let holder = sstable_store.load_table(1, true, &mut stats).await.unwrap();
+        assert_eq!(holder.value().meta, meta);
+        assert_eq!(
+            holder.value().meta.block_metas.len(),
+            holder.value().blocks.len()
+        );
+        assert!(!holder.value().blocks.is_empty());
+        let mut iter =
+            SSTableIterator::new(holder, sstable_store, Arc::new(ReadOptions::default()));
+        iter.rewind().await.unwrap();
+        for i in 0..100 {
+            let key = iter.key();
+            assert_eq!(key, iterator_test_key_of(i).as_slice());
+            iter.next().await.unwrap();
+        }
+    }
+}

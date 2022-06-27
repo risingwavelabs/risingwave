@@ -704,7 +704,7 @@ impl Compactor {
                     let table = self
                         .context
                         .sstable_store
-                        .load_table(table_info.id, &mut stats, true)
+                        .load_table(table_info.id, true, &mut stats)
                         .await?;
                     table_iters.push(Box::new(SSTableIterator::create(
                         table,
