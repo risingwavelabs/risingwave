@@ -20,11 +20,11 @@ First, we need to introduce a little about how we schedule the actors. Each work
 
 Here comes the main part, where we will construct a mapping that determines data distribution.
 
-For all data $k \in U_k$, where $U_k$ is an unbounded set, we apply a hash function $v = H(k)$, where $v$ falls to a limited range. The hash function $H$ ensures that all data are hashed **uniformly** to that range. We call $v$ vnode, as is shown as the squares in the figure below.
+For all data $k \in U_k$, where $U_k$ is an unbounded set, we apply a hash function $v = H(k)$, where $v$ falls to a limited range. The hash function $H$ ensures that all data are hashed **uniformly** to that range. We call $v$ vnode, namely virtual node, as is shown as the squares in the figure below.
 
 ![initial data distribution](./images/consistent-hash/data-distribution.svg)
 
-Then we have vnode mapping, which ensures that vnodes are mapped evenly to parallel units in the cluster. That is to say, the number of vnodes that are mapped to each parallel unit should be as close as possible. This is denoted by different colors in the figure above. As is depicted, we have 3 parallel units (shown as circles), each taking $\frac{1}{3}$ of total vnodes. Vnode mapping is [constructed and maintained by meta]([./architecture-design.md#architecture](https://github.com/singularity-data/risingwave/blob/main/src/meta/src/manager/hash_mapping.rs)).
+Then we have vnode mapping, which ensures that vnodes are mapped evenly to parallel units in the cluster. That is to say, the number of vnodes that are mapped to each parallel unit should be as close as possible. This is denoted by different colors in the figure above. As is depicted, we have 3 parallel units (shown as circles), each taking $\frac{1}{3}$ of total vnodes. Vnode mapping is [constructed and maintained by meta](https://github.com/singularity-data/risingwave/blob/main/src/meta/src/manager/hash_mapping.rs).
 
 As long as the hash function $H$ could ensure uniformity, the data distribution determined by this strategy would be even across physical resources, even if data in $U_k$ might skew to a certain range. 
 
@@ -36,7 +36,7 @@ Let's take scaling out for example. Assume that we have one more parallel unit a
 
 ![optimal data redistribution](./images/consistent-hash/data-redistribution-1.svg)
 
-To minimize data movement when scaling occurs, we should be careful when we modify the vnode mapping. The worst strategy will result in $\frac{1}{2}$ of the data being moved, just as is shown in the figure below.
+To minimize data movement when scaling occurs, we should be careful when we modify the vnode mapping. Below is an opposite example: modifying vnode mapping like this will result in $\frac{1}{2}$ of the data being moved.
 
 ![worst data redistribution](./images/consistent-hash/data-redistribution-2.svg)
 
@@ -48,7 +48,7 @@ We know that a fragment has several actors as its different parallelisms, and th
 
 In the figure, we can see that one upstream actor dispatches data to three downstream actors. The downstream actors are scheduled on the parallel units mentioned in previous example respectively. 
 
-Based on our consistent hash design, the dispatcher is informed of the latest vnode mapping by meta. It then decides how to send data by following steps:
+Based on our consistent hash design, the dispatcher is informed of the latest vnode mapping by meta node. It then decides how to send data by following steps:
 1. Compute vnode of the data via the hash function $H$. Let the vnode be $v_k$.
 2. Look up vnode mapping and find out parallel unit $p_n$ that vnode $v_k$ maps to. 
 3. Send data to the downstream actor that is scheduled on parallel unit $p_n$ (remember that one actor will be scheduled on exactly one parallel unit).
@@ -70,7 +70,7 @@ In vnode mapping, one parallel unit will correspond to several vnodes. Therefore
 
 If we look into the read-write pattern of streaming actors, we'll find that in most cases, actors only need to read the data written by itself (i.e. actor's internal states). That is to say, read data with the same vnodes as it previously writes. 
 
-Therefore, an instinctive way to place data in storage is to **group data by vnodes**. In this way, when actors perform read operation, it could touch as few SSTs as possible and thus trigger less I/O. 
+Therefore, an instinctive way to place data in storage is to **group data by vnodes**. In this way, when actors perform read operation, they could touch as few SST blocks as possible and thus trigger less I/O. 
 
 We know that [Hummock](./state-store-overview.md#overview), our LSM-Tree-based storage engine, sorts key-value pairs by the order of the key. Therefore, in order to group data by vnode on the basis of Hummock, we **encode vnode into the storage key**. The storage key will look like
 ```
