@@ -21,7 +21,7 @@ use itertools::Itertools;
 use madsim::collections::HashMap;
 use prometheus::Registry;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitMetaData, SplitReaderImpl,
@@ -34,12 +34,28 @@ use crate::common::SourceChunkBuilder;
 use crate::monitor::SourceMetrics;
 use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
 
+#[derive(Clone, Debug)]
+pub struct SourceContext {
+    pub actor_id: u32,
+    pub source_id: TableId,
+}
+
+impl SourceContext {
+    pub fn new(actor_id: u32, source_id: TableId) -> Self {
+        SourceContext {
+            actor_id,
+            source_id,
+        }
+    }
+}
+
 struct InnerConnectorSourceReader {
     reader: SplitReaderImpl,
     // split should be None or only contains one value
     split: ConnectorState,
 
-    metrics: SourceMetrics,
+    metrics: Arc<SourceMetrics>,
+    context: SourceContext,
 }
 
 struct InnerConnectorSourceReaderHandle {
@@ -65,7 +81,8 @@ pub struct ConnectorSourceReader {
     // need to clone this tx when adding new inner readers in the future.
     message_tx: Sender<Either<Vec<SourceMessage>, RwError>>,
 
-    registry: Registry,
+    metrics: Arc<SourceMetrics>,
+    context: SourceContext,
 }
 
 impl InnerConnectorSourceReader {
@@ -73,7 +90,8 @@ impl InnerConnectorSourceReader {
         prop: ConnectorProperties,
         split: ConnectorState,
         columns: Vec<SourceColumnDesc>,
-        registry: Registry,
+        metrics: Arc<SourceMetrics>,
+        context: SourceContext,
     ) -> Result<Self> {
         log::debug!(
             "Spawning new connector source inner reader with config {:?}, split {:?}",
@@ -99,12 +117,11 @@ impl InnerConnectorSourceReader {
         .await
         .to_rw_result()?;
 
-        let metrics = SourceMetrics::new(registry);
-
         Ok(InnerConnectorSourceReader {
             reader,
             split,
             metrics,
+            context,
         })
     }
 
@@ -118,6 +135,7 @@ impl InnerConnectorSourceReader {
                 Some(splits) => splits[0].id(),
                 None => "None".to_string(),
             };
+            let chunk: anyhow::Result<Option<Vec<SourceMessage>>>;
             tokio::select! {
                 biased;
                 // stop chan has high priority
@@ -126,21 +144,31 @@ impl InnerConnectorSourceReader {
                     break;
                 }
 
-                chunk = self.reader.next() => {
-                    match chunk.map_err(|e| internal_error(e.to_string())) {
-                        Err(e) => {
-                            log::error!("connector reader {} error happened {}", id, e.to_string());
-                            output.send(Either::Right(e)).await.ok();
-                            break;
-                        },
-                        Ok(None) => {
-                            log::warn!("connector reader {} stream stopped", id);
-                            break;
-                        },
-                        Ok(Some(msg)) => {
-                            output.send(Either::Left(msg)).await.ok();
-                        },
-                    }
+                c = self.reader.next() => {
+                    chunk = c;
+                }
+            }
+
+            match chunk.map_err(|e| internal_error(e.to_string())) {
+                Err(e) => {
+                    log::error!("connector reader {} error happened {}", id, e.to_string());
+                    output.send(Either::Right(e)).await.ok();
+                    break;
+                }
+                Ok(None) => {
+                    log::warn!("connector reader {} stream stopped", id);
+                    break;
+                }
+                Ok(Some(msg)) => {
+                    self.metrics
+                        .partition_input_count
+                        .with_label_values(&[
+                            self.context.actor_id.to_string().as_str(),
+                            self.context.source_id.to_string().as_str(),
+                            id.as_str(),
+                        ])
+                        .inc_by(msg.len() as u64);
+                    output.send(Either::Left(msg)).await.ok();
                 }
             }
         }
@@ -208,7 +236,8 @@ impl ConnectorSourceReader {
                     self.config.clone(),
                     Some(vec![split]),
                     self.columns.clone(),
-                    self.registry.clone(),
+                    self.metrics.clone(),
+                    self.context.clone(),
                 )
                 .await?;
                 let (stop_tx, stop_rx) = oneshot::channel();
@@ -276,6 +305,7 @@ impl ConnectorSource {
         splits: ConnectorState,
         column_ids: Vec<ColumnId>,
         registry: Registry,
+        context: SourceContext,
     ) -> Result<ConnectorSourceReader> {
         let (tx, rx) = mpsc::channel(CONNECTOR_MESSAGE_BUFFER_SIZE);
         let mut handles = HashMap::with_capacity(if let Some(split) = &splits {
@@ -285,6 +315,7 @@ impl ConnectorSource {
         });
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
+        let source_metrics = Arc::new(SourceMetrics::new(registry));
 
         let to_reader_splits = match splits {
             Some(vec_split_impl) => vec_split_impl
@@ -298,8 +329,10 @@ impl ConnectorSource {
                 log::debug!("spawning connector split reader for split {:?}", split);
                 let props = config.clone();
                 let columns = columns.clone();
+                let metrics = source_metrics.clone();
+                let context = context.clone();
                 async move {
-                    InnerConnectorSourceReader::new(props, split, columns, registry.clone()).await
+                    InnerConnectorSourceReader::new(props, split, columns, metrics, context).await
                 }
             }))
             .await?;
@@ -329,7 +362,8 @@ impl ConnectorSource {
             parser: self.parser.clone(),
             columns,
             message_tx: tx,
-            registry: registry.clone(),
+            metrics: source_metrics.clone(),
+            context: context.clone(),
         })
     }
 }

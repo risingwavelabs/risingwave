@@ -25,6 +25,7 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
+use risingwave_source::connector_source::SourceContext;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -280,6 +281,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     state,
                     self.column_ids.clone(),
                     self.metrics.registry.clone(),
+                    SourceContext::new(self.actor_id as u32, self.source_id),
                 )
                 .await
                 .map(SourceStreamReaderImpl::Connector),
