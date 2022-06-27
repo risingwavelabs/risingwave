@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
@@ -29,6 +31,7 @@ use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServic
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::*;
@@ -322,6 +325,17 @@ impl MetaClient {
         self.inner.flush(request).await?;
         Ok(())
     }
+
+    pub async fn list_table_fragments(
+        &self,
+        table_ids: &[u32],
+    ) -> Result<HashMap<u32, TableFragmentInfo>> {
+        let request = ListTableFragmentsRequest {
+            table_ids: table_ids.to_vec(),
+        };
+        let resp = self.inner.list_table_fragments(request).await?;
+        Ok(resp.table_fragments)
+    }
 }
 
 #[async_trait]
@@ -533,6 +547,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_materialized_source, CreateMaterializedSourceRequest, CreateMaterializedSourceResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

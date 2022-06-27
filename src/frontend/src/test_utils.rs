@@ -30,6 +30,7 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::ParallelUnitMapping;
+use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
@@ -427,6 +428,13 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn flush(&self) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn list_table_fragments(
+        &self,
+        _table_ids: &[u32],
+    ) -> RpcResult<HashMap<u32, TableFragmentInfo>> {
+        Ok(HashMap::default())
     }
 
     async fn unpin_snapshot(&self, _epoch: u64) -> RpcResult<()> {

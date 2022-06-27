@@ -69,8 +69,24 @@ message FlushResponse {
   common.Status status = 1;
 }
 
+message ListTableFragmentsRequest {
+  repeated uint32 table_ids = 1;
+}
+
+message ListTableFragmentsResponse {
+  message FragmentInfo {
+    uint32 fragment_id = 1;
+    repeated stream_plan.StreamActor actors = 4;
+  }
+  message TableFragmentInfo {
+    repeated FragmentInfo fragments = 1;
+  }
+  map<uint32, TableFragmentInfo> table_fragments = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
+  rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
 }
 
 // Below for cluster service.
