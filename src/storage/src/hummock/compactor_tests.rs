@@ -121,7 +121,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
+        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
         hummock_manager_ref
@@ -250,7 +250,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
+        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         // assert compact_task
         assert_eq!(
@@ -347,9 +347,8 @@ mod tests {
             .unwrap()
             .unwrap();
         compact_task.existing_table_ids.push(2);
-        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
+        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        println!("compact_task watermark {}", compact_task.watermark);
 
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id, async { true })
