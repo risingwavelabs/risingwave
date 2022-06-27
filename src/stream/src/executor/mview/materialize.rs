@@ -65,13 +65,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let column_descs = column_ids
             .into_iter()
             .zip_eq(schema.fields.iter().cloned())
-            .map(|(column_id, field)| ColumnDesc {
-                data_type: field.data_type,
-                column_id,
-                name: field.name,
-                field_descs: vec![],
-                type_name: "".to_string(),
-            })
+            .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
         Self {
             input,
@@ -133,9 +127,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 }
                 Message::Barrier(b) => {
                     // FIXME(ZBW): use a better error type
-                    self.state_table
-                        .commit_with_value_meta(b.epoch.prev)
-                        .await?;
+                    self.state_table.commit(b.epoch.prev).await?;
                     Message::Barrier(b)
                 }
             }
@@ -229,7 +221,8 @@ mod tests {
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
-        let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+        let table =
+            CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types, vec![0]);
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
             keyspace,

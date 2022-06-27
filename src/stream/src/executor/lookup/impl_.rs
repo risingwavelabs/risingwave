@@ -21,6 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
+use risingwave_storage::table::cell_based_table::DEFAULT_VNODE;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -395,6 +396,9 @@ impl<S: StateStore> LookupExecutor<S> {
         // Serialize join key to a state store key.
         let key_prefix = {
             let mut key_prefix = vec![];
+            // Manually encode a vnode here to match the encoding of cell-based table
+            // TODO: refactor lookup with cell-based table
+            key_prefix.extend(DEFAULT_VNODE.to_be_bytes());
             self.arrangement
                 .serializer
                 .serialize_datums(lookup_row.0.iter(), &mut key_prefix);
@@ -408,18 +412,20 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let mut all_rows = vec![];
 
+        // The key is truncated in `arrange_keyspace` so there's no vnode to decode
+        // TODO: refactor lookup with cell-based table and remove `deserialize_with_vnode`
         for (pk_with_cell_id, cell) in all_cells {
             tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}", pk_with_cell_id, cell);
-            if let Some((_, row)) = self
+            if let Some((_, _, row)) = self
                 .arrangement
                 .deserializer
-                .deserialize(&pk_with_cell_id, &cell)?
+                .deserialize_without_vnode(&pk_with_cell_id, &cell)?
             {
                 all_rows.push(row);
             }
         }
 
-        if let Some((_, last_row)) = self.arrangement.deserializer.take() {
+        if let Some((_, _, last_row)) = self.arrangement.deserializer.take() {
             all_rows.push(last_row);
         }
 
