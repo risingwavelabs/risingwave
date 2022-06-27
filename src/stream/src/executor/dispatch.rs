@@ -21,6 +21,7 @@ use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
+use madsim::task::JoinHandle;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
@@ -31,7 +32,7 @@ use tracing::event;
 
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
-use crate::task::{ActorId, DispatcherId, SharedContext};
+use crate::task::{ActorId, DispatcherId, SharedContext, LOCAL_OUTPUT_CHANNEL_SIZE};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
@@ -126,8 +127,27 @@ pub fn new_output(
     addr: HostAddr,
     actor_id: ActorId,
     down_id: ActorId,
+    metrics: Arc<StreamingMetrics>,
+    actor_output_buffer_monitor_tasks: &mut HashMap<ActorId, JoinHandle<()>>,
 ) -> Result<Box<dyn Output>> {
     let tx = context.take_sender(&(actor_id, down_id))?;
+
+    let tx_clone = tx.clone();
+    let actor_id_str = actor_id.to_string();
+    let task = tokio::spawn(async move {
+        let full_size = LOCAL_OUTPUT_CHANNEL_SIZE;
+        loop {
+            let capacity = tx_clone.capacity();
+            
+            metrics
+                .actor_output_buffer_blocking_time
+                .with_label_values(&[&actor_id_str])
+                .set(capacity as f64/full_size as f64);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
+    actor_output_buffer_monitor_tasks.insert(actor_id, task);
+
     if is_local_address(&addr, &context.addr) {
         // if this is a local downstream actor
         Ok(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
@@ -150,6 +170,7 @@ struct DispatchExecutorInner {
     actor_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
+    actor_output_buffer_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
 }
 
 impl DispatchExecutorInner {
@@ -220,6 +241,8 @@ impl DispatchExecutorInner {
                                 downstream_addr,
                                 self.actor_id,
                                 down_id,
+                                self.metrics.clone(),
+                                &mut self.actor_output_buffer_monitor_tasks,
                             )?);
                         }
                         dispatcher.set_outputs(new_outputs)
@@ -242,6 +265,8 @@ impl DispatchExecutorInner {
                                 downstream_addr,
                                 self.actor_id,
                                 down_id,
+                                self.metrics.clone(),
+                                &mut self.actor_output_buffer_monitor_tasks,
                             )?);
                         }
                         dispatcher.add_outputs(outputs_to_add);
@@ -286,6 +311,7 @@ impl DispatchExecutor {
                 actor_id_str: actor_id.to_string(),
                 context,
                 metrics,
+                actor_output_buffer_monitor_tasks: HashMap::new(),
             },
         }
     }
