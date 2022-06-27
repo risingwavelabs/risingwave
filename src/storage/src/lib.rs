@@ -41,6 +41,9 @@
 #![feature(allocator_api)]
 #![feature(strict_provenance)]
 #![feature(let_else)]
+#![feature(proc_macro_hygiene)]
+#![feature(stmt_expr_attributes)]
+#![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
 pub mod cell_based_row_deserializer;

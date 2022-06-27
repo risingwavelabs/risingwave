@@ -282,6 +282,7 @@ mod tests {
     use risingwave_common::array::{I64Array, Op, Utf8Array};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_storage::store::WriteOptions;
     use risingwave_storage::{Keyspace, StateStore};
 
     use super::*;
@@ -353,11 +354,14 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi||def||abc".to_string()))
         );
 
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Insert and delete.
@@ -387,11 +391,14 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Deletion.
@@ -422,11 +429,14 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Check output after flush.
@@ -515,11 +525,14 @@ mod tests {
             .unwrap();
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.get_row_count();
 
@@ -547,11 +560,14 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         let row_count = managed_state.get_row_count();

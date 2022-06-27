@@ -19,7 +19,7 @@ mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
 mod tier_compaction_picker;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ pub struct CompactStatus {
     compaction_group_id: CompactionGroupId,
     pub(crate) level_handlers: Vec<LevelHandler>,
     // TODO: remove this `CompactionConfig`, which is a duplicate of that in `CompactionGroup`.
-    compaction_config: CompactionConfig,
+    pub compaction_config: CompactionConfig,
     compaction_selector: Arc<dyn LevelSelector>,
 }
 
@@ -77,6 +77,7 @@ pub struct SearchResult {
     target_level: Level,
     split_ranges: Vec<KeyRange>,
     compression_algorithm: String,
+    target_file_size: u64,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -151,6 +152,9 @@ impl CompactStatus {
             compaction_group_id,
             existing_table_ids: vec![],
             compression_algorithm,
+            target_file_size: ret.target_file_size,
+            compaction_filter_mask: 0,
+            table_options: HashMap::default(),
         };
         Some(compact_task)
     }
@@ -269,6 +273,10 @@ impl CompactStatus {
 
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
+    }
+
+    pub fn get_config(&self) -> &CompactionConfig {
+        &self.compaction_config
     }
 }
 

@@ -175,6 +175,12 @@ impl LocalBarrierManager {
             .expect("no rx for local mode")
     }
 
+    /// remove all collect rx less than `prev_epoch`
+    pub fn drain_collect_rx(&mut self, prev_epoch: u64) {
+        self.collect_complete_receiver
+            .drain_filter(|x, _| x < &prev_epoch);
+    }
+
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
     pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) -> Result<()> {
