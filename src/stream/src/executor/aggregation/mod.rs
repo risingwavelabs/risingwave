@@ -399,6 +399,7 @@ pub fn generate_column_descs(
 
 /// Generate state table for agg executor.
 /// Relational pk = `table_desc.len` - 1.
+/// After finished the refactor of frontend infer table catalog, should mark it as unit test only.
 pub fn generate_state_table<S: StateStore>(
     ks: Keyspace<S>,
     agg_call: &AggCall,

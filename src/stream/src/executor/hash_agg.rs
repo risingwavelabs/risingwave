@@ -466,7 +466,6 @@ mod tests {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
-        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         state_tables: Vec<StateTable<S>>,
@@ -480,10 +479,10 @@ mod tests {
             Ok(Box::new(HashAggExecutor::<K, S>::new(
                 args.input,
                 args.agg_calls,
-                args.keyspace,
                 args.pk_indices,
                 args.executor_id,
                 args.key_indices,
+                args.state_tables
             )?))
         }
     }
@@ -500,13 +499,22 @@ mod tests {
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
+        let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
+        let state_tables = keyspace.iter().zip_eq(agg_calls.iter()).map(|(ks, agg_call) | generate_state_table(
+            ks.clone(),
+            agg_call,
+            &key_indices,
+            &pk_indices,
+            &agg_schema,
+            input.as_ref(),
+        )).collect();
         let args = HashAggExecutorDispatcherArgs {
             input,
             agg_calls,
             key_indices,
-            keyspace,
             pk_indices,
             executor_id,
+            state_tables
         };
         let kind = calc_hash_key_kind(&keys);
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args).unwrap()
