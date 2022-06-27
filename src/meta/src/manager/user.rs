@@ -402,7 +402,8 @@ impl<S: MetaStore> UserManager<S> {
         while !users_info.is_empty() {
             let mut now_user = users_info.first_mut().unwrap().clone();
             if !core.user_grant_relation.contains_key(&now_user.name) {
-                core.user_grant_relation.insert(now_user.name.clone(), HashSet::new());
+                core.user_grant_relation
+                    .insert(now_user.name.clone(), HashSet::new());
             }
             let now_relations = core.user_grant_relation.get(&now_user.name).unwrap();
             let mut recursive_flag = false;
@@ -650,25 +651,25 @@ mod tests {
             .action_with_opts
             .iter()
             .all(|p| p.with_grant_option));
-        
+
         // Revoke with restrict
-        let res =         user_manager
-        .revoke_privilege(
-            &[test_user.to_string()],
-            &[make_privilege(
-                object.clone(),
-                &[
-                    Action::Select,
-                    Action::Insert,
-                    Action::Delete,
-                    Action::Update,
-                ],
+        let res = user_manager
+            .revoke_privilege(
+                &[test_user.to_string()],
+                &[make_privilege(
+                    object.clone(),
+                    &[
+                        Action::Select,
+                        Action::Insert,
+                        Action::Delete,
+                        Action::Update,
+                    ],
+                    false,
+                )],
+                true,
                 false,
-            )],
-            true,
-            false,
-        )
-        .await;
+            )
+            .await;
         assert!(res.is_err());
         let sub_user = user_manager.get_user(&test_sub_user.to_string()).await?;
         assert_eq!(sub_user.grant_privileges.len(), 1);
