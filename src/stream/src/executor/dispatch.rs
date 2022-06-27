@@ -135,12 +135,13 @@ pub fn new_output(
     let tx_clone = tx.clone();
     let actor_id_str = actor_id.to_string();
     let task = tokio::spawn(async move {
-        let full_size = LOCAL_OUTPUT_CHANNEL_SIZE as f64 * 0.01;
+        // for calculat percent rate
+        let scaled_full_size = LOCAL_OUTPUT_CHANNEL_SIZE as f64 * 0.01;
         loop {
             metrics
                 .stream_actor_output_buffer_usage_rate
                 .with_label_values(&[&actor_id_str])
-                .set(tx_clone.capacity() as f64 / full_size);
+                .set(tx_clone.capacity() as f64 / scaled_full_size);
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
