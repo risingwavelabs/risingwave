@@ -80,7 +80,7 @@ impl HummockSnapshotManager {
             // epoch to be unpin.
             let mut min_epoch = None;
             if let Some((epoch, query_ids)) = core_guard.epoch_to_query_ids.first_key_value() {
-                if query_ids.is_empty() {
+                if query_ids.is_empty() && *epoch != core_guard.last_pinned {
                     min_epoch = Some(*epoch)
                 }
             }
