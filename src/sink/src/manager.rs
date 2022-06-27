@@ -19,13 +19,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, ProtocolError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{Result,};
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
-use risingwave_connector::ConnectorProperties;
-use risingwave_pb::plan_common::RowFormatType;
 
 /// The local sink manager on the compute node.
 #[async_trait]
