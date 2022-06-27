@@ -237,7 +237,7 @@ pub fn time_date_add<T1, T2, T3>(
 #[inline(always)]
 pub fn time_time_sub<T1, T2, T3>(l: NaiveTimeWrapper, r: NaiveTimeWrapper) -> Result<IntervalUnit> {
     let tmp = l.0 - r.0;
-    let ms = tmp.sub(Duration::days(tmp.num_days())).num_milliseconds();
+    let ms = tmp.num_milliseconds();
     Ok(IntervalUnit::new(0, 0, ms))
 }
 
