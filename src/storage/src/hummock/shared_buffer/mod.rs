@@ -303,11 +303,11 @@ impl SharedBuffer {
 
     /// Create a new upload task
     ///
-    /// Return: (order index, task payload)
+    /// Return: (order index, task payload, task write batch size)
     pub fn new_upload_task(
         &mut self,
         task_type: UploadTaskType,
-    ) -> Option<(OrderIndex, UploadTaskPayload)> {
+    ) -> Option<(OrderIndex, UploadTaskPayload, usize)> {
         let keyed_payload = match task_type {
             UploadTaskType::FlushWriteBatch => {
                 // For flush write batch, currently we only flush the write batches. We first pick
@@ -391,7 +391,11 @@ impl SharedBuffer {
                 .sum();
             self.global_upload_task_size
                 .fetch_add(task_write_batch_size, Relaxed);
-            let ret = Some((min_order_index, to_order_sorted(&keyed_payload)));
+            let ret = Some((
+                min_order_index,
+                to_order_sorted(&keyed_payload),
+                task_write_batch_size,
+            ));
             self.uploading_tasks
                 .insert(min_order_index, (keyed_payload, task_write_batch_size));
             ret
@@ -629,7 +633,7 @@ mod tests {
         let batch1 = generate_test_data("aa");
         let batch2 = generate_test_data("bb");
 
-        let (order_index1, payload1) = shared_buffer
+        let (order_index1, payload1, task_size) = shared_buffer
             .borrow_mut()
             .new_upload_task(FlushWriteBatch)
             .unwrap();
@@ -639,11 +643,12 @@ mod tests {
         assert_eq!(payload1[0], vec![UncommittedData::Batch(batch2.clone())]);
         assert_eq!(payload1[1].len(), 1);
         assert_eq!(payload1[1], vec![UncommittedData::Batch(batch1.clone())]);
+        assert_eq!(task_size, batch1.size() + batch2.size());
 
         let batch3 = generate_test_data("cc");
         let batch4 = generate_test_data("dd");
 
-        let (order_index2, payload2) = shared_buffer
+        let (order_index2, payload2, task_size) = shared_buffer
             .borrow_mut()
             .new_upload_task(FlushWriteBatch)
             .unwrap();
@@ -653,9 +658,10 @@ mod tests {
         assert_eq!(payload2[0], vec![UncommittedData::Batch(batch4.clone())]);
         assert_eq!(payload2[1].len(), 1);
         assert_eq!(payload2[1], vec![UncommittedData::Batch(batch3.clone())]);
+        assert_eq!(task_size, batch3.size() + batch4.size());
 
         shared_buffer.borrow_mut().fail_upload_task(order_index1);
-        let (order_index1, payload1) = shared_buffer
+        let (order_index1, payload1, task_size) = shared_buffer
             .borrow_mut()
             .new_upload_task(FlushWriteBatch)
             .unwrap();
@@ -665,6 +671,7 @@ mod tests {
         assert_eq!(payload1[0], vec![UncommittedData::Batch(batch2.clone())]);
         assert_eq!(payload1[1].len(), 1);
         assert_eq!(payload1[1], vec![UncommittedData::Batch(batch1.clone())]);
+        assert_eq!(task_size, batch1.size() + batch2.size());
 
         let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2]);
         shared_buffer.borrow_mut().succeed_upload_task(
@@ -674,13 +681,14 @@ mod tests {
 
         shared_buffer.borrow_mut().fail_upload_task(order_index2);
 
-        let (order_index3, payload3) = shared_buffer
+        let (order_index3, payload3, task_size) = shared_buffer
             .borrow_mut()
             .new_upload_task(SyncEpoch)
             .unwrap();
 
         assert_eq!(order_index3, 0);
         assert_eq!(3, payload3.len());
+        assert_eq!(task_size, batch3.size() + batch4.size());
         assert_eq!(vec![UncommittedData::Batch(batch4)], payload3[0]);
         assert_eq!(vec![UncommittedData::Batch(batch3)], payload3[1]);
         assert_eq!(

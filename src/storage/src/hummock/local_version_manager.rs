@@ -33,7 +33,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::jitter;
-use tracing::error;
+use tracing::{error, info};
 
 use super::local_version::{LocalVersion, PinnedVersion, ReadVersion};
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -65,6 +65,24 @@ struct BufferTracker {
 }
 
 impl BufferTracker {
+    pub fn new(
+        flush_threshold: usize,
+        block_write_threshold: usize,
+        buffer_event_sender: Arc<mpsc::UnboundedSender<SharedBufferEvent>>,
+    ) -> Self {
+        info!(
+            "buffer tracker init: flush threshold {}, block write threshold {}",
+            flush_threshold, block_write_threshold
+        );
+        Self {
+            flush_threshold,
+            block_write_threshold,
+            global_buffer_size: Arc::new(AtomicUsize::new(0)),
+            global_upload_task_size: Arc::new(AtomicUsize::new(0)),
+            buffer_event_sender,
+        }
+    }
+
     pub fn get_buffer_size(&self) -> usize {
         self.global_buffer_size.load(Relaxed)
     }
@@ -148,15 +166,13 @@ impl LocalVersionManager {
             worker_context: WorkerContext {
                 version_update_notifier_tx,
             },
-            buffer_tracker: BufferTracker {
-                block_write_threshold: capacity,
+            buffer_tracker: BufferTracker::new(
+                capacity,
                 // 0.8 * capacity
                 // TODO: enable setting the ratio with config
-                flush_threshold: capacity * 4 / 5,
-                global_buffer_size: Arc::new(AtomicUsize::new(0)),
-                global_upload_task_size: Arc::new(AtomicUsize::new(0)),
-                buffer_event_sender: Arc::new(buffer_event_sender),
-            },
+                capacity * 4 / 5,
+                Arc::new(buffer_event_sender),
+            ),
             write_conflict_detector: write_conflict_detector.clone(),
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(
                 options.clone(),
@@ -344,12 +360,16 @@ impl LocalVersionManager {
                 break;
             }
         }
-        let (epoch, (order_index, payload)) = match task {
+        let (epoch, (order_index, payload, task_write_batch_size)) = match task {
             Some(task) => task,
             None => return None,
         };
 
         let join_handle = tokio::spawn(async move {
+            info!(
+                "running flush task in epoch {} of size {}",
+                epoch, task_write_batch_size
+            );
             // TODO: may apply different `is_local` according to whether local spill is enabled.
             let _ = self
                 .run_upload_task(order_index, epoch, payload, true)
@@ -360,6 +380,10 @@ impl LocalVersionManager {
                         epoch, order_index, err
                     );
                 });
+            info!(
+                "flush task in epoch {} of size {} finished",
+                epoch, task_write_batch_size
+            );
         });
         Some((epoch, join_handle))
     }
@@ -381,6 +405,7 @@ impl LocalVersionManager {
     }
 
     pub async fn sync_shared_buffer_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
+        info!("sync epoch {}", epoch);
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
             .send_event(SharedBufferEvent::SyncEpoch(epoch, tx));
@@ -388,7 +413,7 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        let (order_index, task_payload) = match self
+        let (order_index, task_payload, task_write_batch_size) = match self
             .local_version
             .read()
             .get_shared_buffer(epoch)
@@ -396,6 +421,7 @@ impl LocalVersionManager {
         {
             Some(task) => task,
             None => {
+                info!("sync epoch {} has no more task to do", epoch);
                 return Ok(());
             }
         };
@@ -403,6 +429,10 @@ impl LocalVersionManager {
         let ret = self
             .run_upload_task(order_index, epoch, task_payload, false)
             .await;
+        info!(
+            "sync epoch {} finished. Task size {}",
+            epoch, task_write_batch_size
+        );
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.archive_epoch(epoch);
         }
@@ -671,6 +701,11 @@ impl LocalVersionManager {
                             grant_write_request(request);
                             try_flush_shared_buffer(&syncing_epoch, &mut epoch_join_handle);
                         } else {
+                            info!(
+                                "write request is blocked: epoch {}, size: {}",
+                                request.epoch,
+                                request.batch.size()
+                            );
                             pending_write_requests.push_back(request);
                         }
                     }
@@ -684,11 +719,20 @@ impl LocalVersionManager {
                             .buffer_tracker
                             .global_buffer_size
                             .fetch_sub(size, Relaxed);
+                        let mut has_granted = false;
                         while !pending_write_requests.is_empty()
                             && local_version_manager.buffer_tracker.can_write()
                         {
                             let request = pending_write_requests.pop_front().unwrap();
+                            info!(
+                                "write request is granted: epoch {}, size: {}",
+                                request.epoch,
+                                request.batch.size()
+                            );
                             grant_write_request(request);
+                            has_granted = true;
+                        }
+                        if has_granted {
                             try_flush_shared_buffer(&syncing_epoch, &mut epoch_join_handle);
                         }
                     }
@@ -908,11 +952,13 @@ mod tests {
                 .get_shared_buffer(epochs[0])
                 .unwrap()
                 .write();
-            let (task_id, payload) = shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
+            let (task_id, payload, task_size) =
+                shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
             {
                 assert_eq!(1, payload.len());
                 assert_eq!(1, payload[0].len());
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[0].clone()));
+                assert_eq!(task_size, batches[0].size());
             }
             shared_buffer_guard.succeed_upload_task(
                 task_id,
@@ -962,11 +1008,13 @@ mod tests {
                 .get_shared_buffer(epochs[1])
                 .unwrap()
                 .write();
-            let (task_id, payload) = shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
+            let (task_id, payload, task_size) =
+                shared_buffer_guard.new_upload_task(SyncEpoch).unwrap();
             {
                 assert_eq!(1, payload.len());
                 assert_eq!(1, payload[0].len());
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[1].clone()));
+                assert_eq!(task_size, batches[1].size());
             }
             shared_buffer_guard.succeed_upload_task(
                 task_id,
