@@ -28,10 +28,6 @@ Then we have vnode mapping, which ensures that vnodes are mapped evenly to paral
 
 As long as the hash function $H$ could ensure uniformity, the data distribution determined by this strategy would be even across physical resources, even if data in $U_k$ might skew to a certain range. 
 
-<!-- Now we have vnodes corresponding to disjoint sets of keys, which naturally forms a data partition pattern. That is to say, one vnode could be viewed as a minimal data partition unit, and we could aggregate several vnodes together to get a larger data partition. -->
-
-<!-- In order to determine the distribution of data, we need to devise a way to physically aggregate the data. So we have parallel unit to represent the physical location of data, as is shown as the circles in the figure below. A parallel unit is also the minimal scheduling unit. That is to say, one actor could be scheduled to exactly one parallel unit, and all data (i.e. states) of the actor will. -->
-
 #### Data Redistribution
 
 Since $v = H(k)$, the way that data are mapped to vnodes will be invariant. Therefore, when scaling occurs, we only need to modify vnode mapping (the way that vnodes are mapped to parallel units), so as to redistribute the data.
@@ -52,22 +48,44 @@ We know that a fragment has several actors as its different parallelisms, and th
 
 In the figure, we can see that one upstream actor dispatches data to three downstream actors. The downstream actors are scheduled on the parallel units mentioned in previous example respectively. 
 
-Based on our consistent hash design, the dispatcher is informed of latest vnode mapping by meta. It then decides how to send data in following steps:
+Based on our consistent hash design, the dispatcher is informed of the latest vnode mapping by meta. It then decides how to send data by following steps:
 1. Compute vnode of the data via the hash function $H$. Let the vnode be $v_k$.
 2. Look up vnode mapping and find out parallel unit $p_n$ that vnode $v_k$ maps to. 
-3. Send data to the downstream actor that is scheduled on this parallel unit $p_n$ (remember that one actor will be scheduled on exactly one parallel unit).
+3. Send data to the downstream actor that is scheduled on parallel unit $p_n$ (remember that one actor will be scheduled on exactly one parallel unit).
 
-In this way, all actors' data (i.e. actors' states) are distributed according to the vnode mapping constructed by meta. By determining the construction and modification of vnode mapping, we could hit the target to minimize data movement on scaling.
+In this way, all actors' data (i.e. actors' states) will be distributed according to the vnode mapping constructed by meta. 
 
-### Storage
+When scaling occurs, actors will be re-scheduled accordingly. By modifying the vnode mapping in meta and make streaming act on the new vnode mapping, we could minimize data movement in following aspects:
 
+- The data of existing actors will not be displaced too much. 
+- The block cache of a compute node will not be invalidated too much.
 
 ### Batch
 
+When we perform parallel batch read, we should partition the data for each parallelism in a certain way. Now that we have vnodes corresponding to disjoint sets of data, this naturally forms a data partition pattern. That is to say, one vnode could be viewed as a minimal data partition unit, and we could aggregate several vnodes together to get a larger data partition.
 
-<!-- 
-### Data Movement
+In vnode mapping, one parallel unit will correspond to several vnodes. Therefore, we could use parallel unit as the partition bound. Data falling to one parallel unit in vnode mapping will be one partition. This is better than range partition in that the partition is more stable when the primary key of a materialized view distributes non-randomly.
 
-#### Actor
+### Storage
 
-#### Block Cache -->
+If we look into the read-write pattern of streaming actors, we'll find that in most cases, actors only need to read the data written by itself (i.e. actor's internal states). That is to say, read data with the same vnodes as it previously writes. 
+
+Therefore, an instinctive way to place data in storage is to **group data by vnodes**. In this way, when actors perform read operation, it could touch as few SSTs as possible and thus trigger less I/O. 
+
+We know that [Hummock](./state-store-overview.md#overview), our LSM-Tree-based storage engine, sorts key-value pairs by the order of the key. Therefore, in order to group data by vnode on the basis of Hummock, we **encode vnode into the storage key**. The storage key will look like
+```
+table_id | vnode | ...
+```
+where `table_id` denotes the [state table](./storing-state-using-relational-table.md#relational-table-layer), and `vnode` is computed via $H$ on key of the data. 
+
+To illustrate this, let's revisit the [previous example](#streaming). Executors of an operator will share the same logical state table, just as is shown in the figure below:
+
+![actor state table](./images/consistent-hash/actor-state-table.svg)
+
+Now that we have 12 vnodes in total in the example, the data layout in storage will accordingly look like this:
+
+![storage data layout](./images/consistent-hash/storage-data-layout.svg)
+
+Note that we only show the logical sequence and aggregation of data in this illustration. The actual data may be separated into different SSTs in Hummock.
+
+Since the way that certain data are hashed to vnode is invariant, the encoding of the data will also be invariant. How we schedule the fragment (e.g. parallelism of the fragment) will not affect data encoding. That is to say, storage will not care about vnode mapping, which is determined by meta and used only by streaming. This is actually a way of decoupling compute layer and storage layer.
