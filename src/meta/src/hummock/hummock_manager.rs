@@ -837,14 +837,14 @@ where
                 .await
                 .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id));
             for table_id in &sst.table_ids {
-                tracing::info!(
-                    "table id {} compaction group id {}",
+                assert!(
+                    compaction_group
+                        .member_prefixes()
+                        .contains(&Prefix::from(*table_id)),
+                    "table {} doesn't belong to compaction group {}",
                     table_id,
                     compaction_group_id
                 );
-                assert!(compaction_group
-                    .member_prefixes()
-                    .contains(&Prefix::from(*table_id)));
             }
         }
 

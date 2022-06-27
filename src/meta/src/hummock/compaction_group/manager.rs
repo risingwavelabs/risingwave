@@ -90,10 +90,8 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
             table_option.clone(),
         ));
-        tracing::info!("register MV {}", table_fragments.table_id().table_id);
         // internal states
         for table_id in table_fragments.internal_table_ids() {
-            tracing::info!("register state {}", table_id);
             assert_ne!(table_id, table_fragments.table_id().table_id);
             pairs.push((
                 Prefix::from(table_id),
@@ -130,7 +128,6 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         table_properties: &HashMap<String, String>,
     ) -> Result<()> {
         let table_option = CompactionGroup::build_table_option(table_properties);
-        tracing::info!("register source {}", source_id);
         self.inner
             .write()
             .await

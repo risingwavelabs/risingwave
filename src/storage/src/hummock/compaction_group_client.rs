@@ -16,19 +16,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionGroup;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::RwLock;
 
 use crate::hummock::{HummockError, HummockResult};
 
 #[async_trait::async_trait]
 pub trait CompactionGroupClient: Send + Sync + 'static {
-    /// Fast path.
-    async fn try_get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId>;
-    /// Slow path.
     async fn get_compaction_group_id(
         &self,
         prefix: Prefix,
@@ -52,25 +49,23 @@ impl CompactionGroupClientImpl {
 
 #[async_trait::async_trait]
 impl CompactionGroupClient for CompactionGroupClientImpl {
-    /// Tries to get from local cache
-    async fn try_get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId> {
-        self.inner.read().await.get(&prefix)
-    }
-
-    /// Tries to get from meta service
+    /// Tries to get from local cache first,then from meta service
     async fn get_compaction_group_id(
         &self,
         prefix: Prefix,
     ) -> HummockResult<Option<CompactionGroupId>> {
-        let mut guard = self.inner.write().await;
-        if let Some(compaction_group_id) = guard.get(&prefix) {
+        // Fast path
+        if let Some(compaction_group_id) = self.inner.read().get(&prefix) {
             return Ok(Some(compaction_group_id));
         }
+        // Slow path.
+        // TODO: May deduplicate RPCs if necessary.
         let compaction_groups = self
             .hummock_meta_client
             .get_compaction_groups()
             .await
             .map_err(HummockError::meta_error)?;
+        let mut guard = self.inner.write();
         guard.set_index(compaction_groups);
         Ok(guard.get(&prefix))
     }
@@ -119,14 +114,10 @@ impl DummyCompactionGroupClient {
 
 #[async_trait::async_trait]
 impl CompactionGroupClient for DummyCompactionGroupClient {
-    async fn try_get_compaction_group_id(&self, _prefix: Prefix) -> Option<CompactionGroupId> {
-        Some(self.compaction_group_id)
-    }
-
     async fn get_compaction_group_id(
         &self,
-        prefix: Prefix,
+        _prefix: Prefix,
     ) -> HummockResult<Option<CompactionGroupId>> {
-        Ok(self.try_get_compaction_group_id(prefix).await)
+        Ok(Some(self.compaction_group_id))
     }
 }

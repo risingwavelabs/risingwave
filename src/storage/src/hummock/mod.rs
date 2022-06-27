@@ -190,13 +190,6 @@ impl HummockStorage {
 
     async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
         let prefix = Prefix::from(table_id.table_id);
-        let compaction_group_id = self
-            .compaction_group_client
-            .try_get_compaction_group_id(prefix)
-            .await;
-        if let Some(compaction_group_id) = compaction_group_id {
-            return Ok(compaction_group_id);
-        }
         Ok(self
             .compaction_group_client
             .get_compaction_group_id(prefix)
