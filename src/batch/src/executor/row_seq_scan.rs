@@ -20,13 +20,13 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::{build_from_prost, make_input_ref, Expression, LiteralExpression};
+use risingwave_expr::expr::expr_unary::new_unary_expr;
+use risingwave_expr::expr::{Expression, LiteralExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
-use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::{ExprNode, FunctionCall};
+use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::{
     BatchDedupPkIter, CellBasedIter, CellBasedTable,
@@ -95,23 +95,12 @@ fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
         && matches!(bounds.end_bound(), Bound::Unbounded)
 }
 
-fn cast(lit: LiteralExpression, return_ty: DataType) -> Datum {
-    let (data, data_ty) = (lit.literal(), lit.return_type());
-    if data_ty == return_ty {
-        return data;
+fn eval_as(lit: LiteralExpression, return_ty: DataType) -> Datum {
+    let mut const_expr = lit.boxed();
+    if const_expr.return_type() != return_ty {
+        const_expr = new_unary_expr(ExprType::Cast, return_ty, const_expr).unwrap();
     }
-
-    let data_chunk = DataChunk::from_rows(&[Row(vec![data])], &[data_ty.clone()]).unwrap();
-    let expr = ExprNode {
-        expr_type: Type::Cast as i32,
-        return_type: Some(return_ty.to_protobuf()),
-        rex_node: Some(RexNode::FuncCall(FunctionCall {
-            children: vec![make_input_ref(0, data_ty.prost_type_name())],
-        })),
-    };
-    let vec_executor = build_from_prost(&expr).unwrap();
-    let array = vec_executor.eval(&data_chunk).unwrap();
-    array.iter().next().unwrap().to_owned_datum()
+    const_expr.eval_row(Row::empty()).unwrap()
 }
 
 fn get_scan_bound(
@@ -124,7 +113,7 @@ fn get_scan_bound(
         .map(|v| {
             let lit = LiteralExpression::try_from(v).unwrap();
             let ty = pk_types.next().unwrap();
-            cast(lit, ty)
+            eval_as(lit, ty)
         })
         .collect_vec());
     if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
@@ -135,7 +124,7 @@ fn get_scan_bound(
     let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
         let lit = LiteralExpression::try_from(bound.value.as_ref().unwrap()).unwrap();
 
-        let datum = cast(lit, bound_ty.clone());
+        let datum = eval_as(lit, bound_ty.clone());
         if bound.inclusive {
             Bound::Included(datum)
         } else {
