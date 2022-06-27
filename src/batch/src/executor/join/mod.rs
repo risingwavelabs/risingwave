@@ -15,16 +15,21 @@
 mod chunked_data;
 pub mod hash_join;
 mod hash_join_state;
+mod lookup_join;
 pub mod nested_loop_join;
 mod row_level_iter;
 mod sort_merge_join;
-mod lookup_join;
+
+use std::sync::Arc;
 
 pub use chunked_data::*;
 pub use hash_join::*;
+use itertools::Itertools;
 pub use nested_loop_join::*;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{DataChunk, RowRef, Vis};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 pub use sort_merge_join::*;
 
@@ -127,13 +132,47 @@ fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
         (_, Vis::Compact(_)) => left.vis().clone(),
         (Vis::Bitmap(_), Vis::Bitmap(_)) => {
             return Err(ErrorCode::NotImplemented(
-                "The concatenate behaviour of two chunk with visibility is undefined"
-                    .to_string(),
+                "The concatenate behaviour of two chunk with visibility is undefined".to_string(),
                 None.into(),
             )
-                .into())
+            .into())
         }
     };
     let data_chunk = DataChunk::new(concated_columns, vis);
     Ok(data_chunk)
+}
+
+/// Create constant data chunk (one tuple repeat `num_tuples` times).
+fn convert_datum_refs_to_chunk(
+    datum_refs: &[DatumRef<'_>],
+    num_tuples: usize,
+    data_types: &[DataType],
+) -> Result<DataChunk> {
+    let mut output_array_builders: Vec<_> = data_types
+        .iter()
+        .map(|data_type| data_type.create_array_builder(num_tuples))
+        .try_collect()?;
+    for _i in 0..num_tuples {
+        for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
+            builder.append_datum_ref(*datum_ref)?;
+        }
+    }
+
+    // Finish each array builder and get Column.
+    let result_columns = output_array_builders
+        .into_iter()
+        .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
+        .try_collect()?;
+
+    Ok(DataChunk::new(result_columns, num_tuples))
+}
+
+/// Create constant data chunk (one tuple repeat `num_tuples` times).
+fn convert_row_to_chunk(
+    row_ref: &RowRef<'_>,
+    num_tuples: usize,
+    data_types: &[DataType],
+) -> Result<DataChunk> {
+    let datum_refs = row_ref.values().collect_vec();
+    convert_datum_refs_to_chunk(&datum_refs, num_tuples, data_types)
 }
