@@ -135,10 +135,8 @@ impl LogicalAgg {
             let mut columns = vec![];
             let mut column_names = HashMap::new(); // avoid duplicate column name
             let mut order_desc = vec![];
-            // TODO: Should maintain column_mappings correctly.
-            // TODO: Refactor, re-use this part of code..
             for &idx in &self.group_keys {
-                Self::append_column_desc(
+                Self::add_column_desc(
                     &mut columns,
                     &mut column_mapping,
                     &mut column_names,
@@ -159,7 +157,7 @@ impl LogicalAgg {
                         // Add sort key as part of pk.
                         // TODO: Need to check whether string agg needs this.
                         for input in &agg_call.inputs {
-                            Self::append_column_desc(
+                            Self::add_column_desc(
                                 &mut columns,
                                 &mut column_mapping,
                                 &mut column_names,
@@ -181,7 +179,7 @@ impl LogicalAgg {
 
                         // Add upstream pk.
                         for pk_index in &base.pk_indices {
-                            Self::append_column_desc(
+                            Self::add_column_desc(
                                 &mut columns,
                                 &mut column_mapping,
                                 &mut column_names,
@@ -200,7 +198,7 @@ impl LogicalAgg {
 
                     // TODO: Remove this (3474)
                     for input in &agg_call.inputs {
-                        Self::append_column_desc(
+                        Self::add_column_desc(
                             &mut columns,
                             &mut column_mapping,
                             &mut column_names,
@@ -244,7 +242,9 @@ impl LogicalAgg {
         (table_catalogs, column_mapping)
     }
 
-    fn append_column_desc(
+    /// Add a column catalog to the end of `columns`. Also update the `column_mapping` and
+    /// `column_names`.
+    fn add_column_desc(
         columns: &mut Vec<ColumnCatalog>,
         column_mapping: &mut HashMap<usize, i32>,
         column_names: &mut HashMap<String, i32>,
