@@ -276,7 +276,11 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
             SourceImpl::Connector(c) => c
-                .stream_reader(state, self.column_ids.clone())
+                .stream_reader(
+                    state,
+                    self.column_ids.clone(),
+                    self.metrics.registry.clone(),
+                )
                 .await
                 .map(SourceStreamReaderImpl::Connector),
         }?;

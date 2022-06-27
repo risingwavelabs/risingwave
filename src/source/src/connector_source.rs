@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use futures::future::{try_join_all, Either};
 use itertools::Itertools;
 use madsim::collections::HashMap;
+use prometheus::Registry;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
@@ -30,12 +31,15 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::common::SourceChunkBuilder;
+use crate::monitor::SourceMetrics;
 use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
 
 struct InnerConnectorSourceReader {
     reader: SplitReaderImpl,
     // split should be None or only contains one value
     split: ConnectorState,
+
+    metrics: SourceMetrics,
 }
 
 struct InnerConnectorSourceReaderHandle {
@@ -60,6 +64,8 @@ pub struct ConnectorSourceReader {
     // We need to keep this tx, otherwise the channel will return none with 0 inner readers, and we
     // need to clone this tx when adding new inner readers in the future.
     message_tx: Sender<Either<Vec<SourceMessage>, RwError>>,
+
+    registry: Registry,
 }
 
 impl InnerConnectorSourceReader {
@@ -67,6 +73,7 @@ impl InnerConnectorSourceReader {
         prop: ConnectorProperties,
         split: ConnectorState,
         columns: Vec<SourceColumnDesc>,
+        registry: Registry,
     ) -> Result<Self> {
         log::debug!(
             "Spawning new connector source inner reader with config {:?}, split {:?}",
@@ -92,7 +99,13 @@ impl InnerConnectorSourceReader {
         .await
         .to_rw_result()?;
 
-        Ok(InnerConnectorSourceReader { reader, split })
+        let metrics = SourceMetrics::new(registry);
+
+        Ok(InnerConnectorSourceReader {
+            reader,
+            split,
+            metrics,
+        })
     }
 
     async fn run(
@@ -195,6 +208,7 @@ impl ConnectorSourceReader {
                     self.config.clone(),
                     Some(vec![split]),
                     self.columns.clone(),
+                    self.registry.clone(),
                 )
                 .await?;
                 let (stop_tx, stop_rx) = oneshot::channel();
@@ -261,6 +275,7 @@ impl ConnectorSource {
         &self,
         splits: ConnectorState,
         column_ids: Vec<ColumnId>,
+        registry: Registry,
     ) -> Result<ConnectorSourceReader> {
         let (tx, rx) = mpsc::channel(CONNECTOR_MESSAGE_BUFFER_SIZE);
         let mut handles = HashMap::with_capacity(if let Some(split) = &splits {
@@ -278,13 +293,16 @@ impl ConnectorSource {
                 .collect::<Vec<ConnectorState>>(),
             None => vec![None],
         };
-        let readers = try_join_all(to_reader_splits.into_iter().map(|split| {
-            log::debug!("spawning connector split reader for split {:?}", split);
-            let props = config.clone();
-            let columns = columns.clone();
-            async move { InnerConnectorSourceReader::new(props, split, columns).await }
-        }))
-        .await?;
+        let readers =
+            try_join_all(to_reader_splits.into_iter().map(|split| {
+                log::debug!("spawning connector split reader for split {:?}", split);
+                let props = config.clone();
+                let columns = columns.clone();
+                async move {
+                    InnerConnectorSourceReader::new(props, split, columns, registry.clone()).await
+                }
+            }))
+            .await?;
 
         for mut reader in readers {
             let split_id = match &reader.split {
@@ -311,6 +329,7 @@ impl ConnectorSource {
             parser: self.parser.clone(),
             columns,
             message_tx: tx,
+            registry: registry.clone(),
         })
     }
 }
