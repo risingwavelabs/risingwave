@@ -73,6 +73,11 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
+    def timeseries_usage_rate(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
     def timeseries_latency(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=10,
@@ -397,7 +402,7 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_cpu("Actor Output Buffer Usage Rate", [
+            panels.timeseries_usage_rate("Actor Output Buffer Usage Rate", [
                 panels.target(
                     "rate(stream_actor_output_buffer_usage_rate[1m]) > 0", "{{actor_id}}"
                 ),
