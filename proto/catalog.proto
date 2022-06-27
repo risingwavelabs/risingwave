@@ -33,13 +33,6 @@ message Source {
   string owner = 7;
 }
 
-// VirtualTable defines a view in system catalogs, it can only be queried and not be treated as a source.
-message VirtualTable {
-  uint32 id = 1;
-  string name = 2;
-  repeated plan_common.ColumnCatalog columns = 3;
-}
-
 /// See `TableCatalog` struct in frontend crate for more information.
 message Table {
   uint32 id = 1;
@@ -60,6 +53,7 @@ message Table {
   bool appendonly = 14;
   string owner = 15;
   common.ParallelUnitMapping mapping = 16;
+  map<string, string> properties = 17;
 }
 
 message Schema {

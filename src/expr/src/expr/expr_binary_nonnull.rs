@@ -406,6 +406,12 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_div,
                 {
+                    { interval, int16, interval, interval_float_div },
+                    { interval, int32, interval, interval_float_div },
+                    { interval, int64, interval, interval_float_div },
+                    { interval, float32, interval, interval_float_div },
+                    { interval, float64, interval, interval_float_div },
+                    { interval, decimal, interval, interval_float_div },
                 },
             }
         }

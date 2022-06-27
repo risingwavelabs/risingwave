@@ -165,6 +165,7 @@ impl StreamMaterialize {
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             vnode_mapping: None,
+            properties: HashMap::default(),
         };
 
         Ok(Self { base, input, table })

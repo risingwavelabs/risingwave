@@ -71,7 +71,7 @@ impl InterestedMetrics {
 }
 
 pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
-    let hummock_opts = HummockServiceOpts::from_env()?;
+    let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta, hummock, metrics) = hummock_opts.create_hummock_store_with_metrics().await?;
     let next_cnt = Arc::new(AtomicU64::new(0));
     let iter_cnt = Arc::new(AtomicU64::new(0));
@@ -95,7 +95,6 @@ pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
                             next_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             item?;
                         }
-                        tokio::task::yield_now().await;
                     }
                 });
                 handlers.push(handler);
@@ -125,5 +124,7 @@ pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
             }
         }
     }
+
+    hummock_opts.shutdown().await;
     Ok(())
 }

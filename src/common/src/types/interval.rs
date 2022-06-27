@@ -183,6 +183,29 @@ impl IntervalUnit {
         Some(IntervalUnit { months, days, ms })
     }
 
+    /// Divides [`IntervalUnit`] by an integer/float with zero check.
+    pub fn div_float<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+
+        if rhs == 0.0 {
+            return None;
+        }
+
+        let months = (self.months as f64) / rhs;
+        let days = (self.days as f64) / rhs + (months % 1.0) * 30.0;
+        let ms = ((self.ms as f64) / rhs + (days % 1.0) * 24.0 * 60.0 * 60.0 * 1000.0).round();
+
+        Some(IntervalUnit {
+            months: (months as i32),
+            days: (days as i32),
+            ms: (ms as i64),
+        })
+    }
+
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
     pub fn exact_div(&self, rhs: &Self) -> Option<i64> {
         let mut res = None;
@@ -349,6 +372,7 @@ impl Display for IntervalUnit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ordered_float::OrderedFloat;
 
     #[test]
     fn test_to_string() {
@@ -383,6 +407,48 @@ mod tests {
                 println!("Failed on {}.exact_div({})", lhs, rhs);
                 break;
             }
+        }
+    }
+
+    #[test]
+    fn test_div_float() {
+        let cases_int = [
+            ((10, 8, 6), 2, Some((5, 4, 3))),
+            ((1, 2, 33), 3, Some((0, 10, 57600011))),
+            ((1, 0, 11), 10, Some((0, 3, 1))),
+            ((5, 6, 7), 0, None),
+        ];
+
+        let cases_float = [
+            ((10, 8, 6), 2.0f32, Some((5, 4, 3))),
+            ((1, 2, 33), 3.0f32, Some((0, 10, 57600011))),
+            ((10, 15, 100), 2.5f32, Some((4, 6, 40))),
+            ((5, 6, 7), 0.0f32, None),
+        ];
+
+        for (lhs, rhs, expected) in cases_int {
+            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+
+            let actual = lhs.div_float(rhs as i16);
+            assert_eq!(actual, expected);
+
+            let actual = lhs.div_float(rhs as i32);
+            assert_eq!(actual, expected);
+
+            let actual = lhs.div_float(rhs as i64);
+            assert_eq!(actual, expected);
+        }
+
+        for (lhs, rhs, expected) in cases_float {
+            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+
+            let actual = lhs.div_float(OrderedFloat::<f32>(rhs));
+            assert_eq!(actual, expected);
+
+            let actual = lhs.div_float(OrderedFloat::<f64>(rhs as f64));
+            assert_eq!(actual, expected);
         }
     }
 }

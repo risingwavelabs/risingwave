@@ -20,7 +20,7 @@ use etcd_client::{Client as EtcdClient, ConnectOptions};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
@@ -41,7 +41,7 @@ use crate::dashboard::DashboardService;
 use crate::hummock;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::CompactionScheduler;
-use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv, UserManager};
+use crate::manager::{CatalogManager, IdleManager, MetaOpts, MetaSrvEnv, UserManager};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -58,6 +58,7 @@ pub enum MetaStoreBackend {
     Mem,
 }
 
+#[derive(Clone)]
 pub struct AddressInfo {
     pub addr: String,
     pub listen_addr: SocketAddr,
@@ -154,15 +155,16 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         if !old_leader_lease.is_empty() {
             let lease_info = MetaLeaseInfo::decode(&mut old_leader_lease.as_slice()).unwrap();
 
-            if lease_info.lease_expire_time < now.as_secs()
+            if lease_info.lease_expire_time > now.as_secs()
                 && lease_info.leader.as_ref().unwrap().node_address != addr
             {
-                tracing::warn!(
-                    "the lease {:?} does not expire, now time: {}.",
+                let err_info = format!(
+                    "the lease {:?} does not expire, now time: {}",
                     lease_info,
-                    now.as_secs()
+                    now.as_secs(),
                 );
-                continue;
+                tracing::error!("{}", err_info);
+                return Err(RwError::from(ErrorCode::MetaError(err_info)));
             }
         }
         let lease_id = if !old_leader_info.is_empty() {
@@ -187,6 +189,11 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 META_CF_NAME.to_string(),
                 META_LEADER_KEY.as_bytes().to_vec(),
                 old_leader_info,
+            );
+            txn.put(
+                META_CF_NAME.to_string(),
+                META_LEADER_KEY.as_bytes().to_vec(),
+                leader_info.encode_to_vec(),
             );
         } else {
             if let Err(e) = meta_store
@@ -218,9 +225,12 @@ pub async fn register_leader_for_meta<S: MetaStore>(
         let leader = leader_info.clone();
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(Duration::from_secs(lease_time));
+            let mut ticker = tokio::time::interval(Duration::from_secs(lease_time / 2));
             loop {
                 let mut txn = Transaction::default();
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards");
                 let lease_info = MetaLeaseInfo {
                     leader: Some(leader_info.clone()),
                     lease_register_time: now.as_secs(),
@@ -249,12 +259,9 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                         }
                     }
                 }
-
                 tokio::select! {
-                        biased;
-                    // Shutdown
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Barrier manager is shutting down");
+                        tracing::info!("Register leader info is stopped");
                         return;
                     }
                     // Wait for the minimal interval,
@@ -400,7 +407,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
-    let stream_srv = StreamServiceImpl::<S>::new(stream_manager);
+    let stream_srv = StreamServiceImpl::<S>::new(env.clone(), stream_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
@@ -409,8 +416,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         fragment_manager.clone(),
     );
     let notification_manager = env.notification_manager_ref();
-    let notification_srv =
-        NotificationServiceImpl::new(env, catalog_manager, cluster_manager.clone(), user_manager);
+    let notification_srv = NotificationServiceImpl::new(
+        env.clone(),
+        catalog_manager,
+        cluster_manager.clone(),
+        user_manager,
+    );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
@@ -430,11 +441,29 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
+
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
+    let (idle_send, mut idle_recv) = tokio::sync::oneshot::channel();
+    sub_tasks.push(
+        IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
+            .await,
+    );
+
+    let shutdown_all = async move {
+        for (join_handle, shutdown_sender) in sub_tasks {
+            if let Err(_err) = shutdown_sender.send(()) {
+                // Maybe it is already shut down
+                continue;
+            }
+            if let Err(err) = join_handle.await {
+                tracing::warn!("Failed to join shutdown: {:?}", err);
+            }
+        }
+    };
+
+    tokio::spawn(async move {
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
             .add_service(HeartbeatServiceServer::new(heartbeat_srv))
@@ -444,25 +473,76 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
-            .serve_with_shutdown(address_info.listen_addr, async move {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    _ = &mut shutdown_recv => {
-                        for (join_handle, shutdown_sender) in sub_tasks {
-                            if let Err(err) = shutdown_sender.send(()) {
-                                tracing::warn!("Failed to send shutdown: {:?}", err);
-                                continue;
-                            }
-                            if let Err(err) = join_handle.await {
-                                tracing::warn!("Failed to join shutdown: {:?}", err);
-                            }
-                        }
-                    },
-                }
-            })
+            .serve(address_info.listen_addr)
             .await
             .unwrap();
     });
 
+    // TODO: Use tonic's serve_with_shutdown for a graceful shutdown. Now it does not work,
+    // as the graceful shutdown waits all connections to disconnect in order to finish the stop.
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = &mut shutdown_recv => {
+                shutdown_all.await;
+            },
+            _ = &mut idle_recv => {
+                shutdown_all.await;
+            },
+        }
+    });
+
     Ok((join_handle, shutdown_send))
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::time::sleep;
+
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_leader_lease() {
+        let info = AddressInfo {
+            addr: "node1".to_string(),
+            ..Default::default()
+        };
+        let meta_store = Arc::new(MemStore::default());
+        let (handle, closer) = rpc_serve_with_store(
+            meta_store.clone(),
+            info,
+            Duration::from_secs(10),
+            2,
+            MetaOpts::default(),
+        )
+        .await
+        .unwrap();
+        sleep(Duration::from_secs(4)).await;
+        let info2 = AddressInfo {
+            addr: "node2".to_string(),
+            ..Default::default()
+        };
+        let ret = rpc_serve_with_store(
+            meta_store.clone(),
+            info2.clone(),
+            Duration::from_secs(10),
+            2,
+            MetaOpts::default(),
+        )
+        .await;
+        assert!(ret.is_err());
+        closer.send(()).unwrap();
+        handle.await.unwrap();
+        sleep(Duration::from_secs(3)).await;
+        rpc_serve_with_store(
+            meta_store.clone(),
+            info2,
+            Duration::from_secs(10),
+            2,
+            MetaOpts::default(),
+        )
+        .await
+        .unwrap();
+    }
 }

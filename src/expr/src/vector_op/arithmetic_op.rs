@@ -20,7 +20,7 @@ use std::ops::Sub;
 use chrono::{Duration, NaiveDateTime};
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
 use risingwave_common::types::{
-    CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF64,
 };
 
 use super::cast::date_to_timestamp;
@@ -238,6 +238,13 @@ pub fn time_time_sub<T1, T2, T3>(l: NaiveTimeWrapper, r: NaiveTimeWrapper) -> Re
     let tmp = l.0 - r.0;
     let ms = tmp.sub(Duration::days(tmp.num_days())).num_milliseconds();
     Ok(IntervalUnit::new(0, 0, ms))
+  
+#[inline(always)]
+pub fn interval_float_div<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
+where
+    T2: TryInto<OrderedF64> + Debug,
+{
+    l.div_float(r).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[cfg(test)]
