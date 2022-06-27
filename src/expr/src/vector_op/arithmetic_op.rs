@@ -17,10 +17,10 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 use std::ops::Sub;
 
-use chrono::Duration;
+use chrono::{Duration, NaiveDateTime};
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
 use risingwave_common::types::{
-    CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
+    CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
 };
 
 use super::cast::date_to_timestamp;
@@ -170,6 +170,20 @@ pub fn date_interval_sub<T2, T1, T3>(
 }
 
 #[inline(always)]
+pub fn date_int32_add<T1, T2, T3>(l: NaiveDateWrapper, r: i32) -> Result<NaiveDateWrapper> {
+    let date = l.0;
+    let date_wrapper = date
+        .checked_add_signed(chrono::Duration::days(r as i64))
+        .map(NaiveDateWrapper::new);
+
+    date_wrapper.ok_or(ExprError::NumericOutOfRange)
+}
+
+#[inline(always)]
+pub fn int32_date_add<T1, T2, T3>(l: i32, r: NaiveDateWrapper) -> Result<NaiveDateWrapper> {
+    date_int32_add::<T2, T1, T3>(r, l)
+}
+#[inline(always)]
 pub fn timestamp_interval_add<T1, T2, T3>(
     l: NaiveDateTimeWrapper,
     r: IntervalUnit,
@@ -199,6 +213,31 @@ where
     T1: TryInto<i32> + Debug,
 {
     interval_int_mul::<T2, T1, T3>(r, l)
+}
+
+#[inline(always)]
+pub fn date_time_add<T1, T2, T3>(
+    l: NaiveDateWrapper,
+    r: NaiveTimeWrapper,
+) -> Result<NaiveDateTimeWrapper> {
+    let date_time = NaiveDateTime::new(l.0, r.0);
+    let date_time_wrapper = NaiveDateTimeWrapper::new(date_time);
+    Ok(date_time_wrapper)
+}
+
+#[inline(always)]
+pub fn time_date_add<T1, T2, T3>(
+    l: NaiveTimeWrapper,
+    r: NaiveDateWrapper,
+) -> Result<NaiveDateTimeWrapper> {
+    date_time_add::<T2, T1, T3>(r, l)
+}
+
+#[inline(always)]
+pub fn time_time_sub<T1, T2, T3>(l: NaiveTimeWrapper, r: NaiveTimeWrapper) -> Result<IntervalUnit> {
+    let tmp = l.0 - r.0;
+    let ms = tmp.sub(Duration::days(tmp.num_days())).num_milliseconds();
+    Ok(IntervalUnit::new(0, 0, ms))
 }
 
 #[cfg(test)]

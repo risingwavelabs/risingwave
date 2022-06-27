@@ -362,6 +362,10 @@ pub fn new_binary_expr(
                     { interval, timestamp, timestamp, interval_timestamp_add },
                     { interval, date, timestamp, interval_date_add },
                     { date, interval, timestamp, date_interval_add },
+                    { date, int32, date, date_int32_add },
+                    { int32, date, date, int32_date_add },
+                    { date, time, timestamp, date_time_add },
+                    { time, date, timestamp, time_date_add },
                     { interval, interval, interval, general_add },
                 },
             }
@@ -376,6 +380,7 @@ pub fn new_binary_expr(
                     { timestamp, interval, timestamp, timestamp_interval_sub },
                     { date, date, int32, date_date_sub },
                     { date, interval, timestamp, date_interval_sub },
+                    { time, time, interval, time_time_sub },
                     { interval, interval, interval, general_sub },
                 },
             }
