@@ -109,7 +109,7 @@ impl OptimizerContext {
     #[cfg(test)]
     pub async fn mock() -> OptimizerContextRef {
         Self {
-            session_ctx: Arc::new(SessionImpl::mock()),
+            session_ctx: Arc::new(SessionImpl::mock().await),
             next_id: AtomicI32::new(0),
             sql: Arc::from(""),
         }
@@ -160,7 +160,7 @@ impl FrontendEnv {
         Self::with_meta_client(meta_client, opts).await
     }
 
-    pub fn mock() -> Self {
+    pub async fn mock() -> Self {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
@@ -171,7 +171,7 @@ impl FrontendEnv {
         let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
-        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let hummock_snapshot_manager = HummockSnapshotManager::new(meta_client.clone()).await;
         let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
@@ -227,7 +227,7 @@ impl FrontendEnv {
 
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
-            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+            HummockSnapshotManager::new(frontend_meta_client.clone()).await;
         let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
@@ -402,9 +402,9 @@ impl SessionImpl {
     }
 
     #[cfg(test)]
-    pub fn mock() -> Self {
+    pub async fn mock() -> Self {
         Self {
-            env: FrontendEnv::mock(),
+            env: FrontendEnv::mock().await,
             auth_context: Arc::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_string(),
                 DEFAULT_SUPPER_USER.to_string(),

@@ -376,9 +376,7 @@ mod tests {
             create_query().await,
             100,
             worker_node_manager,
-            Arc::new(HummockSnapshotManager::new(Arc::new(
-                MockFrontendMetaClient {},
-            ))),
+            HummockSnapshotManager::new(Arc::new(MockFrontendMetaClient {})).await,
             compute_client_pool,
         );
 

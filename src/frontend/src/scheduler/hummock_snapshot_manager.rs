@@ -34,11 +34,26 @@ pub struct HummockSnapshotManager {
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 
 impl HummockSnapshotManager {
-    pub fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Self {
-        Self {
-            core: Mutex::new(HummockSnapshotManagerCore::new()),
+    pub async fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Arc<Self> {
+        // Get epoch at first.
+        let epoch = Self::pin_epoch_with_retry(meta_client.clone(), 0, usize::MAX, || false)
+            .await
+            .expect("should be `Some` since `break_condition` is always false")
+            .expect("should be able to pinned the first epoch");
+
+        // Create the snapshot manager.
+        let local_snapshot_manager = Arc::new(Self {
+            core: Mutex::new(HummockSnapshotManagerCore::new(epoch)),
             meta_client,
-        }
+        });
+
+        // Pin and get the latest version.
+        tokio::spawn(HummockSnapshotManager::start_pin_worker(
+            Arc::downgrade(&local_snapshot_manager),
+            local_snapshot_manager.meta_client.clone(),
+        ));
+
+        local_snapshot_manager
     }
 
     pub async fn get_epoch(&self, query_id: QueryId) -> SchedulerResult<u64> {
@@ -170,6 +185,9 @@ impl HummockSnapshotManager {
                     let mut core_guard = local_snapshot_manager.core.lock().await;
                     if core_guard.last_pinned < pinned_epoch {
                         core_guard.last_pinned = pinned_epoch;
+                        core_guard
+                            .epoch_to_query_ids
+                            .insert(pinned_epoch, HashSet::new());
                     }
                 }
                 Some(Err(_)) => {
@@ -195,10 +213,10 @@ struct HummockSnapshotManagerCore {
 }
 
 impl HummockSnapshotManagerCore {
-    fn new() -> Self {
+    fn new(last_pinned: u64) -> Self {
         Self {
-            // Initialize by setting `is_outdated` to `true`.
-            ..Default::default()
+            last_pinned,
+            epoch_to_query_ids: BTreeMap::from([(last_pinned, HashSet::new())]),
         }
     }
 }
