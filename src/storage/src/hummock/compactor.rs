@@ -27,7 +27,9 @@ use risingwave_common::config::{CompactionFilterFlag, StorageConfig};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{get_epoch, get_table_id, Epoch, FullKey};
+use risingwave_hummock_sdk::key::{
+    extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
+};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
 use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
@@ -139,12 +141,10 @@ pub struct TTLCompactionFilter {
 
 impl CompactionFilter for TTLCompactionFilter {
     fn filter(&self, key: &[u8]) -> bool {
-        let table_id = get_table_id(key);
+        let (table_id, epoch) = extract_table_id_and_epoch(key);
         match table_id {
             Some(table_id) => {
                 let ttl = self.table_id_to_ttl[&table_id];
-                let epoch = get_epoch(key);
-
                 epoch + ttl as u64 > self.expire
             }
 
