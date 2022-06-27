@@ -35,7 +35,6 @@ pub struct BatchExpand {
 impl BatchExpand {
     pub fn new(logical: LogicalExpand) -> Self {
         let ctx = logical.base.ctx.clone();
-        // FIXME: rethink the distribution and order here.
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),

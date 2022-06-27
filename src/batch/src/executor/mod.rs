@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod delete;
+mod expand;
 mod filter;
 mod generic_exchange;
 mod hash_agg;
@@ -33,10 +34,10 @@ mod top_n;
 mod trace;
 mod update;
 mod values;
-mod expand;
 
 use async_recursion::async_recursion;
 pub use delete::*;
+pub use expand::*;
 pub use filter::*;
 use futures::stream::BoxStream;
 pub use generic_exchange::*;
@@ -62,7 +63,6 @@ pub use top_n::*;
 pub use trace::*;
 pub use update::*;
 pub use values::*;
-pub use expand::*;
 
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
