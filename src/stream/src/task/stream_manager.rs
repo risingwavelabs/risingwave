@@ -785,6 +785,10 @@ impl LocalStreamManagerCore {
             .remove(&actor_id)
             .unwrap()
             .abort();
+        self.actor_output_buffer_monitor_tasks
+            .remove(&actor_id)
+            .unwrap()
+            .abort();
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
@@ -797,6 +801,10 @@ impl LocalStreamManagerCore {
         for (actor_id, handle) in self.handles.drain() {
             self.context.retain(|&(up_id, _)| up_id != actor_id);
             self.actor_coroutine_monitor_tasks
+                .remove(&actor_id)
+                .unwrap()
+                .abort();
+            self.actor_output_buffer_monitor_tasks
                 .remove(&actor_id)
                 .unwrap()
                 .abort();
