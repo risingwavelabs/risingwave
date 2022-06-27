@@ -312,5 +312,5 @@
 - sql: |
     select pg_typeof(round(null));
   batch_plan: |
-    BatchProject { exprs: ['Float64':Varchar] }
+    BatchProject { exprs: ['double precision':Varchar] }
       BatchValues { rows: [[]] }

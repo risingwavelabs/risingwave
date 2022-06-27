@@ -106,7 +106,7 @@ impl Binder {
                     let input = &inputs[0];
                     let v = match input.is_unknown() {
                         true => "unknown".into(),
-                        false => format!("{:?}", input.return_type()),
+                        false => input.return_type().to_string(),
                     };
                     return Ok(ExprImpl::literal_varchar(v));
                 }

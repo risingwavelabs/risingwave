@@ -177,4 +177,4 @@ unknown
 query T
 select pg_typeof(round(null));
 ----
-Float64
+double precision
