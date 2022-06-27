@@ -845,7 +845,10 @@ where
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
-        // Verify all table_ids have already been registered to compaction group manager.
+        // Verify all table_ids have already been registered to compaction group.
+        // Prerequisite: `commit_epoch` should be called before any compaction group unregistration
+        // within the same epoch. So that a being dropped table is still a valid compaction group
+        // member.
         for (compaction_group_id, sst) in &sstables {
             let compaction_group = self
                 .compaction_group_manager
