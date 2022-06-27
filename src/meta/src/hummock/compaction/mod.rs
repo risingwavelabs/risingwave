@@ -19,7 +19,7 @@ mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
 mod tier_compaction_picker;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ pub struct CompactStatus {
     compaction_group_id: CompactionGroupId,
     pub(crate) level_handlers: Vec<LevelHandler>,
     // TODO: remove this `CompactionConfig`, which is a duplicate of that in `CompactionGroup`.
-    compaction_config: CompactionConfig,
+    pub compaction_config: CompactionConfig,
     compaction_selector: Arc<dyn LevelSelector>,
 }
 
@@ -153,6 +153,8 @@ impl CompactStatus {
             existing_table_ids: vec![],
             compression_algorithm,
             target_file_size: ret.target_file_size,
+            compaction_filter_mask: 0,
+            table_options: HashMap::default(),
         };
         Some(compact_task)
     }

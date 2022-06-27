@@ -77,21 +77,14 @@ impl Binder {
                 "split_part" => ExprType::SplitPart,
                 "coalesce" => ExprType::Coalesce,
                 "round" => {
-                    inputs = Self::rewrite_round_args(inputs);
                     if inputs.len() >= 2 {
                         ExprType::RoundDigit
                     } else {
                         ExprType::Round
                     }
                 }
-                "ceil" => {
-                    inputs = Self::rewrite_round_args(inputs);
-                    ExprType::Ceil
-                }
-                "floor" => {
-                    inputs = Self::rewrite_round_args(inputs);
-                    ExprType::Floor
-                }
+                "ceil" => ExprType::Ceil,
+                "floor" => ExprType::Floor,
                 "abs" => ExprType::Abs,
                 "booleq" => {
                     inputs = Self::rewrite_two_bool_inputs(inputs)?;
@@ -148,50 +141,6 @@ impl Binder {
                 inputs[0].clone(),
             ];
             Ok(inputs)
-        }
-    }
-
-    /// Rewrite the arguments to be consistent with the `round, ceil, floor` signature:
-    /// Round:
-    /// - round(Decimal, Int32) -> Decimal
-    /// - round(Decimal) -> Decimal
-    /// - round(Float64) -> Float64
-    /// - Extend: round(Int16, Int32, Int64, Float32) -> Float64
-    ///
-    /// Ceil:
-    /// - ceil(Decimal) -> Decimal
-    /// - ceil(Float) -> Float64
-    /// - Extend: ceil(Int16, Int32, Int64, Float32) -> Float64
-    ///
-    /// Floor:
-    /// - floor(Decimal) -> Decimal
-    /// - floor(Float) -> Float64
-    /// - Extend: floor(Int16, Int32, Int64, Float32) -> Float64
-    fn rewrite_round_args(mut inputs: Vec<ExprImpl>) -> Vec<ExprImpl> {
-        if inputs.len() == 1 {
-            let input = inputs.pop().unwrap();
-            match input.return_type() {
-                risingwave_common::types::DataType::Decimal => vec![input],
-                _ => vec![input
-                    .clone()
-                    .cast_implicit(DataType::Float64)
-                    .unwrap_or(input)],
-            }
-        } else if inputs.len() == 2 {
-            let digits = inputs.pop().unwrap();
-            let input = inputs.pop().unwrap();
-            vec![
-                input
-                    .clone()
-                    .cast_implicit(DataType::Decimal)
-                    .unwrap_or(input),
-                digits
-                    .clone()
-                    .cast_implicit(DataType::Int32)
-                    .unwrap_or(digits),
-            ]
-        } else {
-            inputs
         }
     }
 

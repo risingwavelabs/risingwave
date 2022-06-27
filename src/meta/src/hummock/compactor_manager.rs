@@ -143,6 +143,8 @@ impl CompactorManager {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
@@ -190,8 +192,10 @@ mod tests {
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
-            target_file_size: 1,
             compression_algorithm: 0,
+            target_file_size: 1,
+            compaction_filter_mask: 0,
+            table_options: HashMap::default(),
         }
     }
 

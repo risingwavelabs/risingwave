@@ -15,6 +15,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ErrorCode::InternalError;
@@ -276,5 +277,21 @@ mod default {
     }
     pub fn share_buffer_upload_concurrency() -> usize {
         8
+    }
+}
+
+bitflags! {
+
+    #[derive(Default)]
+    pub struct CompactionFilterFlag: u32 {
+        const NONE = 0b00000000;
+        const STATE_CLEAN = 0b00000010;
+        const TTL = 0b00000100;
+    }
+}
+
+impl From<CompactionFilterFlag> for u32 {
+    fn from(flag: CompactionFilterFlag) -> Self {
+        flag.bits()
     }
 }

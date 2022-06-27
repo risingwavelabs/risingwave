@@ -652,6 +652,7 @@ where
                 "dropping source {}, but associated fragments still exists",
                 source_id
             );
+            core.source_fragments.remove(&source_id);
         } else {
             // Unregister afterwards and is safeguarded by
             // CompactionGroupManager::purge_stale_members.

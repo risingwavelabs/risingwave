@@ -82,7 +82,6 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         table_properties: &HashMap<String, String>,
     ) -> Result<()> {
         let table_option = CompactionGroup::build_table_option(table_properties);
-
         let mut pairs = vec![];
         // materialized_view or materialized_source
         pairs.push((
