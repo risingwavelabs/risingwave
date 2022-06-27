@@ -94,7 +94,6 @@ impl ManagedBarrierState {
                     // Notify about barrier finishing.
                     let result = CollectResult {
                         create_mview_progress,
-                        synced_sstables: vec![],
                     };
                     if collect_notifier.send(result).is_err() {
                         warn!(

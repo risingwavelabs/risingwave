@@ -171,6 +171,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<LocalSstableInfo> {
         todo!()
     }
+
+    /// Clears contents in shared buffer.
+    /// This method should only be called when dropping all actors in the local compute node.
+    fn clear_shared_buffer(&self) -> StorageResult<()> {
+        todo!()
+    }
 }
 
 pub trait StateStoreIter: Send + 'static {

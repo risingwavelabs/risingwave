@@ -238,6 +238,10 @@ impl StateStore for MemoryStateStore {
             Ok(())
         }
     }
+
+    fn clear_shared_buffer(&self) -> StorageResult<()> {
+        Ok(())
+    }
 }
 
 pub struct MemoryStateStoreIter {

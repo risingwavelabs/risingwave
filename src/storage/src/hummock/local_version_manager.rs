@@ -770,6 +770,10 @@ impl LocalVersionManager {
             }
         }
     }
+
+    pub fn clear_shared_buffer(&self) {
+        self.local_version.write().clear_shared_buffer();
+    }
 }
 
 #[cfg(test)]
