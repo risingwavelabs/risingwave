@@ -48,10 +48,9 @@ impl HummockSnapshotManager {
         });
 
         // Pin and get the latest version.
-        tokio::spawn(HummockSnapshotManager::start_pin_worker(
-            Arc::downgrade(&local_snapshot_manager),
-            local_snapshot_manager.meta_client.clone(),
-        ));
+        tokio::spawn(HummockSnapshotManager::start_pin_worker(Arc::downgrade(
+            &local_snapshot_manager,
+        )));
 
         local_snapshot_manager
     }
@@ -155,10 +154,7 @@ impl HummockSnapshotManager {
         }
     }
 
-    async fn start_pin_worker(
-        local_snapshot_manager_weak: Weak<HummockSnapshotManager>,
-        meta_client: Arc<dyn FrontendMetaClient>,
-    ) {
+    async fn start_pin_worker(local_snapshot_manager_weak: Weak<HummockSnapshotManager>) {
         let min_execute_interval = Duration::from_millis(100);
         let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
         min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -174,11 +170,16 @@ impl HummockSnapshotManager {
 
             let last_epoch = local_snapshot_manager.core.lock().await.last_pinned;
 
-            match Self::pin_epoch_with_retry(meta_client.clone(), last_epoch, usize::MAX, || {
-                // Should stop when the `local_version_manager` in this thread is the only
-                // strong reference to the object.
-                local_snapshot_manager_weak.strong_count() == 1
-            })
+            match Self::pin_epoch_with_retry(
+                local_snapshot_manager.meta_client.clone(),
+                last_epoch,
+                usize::MAX,
+                || {
+                    // Should stop when the `local_version_manager` in this thread is the only
+                    // strong reference to the object.
+                    local_snapshot_manager_weak.strong_count() == 1
+                },
+            )
             .await
             {
                 Some(Ok(pinned_epoch)) => {
