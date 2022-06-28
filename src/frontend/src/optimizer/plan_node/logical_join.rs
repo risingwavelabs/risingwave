@@ -824,7 +824,6 @@ impl ToStream for LogicalJoin {
                     &[left_ref_index],
                 ))?;
 
-            // The right input needs to be a direct descendant of a simple agg
             assert!(*self.right().distribution() == Distribution::Single);
 
             let right = self
