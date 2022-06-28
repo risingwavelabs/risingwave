@@ -112,7 +112,10 @@ impl Distribution {
         match required {
             RequiredDist::Any => true,
             RequiredDist::AnyShard => {
-                matches!(self, Distribution::SomeShard | Distribution::HashShard(_))
+                matches!(
+                    self,
+                    Distribution::SomeShard | Distribution::HashShard(_) | Distribution::Broadcast
+                )
             }
             RequiredDist::ShardByKey(required_keys) => match self {
                 Distribution::HashShard(hash_keys) => hash_keys
@@ -128,7 +131,9 @@ impl Distribution {
     /// valid.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
-            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => Default::default(),
+            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
+                Default::default()
+            }
             Distribution::HashShard(dists) => dists,
         }
     }

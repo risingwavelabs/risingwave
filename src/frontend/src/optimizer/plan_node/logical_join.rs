@@ -294,7 +294,7 @@ impl LogicalJoin {
         &self.output_indices
     }
 
-    /// Clone with new `on` condition
+    /// Clone with new output indices
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
         Self::new_with_output_indices(
             self.left.clone(),
@@ -743,9 +743,7 @@ impl ToStream for LogicalJoin {
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let new_output_indices = logical_join.output_indices.clone();
-                let new_internal_column_num = logical_join.internal_column_num();
-                let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
+                let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
 
                 // Temporarily remove output indices.
                 let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
@@ -762,8 +760,8 @@ impl ToStream for LogicalJoin {
                     let logical_project = LogicalProject::with_mapping(
                         plan,
                         ColIndexMapping::with_remaining_columns(
-                            &new_output_indices,
-                            new_internal_column_num,
+                            &self.output_indices,
+                            self.internal_column_num(),
                         ),
                     );
                     Ok(StreamProject::new(logical_project).into())
@@ -783,7 +781,7 @@ impl ToStream for LogicalJoin {
             // `StreamDynamicFilter`
 
             // Check if `Inner` subquery (no `IN` or `EXISTS` keywords)
-            if !(self.join_type == JoinType::Inner) {
+            if self.join_type != JoinType::Inner {
                 return Err(nested_loop_join_error);
             }
 
@@ -824,14 +822,19 @@ impl ToStream for LogicalJoin {
                     &[left_ref_index],
                 ))?;
 
-            // The right input needs to be a direct descendant of a simple agg
-            assert!(*self.right().distribution() == Distribution::Single);
-
             let right = self
                 .right()
                 .to_stream_with_dist_required(&RequiredDist::PhysicalDist(
                     Distribution::Broadcast,
                 ))?;
+
+            assert!(right.as_stream_exchange().is_some());
+
+            assert_eq!(right.inputs().len(), 1);
+            assert_eq!(
+                *right.inputs().first().unwrap().distribution(),
+                Distribution::Single
+            );
 
             let plan = StreamDynamicFilter::new(predicate.other_cond().clone(), left, right).into();
 
