@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
-use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::util::ordered::OrderedRowSerializer;
-use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
-use risingwave_storage::table::cell_based_table::DEFAULT_VNODE;
+use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -166,10 +165,10 @@ impl<S: StateStore> LookupExecutor<S> {
         }
 
         // compute the arrange keys used for the lookup
-        let arrangement_order_types = arrangement_order_rules
-            .iter()
-            .map(|x| x.order_type)
-            .collect();
+        // let arrangement_order_types = arrangement_order_rules
+        //     .iter()
+        //     .map(|x| x.order_type)
+        //     .collect();
 
         // check whether join keys are of the same length.
         assert_eq!(
@@ -204,6 +203,26 @@ impl<S: StateStore> LookupExecutor<S> {
             "mismatched output schema"
         );
 
+        let mut table_descs = vec![];
+        for column_id in 0..arrange_join_key_indices.len() + arrangement_col_descs.len() {
+            table_descs.push(ColumnDesc::unnamed(
+                ColumnId::new(column_id as i32),
+                DataType::Int64,
+            ));
+        }
+        // `arrangement_pk_indices` indicates the primary key in arrangement, usually row_id. Chain
+        // with join key to get relational pk. arrangement: [ a (join key/sort key) | b
+        // (value) | row_id]. The arrangement pk_indices is [2], arrange_join_key_indices will be
+        // [0], so relational pk will be [0, 2].
+        let arrangement_index_key_indices = arrange_join_key_indices
+            .clone()
+            .into_iter()
+            .chain(arrangement_pk_indices.clone().into_iter())
+            .collect_vec();
+        println!(
+            "arrangment index key indices: {:?}",
+            arrangement_index_key_indices
+        );
         Self {
             chunk_data_types,
             schema: output_schema,
@@ -217,17 +236,19 @@ impl<S: StateStore> LookupExecutor<S> {
                 col_types: stream_datatypes,
             },
             arrangement: ArrangeJoinSide {
-                pk_indices: arrangement_pk_indices,
+                pk_indices: arrangement_pk_indices.clone(),
                 col_types: arrangement_datatypes,
-                // special thing about this pair of serializer and deserializer: the serializer only
-                // serializes join key, while the deserializer will take join key + pk into account.
-                deserializer: make_cell_based_row_deserializer(arrangement_col_descs.clone()),
-                serializer: OrderedRowSerializer::new(arrangement_order_types),
-                col_descs: arrangement_col_descs,
+                col_descs: arrangement_col_descs.clone(),
                 order_rules: arrangement_order_rules,
                 key_indices: arrange_join_key_indices,
-                keyspace: arrangement_keyspace,
                 use_current_epoch,
+                state_table: StateTable::new(
+                    arrangement_keyspace,
+                    arrangement_col_descs,
+                    vec![OrderType::Ascending; arrangement_index_key_indices.len()],
+                    Some(arrangement_pk_indices),
+                    arrangement_index_key_indices,
+                ),
             },
             column_mapping,
             key_indices_mapping,
@@ -394,45 +415,50 @@ impl<S: StateStore> LookupExecutor<S> {
         }
 
         // Serialize join key to a state store key.
-        let key_prefix = {
-            let mut key_prefix = vec![];
-            // Manually encode a vnode here to match the encoding of cell-based table
-            // TODO: refactor lookup with cell-based table
-            key_prefix.extend(DEFAULT_VNODE.to_be_bytes());
-            self.arrangement
-                .serializer
-                .serialize_datums(lookup_row.0.iter(), &mut key_prefix);
-            key_prefix
-        };
+        // let key_prefix = {
+        //     let mut key_prefix = vec![];
+        //     self.arrangement
+        //         .serializer
+        //         .serialize_datums(lookup_row.0.iter(), &mut key_prefix);
+        //     key_prefix
+        // };
 
-        tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}, {:?}", lookup_row, bytes::Bytes::copy_from_slice(&key_prefix));
-
-        let arrange_keyspace = self.arrangement.keyspace.append(key_prefix);
-        let all_cells = arrange_keyspace.scan(None, lookup_epoch).await?;
+        // tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}, {:?}", lookup_row,
+        // bytes::Bytes::copy_from_slice(&key_prefix));
 
         let mut all_rows = vec![];
+        // //
+        // for (pk_with_cell_id, cell) in all_cells {
+        //     tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}",
+        // pk_with_cell_id, cell);     if let Some((_, row)) = self
+        //         .arrangement
+        //         .deserializer
+        //         .deserialize(&pk_with_cell_id, &cell)?
+        //     {
+        //         all_rows.push(row);
+        //     }
+        // }
 
-        // The key is truncated in `arrange_keyspace` so there's no vnode to decode
-        // TODO: refactor lookup with cell-based table and remove `deserialize_with_vnode`
-        for (pk_with_cell_id, cell) in all_cells {
-            tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}", pk_with_cell_id, cell);
-            if let Some((_, _, row)) = self
-                .arrangement
-                .deserializer
-                .deserialize_without_vnode(&pk_with_cell_id, &cell)?
-            {
-                all_rows.push(row);
-            }
-        }
+        // if let Some((_, last_row)) = self.arrangement.deserializer.take() {
+        //     all_rows.push(last_row);
+        // }
 
-        if let Some((_, _, last_row)) = self.arrangement.deserializer.take() {
-            all_rows.push(last_row);
+        let all_data_iter = self
+            .arrangement
+            .state_table
+            .iter_with_pk_prefix(&lookup_row, lookup_epoch)
+            .await?
+            .fuse();
+        pin_mut!(all_data_iter);
+        while let Some(inner) = all_data_iter.next().await {
+            let ret = inner?;
+            all_rows.push(ret.into_owned());
         }
 
         tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows);
 
         self.lookup_cache
-            .batch_update(lookup_row, all_rows.iter().cloned());
+            .batch_update(lookup_row.clone(), all_rows.iter().cloned());
 
         Ok(all_rows)
     }

@@ -29,7 +29,6 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let lookup = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Lookup)?;
-
         let arrangement = params.input.remove(1);
         let stream = params.input.remove(0);
 
