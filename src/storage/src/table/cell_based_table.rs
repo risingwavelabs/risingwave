@@ -240,10 +240,7 @@ impl<S: StateStore, const T: AccessType> CellBasedTable<S, T> {
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
         let vnode = match self.dist_key_in_pk_indices.as_ref() {
-            Some(indices) => pk
-                .hash_by_indices(indices, &CRC32FastBuilder {})
-                .unwrap()
-                .to_vnode(),
+            Some(indices) => pk.hash_by_indices(indices, &CRC32FastBuilder {}).to_vnode(),
             None => DEFAULT_VNODE,
         };
         // This table should only be used to access entries with vnode specified in `self.vnodes`.
@@ -323,7 +320,6 @@ impl<S: StateStore> CellBasedTable<S, READ_WRITE> {
         let vnode = match self.dist_key_indices.as_ref() {
             Some(indices) => row
                 .hash_by_indices(indices, &CRC32FastBuilder {})
-                .unwrap()
                 .to_vnode(),
             None => DEFAULT_VNODE,
         };
