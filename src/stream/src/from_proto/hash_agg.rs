@@ -64,7 +64,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
         let key_indices = node
-            .get_distribution_keys()
+            .get_group_keys()
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
