@@ -92,7 +92,7 @@ message GrantPrivilegeResponse {
 message RevokePrivilegeRequest {
   repeated string users = 1;
   repeated GrantPrivilege privileges = 2;
-  optional string granted_by = 3;
+  string granted_by = 3;
   string revoke_by = 4;
   bool revoke_grant_option = 5;
   bool cascade = 6;

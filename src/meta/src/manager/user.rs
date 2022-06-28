@@ -377,7 +377,7 @@ impl<S: MetaStore> UserManager<S> {
         &self,
         users: &[UserName],
         revoke_grant_privileges: &[GrantPrivilege],
-        granted_by: Option<UserName>,
+        granted_by: UserName,
         revoke_by: UserName,
         revoke_grant_option: bool,
         cascade: bool,
@@ -393,7 +393,7 @@ impl<S: MetaStore> UserManager<S> {
             .get(&revoke_by)
             .ok_or_else(|| InternalError(format!("Session user {} does not exist", &revoke_by)))
             .cloned()?;
-        let same_user = granted_by.is_some() && granted_by.unwrap() != revoke_by.name;
+        let same_user = !granted_by.is_empty() && granted_by != revoke_by.name;
         if !revoke_by.is_supper {
             for privilege in revoke_grant_privileges {
                 if let Some(user_privilege) = revoke_by
@@ -688,7 +688,7 @@ mod tests {
             .revoke_privilege(
                 &[test_user.to_string()],
                 &[make_privilege(object.clone(), &[Action::Connect], false)],
-                None,
+                String::from(""),
                 test_sub_user.to_string(),
                 true,
                 false,
@@ -708,7 +708,7 @@ mod tests {
                     &[Action::Connect],
                     false,
                 )],
-                None,
+                String::from(""),
                 test_sub_user.to_string(),
                 true,
                 false,
@@ -733,7 +733,7 @@ mod tests {
                     ],
                     false,
                 )],
-                None,
+                String::from(""),
                 DEFAULT_SUPPER_USER.to_string(),
                 true,
                 false,
@@ -758,7 +758,7 @@ mod tests {
                     ],
                     false,
                 )],
-                None,
+                String::from(""),
                 DEFAULT_SUPPER_USER.to_string(),
                 true,
                 true,
@@ -781,7 +781,7 @@ mod tests {
                     &[Action::Select, Action::Insert, Action::Delete],
                     false,
                 )],
-                None,
+                String::from(""),
                 DEFAULT_SUPPER_USER.to_string(),
                 false,
                 true,
