@@ -6,7 +6,7 @@ Scaling could occur for multiple reasons in RisingWave. For example, when worklo
 
 On the other hand, we need to parallel the scan on tables or materialized views in [batch query mode](./architecture-design.md#batch-query-mode). Therefore, we need to partition the data in a way that could boost the performance most. So what is the most beneficial way of data partition for tables and materialized views?
 
-In RisingWave, we adopt consistent-hash-based strategy to solve the two problems above. This document will elaborate our design.
+In RisingWave, we adopt consistent-hash-based strategy to solve the two problems above. This document will elaborate on our design.
 
 ## Design
 
