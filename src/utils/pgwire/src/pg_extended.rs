@@ -51,11 +51,11 @@ fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Vec<Strin
                 TypeOid::Int => todo!(),
                 TypeOid::Float4 => todo!(),
                 TypeOid::Float8 => todo!(),
-                TypeOid::CharArray => todo!(),
                 TypeOid::Date => todo!(),
                 TypeOid::Time => todo!(),
                 TypeOid::Timestamp => todo!(),
                 TypeOid::Timestampz => todo!(),
+                TypeOid::Interval => todo!(),
                 TypeOid::Decimal => todo!(),
             }
         })
@@ -123,16 +123,35 @@ impl PgStatement {
         self.row_description.clone()
     }
 
-    pub fn instance(&self, portal_name: String, params: &[Bytes]) -> PgPortal {
+    async fn infer_row_description<SM: SessionManager>(
+        session: Arc<SM::Session>,
+        sql: &str,
+    ) -> Result<Vec<PgFieldDescriptor>, ()> {
+        if sql.len() > 6 && sql[0..6].eq_ignore_ascii_case("select") {
+            return session.infer_return_type(sql).await.map_err(|_e| ());
+        }
+        Ok(vec![])
+    }
+
+    pub async fn instance<SM: SessionManager>(
+        &self,
+        session: Arc<SM::Session>,
+        portal_name: String,
+        params: &[Bytes],
+    ) -> Result<PgPortal, ()> {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
         if params.is_empty() {
-            return PgPortal {
+            let row_description =
+                Self::infer_row_description::<SM>(session, statement.as_str()).await?;
+
+            return Ok(PgPortal {
                 name: portal_name,
                 query_string: self.query_string.clone(),
                 result_cache: None,
                 stmt_type: None,
-            };
+                row_description,
+            });
         }
 
         // 1. Identify all the $n. For example, "SELECT $3, $2, $1" -> [3, 2, 1].
@@ -155,13 +174,17 @@ impl PgStatement {
         // "SELECT 'A', 'B', 'C'".
         let instance_query_string = replace_params(statement, &generic_params, &params);
 
-        // 4. Create a new portal.
-        PgPortal {
+        // 4. Get row_description and return portal.
+        let row_description =
+            Self::infer_row_description::<SM>(session, instance_query_string.as_str()).await?;
+
+        Ok(PgPortal {
             name: portal_name,
             query_string: Bytes::from(instance_query_string),
             result_cache: None,
             stmt_type: None,
-        }
+            row_description,
+        })
     }
 }
 
@@ -171,15 +194,17 @@ pub struct PgPortal {
     query_string: Bytes,
     result_cache: Option<IntoIter<Row>>,
     stmt_type: Option<StatementType>,
+    row_description: Vec<PgFieldDescriptor>,
 }
 
 impl PgPortal {
-    pub fn new(name: String, query_string: Bytes) -> Self {
+    pub fn new(name: String, query_string: Bytes, row_description: Vec<PgFieldDescriptor>) -> Self {
         PgPortal {
             name,
             query_string,
             result_cache: None,
             stmt_type: None,
+            row_description,
         }
     }
 
@@ -189,6 +214,10 @@ impl PgPortal {
 
     pub fn query_string(&self) -> Bytes {
         self.query_string.clone()
+    }
+
+    pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
+        self.row_description.clone()
     }
 
     pub async fn execute<SM: SessionManager>(
@@ -233,7 +262,7 @@ impl PgPortal {
 
         Ok(PgResponse::new(
             self.stmt_type.unwrap(),
-            data_set.len().try_into().unwrap(),
+            data_set.len() as _,
             data_set,
             vec![],
             row_end,

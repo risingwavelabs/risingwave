@@ -14,7 +14,7 @@
                 appendOnly: true
                 batchPlan:
                   tableDesc:
-                    tableId: 2
+                    tableId: 4
                     columns:
                       - columnType:
                           typeName: INT64
@@ -50,7 +50,7 @@
                 name: _row_id
             chain:
               tableRefId:
-                tableId: 2
+                tableId: 4
               upstreamFields:
                 - dataType:
                     typeName: INT64
@@ -119,6 +119,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -156,7 +157,7 @@
             appendOnly: true
             batchPlan:
               tableDesc:
-                tableId: 2
+                tableId: 4
                 columns:
                   - columnType:
                       typeName: INT64
@@ -192,7 +193,7 @@
             name: _row_id
         chain:
           tableRefId:
-            tableId: 2
+            tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -231,6 +232,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -268,7 +270,7 @@
             appendOnly: true
             batchPlan:
               tableDesc:
-                tableId: 2
+                tableId: 4
                 columns:
                   - columnType:
                       typeName: INT64
@@ -309,7 +311,7 @@
             name: _row_id
         chain:
           tableRefId:
-            tableId: 2
+            tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -352,6 +354,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -385,72 +388,120 @@
       - input:
           - input:
               - input:
-                  - merge: {}
-                  - pkIndices:
+                  - input:
+                      - merge: {}
+                      - pkIndices:
+                          - 1
+                        appendOnly: true
+                        batchPlan:
+                          tableDesc:
+                            tableId: 4
+                            columns:
+                              - columnType:
+                                  typeName: INT64
+                                  isNullable: true
+                                name: _row_id
+                              - columnType:
+                                  typeName: INT32
+                                  isNullable: true
+                                columnId: 1
+                                name: v1
+                            orderKey:
+                              - columnDesc:
+                                  columnType:
+                                    typeName: INT64
+                                    isNullable: true
+                                  name: _row_id
+                                order: ASCENDING
+                          columnIds:
+                            - 1
+                            - 0
+                          distributionKeys:
+                            - 1
+                    pkIndices:
                       - 1
-                    appendOnly: true
-                    batchPlan:
-                      tableDesc:
-                        tableId: 2
-                        columns:
-                          - columnType:
-                              typeName: INT64
-                              isNullable: true
-                            name: _row_id
-                          - columnType:
-                              typeName: INT32
-                              isNullable: true
-                            columnId: 1
-                            name: v1
-                        orderKey:
-                          - columnDesc:
-                              columnType:
-                                typeName: INT64
-                                isNullable: true
-                              name: _row_id
-                            order: ASCENDING
+                    fields:
+                      - dataType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v1
+                      - dataType:
+                          typeName: INT64
+                          isNullable: true
+                        name: _row_id
+                    chain:
+                      tableRefId:
+                        tableId: 4
+                      upstreamFields:
+                        - dataType:
+                            typeName: INT64
+                            isNullable: true
+                          name: _row_id
+                        - dataType:
+                            typeName: INT32
+                            isNullable: true
+                          name: v1
                       columnIds:
                         - 1
                         - 0
-                      distributionKeys:
-                        - 1
-                pkIndices:
-                  - 1
                 fields:
-                  - dataType:
-                      typeName: INT32
-                      isNullable: true
-                    name: v1
                   - dataType:
                       typeName: INT64
                       isNullable: true
-                    name: _row_id
-                chain:
-                  tableRefId:
-                    tableId: 2
-                  upstreamFields:
-                    - dataType:
+                    name: "agg#0"
+                  - dataType:
+                      typeName: INT64
+                      isNullable: true
+                    name: "agg#1"
+                localSimpleAgg:
+                  aggCalls:
+                    - type: COUNT
+                      returnType:
                         typeName: INT64
                         isNullable: true
-                      name: _row_id
-                    - dataType:
-                        typeName: INT32
+                    - type: SUM
+                      args:
+                        - input: {}
+                          type:
+                            typeName: INT32
+                            isNullable: true
+                      returnType:
+                        typeName: INT64
                         isNullable: true
-                      name: v1
-                  columnIds:
+                  distributionKeys:
                     - 1
-                    - 0
-            pkIndices:
-              - 1
+                  internalTables:
+                    - id: 4294967294
+                      schemaId: 2147483646
+                      databaseId: 2147483646
+                      columns:
+                        - columnDesc:
+                            columnType:
+                              typeName: INT64
+                              isNullable: true
+                      distributionKeys:
+                        - 1
+                      owner: root
+                    - id: 4294967294
+                      schemaId: 2147483646
+                      databaseId: 2147483646
+                      columns:
+                        - columnDesc:
+                            columnType:
+                              typeName: INT64
+                              isNullable: true
+                      distributionKeys:
+                        - 1
+                      owner: root
             fields:
-              - dataType:
-                  typeName: INT32
-                  isNullable: true
-                name: v1
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: _row_id
+                name: "agg#0"
+              - dataType:
+                  typeName: INT64
+                  isNullable: true
+                name: "agg#1"
             exchange:
               strategy:
                 type: SIMPLE
@@ -465,15 +516,21 @@
             name: "agg#1"
         globalSimpleAgg:
           aggCalls:
-            - type: COUNT
+            - type: SUM
+              args:
+                - input: {}
+                  type:
+                    typeName: INT64
+                    isNullable: true
               returnType:
                 typeName: INT64
                 isNullable: true
             - type: SUM
               args:
-                - input: {}
+                - input:
+                    columnIdx: 1
                   type:
-                    typeName: INT32
+                    typeName: INT64
                     isNullable: true
               returnType:
                 typeName: INT64
@@ -512,6 +569,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
@@ -545,7 +603,7 @@
                             appendOnly: true
                             batchPlan:
                               tableDesc:
-                                tableId: 2
+                                tableId: 4
                                 columns:
                                   - columnType:
                                       typeName: INT64
@@ -591,7 +649,7 @@
                             name: _row_id
                         chain:
                           tableRefId:
-                            tableId: 2
+                            tableId: 4
                           upstreamFields:
                             - dataType:
                                 typeName: INT64
@@ -679,7 +737,7 @@
                   isNullable: true
                 name: "agg#1"
             hashAgg:
-              distributionKeys:
+              groupKeys:
                 - 0
               aggCalls:
                 - type: COUNT
@@ -795,6 +853,7 @@
         - 1
     ---
     id: 4294967294
+    schemaId: 1
     name: test
     columns:
       - columnDesc:
