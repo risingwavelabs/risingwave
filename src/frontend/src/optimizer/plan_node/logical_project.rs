@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::string::String;
 
@@ -29,6 +30,33 @@ use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
+/// the `LogicalProjectBuilder` is the way to construct a `LogicalProject` to dedup the duplicate
+/// expressions
+#[derive(Default)]
+struct LogicalProjectBuilder {
+    exprs: Vec<ExprImpl>,
+    exprs_index: HashMap<ExprImpl, usize>,
+}
+
+impl LogicalProjectBuilder {
+    /// add an expression to the `LogicalProject` and return the column index of the project's
+    /// output
+    pub fn add_expr(&mut self, expr: &ExprImpl) -> usize {
+        if let Some(idx) = self.exprs_index.get(expr) {
+            return *idx;
+        } else {
+            let index = self.exprs.len();
+            self.exprs.push(expr.clone());
+            self.exprs_index.insert(expr.clone(), index);
+            index
+        }
+    }
+
+    /// build the `LogicalProject` from `LogicalProjectBuilder`
+    pub fn build(self, input: PlanRef) -> LogicalProject {
+        LogicalProject::new(input, self.exprs)
+    }
+}
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
@@ -36,7 +64,6 @@ pub struct LogicalProject {
     exprs: Vec<ExprImpl>,
     input: PlanRef,
 }
-
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
         let ctx = input.ctx();
