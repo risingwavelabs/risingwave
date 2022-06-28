@@ -775,7 +775,10 @@ where
                     id: vec![],
                 },
             );
-            let mut version_delta = HummockVersionDelta::default();
+            let mut version_delta = HummockVersionDelta {
+                prev_id: old_version.id,
+                ..Default::default()
+            };
             let level_deltas = &mut version_delta
                 .level_deltas
                 .entry(compact_task.compaction_group_id)
@@ -888,10 +891,15 @@ where
             VarTransaction::new(&mut versioning.hummock_version_deltas);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
         current_version_id.increase();
+        let mut new_version_delta = hummock_version_deltas.new_entry_txn_or_default(
+            current_version_id.id(),
+            HummockVersionDelta {
+                prev_id: old_version.id,
+                ..Default::default()
+            },
+        );
         let mut new_hummock_version =
             hummock_versions.new_entry_txn_or_default(current_version_id.id(), old_version);
-        let mut new_version_delta = hummock_version_deltas
-            .new_entry_txn_or_default(current_version_id.id(), HummockVersionDelta::default());
         new_hummock_version.id = current_version_id.id();
         new_version_delta.id = current_version_id.id();
         if epoch <= new_hummock_version.max_committed_epoch {
