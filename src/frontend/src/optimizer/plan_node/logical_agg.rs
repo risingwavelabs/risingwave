@@ -130,24 +130,26 @@ impl LogicalAgg {
         let base = self.input.plan_base();
         let schema = &base.schema;
         let fields = schema.fields();
+
+        let mut internal_pk_indices = vec![];
+        let mut columns = vec![];
+        let mut order_desc = vec![];
+        for &idx in &self.group_keys {
+            let column_id = columns.len() as i32;
+            internal_pk_indices.push(column_id as usize); // Currently our column index is same as column id
+            column_mapping.insert(idx, column_id);
+            let column_desc = ColumnDesc::from_field_with_column_id(&fields[idx], column_id);
+            columns.push(ColumnCatalog {
+                column_desc: column_desc.clone(),
+                is_hidden: false,
+            });
+            order_desc.push(OrderedColumnDesc {
+                column_desc,
+                order: OrderType::Ascending,
+            })
+        }
         for agg_call in &self.agg_calls {
-            let mut internal_pk_indices = vec![];
-            let mut columns = vec![];
-            let mut order_desc = vec![];
-            for &idx in &self.group_keys {
-                let column_id = columns.len() as i32;
-                internal_pk_indices.push(column_id as usize); // Currently our column index is same as column id
-                column_mapping.insert(idx, column_id);
-                let column_desc = ColumnDesc::from_field_with_column_id(&fields[idx], column_id);
-                columns.push(ColumnCatalog {
-                    column_desc: column_desc.clone(),
-                    is_hidden: false,
-                });
-                order_desc.push(OrderedColumnDesc {
-                    column_desc,
-                    order: OrderType::Ascending,
-                })
-            }
+            let mut columns = columns.clone();
             match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg => {
                     for input in &agg_call.inputs {
@@ -182,8 +184,8 @@ impl LogicalAgg {
                 associated_source_id: None,
                 name: String::new(),
                 columns,
-                order_desc,
-                pks: internal_pk_indices,
+                order_desc: order_desc.clone(),
+                pks: internal_pk_indices.clone(),
                 is_index_on: None,
                 distribution_keys: base.dist.dist_column_indices().to_vec(),
                 appendonly: false,
