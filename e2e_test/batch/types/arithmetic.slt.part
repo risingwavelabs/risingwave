@@ -104,22 +104,22 @@ select TIME '18:20:49' -  TIME '16:07:16';
 02:13:33
 
 query T
-select TIME '18:20:49' -  interval '2' hour;
+select TIME '18:20:49' -  interval '2 hours';
 ----
 16:20:49
 
 query T
-select TIME '18:20:49' -  interval '1' days;
+select TIME '18:20:49' -  interval '1 day';
 ----
-18:20:48
+18:20:49
 
 query T
-select TIME '18:20:49' +  interval '1' days;
+select TIME '18:20:49' +  interval '1 day';
 ----
-18:20:50
+18:20:49
 
 query T
-select TIME '18:20:49' +  interval '1' hour;
+select TIME '18:20:49' +  interval '1 hour';
 ----
 19:20:49
 
