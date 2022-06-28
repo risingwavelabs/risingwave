@@ -111,6 +111,17 @@ impl HummockStorage {
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
+
+        // The correctness of using compaction_group_id in read path and write path holds only
+        // because we are currently:
+        //
+        // a) adopting static compaction group. It means a table_id->compaction_group mapping would
+        // never change since creation until the table is dropped.
+        //
+        // b) enforcing shared buffer to split output SSTs by compaction group. It means no SSTs
+        // would contain tables from different compaction_group, even for those in L0.
+        //
+        // When adopting dynamic compaction group in the future, be sure to revisit this assumption.
         for level in pinned_version.levels(compaction_group_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
@@ -255,6 +266,8 @@ impl HummockStorage {
             }
         }
 
+        // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
+        // read/write path.
         for level in pinned_version.levels(compaction_group_id) {
             if level.table_infos.is_empty() {
                 continue;
@@ -381,6 +394,8 @@ impl StateStore for HummockStorage {
         async move {
             let epoch = write_options.epoch;
             let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
+            // See comments in HummockStorage::iter_inner for details about using
+            // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
                 .write_shared_buffer(epoch, compaction_group_id, kv_pairs, false)
@@ -398,6 +413,8 @@ impl StateStore for HummockStorage {
         async move {
             let epoch = write_options.epoch;
             let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
+            // See comments in HummockStorage::iter_inner for details about using
+            // compaction_group_id in read/write path.
             self.local_version_manager
                 .write_shared_buffer(epoch, compaction_group_id, kv_pairs, true)
                 .await?;
