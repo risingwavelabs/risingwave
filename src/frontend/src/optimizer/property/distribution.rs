@@ -65,6 +65,8 @@ pub enum Distribution {
     /// records with the same hash values must be on the same partition.
     /// `usize` is the index of column used as the distribution key.
     HashShard(Vec<usize>),
+    /// Records are available on all downstream shards
+    Broadcast,
 }
 
 /// the distribution property requirement.
@@ -90,6 +92,7 @@ impl Distribution {
                 Distribution::HashShard(_) => DistributionMode::Hash,
                 // TODO: add round robin DistributionMode
                 Distribution::SomeShard => DistributionMode::Single,
+                Distribution::Broadcast => DistributionMode::Broadcast,
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
@@ -99,6 +102,7 @@ impl Distribution {
                 })),
                 // TODO: add round robin distribution
                 Distribution::SomeShard => None,
+                Distribution::Broadcast => None,
             },
         }
     }
@@ -124,7 +128,7 @@ impl Distribution {
     /// valid.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
-            Distribution::Single | Distribution::SomeShard => Default::default(),
+            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => Default::default(),
             Distribution::HashShard(dists) => dists,
         }
     }

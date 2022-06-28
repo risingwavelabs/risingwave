@@ -34,9 +34,6 @@ impl BatchSimpleAgg {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let input_dist = input.distribution();
-        match input_dist {
-            Distribution::Single | Distribution::SomeShard | Distribution::HashShard(_) => {}
-        };
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
