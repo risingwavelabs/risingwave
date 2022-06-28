@@ -17,7 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
-use risingwave_pb::catalog::{Sink, Source};
+use risingwave_pb::catalog::{Source};
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
@@ -246,14 +246,6 @@ impl StreamServiceImpl {
                     .create_table_source(&id, columns)?;
             }
         };
-
-        Ok(())
-    }
-
-    async fn create_sink_inner(&self, sink: &Sink) -> RwResult<()> {
-        let id = TableId::new(sink.id); // TODO: use SinkId instead
-
-        self.env.sink_manager().create_sink(&id).await?;
 
         Ok(())
     }
