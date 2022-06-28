@@ -4481,6 +4481,7 @@ dependencies = [
  "num-traits",
  "parking_lot",
  "paste",
+ "prometheus",
  "prost",
  "protobuf",
  "protobuf-codegen-pure",
