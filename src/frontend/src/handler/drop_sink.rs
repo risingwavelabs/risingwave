@@ -31,13 +31,16 @@ pub async fn handle_drop_sink(
 
     check_source(catalog_reader, session.clone(), &schema_name, &sink_name)?;
 
-    let sink = catalog_reader
-        .read_guard()
-        .get_sink_by_name(session.database(), &schema_name, &sink_name)?
-        .clone();
+    // let sink = catalog_reader
+    //     .read_guard()
+    //     .get_sink_by_name(session.database(), &schema_name, &sink_name)?
+    //     .clone();
+
+    let sink = 0;
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_sink(sink.id).await?;
+    // catalog_writer.drop_sink(sink.id).await?;
+    catalog_writer.drop_sink(sink).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }
@@ -57,7 +60,7 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql_create_table).await.unwrap();
         frontend.run_sql(sql_create_mv).await.unwrap();
-        // frontend.run_sql(sql_create_sink).await.unwrap();
+        frontend.run_sql(sql_create_sink).await.unwrap();
         frontend.run_sql(sql_drop_sink).await.unwrap();
 
         let session = frontend.session_ref();

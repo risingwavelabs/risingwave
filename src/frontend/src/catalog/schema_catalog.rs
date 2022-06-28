@@ -36,7 +36,6 @@ pub struct SchemaCatalog {
     table_name_by_id: HashMap<TableId, String>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
-    sink_by_name: HashMap<String, SinkCatalog>,
     sink_name_by_id: HashMap<SinkId, String>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
@@ -85,15 +84,11 @@ impl SchemaCatalog {
         let name = prost.name.clone();
         let id = prost.id;
 
-        self.sink_by_name
-            .try_insert(name.clone(), SinkCatalog::from(&prost))
-            .unwrap();
         self.sink_name_by_id.try_insert(id, name).unwrap();
     }
 
     pub fn drop_sink(&mut self, id: SinkId) {
-        let name = self.sink_name_by_id.remove(&id).unwrap();
-        self.sink_by_name.remove(&name).unwrap();
+        self.sink_name_by_id.remove(&id).unwrap();
     }
 
     pub fn iter_table(&self) -> impl Iterator<Item = &TableCatalog> {
@@ -136,13 +131,6 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
-    /// Iterate all sinks.
-    pub fn iter_sink(&self) -> impl Iterator<Item = &SinkCatalog> {
-        self.sink_by_name
-            .iter()
-            .map(|(_, v)| v)
-    }
-
     /// Iterate the materialized sources.
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &SourceCatalog> {
         self.source_by_name
@@ -164,10 +152,6 @@ impl SchemaCatalog {
 
     pub fn get_source_by_name(&self, source_name: &str) -> Option<&SourceCatalog> {
         self.source_by_name.get(source_name)
-    }
-
-    pub fn get_sink_by_name(&self, sink_name: &str) -> Option<&SinkCatalog> {
-        self.sink_by_name.get(sink_name)
     }
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
@@ -196,7 +180,6 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
-            sink_by_name: HashMap::new(),
             sink_name_by_id: HashMap::new(),
             system_table_by_name: HashMap::new(),
             owner: schema.owner.clone(),
