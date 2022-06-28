@@ -19,17 +19,21 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::{
     concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
 };
-use crate::executor::{BoxedDataChunkStream, BoxedExecutor, Executor};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
+use crate::task::BatchTaskContext;
 
 pub struct LookupJoinExecutor {
     join_type: JoinType,
-    join_expr: BoxedExpression,
+    condition: Option<BoxedExpression>,
     probe_side_source: RowLevelIter,
     probe_side_schema: Vec<DataType>,
     probe_side_idxs: Vec<usize>,
@@ -39,8 +43,8 @@ pub struct LookupJoinExecutor {
     chunk_builder: DataChunkBuilder,
     schema: Schema,
     output_indices: Vec<usize>,
-    identity: String,
     last_chunk: Option<SlicedDataChunk>,
+    identity: String,
 }
 
 impl Executor for LookupJoinExecutor {
@@ -115,10 +119,15 @@ impl LookupJoinExecutor {
             )?;
 
             let new_chunk = concatenate(&const_row_chunk, &build_side_chunk)?;
-            let visibility = self.join_expr.eval(&new_chunk)?;
-            Ok(Some(
-                new_chunk.with_visibility(visibility.as_bool().try_into()?),
-            ))
+
+            if let Some(cond) = self.condition.as_ref() {
+                let visibility = cond.eval(&new_chunk)?;
+                Ok(Some(
+                    new_chunk.with_visibility(visibility.as_bool().try_into()?),
+                ))
+            } else {
+                Ok(Some(new_chunk))
+            }
         } else {
             Ok(None)
         }
@@ -158,5 +167,78 @@ impl LookupJoinExecutor {
         let (mut left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(input_chunk)?;
         std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
         Ok(return_chunk)
+    }
+}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for LookupJoinExecutor {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        ensure!(
+            inputs.len() == 2,
+            "LookupJoinExeuctor should have 2 children!"
+        );
+
+        let lookup_join_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::LookupJoin
+        )?;
+
+        let join_type = JoinType::from_prost(lookup_join_node.get_join_type()?);
+        let condition = match lookup_join_node.get_condition() {
+            Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
+            Err(_) => None,
+        };
+
+        let left_child = inputs.remove(0);
+        let probe_side_schema = left_child.schema().data_types();
+
+        let right_child = inputs.remove(0);
+        let build_side_schema = right_child.schema().data_types();
+
+        let output_indices: Vec<usize> = lookup_join_node
+            .output_indices
+            .iter()
+            .map(|&x| x as usize)
+            .collect();
+
+        let fields = [
+            left_child.schema().fields.clone(),
+            right_child.schema().fields.clone(),
+        ]
+        .concat();
+        let original_schema = Schema { fields };
+        let actual_schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
+
+        let mut probe_side_idxs = vec![];
+        for left_key in lookup_join_node.get_left_key() {
+            probe_side_idxs.push(*left_key as usize)
+        }
+
+        let mut build_side_idxs = vec![];
+        for right_key in lookup_join_node.get_right_key() {
+            build_side_idxs.push(*right_key as usize)
+        }
+
+        Ok(Box::new(Self {
+            join_type,
+            condition,
+            probe_side_source: RowLevelIter::new(left_child),
+            probe_side_schema,
+            probe_side_idxs,
+            build_side: RowLevelIter::new(right_child),
+            build_side_schema,
+            build_side_idxs,
+            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
+            schema: actual_schema,
+            output_indices,
+            last_chunk: None,
+            identity: "LookupJoinExecutor".to_string(),
+        }))
     }
 }

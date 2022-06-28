@@ -25,6 +25,7 @@ use std::sync::Arc;
 pub use chunked_data::*;
 pub use hash_join::*;
 use itertools::Itertools;
+pub use lookup_join::*;
 pub use nested_loop_join::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, RowRef, Vis};
