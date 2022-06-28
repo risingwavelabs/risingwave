@@ -50,7 +50,7 @@ if [ "$PUSH_GHCR" = true ]; then
   do
     docker push "${ghcraddr}/${component}:latest"
     if [ "${BUILDKITE_SOURCE}" == "schedule" ] || [ "${BUILDKITE_SOURCE}" == "ui" ]; then
-      # If this is a main-cron build, tag the image with the date.
+      # If this is a schedule/ui build, tag the image with the date.
       TAG="${ghcraddr}/${component}:nightly-${date}"
       docker push "$TAG"
     fi
