@@ -37,7 +37,7 @@ pub struct SchemaCatalog {
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
 
-    // Can be replaced with a bijective map: https://crates.io/crates/bimap.
+    // TODO(nanderstabel): Can be replaced with a bijective map: https://crates.io/crates/bimap.
     sink_id_by_name: HashMap<String, SinkId>,
     sink_name_by_id: HashMap<SinkId, String>,
 
