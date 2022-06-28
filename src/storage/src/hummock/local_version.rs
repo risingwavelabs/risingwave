@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
@@ -24,8 +25,6 @@ use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
-use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
-use crate::hummock::shared_buffer::{OrderIndex, UploadTaskType};
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
@@ -58,10 +57,14 @@ impl LocalVersion {
         self.shared_buffer.iter()
     }
 
-    pub fn new_shared_buffer(&mut self, epoch: HummockEpoch) -> Arc<RwLock<SharedBuffer>> {
+    pub fn new_shared_buffer(
+        &mut self,
+        epoch: HummockEpoch,
+        global_upload_task_size: Arc<AtomicUsize>,
+    ) -> Arc<RwLock<SharedBuffer>> {
         self.shared_buffer
             .entry(epoch)
-            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::default())))
+            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::new(global_upload_task_size))))
             .clone()
     }
 
@@ -102,16 +105,6 @@ impl LocalVersion {
             shared_buffer: shared_buffer.into_iter().map(|x| x.read_arc()).collect(),
             pinned_version,
         }
-    }
-
-    pub fn new_upload_task(
-        &self,
-        epoch: HummockEpoch,
-        task_type: UploadTaskType,
-    ) -> Option<(OrderIndex, UploadTaskPayload)> {
-        self.shared_buffer
-            .get(&epoch)
-            .and_then(|shared_buffer| shared_buffer.write().new_upload_task(task_type))
     }
 }
 
