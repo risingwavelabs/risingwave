@@ -46,6 +46,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 use tokio_retry::strategy::FixedInterval;
 
+use crate::barrier::ChangedTableState::NoTable;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
@@ -677,19 +678,22 @@ where
         };
 
         if !diff.is_empty() {
-            let command = Command::Plain(Some(Mutation::Splits(SourceChangeSplitMutation {
-                actor_splits: diff
-                    .iter()
-                    .map(|(&actor_id, splits)| {
-                        (
-                            actor_id,
-                            ConnectorSplits {
-                                splits: splits.iter().map(ConnectorSplit::from).collect(),
-                            },
-                        )
-                    })
-                    .collect(),
-            })));
+            let command = Command::Plain {
+                mutation: Some(Mutation::Splits(SourceChangeSplitMutation {
+                    actor_splits: diff
+                        .iter()
+                        .map(|(&actor_id, splits)| {
+                            (
+                                actor_id,
+                                ConnectorSplits {
+                                    splits: splits.iter().map(ConnectorSplit::from).collect(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })),
+                changed_table_id: NoTable,
+            };
 
             log::debug!("pushing down mutation {:#?}", command);
 

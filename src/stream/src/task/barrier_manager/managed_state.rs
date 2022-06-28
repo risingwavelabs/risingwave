@@ -15,12 +15,15 @@
 use std::collections::{HashMap, HashSet};
 use std::iter::once;
 
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use tokio::sync::oneshot;
 
 use super::progress::ChainState;
 use super::CollectResult;
 use crate::executor::Barrier;
+use crate::task::barrier_manager::managed_state::ManagedBarrierStateInner::Issued;
 use crate::task::ActorId;
 
 /// The state machine of local barrier manager.
@@ -39,7 +42,7 @@ enum ManagedBarrierStateInner {
         remaining_actors: HashSet<ActorId>,
 
         /// Notify that the collection is finished.
-        collect_notifier: oneshot::Sender<CollectResult>,
+        collect_notifier: oneshot::Sender<Result<CollectResult>>,
     },
 }
 
@@ -96,7 +99,7 @@ impl ManagedBarrierState {
                         create_mview_progress,
                         synced_sstables: vec![],
                     };
-                    if collect_notifier.send(result).is_err() {
+                    if collect_notifier.send(Ok(result)).is_err() {
                         warn!(
                             "failed to notify barrier collection with epoch {}",
                             curr_epoch
@@ -106,6 +109,29 @@ impl ManagedBarrierState {
                 _ => unreachable!(),
             }
         }
+    }
+
+    /// Remove stop barrier (epoch < `curr_epoch`), and send err.
+    pub(crate) fn remove_stop_barrier(&mut self, curr_epoch: u64) {
+        let stop_barrier = self
+            .epoch_barrier_state_map
+            .drain_filter(|k, _| k < &curr_epoch);
+        stop_barrier.for_each(|(k, v)| {
+            assert!(k < curr_epoch);
+            if let Issued {
+                collect_notifier, ..
+            } = v
+            {
+                if collect_notifier
+                    .send(Err(RwError::from(InternalError(
+                        "fail before this epoch".to_string(),
+                    ))))
+                    .is_err()
+                {
+                    warn!("fail stop barrier with curr_epoch{}", k)
+                }
+            }
+        })
     }
 
     /// Collect a `barrier` from the actor with `actor_id`.
@@ -127,7 +153,11 @@ impl ManagedBarrierState {
                 remaining_actors, ..
             }) => {
                 let exist = remaining_actors.remove(&actor_id);
-                assert!(exist);
+                assert!(
+                    exist,
+                    "the actor doesn't exist; actor_id:{:?},curr_epoch:{:?}",
+                    actor_id, barrier.epoch.curr
+                );
                 self.may_notify(barrier.epoch.curr);
             }
             None => {
@@ -147,7 +177,7 @@ impl ManagedBarrierState {
         &mut self,
         barrier: &Barrier,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-        collect_notifier: oneshot::Sender<CollectResult>,
+        collect_notifier: oneshot::Sender<Result<CollectResult>>,
     ) {
         let inner = match self.epoch_barrier_state_map.get(&barrier.epoch.curr) {
             Some(ManagedBarrierStateInner::Stashed { collected_actors }) => {

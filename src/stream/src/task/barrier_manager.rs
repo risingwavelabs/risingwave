@@ -68,7 +68,7 @@ pub struct LocalBarrierManager {
     state: BarrierState,
 
     /// Save collect rx
-    collect_complete_receiver: HashMap<u64, Option<oneshot::Receiver<CollectResult>>>,
+    collect_complete_receiver: HashMap<u64, Option<oneshot::Receiver<Result<CollectResult>>>>,
 }
 
 impl Default for LocalBarrierManager {
@@ -163,7 +163,10 @@ impl LocalBarrierManager {
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> oneshot::Receiver<CollectResult> {
+    pub fn remove_collect_rx(
+        &mut self,
+        prev_epoch: u64,
+    ) -> oneshot::Receiver<Result<CollectResult>> {
         self.collect_complete_receiver
             .remove(&prev_epoch)
             .unwrap_or_else(|| {
@@ -178,7 +181,15 @@ impl LocalBarrierManager {
     /// remove all collect rx less than `prev_epoch`
     pub fn drain_collect_rx(&mut self, prev_epoch: u64) {
         self.collect_complete_receiver
-            .drain_filter(|x, _| x < &prev_epoch);
+            .drain_filter(|x, _| x <= &prev_epoch);
+        match &mut self.state {
+            #[cfg(test)]
+            BarrierState::Local => {}
+
+            BarrierState::Managed(managed_state) => {
+                managed_state.remove_stop_barrier(prev_epoch);
+            }
+        }
     }
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report

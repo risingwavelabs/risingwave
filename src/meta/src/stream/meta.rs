@@ -26,6 +26,7 @@ use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
+use crate::barrier::ChangedTableState;
 use crate::cluster::WorkerId;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
@@ -305,15 +306,21 @@ where
     }
 
     /// Used in [`crate::barrier::GlobalBarrierManager`]
-    pub async fn load_all_actors(&self, with_creating_table: Option<TableId>) -> ActorInfos {
+    pub async fn load_all_actors(&self, with_creating_table: ChangedTableState) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            let include_inactive = with_creating_table.contains(&fragments.table_id());
-            let check_state = |s: ActorState| {
-                s == ActorState::Running || include_inactive && s == ActorState::Inactive
+            let check_state = |s: ActorState| match with_creating_table {
+                ChangedTableState::NoTable => s == ActorState::Running,
+                ChangedTableState::Drop(table_id) => {
+                    s == ActorState::Running && !table_id.eq(&fragments.table_id())
+                }
+                ChangedTableState::Create(table_id) => {
+                    s == ActorState::Running
+                        || table_id.eq(&fragments.table_id()) && s == ActorState::Inactive
+                }
             };
 
             for (node_id, actor_states) in fragments.node_actor_states() {

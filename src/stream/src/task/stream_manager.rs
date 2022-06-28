@@ -187,14 +187,14 @@ impl LocalStreamManager {
         &self,
         prev_epoch: u64,
         need_sync: bool,
-    ) -> CollectResult {
+    ) -> Result<CollectResult> {
         let rx = {
             let core = self.core.lock();
             let mut barrier_manager = core.context.lock_barrier_manager();
             barrier_manager.remove_collect_rx(prev_epoch)
         };
         // Wait for all actors finishing this barrier.
-        let mut collect_result = rx.await.unwrap();
+        let mut collect_result = rx.await.unwrap()?;
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         if need_sync {
@@ -214,7 +214,7 @@ impl LocalStreamManager {
             });
         }
 
-        collect_result
+        Ok(collect_result)
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
@@ -257,10 +257,10 @@ impl LocalStreamManager {
             span: tracing::Span::none(),
         };
 
-        self.drain_collect_rx(barrier.epoch.prev);
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
         self.collect_barrier_and_sync(barrier.epoch.prev, false)
-            .await;
+            .await?;
+        self.drain_collect_rx(barrier.epoch.prev);
         self.core.lock().drop_all_actors();
 
         Ok(())

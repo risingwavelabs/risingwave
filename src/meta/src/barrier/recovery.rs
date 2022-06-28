@@ -33,6 +33,7 @@ use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
+use crate::barrier::ChangedTableState::NoTable;
 use crate::barrier::{Command, GlobalBarrierManager};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
@@ -64,7 +65,7 @@ where
         debug!("recovery start!");
         let retry_strategy = Self::get_retry_strategy();
         let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let info = self.resolve_actor_info(None).await;
+            let info = self.resolve_actor_info(NoTable).await;
             let mut new_epoch = prev_epoch.next();
             // Reset all compute nodes, stop and drop existing actors.
             self.reset_compute_nodes(&info, &prev_epoch, &new_epoch)
@@ -95,7 +96,7 @@ where
                 info,
                 prev_epoch,
                 new_epoch,
-                Command::checkpoint(),
+                Command::checkpoint(NoTable),
             ));
 
             let command_ctx_clone = command_ctx.clone();
