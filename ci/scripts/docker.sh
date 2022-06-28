@@ -6,24 +6,6 @@ set -euo pipefail
 date="$(date +%Y%m%d)"
 ghcraddr="ghcr.io/singularity-data"
 
-# If this is a schedule/ui build, tag the image with the date.
-if [ "${BUILDKITE_SOURCE}" == "schedule" ] || [ "${BUILDKITE_SOURCE}" == "ui" ]; then
-  TAG="nightly-${date}"
-  echo "$TAG"
-fi
-
-# If there's a tag, we tag the image.
-if [[ -n "${BUILDKITE_TAG}" ]]; then
-  TAG="${BUILDKITE_TAG}"
-  echo "$TAG"
-fi
-
-# If the commit is 40 characters long, it's probably a SHA.
-if [[ "${#BUILDKITE_COMMIT}" = 40 ]]; then
-  TAG="git-${BUILDKITE_COMMIT}"
-  echo "$TAG"
-fi
-
 components=(
   "risingwave"
   "compute-node"
@@ -36,7 +18,24 @@ for component in "${components[@]}"
 do
   echo "--- docker build and tag : ${component}"
   docker build -f docker/Dockerfile -t "${ghcraddr}/${component}:latest" --target "${component}" .
-  docker tag "${ghcraddr}/${component}:latest" "${ghcraddr}/${component}:${TAG}"
+  if [ "${BUILDKITE_SOURCE}" == "schedule" ] || [ "${BUILDKITE_SOURCE}" == "ui" ]; then
+    # If this is a schedule/ui build, tag the image with the date.
+    TAG="${ghcraddr}/${component}:nightly-${date}"
+    docker tag "${ghcraddr}/${component}:latest" "$TAG"
+    echo "$TAG"
+  fi
+  if [[ -n "${BUILDKITE_TAG}" ]]; then
+    # If there's a tag, we tag the image.
+    TAG="${ghcraddr}/${component}:${BUILDKITE_TAG}"
+    docker tag "${ghcraddr}/${component}:latest" "$TAG"
+    echo "$TAG"
+  fi
+  if [[ "${#BUILDKITE_COMMIT}" = 40 ]]; then
+    # If the commit is 40 characters long, it's probably a SHA.
+    TAG="${ghcraddr}/${component}:git-${BUILDKITE_COMMIT}"
+    docker tag "${ghcraddr}/${component}:latest" "$TAG"
+    echo "$TAG"
+  fi
 done
 
 echo "--- docker images"
@@ -50,6 +49,20 @@ if [ "$PUSH_GHCR" = true ]; then
   for component in "${components[@]}"
   do
     docker push "${ghcraddr}/${component}:latest"
-    docker push "${ghcraddr}/${component}:${TAG}"
+    if [ "${BUILDKITE_SOURCE}" == "schedule" ] || [ "${BUILDKITE_SOURCE}" == "ui" ]; then
+      # If this is a main-cron build, tag the image with the date.
+      TAG="${ghcraddr}/${component}:nightly-${date}"
+      docker push "$TAG"
+    fi
+    if [[ -n "${BUILDKITE_TAG}" ]]; then
+      # If there's a tag, we tag the image.
+      TAG="${ghcraddr}/${component}:${BUILDKITE_TAG}"
+      docker push "$TAG"
+    fi
+    if [[ "${#BUILDKITE_COMMIT}" = 40 ]]; then
+      # If the commit is 40 characters long, it's probably a SHA.
+      TAG="${ghcraddr}/${component}:git-${BUILDKITE_COMMIT}"
+      docker push "$TAG"
+    fi
   done
 fi
