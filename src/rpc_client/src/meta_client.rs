@@ -20,8 +20,7 @@ use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;

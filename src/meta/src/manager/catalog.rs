@@ -41,12 +41,7 @@ pub type TableId = u32;
 pub type SourceId = u32;
 pub type RelationId = u32;
 
-pub type Catalog = (
-    Vec<Database>,
-    Vec<Schema>,
-    Vec<Table>,
-    Vec<Source>,
-);
+pub type Catalog = (Vec<Database>, Vec<Schema>, Vec<Table>, Vec<Source>);
 
 pub struct CatalogManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
