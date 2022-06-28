@@ -20,13 +20,13 @@ pub fn length_default(s: &str) -> Result<i32> {
 }
 
 #[inline(always)]
-pub fn bit_length(s: &str) -> Result<i32> {
-    octet_length(s).map(|n| n * 8)
+pub fn octet_length(s: &str) -> Result<i32> {
+    Ok(s.as_bytes().len() as i32)
 }
 
 #[inline(always)]
-pub fn octet_length(s: &str) -> Result<i32> {
-    Ok(s.as_bytes().len() as i32)
+pub fn bit_length(s: &str) -> Result<i32> {
+    octet_length(s).map(|n| n * 8)
 }
 
 #[cfg(test)]
