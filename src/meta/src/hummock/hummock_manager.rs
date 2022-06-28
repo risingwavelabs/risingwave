@@ -226,6 +226,12 @@ where
             .map(|version| (version.id, version))
             .collect();
 
+        versioning_guard.hummock_version_deltas = HummockVersionDelta::list(self.env.meta_store())
+            .await?
+            .into_iter()
+            .map(|version_delta| (version_delta.id, version_delta))
+            .collect();
+
         // Insert the initial version.
         if versioning_guard.hummock_versions.is_empty() {
             let mut init_version = HummockVersion {
