@@ -15,16 +15,14 @@
 use std::collections::HashMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{Result};
 use risingwave_pb::catalog::Sink as ProstSink;
-use risingwave_sqlparser::ast::{CreateSinkStatement, SqlOption, Value};
+use risingwave_sqlparser::ast::{CreateSinkStatement};
 
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
-use crate::optimizer::PlanRef;
-use crate::planner::Planner;
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::session::{OptimizerContext};
+use super::util::handle_with_properties;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
@@ -32,6 +30,7 @@ pub(crate) fn make_prost_sink(
     name: String,
     mv_name: String,
     properties: HashMap<String, String>,
+    owner: String
 ) -> Result<ProstSink> {
 
     Ok(ProstSink {
@@ -41,63 +40,53 @@ pub(crate) fn make_prost_sink(
         name,
         mv_name,
         properties,
+        owner
     })
 }
 
-fn handle_sink_with_properties(options: Vec<SqlOption>) -> Result<HashMap<String, String>> {
-    options
-        .into_iter()
-        .map(|x| match x.value {
-            Value::SingleQuotedString(s) => Ok((x.name.value, s)),
-            _ => Err(RwError::from(ProtocolError(
-                "with properties only support single quoted string value".to_string(),
-            ))),
-        })
-        .collect()
-}
+// pub fn gen_create_sink_plan(
+//     session: &SessionImpl,
+//     context: OptimizerContextRef,
+//     stmt: CreateSinkStatement,
+// ) -> Result<(PlanRef, ProstSink)> {
+//     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
+//     let (database_id, schema_id) = session
+//         .env()
+//         .catalog_reader()
+//         .read_guard()
+//         .check_relation_name_duplicated(
+//             session.database(),
+//             &schema_name,
+//             sink_name.as_str(),
+//         )?;
 
-pub fn gen_create_sink_plan(
-    session: &SessionImpl,
-    context: OptimizerContextRef,
-    stmt: CreateSinkStatement,
-) -> Result<(PlanRef, ProstSink)> {
-    let (schema_name, table_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(
-            session.database(),
-            &schema_name,
-            &stmt.sink_name.to_string(),
-        )?;
+//     let mv_name = stmt.materialized_view.to_string();
 
-    let mv_name = stmt.materialized_view.to_string();
+//     let relation = {
+//         let mut binder = Binder::new(
+//             session.env().catalog_reader().read_guard(),
+//             session.database().to_string(),
+//         );
+//         binder.bind_table_or_source(
+//             &schema_name,
+//             mv_name.as_str(),
+//             None,
+//         )?
+//     };
 
-    let relation = {
-        let mut binder = Binder::new(
-            session.env().catalog_reader().read_guard(),
-            session.database().to_string(),
-        );
-        binder.bind_table_or_source(
-            &schema_name,
-            mv_name.as_str(),
-            None,
-        )?
-    };
+//     let plan = Planner::new(context).plan_relation(relation)?;
 
-    let plan = Planner::new(context).plan_relation(relation)?;
+//     let sink = make_prost_sink(
+//         database_id,
+//         schema_id,
+//         stmt.sink_name.to_string(),
+//         mv_name,
+//         handle_with_properties("create_sink", stmt.with_properties.0)?,
+//         session.user_name().to_string(),
+//     )?;
 
-    let sink = make_prost_sink(
-        database_id,
-        schema_id,
-        stmt.sink_name.to_string(),
-        mv_name,
-        handle_sink_with_properties(stmt.with_properties.0)?,
-    )?;
-
-    Ok((plan, sink))
-}
+//     Ok((plan, sink))
+// }
 
 pub async fn handle_create_sink(
     context: OptimizerContext,
@@ -105,13 +94,34 @@ pub async fn handle_create_sink(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let (sink, graph) = {
-        let (plan, sink) = gen_create_sink_plan(&session, context.into(), stmt)?;
-        // let stream_plan = plan.to_stream_prost();
-        // let graph = StreamFragmenter::build_graph(stream_plan);
+    // let (sink, graph) = {
+    //     let (plan, sink) = gen_create_sink_plan(&session, context.into(), stmt)?;
+    //     let stream_plan = plan.to_stream_prost();
+    //     let graph = StreamFragmenter::build_graph(stream_plan);
 
-        (sink, 1)
-    };
+    //     (sink, 1)
+    // };
+    
+    let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
+    let (database_id, schema_id) = session
+        .env()
+        .catalog_reader()
+        .read_guard()
+        .check_relation_name_duplicated(
+            session.database(),
+            &schema_name,
+            sink_name.as_str(),
+        )?;
+
+    let mv_name = stmt.materialized_view.to_string();
+    let sink = make_prost_sink(
+        database_id,
+        schema_id,
+        stmt.sink_name.to_string(),
+        mv_name,
+        handle_with_properties("create_sink", stmt.with_properties.0)?,
+        session.user_name().to_string(),
+    )?;
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_sink(sink).await?;

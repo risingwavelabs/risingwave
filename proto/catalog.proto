@@ -40,6 +40,7 @@ message Sink {
   string name = 4;
   string mv_name = 5;
   map<string, string> properties = 6;
+  string owner = 7;
 }
 
 /// See `TableCatalog` struct in frontend crate for more information.
