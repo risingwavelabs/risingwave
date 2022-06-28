@@ -38,7 +38,7 @@ message Sink {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
-  string materialized_view = 5; //TODO(nanderstabel): Change to 'table' message instead of string?
+  string mv_name = 5;
   map<string, string> properties = 6;
 }
 

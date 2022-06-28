@@ -14,52 +14,32 @@
 
 use std::collections::HashMap;
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::Sink as ProstSink;
-use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
-use risingwave_sqlparser::ast::{CreateSinkStatement, ObjectName, SqlOption, Value};
+use risingwave_sqlparser::ast::{CreateSinkStatement, SqlOption, Value};
 
-use super::create_table::bind_sql_columns;
 use crate::binder::Binder;
-use crate::catalog::column_catalog::ColumnCatalog;
-use crate::optimizer::property::RequiredDist;
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
-
-// feedback tao
-// database_id: DatabaseId,
-// schema_id: SchemaId,
-// sink_name: String,
-// mv_name: String,
-// properties: HashMap<String, String>,
 
 pub(crate) fn make_prost_sink(
-    session: &SessionImpl,
-    name: ObjectName,
-    materialized_view: ObjectName,
+    database_id: DatabaseId,
+    schema_id: SchemaId,
+    name: String,
+    mv_name: String,
     properties: HashMap<String, String>,
 ) -> Result<ProstSink> {
-    let (schema_name, name) = Binder::resolve_table_name(name)?;
-
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(session.database(), &schema_name, &name)?;
-
-    let (_, materialized_view) = Binder::resolve_table_name(materialized_view)?;
 
     Ok(ProstSink {
         id: 0,
         schema_id,
         database_id,
         name,
-        materialized_view,
+        mv_name,
         properties,
     })
 }
@@ -92,6 +72,8 @@ pub fn gen_create_sink_plan(
             &stmt.sink_name.to_string(),
         )?;
 
+    let mv_name = stmt.materialized_view.to_string();
+
     let relation = {
         let mut binder = Binder::new(
             session.env().catalog_reader().read_guard(),
@@ -99,7 +81,7 @@ pub fn gen_create_sink_plan(
         );
         binder.bind_table_or_source(
             &schema_name,
-            stmt.materialized_view.to_string().as_str(),
+            mv_name.as_str(),
             None,
         )?
     };
@@ -107,9 +89,10 @@ pub fn gen_create_sink_plan(
     let plan = Planner::new(context).plan_relation(relation)?;
 
     let sink = make_prost_sink(
-        &session,
-        stmt.sink_name,
-        stmt.materialized_view,
+        database_id,
+        schema_id,
+        stmt.sink_name.to_string(),
+        mv_name,
         handle_sink_with_properties(stmt.with_properties.0)?,
     )?;
 
@@ -138,13 +121,8 @@ pub async fn handle_create_sink(
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashMap;
-
-    use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-    use risingwave_common::types::DataType;
 
-    use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
