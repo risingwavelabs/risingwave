@@ -1009,6 +1009,41 @@
                         BatchFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
                           BatchScan { table: nation, columns: [n_nationkey, n_name] }
   stream_plan: |
+    StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
+      StreamExchange { dist: HashShard([0]) }
+        StreamProject { exprs: [$0, $2] }
+          StreamDynamicFilter { predicate: ($3 > $4) }
+            StreamExchange { dist: HashShard([3]) }
+              StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), sum($1)] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamProject { exprs: [$0, ($2 * $1), $3, $4, $5] }
+                    StreamHashJoin { type: Inner, predicate: $3 = $6, output_indices: [0, 1, 2, 4, 5, 7] }
+                      StreamExchange { dist: HashShard([3]) }
+                        StreamHashJoin { type: Inner, predicate: $1 = $5, output_indices: [0, 2, 3, 6, 4, 7] }
+                          StreamExchange { dist: HashShard([1]) }
+                            StreamTableScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, _row_id], pk_indices: [4] }
+                          StreamExchange { dist: HashShard([0]) }
+                            StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamProject { exprs: [$0, $1] }
+                          StreamFilter { predicate: ($2 = 'ARGENTINA':Varchar) }
+                            StreamTableScan { table: nation, columns: [n_nationkey, _row_id, n_name], pk_indices: [1] }
+            StreamProject { exprs: [($1 * 0.0001000000:Decimal)] }
+              StreamExchange { dist: Broadcast }
+                StreamSimpleAgg { aggs: [count, sum($0)] }
+                  StreamExchange { dist: Single }
+                    StreamProject { exprs: [($1 * $0), $2, $3, $4] }
+                      StreamHashJoin { type: Inner, predicate: $2 = $5, output_indices: [0, 1, 3, 4, 6] }
+                        StreamExchange { dist: HashShard([2]) }
+                          StreamHashJoin { type: Inner, predicate: $0 = $4, output_indices: [1, 2, 5, 3, 6] }
+                            StreamExchange { dist: HashShard([0]) }
+                              StreamTableScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost, _row_id], pk_indices: [3] }
+                            StreamExchange { dist: HashShard([0]) }
+                              StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
+                        StreamExchange { dist: HashShard([0]) }
+                          StreamProject { exprs: [$0, $1] }
+                            StreamFilter { predicate: ($2 = 'ARGENTINA':Varchar) }
+                              StreamTableScan { table: nation, columns: [n_nationkey, _row_id, n_name], pk_indices: [1] }
 - id: tpch_q12
   before:
     - create_tables
@@ -1789,3 +1824,22 @@
                           BatchFilter { predicate: ($0 > 0.00:Decimal) AND In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
                             BatchScan { table: customer, columns: [c_acctbal, c_phone] }
   stream_plan: |
+    StreamMaterialize { columns: [cntrycode, agg#0(hidden), numcust, totacctbal], pk_columns: [cntrycode] }
+      StreamHashAgg { group_keys: [$0], aggs: [count, count, sum($1)] }
+        StreamExchange { dist: HashShard([0]) }
+          StreamProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1, $2] }
+            StreamDynamicFilter { predicate: ($1 > $3) }
+              StreamExchange { dist: HashShard([1]) }
+                StreamHashJoin { type: LeftAnti, predicate: $0 = $4, output_indices: [1, 2, 3] }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamFilter { predicate: In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                      StreamTableScan { table: customer, columns: [c_custkey, c_phone, c_acctbal, _row_id], pk_indices: [3] }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamTableScan { table: orders, columns: [o_custkey, _row_id], pk_indices: [1] }
+              StreamProject { exprs: [($1 / $2)] }
+                StreamExchange { dist: Broadcast }
+                  StreamSimpleAgg { aggs: [count, sum($0), count($0)] }
+                    StreamExchange { dist: Single }
+                      StreamProject { exprs: [$0, $1] }
+                        StreamFilter { predicate: ($0 > 0.00:Decimal) AND In(Substr($2, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                          StreamTableScan { table: customer, columns: [c_acctbal, _row_id, c_phone], pk_indices: [1] }
