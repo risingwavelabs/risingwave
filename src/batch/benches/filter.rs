@@ -14,16 +14,15 @@
 
 use std::sync::Arc;
 
-use criterion::async_executor::AsyncExecutor;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
 use risingwave_batch::executor::test_utils::MockExecutor;
-use risingwave_batch::executor::{BoxedExecutor, Executor, FilterExecutor};
+use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::field_generator::FieldGeneratorImpl;
-use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -64,7 +63,9 @@ fn gen_data(data_type: DataType, batch_size: usize, batch_num: usize) -> Vec<Dat
     ret
 }
 
-async fn execute_filter_executor(input_data: Vec<DataChunk>) {
+fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {
+    let input_data = gen_data(DataType::Int64, chunk_size, chunk_num);
+
     let mut mock_executor = MockExecutor::new(field_n::<1>(DataType::Int64));
     input_data.into_iter().for_each(|c| mock_executor.add(c));
 
@@ -126,30 +127,34 @@ async fn execute_filter_executor(input_data: Vec<DataChunk>) {
         }
     };
 
-    let mut filter_executor = Box::new(FilterExecutor::new(
+    Box::new(FilterExecutor::new(
         build_from_prost(&expr).unwrap(),
         Box::new(mock_executor),
         "FilterBenchmark".to_string(),
     ))
-    .execute();
+}
 
-    while let Some(ret) = filter_executor.next().await {
+async fn execute_filter_executor(executor: BoxedExecutor) {
+    let mut stream = executor.execute();
+    while let Some(ret) = stream.next().await {
         black_box(ret.unwrap());
     }
 }
 
 fn bench_filter(c: &mut Criterion) {
-    const total_size: usize = 1024 * 1024usize;
+    const TOTAL_SIZE: usize = 1024 * 1024usize;
     let rt = Runtime::new().unwrap();
-    for chunk_size in vec![32usize, 128, 512, 1024, 2048, 4096, 8192] {
+    for chunk_size in &[32usize, 128, 512, 1024, 2048, 4096] {
         c.bench_with_input(
             BenchmarkId::new("FilterExecutor", chunk_size),
-            &chunk_size,
+            chunk_size,
             |b, &chunk_size| {
-                let chunk_num = total_size / chunk_size;
-                let data = gen_data(DataType::Int64, chunk_size, chunk_num);
-                b.to_async(&rt)
-                    .iter(|| execute_filter_executor(data.clone()));
+                let chunk_num = TOTAL_SIZE / chunk_size;
+                b.to_async(&rt).iter_batched(
+                    || create_filter_executor(chunk_size, chunk_num),
+                    |e| execute_filter_executor(e),
+                    BatchSize::SmallInput,
+                );
             },
         );
     }
