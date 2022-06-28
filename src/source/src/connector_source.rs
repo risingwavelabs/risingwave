@@ -129,6 +129,8 @@ impl InnerConnectorSourceReader {
         mut stop: oneshot::Receiver<()>,
         output: mpsc::Sender<Either<Vec<SourceMessage>, RwError>>,
     ) {
+        let actor_id = self.context.actor_id.to_string();
+        let source_id = self.context.source_id.to_string();
         loop {
             let id = match &self.split {
                 Some(splits) => splits[0].id(),
@@ -162,8 +164,8 @@ impl InnerConnectorSourceReader {
                     self.metrics
                         .partition_input_count
                         .with_label_values(&[
-                            self.context.actor_id.to_string().as_str(),
-                            self.context.source_id.to_string().as_str(),
+                            actor_id.as_str(),
+                            source_id.as_str(),
                             id.as_str(),
                         ])
                         .inc_by(msg.len() as u64);
