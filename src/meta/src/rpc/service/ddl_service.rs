@@ -248,7 +248,6 @@ where
             .await
             .map_err(tonic_err)?;
 
-        // QUESTION(patrick): why do we need to contact compute node on create sink
         if let Err(e) = self.sink_manager.create_sink(&sink).await {
             self.catalog_manager
                 .cancel_create_sink_procedure(&sink)
