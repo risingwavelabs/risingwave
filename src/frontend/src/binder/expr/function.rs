@@ -101,6 +101,7 @@ impl Binder {
                 "char_length" => ExprType::CharLength,
                 "character_length" => ExprType::CharLength,
                 "repeat" => ExprType::Repeat,
+                "ascii" => ExprType::Ascii,
                 "octet_length" => ExprType::OctetLength,
                 "bit_length" => ExprType::BitLength,
                 // special
