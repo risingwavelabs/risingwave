@@ -20,7 +20,7 @@ use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource,
     Table as ProstTable,
 };
 use risingwave_pb::common::WorkerType;
@@ -165,13 +165,6 @@ impl MetaClient {
         Ok((resp.source_id, resp.version))
     }
 
-    pub async fn create_sink(&self, sink: ProstSink) -> Result<(u32, CatalogVersion)> {
-        let request = CreateSinkRequest { sink: Some(sink) };
-
-        let resp = self.inner.create_sink(request).await?;
-        Ok((resp.sink_id, resp.version))
-    }
-
     pub async fn create_materialized_source(
         &self,
         source: ProstSource,
@@ -205,12 +198,6 @@ impl MetaClient {
     pub async fn drop_source(&self, source_id: u32) -> Result<CatalogVersion> {
         let request = DropSourceRequest { source_id };
         let resp = self.inner.drop_source(request).await?;
-        Ok(resp.version)
-    }
-
-    pub async fn drop_sink(&self, sink_id: u32) -> Result<CatalogVersion> {
-        let request = DropSinkRequest { sink_id };
-        let resp = self.inner.drop_sink(request).await?;
         Ok(resp.version)
     }
 
@@ -550,13 +537,11 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_materialized_source, CreateMaterializedSourceRequest, CreateMaterializedSourceResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
-            ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
-            ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, list_materialized_view, ListMaterializedViewRequest, ListMaterializedViewResponse }

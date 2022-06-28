@@ -32,8 +32,7 @@ use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableI
 use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
-    SinkManagerRef, SourceManagerRef,
+    ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef,
 };
 
 #[derive(Clone)]
@@ -43,7 +42,6 @@ pub struct DdlServiceImpl<S: MetaStore> {
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: GlobalStreamManagerRef<S>,
     source_manager: SourceManagerRef<S>,
-    sink_manager: SinkManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -57,7 +55,6 @@ where
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
         source_manager: SourceManagerRef<S>,
-        sink_manager: SinkManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
@@ -66,7 +63,6 @@ where
             catalog_manager,
             stream_manager,
             source_manager,
-            sink_manager,
             cluster_manager,
             fragment_manager,
         }
@@ -224,70 +220,6 @@ where
             .map_err(tonic_err)?;
 
         Ok(Response::new(DropSourceResponse {
-            status: None,
-            version,
-        }))
-    }
-
-    async fn create_sink(
-        &self,
-        request: Request<CreateSinkRequest>,
-    ) -> Result<Response<CreateSinkResponse>, Status> {
-        let mut sink = request.into_inner().sink.unwrap();
-
-        let id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Sink }>()
-            .await
-            .map_err(tonic_err)? as u32;
-        sink.id = id;
-
-        self.catalog_manager
-            .start_create_sink_procedure(&sink)
-            .await
-            .map_err(tonic_err)?;
-
-        if let Err(e) = self.sink_manager.create_sink(&sink).await {
-            self.catalog_manager
-                .cancel_create_sink_procedure(&sink)
-                .await
-                .map_err(tonic_err)?;
-            return Err(e.into());
-        }
-
-        let version = self
-            .catalog_manager
-            .finish_create_sink_procedure(&sink)
-            .await
-            .map_err(tonic_err)?;
-        Ok(Response::new(CreateSinkResponse {
-            status: None,
-            sink_id: id,
-            version,
-        }))
-    }
-
-    async fn drop_sink(
-        &self,
-        request: Request<DropSinkRequest>,
-    ) -> Result<Response<DropSinkResponse>, Status> {
-        let sink_id = request.into_inner().sink_id;
-
-        // 1. Drop sink in catalog. Ref count will be checked.
-        let version = self
-            .catalog_manager
-            .drop_sink(sink_id)
-            .await
-            .map_err(tonic_err)?;
-
-        // 2. Drop sink on compute nodes.
-        self.sink_manager
-            .drop_sink(sink_id)
-            .await
-            .map_err(tonic_err)?;
-
-        Ok(Response::new(DropSinkResponse {
             status: None,
             version,
         }))
