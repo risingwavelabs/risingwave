@@ -61,14 +61,14 @@ struct BufferTracker {
     global_buffer_size: Arc<AtomicUsize>,
     global_upload_task_size: Arc<AtomicUsize>,
 
-    buffer_event_sender: Arc<mpsc::UnboundedSender<SharedBufferEvent>>,
+    buffer_event_sender: mpsc::UnboundedSender<SharedBufferEvent>,
 }
 
 impl BufferTracker {
     pub fn new(
         flush_threshold: usize,
         block_write_threshold: usize,
-        buffer_event_sender: Arc<mpsc::UnboundedSender<SharedBufferEvent>>,
+        buffer_event_sender: mpsc::UnboundedSender<SharedBufferEvent>,
     ) -> Self {
         assert!(
             flush_threshold <= block_write_threshold,
@@ -177,7 +177,7 @@ impl LocalVersionManager {
                 // TODO: enable setting the ratio with config
                 capacity * 4 / 5,
                 capacity,
-                Arc::new(buffer_event_sender),
+                buffer_event_sender,
             ),
             write_conflict_detector: write_conflict_detector.clone(),
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(
@@ -936,7 +936,7 @@ mod tests {
             let batch = SharedBufferBatch::new(
                 LocalVersionManager::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
                 epochs[i],
-                Arc::new(mpsc::unbounded_channel().0),
+                mpsc::unbounded_channel().0,
                 StaticCompactionGroupId::StateDefault.into(),
             );
             assert_eq!(
