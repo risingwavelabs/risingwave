@@ -29,7 +29,9 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
-use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use risingwave_storage::{
+    dispatch_hummock_state_store, dispatch_state_store, StateStore, StateStoreImpl,
+};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -162,12 +164,18 @@ impl LocalStreamManager {
     }
 
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
-    pub fn send_barrier(
+    pub async fn send_barrier(
         &self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> Result<()> {
+        if barrier.mutation.is_some() {
+            // Update when configuration changes.
+            dispatch_hummock_state_store!(self.state_store(), store, {
+                store.update_compaction_group_cache().await?;
+            });
+        }
         let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
         barrier_manager.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
@@ -258,7 +266,8 @@ impl LocalStreamManager {
         };
 
         self.drain_collect_rx(barrier.epoch.prev);
-        self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
+        self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)
+            .await?;
         self.collect_barrier_and_sync(barrier.epoch.prev, false)
             .await;
         self.core.lock().drop_all_actors();

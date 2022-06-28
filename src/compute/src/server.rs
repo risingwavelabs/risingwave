@@ -118,13 +118,13 @@ pub async fn compute_node_serve(
             let (handle, shutdown_sender) = Compactor::start_compactor(
                 storage_config,
                 hummock_meta_client,
-                storage.inner().sstable_store(),
+                storage.sstable_store(),
                 state_store_metrics.clone(),
                 Some(Arc::new(CompactionExecutor::new(Some(1)))),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
-        monitor_cache(storage.inner().sstable_store(), &registry).unwrap();
+        monitor_cache(storage.sstable_store(), &registry).unwrap();
     }
 
     // Initialize the managers.

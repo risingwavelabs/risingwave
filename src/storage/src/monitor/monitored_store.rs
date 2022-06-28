@@ -22,7 +22,10 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use tracing::error;
 
 use super::StateStoreMetrics;
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
+use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::HummockStorage;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -38,10 +41,6 @@ pub struct MonitoredStateStore<S> {
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         Self { inner, stats }
-    }
-
-    pub fn inner(&self) -> &S {
-        &self.inner
     }
 }
 
@@ -248,6 +247,23 @@ where
 
     fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.inner.get_uncommitted_ssts(epoch)
+    }
+}
+
+impl MonitoredStateStore<HummockStorage> {
+    pub fn sstable_store(&self) -> SstableStoreRef {
+        self.inner.sstable_store()
+    }
+
+    pub fn local_version_manager(&self) -> Arc<LocalVersionManager> {
+        self.inner.local_version_manager().clone()
+    }
+
+    pub async fn update_compaction_group_cache(&self) -> StorageResult<()> {
+        self.inner
+            .update_compaction_group_cache()
+            .await
+            .map_err(StorageError::Hummock)
     }
 }
 

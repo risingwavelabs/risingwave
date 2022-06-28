@@ -26,10 +26,10 @@ use crate::hummock::{HummockError, HummockResult};
 
 #[async_trait::async_trait]
 pub trait CompactionGroupClient: Send + Sync + 'static {
-    async fn get_compaction_group_id(
-        &self,
-        prefix: Prefix,
-    ) -> HummockResult<Option<CompactionGroupId>>;
+    /// Updates local cache
+    async fn update(&self) -> HummockResult<()>;
+    /// Tries to get from local cache
+    fn get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId>;
 }
 
 /// `CompactionGroupClientImpl` maintains compaction group metadata cache.
@@ -49,17 +49,7 @@ impl CompactionGroupClientImpl {
 
 #[async_trait::async_trait]
 impl CompactionGroupClient for CompactionGroupClientImpl {
-    /// Tries to get from local cache first,then from meta service
-    async fn get_compaction_group_id(
-        &self,
-        prefix: Prefix,
-    ) -> HummockResult<Option<CompactionGroupId>> {
-        // Fast path
-        if let Some(compaction_group_id) = self.inner.read().get(&prefix) {
-            return Ok(Some(compaction_group_id));
-        }
-        // Slow path.
-        // TODO: May deduplicate RPCs if necessary.
+    async fn update(&self) -> HummockResult<()> {
         let compaction_groups = self
             .hummock_meta_client
             .get_compaction_groups()
@@ -67,7 +57,11 @@ impl CompactionGroupClient for CompactionGroupClientImpl {
             .map_err(HummockError::meta_error)?;
         let mut guard = self.inner.write();
         guard.set_index(compaction_groups);
-        Ok(guard.get(&prefix))
+        Ok(())
+    }
+
+    fn get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId> {
+        self.inner.read().get(&prefix)
     }
 }
 
@@ -114,10 +108,11 @@ impl DummyCompactionGroupClient {
 
 #[async_trait::async_trait]
 impl CompactionGroupClient for DummyCompactionGroupClient {
-    async fn get_compaction_group_id(
-        &self,
-        _prefix: Prefix,
-    ) -> HummockResult<Option<CompactionGroupId>> {
-        Ok(Some(self.compaction_group_id))
+    async fn update(&self) -> HummockResult<()> {
+        Ok(())
+    }
+
+    fn get_compaction_group_id(&self, _prefix: Prefix) -> Option<CompactionGroupId> {
+        Some(self.compaction_group_id)
     }
 }

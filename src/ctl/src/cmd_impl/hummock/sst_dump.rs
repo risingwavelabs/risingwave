@@ -25,7 +25,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the SSTable store so we can access the SSTableMeta
     let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
-    let sstable_store = &*hummock.inner().sstable_store();
+    let sstable_store = &*hummock.sstable_store();
 
     // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
     let version = meta_client.pin_version(u64::MAX).await?;

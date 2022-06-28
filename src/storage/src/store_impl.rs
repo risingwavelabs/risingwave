@@ -83,6 +83,19 @@ macro_rules! dispatch_state_store {
     };
 }
 
+#[macro_export]
+macro_rules! dispatch_hummock_state_store {
+    ($impl:expr, $store:ident, $body:tt) => {
+        match $impl {
+            StateStoreImpl::MemoryStateStore($store) => {
+                let _store = $store;
+                unimplemented!("memory state store should never be used in release mode");
+            }
+            StateStoreImpl::HummockStateStore($store) => $body,
+        }
+    };
+}
+
 impl StateStoreImpl {
     pub async fn new(
         s: &str,

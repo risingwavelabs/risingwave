@@ -188,13 +188,15 @@ impl HummockStorage {
         &self.local_version_manager
     }
 
-    async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
+    fn get_compaction_group_id(&self, table_id: TableId) -> CompactionGroupId {
         let prefix = Prefix::from(table_id.table_id);
-        Ok(self
-            .compaction_group_client
+        self.compaction_group_client
             .get_compaction_group_id(prefix)
-            .await?
-            .unwrap_or_else(|| panic!("{} matches a compaction group", prefix)))
+            .unwrap_or_else(|| panic!("{} matches a compaction group", prefix))
+    }
+
+    pub async fn update_compaction_group_cache(&self) -> HummockResult<()> {
+        self.compaction_group_client.update().await
     }
 }
 
