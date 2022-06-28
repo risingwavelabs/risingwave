@@ -14,26 +14,25 @@
 
 use std::ops::{Bound, RangeBounds};
 
+use risingwave_common::types::ScalarImpl;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
-
-use crate::expr::{Expr, Literal};
 
 /// See also [`ScanRangeProst`]
 #[derive(Debug, Clone)]
 pub struct ScanRange {
-    pub eq_conds: Vec<Literal>,
-    pub range: (Bound<Literal>, Bound<Literal>),
+    pub eq_conds: Vec<ScalarImpl>,
+    pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
 }
 
-fn bound_to_proto(bound: &Bound<Literal>) -> Option<BoundProst> {
+fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundProst> {
     match bound {
         Bound::Included(literal) => Some(BoundProst {
-            value: Some(literal.to_expr_proto()),
+            value: literal.to_protobuf(),
             inclusive: true,
         }),
         Bound::Excluded(literal) => Some(BoundProst {
-            value: Some(literal.to_expr_proto()),
+            value: literal.to_protobuf(),
             inclusive: false,
         }),
         Bound::Unbounded => None,
@@ -43,11 +42,7 @@ fn bound_to_proto(bound: &Bound<Literal>) -> Option<BoundProst> {
 impl ScanRange {
     pub fn to_protobuf(&self) -> ScanRangeProst {
         ScanRangeProst {
-            eq_conds: self
-                .eq_conds
-                .iter()
-                .map(|lit| lit.to_expr_proto())
-                .collect(),
+            eq_conds: self.eq_conds.iter().map(|lit| lit.to_protobuf()).collect(),
             lower_bound: bound_to_proto(&self.range.0),
             upper_bound: bound_to_proto(&self.range.1),
         }

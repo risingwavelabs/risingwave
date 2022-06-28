@@ -56,6 +56,7 @@ pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
 }
 
 /// Extracts epoch part from key
+#[inline(always)]
 pub fn get_epoch(full_key: &[u8]) -> Epoch {
     let mut epoch: Epoch = 0;
 
@@ -73,12 +74,24 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 }
 
 /// Extract table id in key prefix
+#[inline(always)]
 pub fn get_table_id(full_key: &[u8]) -> Option<u32> {
     if full_key[0] == b't' {
         let mut buf = &full_key[1..];
         Some(buf.get_u32())
     } else {
         None
+    }
+}
+
+pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (Option<u32>, Epoch) {
+    match get_table_id(full_key) {
+        Some(table_id) => {
+            let epoch = get_epoch(full_key);
+            (Some(table_id), epoch)
+        }
+
+        None => (None, 0),
     }
 }
 
