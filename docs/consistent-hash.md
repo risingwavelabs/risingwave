@@ -26,7 +26,7 @@ For all data $k \in U_k$, where $U_k$ is an unbounded set, we apply a hash funct
 
 Then we have vnode mapping, which ensures that vnodes are mapped evenly to parallel units in the cluster. In other words, the number of vnodes that are mapped to each parallel unit should be as close as possible. This is denoted by different colors in the figure above. As is depicted, we have 3 parallel units (shown as circles), each taking $\frac{1}{3}$ of total vnodes. Vnode mapping is [constructed and maintained by meta](https://github.com/singularity-data/risingwave/blob/main/src/meta/src/manager/hash_mapping.rs).
 
-As long as the hash function $H$ could ensure uniformity, the data distribution determined by this strategy would be even across physical resources, even if data in $U_k$ skew to a certain range. 
+As long as the hash function $H$ could ensure uniformity, the data distribution determined by this strategy would be even across physical resources. The evenness will be retained even if data in $U_k$ are skewed to a certain range, say, most students scoring over 60 in a hundred-mark system.
 
 #### Data Redistribution
 
@@ -36,7 +36,7 @@ Let's take scaling out for example. Assume that we have one more parallel unit a
 
 ![optimal data redistribution](./images/consistent-hash/data-redistribution-1.svg)
 
-To minimize data movement when scaling occurs, we should be careful when we modify the vnode mapping. Below is an opposite example: modifying vnode mapping like this will result in $\frac{1}{2}$ of the data being moved.
+To minimize data movement when scaling occurs, we should be careful when we modify the vnode mapping. Below is an opposite example. Modifying vnode mapping like this will result in $\frac{1}{2}$ of the data being moved.
 
 ![worst data redistribution](./images/consistent-hash/data-redistribution-2.svg)
 
@@ -90,4 +90,4 @@ Now that we have 12 vnodes in total in the example, the data layout in storage w
 
 Note that we only show the logical sequence and aggregation of data in this illustration. The actual data may be separated into different SSTs in Hummock.
 
-Since the way that certain data are hashed to vnode is invariant, the encoding of the data will also be invariant. How we schedule the fragment (e.g. parallelism of the fragment) will not affect data encoding. In other words, storage will not care about vnode mapping, which is determined by meta and used only by streaming. This is actually a way of decoupling compute layer and storage layer.
+Since the way that certain data are hashed to vnode is invariant, the encoding of the data will also be invariant. How we schedule the fragment (e.g. parallelism of the fragment) will not affect data encoding. In other words, storage will not care about vnode mapping, which is determined by meta and used only by streaming. This is actually a way of decoupling the storage layer from the compute layer.
