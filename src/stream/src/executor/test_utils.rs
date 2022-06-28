@@ -160,3 +160,48 @@ pub fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<Keyspace<MemoryStateS
     }
     returned_vec
 }
+
+pub mod global_simple_agg {
+    use itertools::Itertools;
+    use risingwave_storage::{Keyspace, StateStore};
+
+    use crate::executor::aggregation::{generate_agg_schema, generate_state_table, AggCall};
+    use crate::executor::{BoxedExecutor, Executor, PkIndices, SimpleAggExecutor};
+
+    pub fn new_boxed_simple_agg_executor(
+        keyspace: Vec<Keyspace<impl StateStore>>,
+        input: BoxedExecutor,
+        agg_calls: Vec<AggCall>,
+        pk_indices: PkIndices,
+        executor_id: u64,
+        key_indices: Vec<usize>,
+    ) -> Box<dyn Executor> {
+        let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
+        let state_tables = keyspace
+            .iter()
+            .zip_eq(agg_calls.iter())
+            .map(|(ks, agg_call)| {
+                generate_state_table(
+                    ks.clone(),
+                    agg_call,
+                    &key_indices,
+                    &pk_indices,
+                    &agg_schema,
+                    input.as_ref(),
+                )
+            })
+            .collect();
+
+        Box::new(
+            SimpleAggExecutor::new(
+                input,
+                agg_calls,
+                pk_indices,
+                executor_id,
+                key_indices,
+                state_tables,
+            )
+            .unwrap(),
+        )
+    }
+}
