@@ -77,6 +77,20 @@ impl HummockSnapshotManager {
             let query_ids = core_guard.epoch_to_query_ids.get_mut(&epoch);
             if let Some(query_ids) = query_ids {
                 query_ids.remove(query_id);
+                // Updated the outdated epoch.
+                if query_ids.is_empty() && core_guard.last_pinned == epoch {
+                    let epoch = Self::pin_epoch_with_retry(
+                        self.meta_client.clone(),
+                        Default::default(),
+                        usize::MAX,
+                        || false,
+                    )
+                    .await
+                    .expect("should be `Some` since `break_condition` is always false")
+                    .expect("should be able to pinned");
+                    core_guard.last_pinned = epoch;
+                    core_guard.epoch_to_query_ids.insert(epoch, HashSet::new());
+                }
             }
 
             // Check the min epoch, if the epoch has no query running on it, this should be the min
@@ -188,6 +202,7 @@ impl HummockSnapshotManager {
                 Some(Ok(pinned_epoch)) => {
                     let mut core_guard = local_snapshot_manager.core.lock().await;
                     if core_guard.last_pinned < pinned_epoch {
+                        tracing::info!("Pin epoch {:?}", pinned_epoch);
                         core_guard.last_pinned = pinned_epoch;
                         core_guard
                             .epoch_to_query_ids
@@ -204,6 +219,24 @@ impl HummockSnapshotManager {
                     return;
                 }
             };
+        }
+    }
+
+    /// Used in `ObserverManager`.
+    pub async fn update_snapshot_status(&self, epoch: u64) {
+        let mut core_guard = self.core.lock().await;
+        if core_guard.last_pinned < epoch {
+            let epoch = Self::pin_epoch_with_retry(
+                self.meta_client.clone(),
+                Default::default(),
+                usize::MAX,
+                || false,
+            )
+            .await
+            .expect("should be `Some` since `break_condition` is always false")
+            .expect("should be able to pinned");
+            core_guard.last_pinned = epoch;
+            core_guard.epoch_to_query_ids.insert(epoch, HashSet::new());
         }
     }
 }
