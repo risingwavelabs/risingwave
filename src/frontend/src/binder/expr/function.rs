@@ -101,6 +101,8 @@ impl Binder {
                 "char_length" => ExprType::CharLength,
                 "character_length" => ExprType::CharLength,
                 "repeat" => ExprType::Repeat,
+                "octet_length" => ExprType::OctetLength,
+                "bit_length" => ExprType::BitLength,
                 // special
                 "pg_typeof" if inputs.len() == 1 => {
                     let input = &inputs[0];
@@ -120,6 +122,7 @@ impl Binder {
             };
             Ok(FunctionCall::new(function_type, inputs)?.into())
         } else {
+            log::warn!("fuck! {:?}", f.name);
             Err(ErrorCode::NotImplemented(
                 format!("unsupported function: {:?}", f.name),
                 112.into(),
