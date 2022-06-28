@@ -24,9 +24,10 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
-    HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo,
+    HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -220,22 +221,23 @@ where
             .await?
             .unwrap_or_else(CurrentHummockVersionId::new);
 
-        versioning_guard.hummock_versions = HummockVersion::list(self.env.meta_store())
+        let mut version_ids: HashSet<_> = HummockVersion::list(self.env.meta_store())
             .await?
             .into_iter()
-            .map(|version| (version.id, version))
+            .map(|version| version.id)
             .collect();
 
-        versioning_guard.hummock_version_deltas = HummockVersionDelta::list(self.env.meta_store())
-            .await?
-            .into_iter()
-            .map(|version_delta| (version_delta.id, version_delta))
-            .collect();
+        let hummock_version_deltas: BTreeMap<_, _> =
+            HummockVersionDelta::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .map(|version_delta| (version_delta.id, version_delta))
+                .collect();
 
         // Insert the initial version.
         if versioning_guard.hummock_versions.is_empty() {
             let mut init_version = HummockVersion {
-                id: versioning_guard.current_version_id.id(),
+                id: FIRST_VERSION_ID,
                 levels: Default::default(),
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
@@ -260,11 +262,80 @@ where
                     .levels
                     .insert(compaction_group.group_id(), Levels { levels });
             }
-            init_version.insert(self.env.meta_store()).await?;
-            versioning_guard
-                .hummock_versions
-                .insert(init_version.id, init_version);
+            if version_ids.is_empty() {
+                version_ids.insert(init_version.id);
+            }
+            let mut redo_state = init_version.clone();
+            if version_ids.contains(&init_version.id) {
+                init_version.insert(self.env.meta_store()).await?;
+                versioning_guard
+                    .hummock_versions
+                    .insert(init_version.id, init_version);
+            }
+
+            for (id, version_delta) in &hummock_version_deltas {
+                for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
+                    let mut l0_remove_position = None;
+                    for level_delta in &level_deltas.level_deltas {
+                        let operand = &mut redo_state.get_compaction_group_levels_mut(
+                            *compaction_group_id as CompactionGroupId,
+                        )[level_delta.level_idx as usize];
+                        if !level_delta.removed_table_ids.is_empty() {
+                            let remove_set: HashSet<_> =
+                                level_delta.removed_table_ids.clone().into_iter().collect();
+                            let mut new_table_infos = Vec::with_capacity(operand.table_infos.len());
+                            let mut new_total_file_size = 0;
+                            for table_info in &operand.table_infos {
+                                if remove_set.contains(&table_info.id) {
+                                    if level_delta.level_idx == 0 && l0_remove_position.is_none() {
+                                        l0_remove_position = Some(new_table_infos.len());
+                                    }
+                                } else {
+                                    new_total_file_size += table_info.file_size;
+                                    new_table_infos.push(table_info.clone());
+                                }
+                            }
+                            operand.table_infos = new_table_infos;
+                            operand.total_file_size = new_total_file_size;
+                        }
+                        if !level_delta.inserted_table_infos.is_empty() {
+                            operand.total_file_size += level_delta
+                                .inserted_table_infos
+                                .iter()
+                                .map(|sst| sst.file_size)
+                                .sum::<u64>();
+                            if let Some(l0_remove_pos) = l0_remove_position && level_delta.level_idx == 0 {
+                                    let (l, r) = operand.table_infos.split_at_mut(l0_remove_pos);
+                                    let mut new_table_infos = l.to_vec();
+                                    new_table_infos.extend(level_delta.inserted_table_infos.clone());
+                                    new_table_infos.extend_from_slice(r);
+                                    operand.table_infos = new_table_infos;
+                            } else {
+                                operand.table_infos.extend(level_delta.inserted_table_infos.clone());
+                                if level_delta.level_idx != 0 {
+                                    operand.table_infos.sort_by(|sst1, sst2| {
+                                        let a = sst1.key_range.as_ref().unwrap();
+                                        let b = sst2.key_range.as_ref().unwrap();
+                                        a.compare(b)
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                redo_state.id = *id;
+                redo_state.max_committed_epoch = version_delta.max_committed_epoch;
+                redo_state.safe_epoch = version_delta.safe_epoch;
+
+                if version_ids.contains(&redo_state.id) {
+                    redo_state.insert(self.env.meta_store()).await?;
+                    versioning_guard
+                        .hummock_versions
+                        .insert(redo_state.id, redo_state.clone());
+                }
+            }
         }
+        versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
             .await?
@@ -783,6 +854,7 @@ where
             );
             let mut version_delta = HummockVersionDelta {
                 prev_id: old_version.id,
+                max_committed_epoch: old_version.max_committed_epoch,
                 ..Default::default()
             };
             let level_deltas = &mut version_delta
@@ -901,6 +973,7 @@ where
             current_version_id.id(),
             HummockVersionDelta {
                 prev_id: old_version.id,
+                safe_epoch: old_version.safe_epoch,
                 ..Default::default()
             },
         );
