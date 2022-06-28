@@ -20,10 +20,11 @@ use std::time::Duration;
 
 use anyhow::Result;
 pub use numeric::*;
-use risingwave_common::types::DataType;
 use serde_json::Value;
 pub use timestamp::*;
 pub use varchar::*;
+
+use crate::types::DataType;
 
 pub const DEFAULT_MIN: i16 = i16::MIN;
 pub const DEFAULT_MAX: i16 = i16::MAX;
