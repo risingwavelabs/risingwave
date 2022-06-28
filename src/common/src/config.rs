@@ -278,3 +278,27 @@ mod default {
         8
     }
 }
+
+pub mod constant {
+    pub mod hummock {
+        use bitflags::bitflags;
+        bitflags! {
+
+            #[derive(Default)]
+            pub struct CompactionFilterFlag: u32 {
+                const NONE = 0b00000000;
+                const STATE_CLEAN = 0b00000010;
+                const TTL = 0b00000100;
+            }
+        }
+
+        impl From<CompactionFilterFlag> for u32 {
+            fn from(flag: CompactionFilterFlag) -> Self {
+                flag.bits()
+            }
+        }
+
+        pub const TABLE_OPTION_DUMMY_TTL: u32 = 0;
+        pub const PROPERTIES_TTL_KEY: &str = "ttl";
+    }
+}
