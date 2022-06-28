@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::CompactionFilterFlag;
+use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
 
@@ -54,7 +54,9 @@ impl CompactionConfigBuilder {
                     "Zstd".to_string(),
                     "Zstd".to_string(),
                 ],
-                compaction_filter_mask: (CompactionFilterFlag::NONE).into(),
+                compaction_filter_mask: (CompactionFilterFlag::STATE_CLEAN
+                    | CompactionFilterFlag::TTL)
+                    .into(),
             },
         }
     }
