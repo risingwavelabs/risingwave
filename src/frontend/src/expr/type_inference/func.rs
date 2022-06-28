@@ -26,7 +26,7 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
     let actuals = inputs
         .iter()
-        .map(|e| match e.is_null() {
+        .map(|e| match e.is_unknown() {
             true => None,
             false => Some(e.return_type().into()),
         })
