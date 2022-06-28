@@ -32,11 +32,11 @@ message SysRowSeqScanNode {
 // - index point get: `eq_conds` includes N values, and `lower_bound` & `upper_bound` are `None`
 message ScanRange {
   // The i-th element represents the value of the i-th PK column.
-  repeated expr.ExprNode eq_conds = 1;
+  repeated bytes eq_conds = 1;
 
   // `None` represent unbounded.
   message Bound {
-    expr.ExprNode value = 1;
+    bytes value = 1;
     bool inclusive = 2;
   }
   //  The lower bound of the next PK column subsequent to those in `eq_conds`.

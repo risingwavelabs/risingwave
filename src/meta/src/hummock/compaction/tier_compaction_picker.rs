@@ -108,7 +108,7 @@ impl CompactionPicker for TierCompactionPicker {
                     level_idx: 0,
                     level_type: LevelType::Overlapping as i32,
                     table_infos: select_level_inputs,
-                    total_file_size: 0,
+                    total_file_size: compaction_bytes,
                 },
                 target_level: Level {
                     level_idx: 0,

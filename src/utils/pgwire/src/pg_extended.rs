@@ -51,11 +51,11 @@ fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Vec<Strin
                 TypeOid::Int => todo!(),
                 TypeOid::Float4 => todo!(),
                 TypeOid::Float8 => todo!(),
-                TypeOid::CharArray => todo!(),
                 TypeOid::Date => todo!(),
                 TypeOid::Time => todo!(),
                 TypeOid::Timestamp => todo!(),
                 TypeOid::Timestampz => todo!(),
+                TypeOid::Interval => todo!(),
                 TypeOid::Decimal => todo!(),
             }
         })
