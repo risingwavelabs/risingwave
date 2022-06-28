@@ -304,7 +304,7 @@ impl ConnectorSource {
         &self,
         splits: ConnectorState,
         column_ids: Vec<ColumnId>,
-        registry: Registry,
+        metrics: Arc<SourceMetrics>,
         context: SourceContext,
     ) -> Result<ConnectorSourceReader> {
         let (tx, rx) = mpsc::channel(CONNECTOR_MESSAGE_BUFFER_SIZE);
@@ -315,7 +315,7 @@ impl ConnectorSource {
         });
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
-        let source_metrics = Arc::new(SourceMetrics::new(registry));
+        let source_metrics = metrics.clone();
 
         let to_reader_splits = match splits {
             Some(vec_split_impl) => vec_split_impl
@@ -362,7 +362,7 @@ impl ConnectorSource {
             parser: self.parser.clone(),
             columns,
             message_tx: tx,
-            metrics: source_metrics.clone(),
+            metrics: metrics.clone(),
             context: context.clone(),
         })
     }

@@ -280,7 +280,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .stream_reader(
                     state,
                     self.column_ids.clone(),
-                    self.metrics.registry.clone(),
+                    self.source_desc.metrics.clone(),
                     SourceContext::new(self.actor_id as u32, self.source_id),
                 )
                 .await

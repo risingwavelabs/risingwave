@@ -14,7 +14,7 @@
 
 use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{register_int_counter_vec_with_registry, Registry};
-
+#[derive(Debug)]
 pub struct SourceMetrics {
     pub registry: Registry,
     pub partition_input_count: GenericCounterVec<AtomicU64>,
@@ -37,5 +37,11 @@ impl SourceMetrics {
 
     pub fn unused() -> Self {
         Self::new(Registry::new())
+    }
+}
+
+impl Default for SourceMetrics {
+    fn default() -> Self {
+        SourceMetrics::new(Registry::new())
     }
 }
