@@ -31,12 +31,10 @@ pub async fn handle_drop_sink(
 
     check_source(catalog_reader, session.clone(), &schema_name, &sink_name)?;
 
-    // let sink = catalog_reader
-    //     .read_guard()
-    //     .get_sink_by_name(session.database(), &schema_name, &sink_name)?
-    //     .clone();
-
-    let sink = 0;
+    let sink = catalog_reader
+        .read_guard()
+        .get_sink_id_by_name(session.database(), &schema_name, &sink_name)?
+        .clone();
 
     let catalog_writer = session.env().catalog_writer();
     // catalog_writer.drop_sink(sink.id).await?;

@@ -210,6 +210,17 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
     }
 
+    pub fn get_sink_id_by_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        sink_name: &str,
+    ) -> Result<u32> {
+        self.get_schema_by_name(db_name, schema_name)?
+            .get_sink_id_by_name(sink_name)
+            .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()).into())
+    }
+
     /// Check the name if duplicated with existing table, materialized view or source.
     pub fn check_relation_name_duplicated(
         &self,

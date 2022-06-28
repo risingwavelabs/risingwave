@@ -175,12 +175,11 @@ pub mod tests {
             .clone();
         assert_eq!(table.name(), "mv1");
 
-        // // Check sink exists.
-        // let sink = catalog_reader
-        //     .read_guard()
-        //     .get_sink_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "snk1")
-        //     .unwrap()
-        //     .clone();
-        // assert_eq!(sink.name, "snk1");
+        // Check sink exists.
+        let sink = catalog_reader
+            .read_guard()
+            .get_sink_id_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "snk1")
+            .clone();
+        assert!(sink.is_ok());
     }
 }
