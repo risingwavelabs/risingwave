@@ -294,7 +294,7 @@ impl LogicalJoin {
         &self.output_indices
     }
 
-    /// Clone with new `on` condition
+    /// Clone with new output indices
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
         Self::new_with_output_indices(
             self.left.clone(),
@@ -824,13 +824,14 @@ impl ToStream for LogicalJoin {
                     &[left_ref_index],
                 ))?;
 
-            assert!(*self.right().distribution() == Distribution::Single);
-
             let right = self
                 .right()
                 .to_stream_with_dist_required(&RequiredDist::PhysicalDist(
                     Distribution::Broadcast,
                 ))?;
+
+            assert_eq!(right.inputs().len(), 1);
+            assert_eq!(*right.inputs().first().unwrap().distribution(), Distribution::Single);
 
             let plan = StreamDynamicFilter::new(predicate.other_cond().clone(), left, right).into();
 
