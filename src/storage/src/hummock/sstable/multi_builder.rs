@@ -44,6 +44,7 @@ pub struct CapacitySplitTableBuilder<B> {
 
     current_builder: Option<SSTableBuilder>,
 
+    policy: CachePolicy,
     sstable_store: SstableStoreRef,
 }
 
@@ -53,11 +54,12 @@ where
     F: Future<Output = HummockResult<SSTableBuilder>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(get_id_and_builder: B, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(get_id_and_builder: B, policy: CachePolicy, sstable_store: SstableStoreRef) -> Self {
         Self {
             get_id_and_builder,
             sealed_builders: Vec::new(),
             current_builder: None,
+            policy,
             sstable_store,
         }
     }
@@ -128,17 +130,20 @@ where
             let len = data.len();
             let sstable_store = self.sstable_store.clone();
             let meta_clone = meta.clone();
+            let policy = self.policy;
             let upload_join_handle = tokio::spawn(async move {
-                sstable_store
-                    .put(
-                        Sstable {
-                            id: table_id,
-                            meta: meta_clone,
-                        },
-                        data,
-                        CachePolicy::Fill,
-                    )
-                    .await
+                if policy == CachePolicy::Fill {
+                    let sst = Sstable::new_with_data(table_id, meta_clone, data.clone())?;
+                    sstable_store.put(sst, data, CachePolicy::Fill).await
+                } else {
+                    sstable_store
+                        .put(
+                            Sstable::new(table_id, meta_clone),
+                            data,
+                            CachePolicy::NotFill,
+                        )
+                        .await
+                }
             });
             self.sealed_builders.push(SealedSstableBuilder {
                 id: table_id,
@@ -188,7 +193,11 @@ mod tests {
                 },
             ))
         };
-        let builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
+        let builder = CapacitySplitTableBuilder::new(
+            get_id_and_builder,
+            CachePolicy::NotFill,
+            mock_sstable_store(),
+        );
         let results = builder.finish();
         assert!(results.is_empty());
     }
@@ -211,7 +220,11 @@ mod tests {
                 },
             ))
         };
-        let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder, mock_sstable_store());
+        let mut builder = CapacitySplitTableBuilder::new(
+            get_id_and_builder,
+            CachePolicy::NotFill,
+            mock_sstable_store(),
+        );
 
         for i in 0..table_capacity {
             builder
@@ -239,6 +252,7 @@ mod tests {
                     default_builder_opt_for_test(),
                 ))
             },
+            CachePolicy::NotFill,
             mock_sstable_store(),
         );
         let mut epoch = 100;
@@ -283,6 +297,7 @@ mod tests {
                     default_builder_opt_for_test(),
                 ))
             },
+            CachePolicy::NotFill,
             mock_sstable_store(),
         );
 
