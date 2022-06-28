@@ -636,6 +636,22 @@ where
                     }
                 }
 
+                // build table_options
+                let compaction_group = self
+                    .compaction_group_manager
+                    .compaction_group(compaction_group_id)
+                    .await
+                    .unwrap();
+                compact_task.table_options = compaction_group
+                    .table_id_to_options()
+                    .iter()
+                    .filter(|id_to_option| compact_task.existing_table_ids.contains(id_to_option.0))
+                    .map(|id_to_option| (*id_to_option.0, id_to_option.1.into()))
+                    .collect();
+
+                compact_task.compaction_filter_mask =
+                    compact_status.compaction_config.compaction_filter_mask;
+
                 commit_multi_var!(self, None, compact_status)?;
                 tracing::trace!(
                     "For compaction group {}: pick up {} tables in level {} to compact, The number of total tables is {}. cost time: {:?}",
