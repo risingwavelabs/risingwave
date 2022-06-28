@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::ordered::serialize_pk_and_row;
 
-use crate::cell_serializer::{CellSerializer, KeyBytes, ValueBytes};
+use crate::row_serializer::{KeyBytes, RowSerializer, ValueBytes};
 
 #[derive(Clone)]
 pub struct CellBasedRowSerializer {
@@ -32,7 +32,7 @@ impl CellBasedRowSerializer {
     }
 }
 
-impl CellSerializer for CellBasedRowSerializer {
+impl RowSerializer for CellBasedRowSerializer {
     fn create(
         _pk_indices: &[usize],
         _column_descs: &[ColumnDesc],

@@ -20,7 +20,7 @@ use risingwave_common::types::VirtualNode;
 pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
 
-pub trait CellSerializer {
+pub trait RowSerializer {
     /// Constructs a new serializer.
     fn create(pk_indices: &[usize], column_descs: &[ColumnDesc], column_ids: &[ColumnId]) -> Self;
 

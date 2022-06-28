@@ -23,9 +23,9 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::cell_serializer::CellSerializer;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
+use crate::row_serializer::RowSerializer;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::{StateStore, WriteOptions};
 use crate::table::cell_based_table::{CellBasedTable, DEFAULT_VNODE};

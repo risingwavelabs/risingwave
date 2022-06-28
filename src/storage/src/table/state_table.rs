@@ -28,9 +28,9 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 use super::cell_based_table::{CellBasedTableBase, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::cell_serializer::CellSerializer;
 use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
+use crate::row_serializer::RowSerializer;
 use crate::{Keyspace, StateStore};
 
 /// Identical to `StateTable`. Used when we want to
@@ -41,9 +41,9 @@ pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>
 pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
-/// encoding, using `CellSerializer` for row to cell serializing.
+/// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, SER: CellSerializer> {
+pub struct StateTableBase<S: StateStore, SER: RowSerializer> {
     /// buffer key/values
     mem_table: MemTable,
 
@@ -51,7 +51,7 @@ pub struct StateTableBase<S: StateStore, SER: CellSerializer> {
     cell_based_table: CellBasedTableBase<S, SER, READ_WRITE>,
 }
 
-impl<S: StateStore, SER: CellSerializer> StateTableBase<S, SER> {
+impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,

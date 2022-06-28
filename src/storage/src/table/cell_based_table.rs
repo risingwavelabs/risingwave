@@ -37,10 +37,10 @@ use super::mem_table::RowOp;
 use super::TableIter;
 use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::cell_serializer::CellSerializer;
 use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
+use crate::row_serializer::RowSerializer;
 use crate::storage_value::StorageValue;
 use crate::store::WriteOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
@@ -67,7 +67,7 @@ pub type CellBasedTable<S, const T: AccessType> = CellBasedTableBase<S, CellBase
 /// It is parameterized by its encoding, by specifying cell serializer and deserializers.
 /// TODO: Parameterize on `CellDeserializer`.
 #[derive(Clone)]
-pub struct CellBasedTableBase<S: StateStore, SER: CellSerializer, const T: AccessType> {
+pub struct CellBasedTableBase<S: StateStore, SER: RowSerializer, const T: AccessType> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
@@ -112,7 +112,7 @@ pub struct CellBasedTableBase<S: StateStore, SER: CellSerializer, const T: Acces
     vnodes: Bitmap,
 }
 
-impl<S: StateStore, SER: CellSerializer, const T: AccessType> std::fmt::Debug
+impl<S: StateStore, SER: RowSerializer, const T: AccessType> std::fmt::Debug
     for CellBasedTableBase<S, SER, T>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -124,7 +124,7 @@ fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::CellBasedTable(rw.into())
 }
 
-impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
+impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
     /// Create a read-only [`CellBasedTableBase`] given a complete set of `columns` and a partial
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
@@ -148,7 +148,7 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
     }
 }
 
-impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
+impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
     /// Create a read-write [`CellBasedTableBase`] given a complete set of `columns`.
     /// This is parameterized on cell based row serializer.
     pub fn new(
@@ -181,7 +181,7 @@ impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> 
 }
 
 /// Allow transforming a `READ_WRITE` instance to a `READ_ONLY` one.
-impl<S: StateStore, SER: CellSerializer> From<CellBasedTableBase<S, SER, READ_WRITE>>
+impl<S: StateStore, SER: RowSerializer> From<CellBasedTableBase<S, SER, READ_WRITE>>
     for CellBasedTableBase<S, SER, READ_ONLY>
 {
     fn from(rw: CellBasedTableBase<S, SER, READ_WRITE>) -> Self {
@@ -189,7 +189,7 @@ impl<S: StateStore, SER: CellSerializer> From<CellBasedTableBase<S, SER, READ_WR
     }
 }
 
-impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
+impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
     fn new_inner(
         keyspace: Keyspace<S>,
         table_columns: Vec<ColumnDesc>,
@@ -257,7 +257,7 @@ impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase
 }
 
 /// Get
-impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
+impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
         let vnode = match self.dist_key_in_pk_indices.as_ref() {
@@ -333,7 +333,7 @@ impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase
 }
 
 /// Write
-impl<S: StateStore, SER: CellSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
+impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
     /// Get vnode value with full row.
     fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
         // With `READ_WRITE`, the output columns should be exactly same with the table columns, so
@@ -441,7 +441,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore, SER: CellSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
+impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
     /// Get multiple [`CellBasedIter`] based on the specified vnodes, and merge or concat them by
     /// given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(

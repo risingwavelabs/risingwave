@@ -48,13 +48,13 @@
 
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
-pub mod cell_serializer;
 pub mod dedup_pk_cell_based_row_serializer;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
 pub mod monitor;
 pub mod panic_store;
+pub mod row_serializer;
 pub mod storage_value;
 #[macro_use]
 pub mod store;
