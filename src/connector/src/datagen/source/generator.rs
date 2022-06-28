@@ -15,10 +15,10 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use bytes::Bytes;
+use risingwave_common::field_generator::FieldGeneratorImpl;
 use serde_json::{Map, Value};
 use tokio::time::{sleep, Duration, Instant};
 
-use super::field_generator::FieldGeneratorImpl;
 use super::DEFAULT_DATAGEN_INTERVAL;
 use crate::SourceMessage;
 
