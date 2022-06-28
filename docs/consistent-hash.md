@@ -62,9 +62,11 @@ When scaling occurs, actors will be re-scheduled accordingly. By modifying the v
 
 ### Batch
 
-When we perform parallel batch read, we should partition the data for each parallelism in a certain way. Now that we have vnodes corresponding to disjoint sets of data, this naturally forms a data partition pattern. That is to say, one vnode could be viewed as a minimal data partition unit, and we could aggregate several vnodes together to get a larger data partition.
+When we perform parallel batch read, we should partition the data for each parallelism in some way. Now that we have vnodes corresponding to disjoint sets of data, this naturally forms a data partition pattern: one vnode could be viewed as a minimal data partition unit, and we could aggregate several vnodes together to get a larger data partition.
 
-In vnode mapping, one parallel unit will correspond to several vnodes. Therefore, we could use parallel unit as the partition bound. Data falling to one parallel unit in vnode mapping will be one partition. This is better than range partition in that the partition is more stable when the primary key of a materialized view distributes non-randomly.
+In vnode mapping introduced above, one parallel unit will correspond to several vnodes, so we could view vnodes that are mapped to one parallel unit as one partition group. In [the figure above](#data-distribution), namely, a partition group is vnodes with the same color (or the data that are hashed to these vnodes).
+
+This is better than range partition in that this approach of partition is more stable when the primary key of a materialized view distributes non-randomly, for example, monotonically increasing.
 
 ### Storage
 
@@ -72,7 +74,7 @@ If we look into the read-write pattern of streaming actors, we'll find that in m
 
 Therefore, an instinctive way to place data in storage is to **group data by vnodes**. In this way, when actors perform read operation, they could touch as few SST blocks as possible and thus trigger less I/O. 
 
-We know that [Hummock](./state-store-overview.md#overview), our LSM-Tree-based storage engine, sorts key-value pairs by the order of the key. Therefore, in order to group data by vnode on the basis of Hummock, we **encode vnode into the storage key**. The storage key will look like
+We know that [Hummock](./state-store-overview.md#overview), our LSM-Tree-based storage engine, sorts key-value pairs by the order of the key. Hence, in order to group data by vnode on the basis of Hummock, we **encode vnode into the storage key**. The storage key will look like
 ```
 table_id | vnode | ...
 ```
