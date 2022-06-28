@@ -153,3 +153,15 @@ steps:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
     timeout_in_minutes: 5
+
+  - label: "release docker image"
+    command: "ci/scripts/docker.sh"
+    if: build.tag != null
+    env:
+      - PUSH_GHCR: true
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+    timeout_in_minutes: 25
