@@ -58,40 +58,44 @@ impl Expression for CaseExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        // TODO: we can avoid the compact here.
         let input = input.clone().compact()?;
+        let vis = input.vis();
         let mut els = self
             .else_clause
             .as_deref()
-            .map(|else_clause| else_clause.eval(&input).unwrap());
+            .map(|else_clause| else_clause.wrapping_eval(&input).unwrap());
         let when_thens = self
             .when_clauses
             .iter()
             .map(|when_clause| {
                 (
-                    when_clause.when.eval(&input).unwrap(),
-                    when_clause.then.eval(&input).unwrap(),
+                    when_clause.when.wrapping_eval(&input).unwrap(),
+                    when_clause.then.wrapping_eval(&input).unwrap(),
                 )
             })
             .collect_vec();
         let mut output_array = self.return_type().create_array_builder(input.capacity())?;
         for idx in 0..input.capacity() {
-            if let Some((_, t)) = when_thens
-                .iter()
-                .map(|(w, t)| (w.value_at(idx), t.value_at(idx)))
-                .find(|(w, _)| {
-                    *w.unwrap_or(ScalarRefImpl::Bool(false))
-                        .into_scalar_impl()
-                        .as_bool()
-                })
-            {
-                output_array.append_datum(&t.to_owned_datum())?;
-            } else if let Some(els) = els.as_mut() {
-                let t = els.datum_at(idx);
-                output_array.append_datum(&t)?;
+            if vis.is_set(idx).unwrap() {
+                if let Some((_, t)) = when_thens
+                    .iter()
+                    .map(|(w, t)| (w.value_at(idx), t.value_at(idx)))
+                    .find(|(w, _)| {
+                        *w.unwrap_or(ScalarRefImpl::Bool(false))
+                            .into_scalar_impl()
+                            .as_bool()
+                    })
+                {
+                    output_array.append_datum(&t.to_owned_datum())?;
+                } else if let Some(els) = els.as_mut() {
+                    let t = els.datum_at(idx);
+                    output_array.append_datum(&t)?;
+                } else {
+                    output_array.append_null()?;
+                };
             } else {
                 output_array.append_null()?;
-            };
+            }
         }
         let output_array = output_array.finish()?.into();
         Ok(output_array)

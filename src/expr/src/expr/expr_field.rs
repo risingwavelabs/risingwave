@@ -37,7 +37,7 @@ impl Expression for FieldExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let array = self.input.eval(input)?;
+        let array = self.input.wrapping_eval(input)?;
         if let ArrayImpl::Struct(struct_array) = array.as_ref() {
             Ok(struct_array.field_at(self.index))
         } else {

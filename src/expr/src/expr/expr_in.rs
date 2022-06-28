@@ -57,11 +57,15 @@ impl Expression for InExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let input_array = self.left.eval(input)?;
+        let input_array = self.left.wrapping_eval(input)?;
         let mut output_array = BoolArrayBuilder::new(input_array.len())?;
-        for data in input_array.iter() {
-            let ret = self.exists(&data.to_owned_datum());
-            output_array.append(Some(ret))?;
+        for (data, vis) in input_array.iter().zip(input.vis().iter()) {
+            if vis {
+                let ret = self.exists(&data.to_owned_datum());
+                output_array.append(Some(ret))?;
+            } else {
+                output_array.append(None)?;
+            }
         }
         Ok(Arc::new(output_array.finish()?.into()))
     }
@@ -98,7 +102,12 @@ mod tests {
              abc",
         )
         .with_invisible_holes();
-        let res = search_expr.eval(&data_chunk).unwrap();
+        let vis = data_chunk.get_visibility_ref();
+        let res = search_expr
+            .eval(&data_chunk)
+            .unwrap()
+            .compact(vis.unwrap(), 4)
+            .unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Bool(true)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Bool(false)));
         assert_eq!(res.datum_at(2), Some(ScalarImpl::Bool(true)));

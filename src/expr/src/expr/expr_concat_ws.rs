@@ -38,23 +38,28 @@ impl Expression for ConcatWsExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let sep_column = self.sep_expr.eval(input)?;
+        let sep_column = self.sep_expr.wrapping_eval(input)?;
         let sep_column = sep_column.as_utf8();
 
         let string_columns = self
             .string_exprs
             .iter()
-            .map(|c| c.eval(input))
+            .map(|c| c.wrapping_eval(input))
             .collect::<Result<Vec<_>>>()?;
         let string_columns_ref = string_columns
             .iter()
             .map(|c| c.as_utf8())
             .collect::<Vec<_>>();
 
-        let row_len = input.cardinality();
+        let row_len = input.capacity();
+        let vis = input.vis();
         let mut builder = Utf8ArrayBuilder::new(row_len)?;
 
         for row_idx in 0..row_len {
+            if !vis.is_set(row_idx).unwrap() {
+                builder.append(None)?;
+                continue;
+            }
             let sep = match sep_column.value_at(row_idx) {
                 Some(sep) => sep,
                 None => {
