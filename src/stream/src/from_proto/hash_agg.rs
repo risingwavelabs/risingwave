@@ -18,6 +18,8 @@ use std::marker::PhantomData;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::table::state_table::StateTable;
 
 use super::*;
 use crate::executor::aggregation::AggCall;
@@ -29,9 +31,9 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     input: BoxedExecutor,
     agg_calls: Vec<AggCall>,
     key_indices: Vec<usize>,
-    keyspace: Vec<Keyspace<S>>,
     pk_indices: PkIndices,
     executor_id: u64,
+    state_tables: Vec<StateTable<S>>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -42,10 +44,10 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
         Ok(HashAggExecutor::<K, S>::new(
             args.input,
             args.agg_calls,
-            args.keyspace,
             args.pk_indices,
             args.executor_id,
             args.key_indices,
+            args.state_tables,
         )?
         .boxed())
     }
@@ -62,7 +64,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
         let key_indices = node
-            .get_distribution_keys()
+            .get_group_keys()
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
@@ -73,24 +75,61 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .try_collect()?;
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
-        let keyspace = node
-            .internal_tables
-            .iter()
-            .map(|table| Keyspace::table_root(store.clone(), &TableId::new(table.id)))
-            .collect();
         let input = params.input.remove(0);
         let keys = key_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
+        let agg_calls_len = agg_calls.len();
+        // Create internal tables used by hash agg.
+        let mut state_tables = Vec::with_capacity(agg_calls_len);
+        for table_catalog in &node.internal_tables {
+            // Parse info from proto and create state table.
+            let state_table = {
+                let table_columns = table_catalog
+                    .columns
+                    .iter()
+                    .map(|col| col.column_desc.as_ref().unwrap().into())
+                    .collect();
+                let order_types = table_catalog
+                    .orders
+                    .iter()
+                    .map(|order_type| {
+                        OrderType::from_prost(
+                            &risingwave_pb::plan_common::OrderType::from_i32(*order_type).unwrap(),
+                        )
+                    })
+                    .collect();
+                let dist_key_indices = table_catalog
+                    .distribution_keys
+                    .iter()
+                    .map(|dist_index| *dist_index as usize)
+                    .collect();
+                let pk_indices = table_catalog
+                    .pk
+                    .iter()
+                    .map(|pk_index| *pk_index as usize)
+                    .collect();
+                StateTable::new(
+                    Keyspace::table_root(store.clone(), &TableId::new(table_catalog.id)),
+                    table_columns,
+                    order_types,
+                    Some(dist_key_indices),
+                    pk_indices,
+                )
+            };
+
+            state_tables.push(state_table)
+        }
+
         let args = HashAggExecutorDispatcherArgs {
             input,
             agg_calls,
             key_indices,
-            keyspace,
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
+            state_tables,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }

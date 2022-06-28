@@ -40,18 +40,18 @@ SELECT * FROM pg_catalog.pg_cast
 36 701 1700 ASSIGN
 37 701 700 ASSIGN
 38 701 1043 ASSIGN
-39 1043 16 ASSIGN
-40 1043 21 ASSIGN
-41 1043 23 ASSIGN
-42 1043 20 ASSIGN
-43 1043 1700 ASSIGN
-44 1043 700 ASSIGN
-45 1043 701 ASSIGN
-46 1043 1082 ASSIGN
-47 1043 1114 ASSIGN
-48 1043 1184 ASSIGN
-49 1043 1083 ASSIGN
-50 1043 1043 ASSIGN
+39 1043 16 EXPLICIT
+40 1043 21 EXPLICIT
+41 1043 23 EXPLICIT
+42 1043 20 EXPLICIT
+43 1043 1700 EXPLICIT
+44 1043 700 EXPLICIT
+45 1043 701 EXPLICIT
+46 1043 1082 EXPLICIT
+47 1043 1114 EXPLICIT
+48 1043 1184 EXPLICIT
+49 1043 1083 EXPLICIT
+50 1043 1186 EXPLICIT
 51 1082 1043 ASSIGN
 52 1082 1114 IMPLICIT
 53 1082 1184 IMPLICIT
@@ -64,6 +64,33 @@ SELECT * FROM pg_catalog.pg_cast
 60 1184 1114 ASSIGN
 61 1184 1083 ASSIGN
 62 1083 1043 ASSIGN
-63 1083 1043 IMPLICIT
-64 1043 1043 ASSIGN
-65 1043 1083 ASSIGN
+63 1083 1186 IMPLICIT
+64 1186 1043 ASSIGN
+65 1186 1083 ASSIGN
+
+query TT rowsort
+SELECT s.typname, t.typname
+FROM pg_catalog.pg_cast as c, pg_catalog.pg_type as s, pg_catalog.pg_type as t
+WHERE
+	castcontext = 'IMPLICIT'
+	and c.castsource = s.oid and c.casttarget = t.oid;
+----
+int2      int4
+int2      int8
+int2      numeric
+int2      float4
+int2      float8
+int4      int8
+int4      numeric
+int4      float4
+int4      float8
+int8      numeric
+int8      float4
+int8      float8
+numeric   float4
+numeric   float8
+float4    float8
+date      timestamp
+date      timestamptz
+timestamp timestamptz
+time      interval

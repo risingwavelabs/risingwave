@@ -202,7 +202,7 @@ where
                                 v
                             })
                             .map(|x| {
-                                // NOTE Make sure the type_description include all generic parametre
+                                // NOTE Make sure the type_description include all generic parameter
                                 // description we needed.
                                 assert!(((x - 1) as usize) < types.len());
                                 PgFieldDescriptor::new(
@@ -381,7 +381,7 @@ where
 
     fn write_parameter_status_msg_no_flush(&mut self) -> Result<()> {
         self.write_message_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ClientEncoding("utf8"),
+            BeParameterStatusMessage::ClientEncoding("UTF8"),
         ))?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::StandardConformingString("on"),

@@ -108,7 +108,7 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range);
+            let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
             }
