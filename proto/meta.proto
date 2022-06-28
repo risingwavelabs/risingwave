@@ -74,9 +74,14 @@ message ListTableFragmentsRequest {
 }
 
 message ListTableFragmentsResponse {
+  message ActorInfo {
+    uint32 id = 1;
+    stream_plan.StreamNode node = 2;
+    repeated stream_plan.Dispatcher dispatcher = 3;
+  }
   message FragmentInfo {
-    uint32 fragment_id = 1;
-    repeated stream_plan.StreamActor actors = 4;
+    uint32 id = 1;
+    repeated ActorInfo actors = 4;
   }
   message TableFragmentInfo {
     repeated FragmentInfo fragments = 1;

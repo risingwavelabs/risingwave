@@ -15,7 +15,9 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_pb::meta::list_table_fragments_response::{FragmentInfo, TableFragmentInfo};
+use risingwave_pb::meta::list_table_fragments_response::{
+    ActorInfo, FragmentInfo, TableFragmentInfo,
+};
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
@@ -77,7 +79,7 @@ where
         let table_ids = HashSet::<u32>::from_iter(req.table_ids);
         let table_fragments = self.fragment_manager.list_table_fragments().await?;
         let info = table_fragments
-            .iter()
+            .into_iter()
             .filter(|tf| table_ids.contains(&tf.table_id().table_id))
             .map(|tf| {
                 (
@@ -85,10 +87,18 @@ where
                     TableFragmentInfo {
                         fragments: tf
                             .fragments
-                            .iter()
-                            .map(|(&id, fragment)| FragmentInfo {
-                                fragment_id: id,
-                                actors: fragment.actors.clone(),
+                            .into_iter()
+                            .map(|(id, fragment)| FragmentInfo {
+                                id,
+                                actors: fragment
+                                    .actors
+                                    .into_iter()
+                                    .map(|actor| ActorInfo {
+                                        id: actor.actor_id,
+                                        node: actor.nodes,
+                                        dispatcher: actor.dispatcher,
+                                    })
+                                    .collect_vec(),
                             })
                             .collect_vec(),
                     },
