@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::fmt::Debug;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -25,7 +26,9 @@ use tokio::task::JoinHandle;
 use super::SstableMeta;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, HummockResult, SSTableBuilder, Sstable};
+use crate::hummock::{
+    CachePolicy, HummockError, HummockResult, SSTableBuilder, Sstable, SstableStore,
+};
 
 pub struct SealedSstableBuilder {
     pub id: HummockSSTableId,
@@ -41,7 +44,8 @@ pub struct UploadRequest {
     pub id: u64,
     pub data: Bytes,
     pub meta: SstableMeta,
-    pub grant_sender: oneshot::Sender<()>,
+    pub policy: CachePolicy,
+    pub grant_sender: oneshot::Sender<Result<(), HummockError>>,
 }
 
 /// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -164,24 +168,13 @@ where
                         id: table_id,
                         data,
                         meta: meta_clone,
+                        policy,
                         grant_sender: tx,
                     }).unwrap();
-                    rx.await.unwrap();
-                    Ok(())
+                    rx.await.unwrap()
                 } else {
                     uploading_size.fetch_add(len, Ordering::Relaxed);
-                    let ret = if policy == CachePolicy::Fill {
-                        let sst = Sstable::new_with_data(table_id, meta_clone, data.clone())?;
-                        sstable_store.put(sst, data, CachePolicy::Fill).await
-                    } else {
-                        sstable_store
-                            .put(
-                                Sstable::new(table_id, meta_clone),
-                                data,
-                                CachePolicy::NotFill,
-                            )
-                            .await
-                    };
+                    let ret = do_upload(sstable_store, table_id, data, meta_clone, policy).await;
                     uploading_size.fetch_sub(len, Ordering::Relaxed);
                     ret
                 }
@@ -201,6 +194,23 @@ where
     pub fn finish(mut self) -> Vec<SealedSstableBuilder> {
         self.seal_current();
         self.sealed_builders
+    }
+}
+
+pub async fn do_upload(
+    sstable_store: Arc<SstableStore>,
+    id: u64,
+    data: Bytes,
+    meta: SstableMeta,
+    policy: CachePolicy,
+) -> Result<(), HummockError> {
+    if policy == CachePolicy::Fill {
+        let sst = Sstable::new_with_data(id, meta, data.clone())?;
+        sstable_store.put(sst, data, CachePolicy::Fill).await
+    } else {
+        sstable_store
+            .put(Sstable::new(id, meta), data, CachePolicy::NotFill)
+            .await
     }
 }
 
