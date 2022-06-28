@@ -36,7 +36,10 @@ pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 impl HummockSnapshotManager {
     pub async fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Arc<Self> {
         // Get epoch at first.
-        let epoch = Self::pin_epoch_with_retry(meta_client.clone(), 0, usize::MAX, || false)
+        let epoch =
+            Self::pin_epoch_with_retry(meta_client.clone(), Default::default(), usize::MAX, || {
+                false
+            })
             .await
             .expect("should be `Some` since `break_condition` is always false")
             .expect("should be able to pinned the first epoch");
