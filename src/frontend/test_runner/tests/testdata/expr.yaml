@@ -304,3 +304,28 @@
   batch_plan: |
     BatchProject { exprs: [Substr(null:Varchar, 1:Int32)] }
       BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof('123');
+  batch_plan: |
+    BatchProject { exprs: ['unknown':Varchar] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof(round(null));
+  batch_plan: |
+    BatchProject { exprs: ['double precision':Varchar] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof(row(true, 1, 'hello'));
+  batch_plan: |
+    BatchProject { exprs: ['record':Varchar] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof(array[1, 2]);
+  batch_plan: |
+    BatchProject { exprs: ['integer[]':Varchar] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof(array[array[1, 2], array[3, 4]]);
+  batch_plan: |
+    BatchProject { exprs: ['integer[][]':Varchar] }
+      BatchValues { rows: [[]] }

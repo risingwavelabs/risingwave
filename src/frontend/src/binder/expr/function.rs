@@ -54,6 +54,33 @@ impl Binder {
                 )?)));
             }
             let function_type = match function_name.as_str() {
+                // comparison
+                "booleq" => {
+                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
+                    ExprType::Equal
+                }
+                "boolne" => {
+                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
+                    ExprType::NotEqual
+                }
+                // conditional
+                "coalesce" => ExprType::Coalesce,
+                "nullif" => {
+                    inputs = Self::rewrite_nullif_to_case_when(inputs)?;
+                    ExprType::Case
+                }
+                // mathematical
+                "round" => {
+                    if inputs.len() >= 2 {
+                        ExprType::RoundDigit
+                    } else {
+                        ExprType::Round
+                    }
+                }
+                "ceil" => ExprType::Ceil,
+                "floor" => ExprType::Floor,
+                "abs" => ExprType::Abs,
+                // string
                 "substr" => ExprType::Substr,
                 "length" => ExprType::Length,
                 "upper" => ExprType::Upper,
@@ -65,38 +92,24 @@ impl Binder {
                 "rtrim" => ExprType::Rtrim,
                 "md5" => ExprType::Md5,
                 "to_char" => ExprType::ToChar,
-                "nullif" => {
-                    inputs = Self::rewrite_nullif_to_case_when(inputs)?;
-                    ExprType::Case
-                }
                 "concat" => {
                     inputs = Self::rewrite_concat_to_concat_ws(inputs)?;
                     ExprType::ConcatWs
                 }
                 "concat_ws" => ExprType::ConcatWs,
                 "split_part" => ExprType::SplitPart,
-                "coalesce" => ExprType::Coalesce,
-                "round" => {
-                    if inputs.len() >= 2 {
-                        ExprType::RoundDigit
-                    } else {
-                        ExprType::Round
-                    }
-                }
-                "ceil" => ExprType::Ceil,
-                "floor" => ExprType::Floor,
-                "abs" => ExprType::Abs,
-                "booleq" => {
-                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
-                    ExprType::Equal
-                }
-                "boolne" => {
-                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
-                    ExprType::NotEqual
-                }
                 "char_length" => ExprType::CharLength,
                 "character_length" => ExprType::CharLength,
                 "repeat" => ExprType::Repeat,
+                // special
+                "pg_typeof" if inputs.len() == 1 => {
+                    let input = &inputs[0];
+                    let v = match input.is_unknown() {
+                        true => "unknown".into(),
+                        false => input.return_type().to_string(),
+                    };
+                    return Ok(ExprImpl::literal_varchar(v));
+                }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
