@@ -9,7 +9,7 @@ projects:
     skip:
       - docker-build-pr
       - docker-build-push-schedule
-  - label: docker-schedule
+  - label: docker-schedule-ui
     path: .
     skip:
       - docker-build-pr
@@ -35,9 +35,9 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
 
-  - label: "docker-build-push-schedule"
+  - label: "docker-build-push-schedule-ui"
     command: "ci/scripts/docker.sh"
-    if: build.source == "schedule"
+    if: build.source == "schedule" || build.source == "ui"
     env:
       BUILDPIPE_SCOPE: project
       PUSH_GHCR: true
