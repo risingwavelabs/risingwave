@@ -42,4 +42,26 @@ mod tests {
             assert_eq!(length_default(s).unwrap(), expected)
         }
     }
+
+    #[test]
+    fn test_octet_length() {
+        let cases = [("hello world", 11), ("你好", 6), ("😇哈哈hhh", 13)];
+
+        for (s, expected) in cases {
+            assert_eq!(octet_length(s).unwrap(), expected)
+        }
+    }
+
+    #[test]
+    fn test_bit_length() {
+        let cases = [
+            ("hello world", 11 * 8),
+            ("你好", 6 * 8),
+            ("😇哈哈hhh", 13 * 8),
+        ];
+
+        for (s, expected) in cases {
+            assert_eq!(bit_length(s).unwrap(), expected)
+        }
+    }
 }
