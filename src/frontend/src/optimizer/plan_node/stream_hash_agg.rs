@@ -39,7 +39,7 @@ impl StreamHashAgg {
             Distribution::HashShard(_) => logical
                 .i2o_col_mapping()
                 .rewrite_provided_distribution(input_dist),
-            d @ _ => d.clone(),
+            d => d.clone(),
         };
         // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);

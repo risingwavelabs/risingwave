@@ -783,7 +783,7 @@ impl ToStream for LogicalJoin {
             // `StreamDynamicFilter`
 
             // Check if `Inner` subquery (no `IN` or `EXISTS` keywords)
-            if !(self.join_type == JoinType::Inner) {
+            if self.join_type != JoinType::Inner {
                 return Err(nested_loop_join_error);
             }
 

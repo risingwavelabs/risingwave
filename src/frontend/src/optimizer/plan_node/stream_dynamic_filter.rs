@@ -20,7 +20,7 @@ impl StreamDynamicFilter {
     pub fn new(predicate: Condition, left: PlanRef, right: PlanRef) -> Self {
         // TODO: derive from input
         let base = PlanBase::new_stream(
-            left.ctx().clone(),
+            left.ctx(),
             left.schema().clone(),
             left.pk_indices().to_vec(),
             left.distribution().clone(),
