@@ -66,16 +66,6 @@ impl DedupPkCellBasedRowSerializer {
             .map(|(_, d)| d)
     }
 
-    /// Filters out duplicate pk datums by reference.
-    #[allow(dead_code)]
-    fn remove_dup_pk_datums_by_ref(&self, row: &Row) -> Row {
-        Row(
-            Self::filter_by_dedup_datum_indices(&self.dedup_datum_indices, row.0.iter())
-                .cloned()
-                .collect(),
-        )
-    }
-
     /// Filters out duplicate pk datums.
     fn remove_dup_pk_datums(&self, row: Row) -> Row {
         Row(
@@ -152,6 +142,8 @@ mod tests {
         let column_ids = column_descs.iter().map(|c| c.column_id).collect_vec();
         let mut serializer =
             DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs, &column_ids);
+        // use a placeholder for pk,
+        // since we test the deduplicated row only.
         let pk = vec![];
         let input = Row(vec![
             Some(1_i32.into()),
@@ -199,6 +191,55 @@ mod tests {
             Some(111_i32.into()),
             Some(1111_f64.into()),
         ]);
+        assert_eq!(row, normal_expected);
+    }
+
+    // test serialization and deserialization if all pk datums
+    // were dedupped
+    #[test]
+    fn test_dedup_pk_serialization_all_dedup_pk() {
+        let pk_indices = vec![0, 1, 2];
+        let column_descs = vec![
+            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
+        ];
+        let column_ids = column_descs.iter().map(|c| c.column_id).collect_vec();
+        let mut serializer =
+            DedupPkCellBasedRowSerializer::new(&pk_indices, &column_descs, &column_ids);
+        // use a placeholder for pk,
+        // since we test the deduplicated row only.
+        let pk = vec![];
+        let input = Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]);
+        let actual = serializer.serialize(DEFAULT_VNODE, &pk, input).unwrap();
+        // delimiter cell (1)
+        assert_eq!(actual.len(), 1);
+
+        // follows exact layout of serialized cells
+        // shouldn't have any cells already in pk.
+        let compact_descs = vec![];
+        let mut compact_deserializer = make_cell_based_row_deserializer(compact_descs);
+        for (pk_with_cell_id, cell) in &actual {
+            compact_deserializer
+                .deserialize(pk_with_cell_id, cell)
+                .unwrap();
+        }
+        let (_vnode, _k, row) = compact_deserializer.take().unwrap();
+        let compact_expected = Row(vec![]);
+        assert_eq!(row, compact_expected);
+
+        let mut normal_deserializer = make_cell_based_row_deserializer(column_descs);
+        for (pk_with_cell_id, cell) in actual {
+            normal_deserializer
+                .deserialize(pk_with_cell_id, cell)
+                .unwrap();
+        }
+        let (_vnode, _k, row) = normal_deserializer.take().unwrap();
+        let normal_expected = Row(vec![None, None, None]);
         assert_eq!(row, normal_expected);
     }
 }
