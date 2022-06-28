@@ -662,7 +662,6 @@ impl Compactor {
             self.context.sstable_store.clone(),
             uploading_event_receiver,
         ));
-        let sender = Arc::new(uploading_event_sender);
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = GroupedSstableBuilder::new(
@@ -685,7 +684,7 @@ impl Compactor {
             VirtualNodeGrouping::new(vnode2unit),
             cache_policy,
             self.context.sstable_store.clone(),
-            Some(sender),
+            Some(uploading_event_sender),
         );
 
         // Monitor time cost building shared buffer to SSTs.

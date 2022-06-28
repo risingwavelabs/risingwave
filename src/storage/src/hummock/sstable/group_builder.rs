@@ -113,7 +113,7 @@ pub struct GroupedSstableBuilder<B, G: KeyValueGrouping> {
     builders: HashMap<KeyValueGroupId, CapacitySplitTableBuilder<B>>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
-    uploading_sender: Option<Arc<mpsc::UnboundedSender<UploadRequest>>>,
+    uploading_sender: Option<mpsc::UnboundedSender<UploadRequest>>,
 }
 
 impl<B, G, F> GroupedSstableBuilder<B, G>
@@ -127,7 +127,7 @@ where
         grouping: G,
         policy: CachePolicy,
         sstable_store: SstableStoreRef,
-        uploading_sender: Option<Arc<mpsc::UnboundedSender<UploadRequest>>>,
+        uploading_sender: Option<mpsc::UnboundedSender<UploadRequest>>,
     ) -> Self {
         Self {
             get_id_and_builder,

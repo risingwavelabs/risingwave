@@ -65,7 +65,7 @@ pub struct CapacitySplitTableBuilder<B> {
     sstable_store: SstableStoreRef,
 
     uploading_size: Arc<AtomicUsize>,
-    uploading_sender: Option<Arc<mpsc::UnboundedSender<UploadRequest>>>,
+    uploading_sender: Option<mpsc::UnboundedSender<UploadRequest>>,
 }
 
 impl<B, F> CapacitySplitTableBuilder<B>
@@ -78,7 +78,7 @@ where
         get_id_and_builder: B,
         policy: CachePolicy,
         sstable_store: SstableStoreRef,
-        uploading_sender: Option<Arc<mpsc::UnboundedSender<UploadRequest>>>,
+        uploading_sender: Option<mpsc::UnboundedSender<UploadRequest>>,
     ) -> Self {
         Self {
             get_id_and_builder,
