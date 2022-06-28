@@ -112,7 +112,7 @@ impl Distribution {
         match required {
             RequiredDist::Any => true,
             RequiredDist::AnyShard => {
-                matches!(self, Distribution::SomeShard | Distribution::HashShard(_))
+                matches!(self, Distribution::SomeShard | Distribution::HashShard(_) | Distribution::Broadcast)
             }
             RequiredDist::ShardByKey(required_keys) => match self {
                 Distribution::HashShard(hash_keys) => hash_keys

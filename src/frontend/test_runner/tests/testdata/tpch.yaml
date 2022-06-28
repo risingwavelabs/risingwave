@@ -1028,8 +1028,8 @@
                         StreamProject { exprs: [$0, $1] }
                           StreamFilter { predicate: ($2 = 'ARGENTINA':Varchar) }
                             StreamTableScan { table: nation, columns: [n_nationkey, _row_id, n_name], pk_indices: [1] }
-            StreamProject { exprs: [($1 * 0.0001000000:Decimal)] }
-              StreamExchange { dist: Broadcast }
+            StreamExchange { dist: Broadcast }
+              StreamProject { exprs: [($1 * 0.0001000000:Decimal)] }
                 StreamSimpleAgg { aggs: [count, sum($0)] }
                   StreamExchange { dist: Single }
                     StreamProject { exprs: [($1 * $0), $2, $3, $4] }
@@ -1836,8 +1836,8 @@
                       StreamTableScan { table: customer, columns: [c_custkey, c_phone, c_acctbal, _row_id], pk_indices: [3] }
                   StreamExchange { dist: HashShard([0]) }
                     StreamTableScan { table: orders, columns: [o_custkey, _row_id], pk_indices: [1] }
-              StreamProject { exprs: [($1 / $2)] }
-                StreamExchange { dist: Broadcast }
+              StreamExchange { dist: Broadcast }
+                StreamProject { exprs: [($1 / $2)] }
                   StreamSimpleAgg { aggs: [count, sum($0), count($0)] }
                     StreamExchange { dist: Single }
                       StreamProject { exprs: [$0, $1] }
