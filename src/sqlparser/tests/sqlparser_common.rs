@@ -2194,7 +2194,7 @@ fn parse_implicit_join() {
                         alias: None,
                         args: vec![],
                     },
-                    join_operator: JoinOperator::Inner(JoinConstraint::Natural),
+                    join_operator: JoinOperator::Inner(JoinConstraint::Natural, false),
                 }]
             },
             TableWithJoins {
@@ -2209,7 +2209,7 @@ fn parse_implicit_join() {
                         alias: None,
                         args: vec![],
                     },
-                    join_operator: JoinOperator::Inner(JoinConstraint::Natural),
+                    join_operator: JoinOperator::Inner(JoinConstraint::Natural, false),
                 }]
             }
         ],
@@ -2228,7 +2228,7 @@ fn parse_cross_join() {
                 alias: None,
                 args: vec![],
             },
-            join_operator: JoinOperator::CrossJoin
+            join_operator: JoinOperator::CrossJoin,
         },
         only(only(select.from).joins),
     );
@@ -2239,7 +2239,8 @@ fn parse_joins_on() {
     fn join_with_constraint(
         relation: impl Into<String>,
         alias: Option<TableAlias>,
-        f: impl Fn(JoinConstraint) -> JoinOperator,
+        f: impl Fn(JoinConstraint, bool) -> JoinOperator,
+        is_lookup_join: bool,
     ) -> Join {
         Join {
             relation: TableFactor::Table {
@@ -2247,11 +2248,14 @@ fn parse_joins_on() {
                 alias,
                 args: vec![],
             },
-            join_operator: f(JoinConstraint::On(Expr::BinaryOp {
-                left: Box::new(Expr::Identifier("c1".into())),
-                op: BinaryOperator::Eq,
-                right: Box::new(Expr::Identifier("c2".into())),
-            })),
+            join_operator: f(
+                JoinConstraint::On(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier("c1".into())),
+                    op: BinaryOperator::Eq,
+                    right: Box::new(Expr::Identifier("c2".into())),
+                }),
+                is_lookup_join,
+            ),
         }
     }
     // Test parsing of aliases
@@ -2260,7 +2264,8 @@ fn parse_joins_on() {
         vec![join_with_constraint(
             "t2",
             table_alias("foo"),
-            JoinOperator::Inner
+            JoinOperator::Inner,
+            false
         )]
     );
     one_statement_parses_to(
@@ -2270,19 +2275,47 @@ fn parse_joins_on() {
     // Test parsing of different join operators
     assert_eq!(
         only(&verified_only_select("SELECT * FROM t1 JOIN t2 ON c1 = c2").from).joins,
-        vec![join_with_constraint("t2", None, JoinOperator::Inner)]
+        vec![join_with_constraint("t2", None, JoinOperator::Inner, false)]
+    );
+    assert_eq!(
+        only(&verified_only_select("SELECT * FROM t1 LOOKUP JOIN t2 ON c1 = c2").from).joins,
+        vec![join_with_constraint("t2", None, JoinOperator::Inner, true)]
     );
     assert_eq!(
         only(&verified_only_select("SELECT * FROM t1 LEFT JOIN t2 ON c1 = c2").from).joins,
-        vec![join_with_constraint("t2", None, JoinOperator::LeftOuter)]
+        vec![join_with_constraint(
+            "t2",
+            None,
+            JoinOperator::LeftOuter,
+            false
+        )]
+    );
+    assert_eq!(
+        only(&verified_only_select("SELECT * FROM t1 LEFT LOOKUP JOIN t2 ON c1 = c2").from).joins,
+        vec![join_with_constraint(
+            "t2",
+            None,
+            JoinOperator::LeftOuter,
+            true
+        )]
     );
     assert_eq!(
         only(&verified_only_select("SELECT * FROM t1 RIGHT JOIN t2 ON c1 = c2").from).joins,
-        vec![join_with_constraint("t2", None, JoinOperator::RightOuter)]
+        vec![join_with_constraint(
+            "t2",
+            None,
+            JoinOperator::RightOuter,
+            false
+        )]
     );
     assert_eq!(
         only(&verified_only_select("SELECT * FROM t1 FULL JOIN t2 ON c1 = c2").from).joins,
-        vec![join_with_constraint("t2", None, JoinOperator::FullOuter)]
+        vec![join_with_constraint(
+            "t2",
+            None,
+            JoinOperator::FullOuter,
+            false
+        )]
     );
 }
 
@@ -2291,7 +2324,8 @@ fn parse_joins_using() {
     fn join_with_constraint(
         relation: impl Into<String>,
         alias: Option<TableAlias>,
-        f: impl Fn(JoinConstraint) -> JoinOperator,
+        f: impl Fn(JoinConstraint, bool) -> JoinOperator,
+        is_lookup_join: bool,
     ) -> Join {
         Join {
             relation: TableFactor::Table {
@@ -2299,7 +2333,7 @@ fn parse_joins_using() {
                 alias,
                 args: vec![],
             },
-            join_operator: f(JoinConstraint::Using(vec!["c1".into()])),
+            join_operator: f(JoinConstraint::Using(vec!["c1".into()]), is_lookup_join),
         }
     }
     // Test parsing of aliases
@@ -2308,7 +2342,8 @@ fn parse_joins_using() {
         vec![join_with_constraint(
             "t2",
             table_alias("foo"),
-            JoinOperator::Inner
+            JoinOperator::Inner,
+            false
         )]
     );
     one_statement_parses_to(
@@ -2318,32 +2353,60 @@ fn parse_joins_using() {
     // Test parsing of different join operators
     assert_eq!(
         only(&verified_only_select("SELECT * FROM t1 JOIN t2 USING(c1)").from).joins,
-        vec![join_with_constraint("t2", None, JoinOperator::Inner)]
+        vec![join_with_constraint("t2", None, JoinOperator::Inner, false)]
+    );
+    assert_eq!(
+        only(&verified_only_select("SELECT * FROM t1 LOOKUP JOIN t2 USING(c1)").from).joins,
+        vec![join_with_constraint("t2", None, JoinOperator::Inner, true)]
     );
     assert_eq!(
         only(&verified_only_select("SELECT * FROM t1 LEFT JOIN t2 USING(c1)").from).joins,
-        vec![join_with_constraint("t2", None, JoinOperator::LeftOuter)]
+        vec![join_with_constraint(
+            "t2",
+            None,
+            JoinOperator::LeftOuter,
+            false
+        )]
+    );
+    assert_eq!(
+        only(&verified_only_select("SELECT * FROM t1 LEFT LOOKUP JOIN t2 USING(c1)").from).joins,
+        vec![join_with_constraint(
+            "t2",
+            None,
+            JoinOperator::LeftOuter,
+            true
+        )]
     );
     assert_eq!(
         only(&verified_only_select("SELECT * FROM t1 RIGHT JOIN t2 USING(c1)").from).joins,
-        vec![join_with_constraint("t2", None, JoinOperator::RightOuter)]
+        vec![join_with_constraint(
+            "t2",
+            None,
+            JoinOperator::RightOuter,
+            false
+        )]
     );
     assert_eq!(
         only(&verified_only_select("SELECT * FROM t1 FULL JOIN t2 USING(c1)").from).joins,
-        vec![join_with_constraint("t2", None, JoinOperator::FullOuter)]
+        vec![join_with_constraint(
+            "t2",
+            None,
+            JoinOperator::FullOuter,
+            false
+        )]
     );
 }
 
 #[test]
 fn parse_natural_join() {
-    fn natural_join(f: impl Fn(JoinConstraint) -> JoinOperator) -> Join {
+    fn natural_join(f: impl Fn(JoinConstraint, bool) -> JoinOperator) -> Join {
         Join {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new("t2")]),
                 alias: None,
                 args: vec![],
             },
-            join_operator: f(JoinConstraint::Natural),
+            join_operator: f(JoinConstraint::Natural, false),
         }
     }
     assert_eq!(
@@ -2581,7 +2644,7 @@ fn parse_derived_tables() {
                     alias: None,
                     args: vec![],
                 },
-                join_operator: JoinOperator::Inner(JoinConstraint::Natural),
+                join_operator: JoinOperator::Inner(JoinConstraint::Natural, false),
             }],
         }))
     );
@@ -3166,7 +3229,7 @@ fn lateral_derived() {
         let join = &from.joins[0];
         assert_eq!(
             join.join_operator,
-            JoinOperator::LeftOuter(JoinConstraint::On(Expr::Value(Value::Boolean(true))))
+            JoinOperator::LeftOuter(JoinConstraint::On(Expr::Value(Value::Boolean(true))), false)
         );
         if let TableFactor::Derived {
             lateral,

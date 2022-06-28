@@ -2685,15 +2685,23 @@ impl Parser {
                     Keyword::NoKeyword
                 };
 
+                let is_lookup_join: bool;
                 let join_operator_type = match peek_keyword {
-                    Keyword::INNER | Keyword::JOIN => {
+                    Keyword::INNER | Keyword::JOIN | Keyword::LOOKUP => {
                         let _ = self.parse_keyword(Keyword::INNER);
+                        is_lookup_join = self.parse_keyword(Keyword::LOOKUP);
                         self.expect_keyword(Keyword::JOIN)?;
                         JoinOperator::Inner
                     }
                     kw @ Keyword::LEFT | kw @ Keyword::RIGHT | kw @ Keyword::FULL => {
-                        let _ = self.next_token();
+                        let token = self.next_token();
                         let _ = self.parse_keyword(Keyword::OUTER);
+                        is_lookup_join = self.parse_keyword(Keyword::LOOKUP);
+
+                        if let (Keyword::RIGHT | Keyword::FULL, true) = (kw, is_lookup_join) {
+                            return self.expected("LEFT or INNER join type before LOOKUP", token);
+                        }
+
                         self.expect_keyword(Keyword::JOIN)?;
                         match kw {
                             Keyword::LEFT => JoinOperator::LeftOuter,
@@ -2712,9 +2720,10 @@ impl Parser {
                 };
                 let relation = self.parse_table_factor()?;
                 let join_constraint = self.parse_join_constraint(natural)?;
+
                 Join {
                     relation,
-                    join_operator: join_operator_type(join_constraint),
+                    join_operator: join_operator_type(join_constraint, is_lookup_join),
                 }
             };
             joins.push(join);

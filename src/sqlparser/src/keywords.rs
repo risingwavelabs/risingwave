@@ -269,6 +269,7 @@ define_keywords!(
     LOCALTIMESTAMP,
     LOCATION,
     LOGIN,
+    LOOKUP,
     LOWER,
     MATCH,
     MATERIALIZED,
@@ -542,6 +543,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::NATURAL,
     Keyword::USING,
     Keyword::CLUSTER,
+    Keyword::LOOKUP,
     // for MSSQL-specific OUTER APPLY (seems reserved in most dialects)
     Keyword::OUTER,
     Keyword::SET,

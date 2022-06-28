@@ -425,28 +425,30 @@ impl fmt::Display for Join {
             Suffix(constraint)
         }
         match &self.join_operator {
-            JoinOperator::Inner(constraint) => write!(
+            JoinOperator::Inner(constraint, is_lookup_join) => write!(
                 f,
-                " {}JOIN {}{}",
+                " {}{}JOIN {}{}",
                 prefix(constraint),
+                if *is_lookup_join { "LOOKUP " } else { "" },
                 self.relation,
                 suffix(constraint)
             ),
-            JoinOperator::LeftOuter(constraint) => write!(
+            JoinOperator::LeftOuter(constraint, is_lookup_join) => write!(
                 f,
-                " {}LEFT JOIN {}{}",
+                " {}LEFT {}JOIN {}{}",
                 prefix(constraint),
+                if *is_lookup_join { "LOOKUP " } else { "" },
                 self.relation,
                 suffix(constraint)
             ),
-            JoinOperator::RightOuter(constraint) => write!(
+            JoinOperator::RightOuter(constraint, _) => write!(
                 f,
                 " {}RIGHT JOIN {}{}",
                 prefix(constraint),
                 self.relation,
                 suffix(constraint)
             ),
-            JoinOperator::FullOuter(constraint) => write!(
+            JoinOperator::FullOuter(constraint, _) => write!(
                 f,
                 " {}FULL JOIN {}{}",
                 prefix(constraint),
@@ -461,10 +463,10 @@ impl fmt::Display for Join {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum JoinOperator {
-    Inner(JoinConstraint),
-    LeftOuter(JoinConstraint),
-    RightOuter(JoinConstraint),
-    FullOuter(JoinConstraint),
+    Inner(JoinConstraint, bool),
+    LeftOuter(JoinConstraint, bool),
+    RightOuter(JoinConstraint, bool),
+    FullOuter(JoinConstraint, bool),
     CrossJoin,
 }
 
