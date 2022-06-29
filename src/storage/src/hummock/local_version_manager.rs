@@ -766,18 +766,16 @@ impl LocalVersionManager {
                     }
 
                     SharedBufferEvent::Clear(notifier) => {
-                        // Cancel and wait for all ongoing flush.
+                        // Wait for all ongoing flush to finish.
                         let ongoing_flush_handles: Vec<_> =
                             epoch_join_handle.drain().flat_map(|e| e.1).collect();
-                        for handle in &ongoing_flush_handles {
-                            handle.abort();
-                        }
                         if let Err(e) = try_join_all(ongoing_flush_handles).await {
                             error!("Failed to join flush handle {:?}", e)
                         }
 
-                        // Clear pending write requests.
-                        pending_write_requests.clear();
+                        // There cannot be any pending write requests since we should only clear
+                        // shared buffer after all actors stop processing data.
+                        assert!(pending_write_requests.is_empty());
 
                         // Clear shared buffer
                         local_version_manager
