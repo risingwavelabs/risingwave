@@ -174,7 +174,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 (
                     key.clone(),
                     hash_code.clone(),
-                    key_to_vis_maps.remove(key).unwrap().try_into().unwrap(),
+                    key_to_vis_maps.remove(key).unwrap().into_iter().collect(),
                 )
             })
             .collect_vec();

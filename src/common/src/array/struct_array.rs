@@ -268,7 +268,7 @@ impl StructArray {
         children_type: Vec<DataType>,
     ) -> ArrayResult<StructArray> {
         let cardinality = null_bitmap.len();
-        let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
+        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let children = children.into_iter().map(Arc::new).collect_vec();
         Ok(StructArray {
             bitmap,

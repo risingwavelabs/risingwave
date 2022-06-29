@@ -428,7 +428,7 @@ impl StreamChunkTestExt for StreamChunk {
         let visibility = if visibility.iter().all(|b| *b) {
             None
         } else {
-            Some(Bitmap::try_from(visibility).unwrap())
+            Some(Bitmap::from_iter(visibility))
         };
         StreamChunk::new(ops, columns, visibility)
     }

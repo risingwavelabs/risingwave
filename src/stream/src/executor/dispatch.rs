@@ -615,7 +615,7 @@ impl Dispatcher for HashDataDispatcher {
                 .zip_eq(self.outputs.iter_mut())
                 .zip_eq(self.fragment_ids.iter())
             {
-                let vis_map = vis_map.try_into().unwrap();
+                let vis_map = vis_map.into_iter().collect();
                 // columns is not changed in this function
                 let new_stream_chunk =
                     StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
