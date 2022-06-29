@@ -53,6 +53,8 @@ pub struct BackwardUserIterator {
     /// Only reads values if `epoch <= self.read_epoch`.
     read_epoch: Epoch,
 
+    min_epoch: Epoch,
+
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
     _version: Option<Arc<PinnedVersion>>,
 }
@@ -64,7 +66,7 @@ impl BackwardUserIterator {
         iterator: BackwardMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::with_epoch(iterator, key_range, Epoch::MAX, None)
+        Self::with_epoch(iterator, key_range, Epoch::MAX, 0, None)
     }
 
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
@@ -72,6 +74,7 @@ impl BackwardUserIterator {
         iterator: BackwardMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        min_epoch: u64,
         version: Option<Arc<PinnedVersion>>,
     ) -> Self {
         Self {
@@ -83,6 +86,7 @@ impl BackwardUserIterator {
             last_val: Vec::new(),
             last_delete: true,
             read_epoch,
+            min_epoch,
             _version: version,
         }
     }
@@ -141,7 +145,7 @@ impl BackwardUserIterator {
             let epoch = get_epoch(full_key);
             let key = to_user_key(full_key);
 
-            if epoch <= self.read_epoch {
+            if epoch > self.min_epoch && epoch <= self.read_epoch {
                 if self.just_met_new_key {
                     self.last_key.clear();
                     self.last_key.extend_from_slice(key);
@@ -269,11 +273,12 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator {
         stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        min_epoch: u64,
         version: Option<Arc<PinnedVersion>>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::<Backward>::new(iterator_iter, stats);
         DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
-            iterator, key_range, read_epoch, version,
+            iterator, key_range, read_epoch, min_epoch, version,
         ))
     }
 }

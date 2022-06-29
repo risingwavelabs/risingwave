@@ -41,6 +41,7 @@ pub trait DirectedUserIteratorBuilder {
         stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        min_epoch: u64,
         version: Option<Arc<PinnedVersion>>,
     ) -> DirectedUserIterator;
 }
@@ -115,6 +116,9 @@ pub struct UserIterator {
     /// Only reads values if `ts <= self.read_epoch`.
     read_epoch: Epoch,
 
+    /// Only reads values if `ts >= self.min_epoch`.
+    min_epoch: Epoch,
+
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
     _version: Option<Arc<PinnedVersion>>,
 }
@@ -127,7 +131,7 @@ impl UserIterator {
         iterator: MergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new(iterator, key_range, Epoch::MAX, None)
+        Self::new(iterator, key_range, Epoch::MAX, 0, None)
     }
 
     /// Create [`UserIterator`] with given `read_epoch`.
@@ -135,6 +139,7 @@ impl UserIterator {
         iterator: MergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        min_epoch: u64,
         version: Option<Arc<PinnedVersion>>,
     ) -> Self {
         Self {
@@ -144,6 +149,7 @@ impl UserIterator {
             last_key: Vec::new(),
             last_val: Vec::new(),
             read_epoch,
+            min_epoch,
             _version: version,
         }
     }
@@ -161,7 +167,9 @@ impl UserIterator {
             let key = to_user_key(full_key);
 
             // handle multi-version
-            if self.last_key.as_slice() != key && epoch <= self.read_epoch {
+            if self.last_key.as_slice() != key
+                && (epoch > self.min_epoch && epoch <= self.read_epoch)
+            {
                 self.last_key.clear();
                 self.last_key.extend_from_slice(key);
 
@@ -271,10 +279,13 @@ impl DirectedUserIteratorBuilder for UserIterator {
         stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        min_epoch: u64,
         version: Option<Arc<PinnedVersion>>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::<Forward>::new(iterator_iter, stats);
-        DirectedUserIterator::Forward(Self::new(iterator, key_range, read_epoch, version))
+        DirectedUserIterator::Forward(Self::new(
+            iterator, key_range, read_epoch, min_epoch, version,
+        ))
     }
 }
 
