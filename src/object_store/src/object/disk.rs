@@ -25,7 +25,6 @@ use futures::future::try_join_all;
 use risingwave_common::cache::{CachableEntry, LruCache};
 use tokio::io::AsyncWriteExt;
 
-use crate::define_object_store_associated_types;
 use crate::object::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore};
 
 pub(super) mod utils {
@@ -147,118 +146,103 @@ impl DiskObjectStore {
     }
 }
 
+#[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
-    define_object_store_associated_types!();
-
-    fn upload<'a>(&'a self, path: &'a str, obj: Bytes) -> Self::UploadFuture<'_> {
-        async move {
-            let mut file =
-                utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
-            file.write_all(&obj)
-                .await
-                .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
-            file.flush()
-                .await
-                .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
-            Ok(())
-        }
+    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        let mut file =
+            utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
+        file.write_all(&obj)
+            .await
+            .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
+        file.flush()
+            .await
+            .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
+        Ok(())
     }
 
-    fn read<'a>(&'a self, path: &'a str, block_loc: Option<BlockLocation>) -> Self::ReadFuture<'_> {
-        async move {
-            match block_loc {
-                Some(block_loc) => Ok(self.readv(path, &[block_loc]).await?.pop().unwrap()),
-                None => {
-                    let file_holder = self.get_read_file(path).await?;
-                    let metadata = utils::get_metadata(file_holder.clone()).await?;
-                    let path_owned = path.to_owned();
-                    utils::asyncify(move || {
-                        let mut buf = vec![0; metadata.len() as usize];
-                        file_holder
-                            .value()
-                            .read_exact_at(&mut buf, 0)
-                            .map_err(|e| {
-                                ObjectError::disk(
-                                    format!("failed to read the whole file {}", path_owned),
-                                    e,
-                                )
-                            })?;
-                        Ok(Bytes::from(buf))
-                    })
-                    .await
-                }
-            }
-        }
-    }
-
-    fn readv<'a>(
-        &'a self,
-        path: &'a str,
-        block_locs: &'a [BlockLocation],
-    ) -> Self::ReadvFuture<'_> {
-        async move {
-            let file_holder = self.get_read_file(path).await?;
-            let metadata = utils::get_metadata(file_holder.clone()).await?;
-            for block_loc in block_locs {
-                if block_loc.offset + block_loc.size > metadata.len() as usize {
-                    return Err(ObjectError::disk(
-                        "".to_string(),
-                        Error::new(
-                            ErrorKind::Other,
-                            format!(
-                                "block location {:?} is out of bounds for file of len {}",
-                                block_loc,
-                                metadata.len()
-                            ),
-                        ),
-                    ));
-                }
-            }
-            let mut ret = Vec::with_capacity(block_locs.len());
-            for block_loc_ref in block_locs {
-                let file_holder = file_holder.clone();
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        match block_loc {
+            Some(block_loc) => Ok(self.readv(path, &[block_loc]).await?.pop().unwrap()),
+            None => {
+                let file_holder = self.get_read_file(path).await?;
+                let metadata = utils::get_metadata(file_holder.clone()).await?;
                 let path_owned = path.to_owned();
-                let block_loc = *block_loc_ref;
-                let future = utils::asyncify(move || {
-                    let mut buf = vec![0; block_loc.size as usize];
+                utils::asyncify(move || {
+                    let mut buf = vec![0; metadata.len() as usize];
                     file_holder
                         .value()
-                        .read_exact_at(&mut buf, block_loc.offset as u64)
+                        .read_exact_at(&mut buf, 0)
                         .map_err(|e| {
                             ObjectError::disk(
-                                format!(
-                                    "failed to read  file {} at offset {} for size {}",
-                                    path_owned, block_loc.offset, block_loc.size
-                                ),
+                                format!("failed to read the whole file {}", path_owned),
                                 e,
                             )
                         })?;
                     Ok(Bytes::from(buf))
-                });
-                ret.push(future)
-            }
-
-            try_join_all(ret).await
-        }
-    }
-
-    fn metadata<'a>(&'a self, path: &'a str) -> Self::MetadataFuture<'_> {
-        async move {
-            let file_holder = self.get_read_file(path).await?;
-            let metadata = utils::get_metadata(file_holder).await?;
-            Ok(ObjectMetadata {
-                total_size: metadata.len() as usize,
-            })
-        }
-    }
-
-    fn delete<'a>(&'a self, path: &'a str) -> Self::DeleteFuture<'_> {
-        async move {
-            tokio::fs::remove_file(self.new_file_path(path)?.as_path())
+                })
                 .await
-                .map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))?;
-            Ok(())
+            }
         }
+    }
+
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+        let file_holder = self.get_read_file(path).await?;
+        let metadata = utils::get_metadata(file_holder.clone()).await?;
+        for block_loc in block_locs {
+            if block_loc.offset + block_loc.size > metadata.len() as usize {
+                return Err(ObjectError::disk(
+                    "".to_string(),
+                    Error::new(
+                        ErrorKind::Other,
+                        format!(
+                            "block location {:?} is out of bounds for file of len {}",
+                            block_loc,
+                            metadata.len()
+                        ),
+                    ),
+                ));
+            }
+        }
+        let mut ret = Vec::with_capacity(block_locs.len());
+        for block_loc_ref in block_locs {
+            let file_holder = file_holder.clone();
+            let path_owned = path.to_owned();
+            let block_loc = *block_loc_ref;
+            let future = utils::asyncify(move || {
+                let mut buf = vec![0; block_loc.size as usize];
+                file_holder
+                    .value()
+                    .read_exact_at(&mut buf, block_loc.offset as u64)
+                    .map_err(|e| {
+                        ObjectError::disk(
+                            format!(
+                                "failed to read  file {} at offset {} for size {}",
+                                path_owned, block_loc.offset, block_loc.size
+                            ),
+                            e,
+                        )
+                    })?;
+                Ok(Bytes::from(buf))
+            });
+            ret.push(future)
+        }
+
+        try_join_all(ret).await
+    }
+
+    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+        let file_holder = self.get_read_file(path).await?;
+        let metadata = utils::get_metadata(file_holder).await?;
+        Ok(ObjectMetadata {
+            total_size: metadata.len() as usize,
+        })
+    }
+
+    async fn delete(&self, path: &str) -> ObjectResult<()> {
+        tokio::fs::remove_file(self.new_file_path(path)?.as_path())
+            .await
+            .map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))?;
+        Ok(())
     }
 }
 

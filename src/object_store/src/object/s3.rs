@@ -19,8 +19,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 
 use super::{BlockLocation, ObjectError, ObjectMetadata};
-use crate::define_object_store_associated_types;
-use crate::object::{Bytes, ObjectStore};
+use crate::object::{Bytes, ObjectResult, ObjectStore};
 
 /// Object store with S3 backend
 pub struct S3ObjectStore {
@@ -28,107 +27,92 @@ pub struct S3ObjectStore {
     bucket: String,
 }
 
+#[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
-    define_object_store_associated_types!();
-
-    fn upload<'a>(&'a self, path: &'a str, obj: Bytes) -> Self::UploadFuture<'_> {
-        async move {
-            fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
-                "s3 upload error"
-            )));
-            self.client
-                .put_object()
-                .bucket(&self.bucket)
-                .body(SdkBody::from(obj).into())
-                .key(path)
-                .send()
-                .await?;
-            Ok(())
-        }
+    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
+            "s3 upload error"
+        )));
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .body(SdkBody::from(obj).into())
+            .key(path)
+            .send()
+            .await?;
+        Ok(())
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
-    fn read<'a>(&'a self, path: &'a str, block_loc: Option<BlockLocation>) -> Self::ReadFuture<'_> {
-        async move {
-            fail_point!("s3_read_err", |_| Err(ObjectError::internal(
-                "s3 read error"
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        fail_point!("s3_read_err", |_| Err(ObjectError::internal(
+            "s3 read error"
+        )));
+        let req = self.client.get_object().bucket(&self.bucket).key(path);
+
+        let range = match block_loc.as_ref() {
+            None => None,
+            Some(block_location) => block_location.byte_range_specifier(),
+        };
+
+        let req = if let Some(range) = range {
+            req.range(range)
+        } else {
+            req
+        };
+
+        let resp = req.send().await?;
+        let val = resp.body.collect().await?.into_bytes();
+
+        if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
+            return Err(ObjectError::internal(format!(
+                "mismatched size: expected {}, found {} when reading {} at {:?}",
+                block_loc.as_ref().unwrap().size,
+                val.len(),
+                path,
+                block_loc.as_ref().unwrap()
             )));
-            let req = self.client.get_object().bucket(&self.bucket).key(path);
-
-            let range = match block_loc.as_ref() {
-                None => None,
-                Some(block_location) => block_location.byte_range_specifier(),
-            };
-
-            let req = if let Some(range) = range {
-                req.range(range)
-            } else {
-                req
-            };
-
-            let resp = req.send().await?;
-            let val = resp.body.collect().await?.into_bytes();
-
-            if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
-                return Err(ObjectError::internal(format!(
-                    "mismatched size: expected {}, found {} when reading {} at {:?}",
-                    block_loc.as_ref().unwrap().size,
-                    val.len(),
-                    path,
-                    block_loc.as_ref().unwrap()
-                )));
-            }
-            Ok(val)
         }
+        Ok(val)
     }
 
-    fn readv<'a>(
-        &'a self,
-        path: &'a str,
-        block_locs: &'a [BlockLocation],
-    ) -> Self::ReadvFuture<'_> {
-        async move {
-            let futures = block_locs
-                .iter()
-                .map(|block_loc| self.read(path, Some(*block_loc)))
-                .collect_vec();
-            try_join_all(futures).await
-        }
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+        let futures = block_locs
+            .iter()
+            .map(|block_loc| self.read(path, Some(*block_loc)))
+            .collect_vec();
+        try_join_all(futures).await
     }
 
-    fn metadata<'a>(&'a self, path: &'a str) -> Self::MetadataFuture<'_> {
-        async move {
-            fail_point!("s3_metadata_err", |_| Err(ObjectError::internal(
-                "s3 metadata error"
-            )));
-            let resp = self
-                .client
-                .head_object()
-                .bucket(&self.bucket)
-                .key(path)
-                .send()
-                .await?;
-            Ok(ObjectMetadata {
-                total_size: resp.content_length as usize,
-            })
-        }
+    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+        fail_point!("s3_metadata_err", |_| Err(ObjectError::internal(
+            "s3 metadata error"
+        )));
+        let resp = self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(path)
+            .send()
+            .await?;
+        Ok(ObjectMetadata {
+            total_size: resp.content_length as usize,
+        })
     }
 
     /// Permanently deletes the whole object.
     /// According to Amazon S3, this will simply return Ok if the object does not exist.
-    fn delete<'a>(&'a self, path: &'a str) -> Self::DeleteFuture<'_> {
-        async move {
-            fail_point!("s3_delete_err", |_| Err(ObjectError::internal(
-                "s3 delete error"
-            )));
-            self.client
-                .delete_object()
-                .bucket(&self.bucket)
-                .key(path)
-                .send()
-                .await?;
-            Ok(())
-        }
+    async fn delete(&self, path: &str) -> ObjectResult<()> {
+        fail_point!("s3_delete_err", |_| Err(ObjectError::internal(
+            "s3 delete error"
+        )));
+        self.client
+            .delete_object()
+            .bucket(&self.bucket)
+            .key(path)
+            .send()
+            .await?;
+        Ok(())
     }
 }
 

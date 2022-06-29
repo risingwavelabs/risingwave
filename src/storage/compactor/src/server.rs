@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use risingwave_common::service::MetricsManager;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreImpl};
+use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
@@ -74,7 +74,7 @@ pub async fn compactor_serve(
 
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
-    let object_store = Arc::new(ObjectStoreImpl::Remote(
+    let object_store = Arc::new(
         parse_remote_object_store(
             opts.state_store
                 .strip_prefix("hummock+")
@@ -82,7 +82,7 @@ pub async fn compactor_serve(
             object_metrics,
         )
         .await,
-    ));
+    );
     let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,
         storage_config.data_directory.to_string(),

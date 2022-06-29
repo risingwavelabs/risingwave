@@ -107,7 +107,7 @@ impl StateStoreImpl {
                     .await;
                     ObjectStoreImpl::hybrid(local_object_store, remote_object_store)
                 } else {
-                    ObjectStoreImpl::Remote(remote_object_store)
+                    remote_object_store
                 };
 
                 let sstable_store = Arc::new(SstableStore::new(
