@@ -72,12 +72,14 @@ impl Vis {
         }
     }
 
-    pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
+    /// # Panics
+    /// Panics if `idx > len`.
+    pub fn is_set(&self, idx: usize) -> bool {
         match self {
-            Vis::Bitmap(b) => b.is_set(idx),
+            Vis::Bitmap(b) => b.is_set(idx).unwrap(),
             Vis::Compact(c) => {
-                ensure!(idx <= *c);
-                Ok(true)
+                assert!(idx <= *c);
+                true
             }
         }
     }
