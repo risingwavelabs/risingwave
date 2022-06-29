@@ -56,9 +56,11 @@ pub type ExpressionRef = Arc<dyn Expression>;
 pub trait Expression: std::fmt::Debug + Sync + Send {
     fn return_type(&self) -> DataType;
 
+    /// Eval the result with extra checks.
     fn wrapping_eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let res = self.eval(input)?;
 
+        // TODO: Decide to use assert or debug_assert by benchmarks.
         assert_eq!(res.len(), input.capacity());
 
         Ok(res)
