@@ -14,10 +14,8 @@
 
 //! Streaming Aggregators
 
-use risingwave_common::catalog::TableId;
-
 use super::*;
-use crate::executor::aggregation::AggCall;
+use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
 use crate::executor::SimpleAggExecutor;
 
 pub struct SimpleAggExecutorBuilder;
@@ -37,24 +35,20 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .try_collect()?;
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
-        let keyspace = node
-            .internal_tables
-            .iter()
-            .map(|table| Keyspace::table_root(store.clone(), &TableId::new(table.id)))
-            .collect();
         let key_indices = node
             .get_distribution_keys()
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
+        let state_tables = generate_state_tables_from_proto(store, &node.internal_tables);
 
         Ok(SimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
-            keyspace,
             params.pk_indices,
             params.executor_id,
             key_indices,
+            state_tables,
         )?
         .boxed())
     }
