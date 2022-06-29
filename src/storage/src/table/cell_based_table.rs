@@ -200,6 +200,7 @@ impl<S: StateStore, SER: RowSerializer> From<CellBasedTableBase<S, SER, READ_WRI
 }
 
 impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
+    /// Returns a bitmap that only the vnode `0x00` is set. Used for fallback or no distribution.
     pub(super) fn fallback_vnodes() -> Arc<Bitmap> {
         lazy_static::lazy_static! {
             static ref FALLBACK_VNODES: Arc<Bitmap> = {
