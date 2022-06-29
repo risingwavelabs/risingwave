@@ -446,8 +446,9 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
                     dist_key_indices,
                     vnodes,
                 ),
-                // Simple Agg, or Hash Agg in tests
+                // Simple Agg
                 None => {
+                    assert!(dist_key_indices.is_empty());
                     StateTable::new_without_distribution(keyspace, columns, order_types, pk_indices)
                 }
             }

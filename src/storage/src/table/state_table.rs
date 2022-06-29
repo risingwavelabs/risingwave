@@ -55,7 +55,7 @@ pub struct StateTableBase<S: StateStore, SER: RowSerializer> {
 
 impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
-    // TODO: remove this after all state table usages are replaced by `new_with_distribution`.
+    // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,
@@ -66,6 +66,7 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
         Self::new_without_distribution(keyspace, columns, order_types, pk_indices)
     }
 
+    /// Create a state table without distribution, used for singleton executors and tests.
     pub fn new_without_distribution(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,
@@ -82,6 +83,7 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
         )
     }
 
+    /// Create a state table with distribution specified with `dist_key_indices` and `vnodes`.
     pub fn new_with_distribution(
         keyspace: Keyspace<S>,
         columns: Vec<ColumnDesc>,

@@ -269,6 +269,7 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
 
 /// Get
 impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
+    /// Get vnode value with `indices` on the given `row`. Should not be used directly.
     fn compute_vnode(&self, row: &Row, indices: &[usize]) -> VirtualNode {
         let vnode = if indices.is_empty() {
             DEFAULT_VNODE
@@ -276,10 +277,6 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
             row.hash_by_indices(indices, &CRC32FastBuilder {})
                 .to_vnode()
         };
-
-        if vnode != 0 {
-            tracing::warn!("{:?}, {:?} => {}", row, indices, vnode);
-        }
 
         // This table should only be used to access entries with vnode specified in `self.vnodes`.
         assert!(

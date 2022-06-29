@@ -539,13 +539,6 @@ impl Dispatcher for HashDataDispatcher {
                 .map(|hash| *hash as usize % VIRTUAL_NODE_COUNT)
                 .collect::<Vec<_>>();
 
-            tracing::warn!(
-                "{}\n {:?} => {:?}",
-                chunk.to_pretty_string(),
-                &self.keys,
-                hash_values
-            );
-
             let (ops, columns, visibility) = chunk.into_inner();
 
             // TODO: use bitmap builder
