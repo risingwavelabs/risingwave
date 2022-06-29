@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::state_table::StateTable;
@@ -49,33 +50,69 @@ impl<S: StateStore> MaterializeExecutor<S> {
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         distribution_keys: Vec<usize>,
+        vnodes: Arc<Bitmap>,
+    ) -> Self {
+        Self::new_inner(
+            input,
+            keyspace,
+            keys,
+            column_ids,
+            executor_id,
+            distribution_keys,
+            Some(vnodes),
+        )
+    }
+
+    /// Create a new `MaterializeExecutor` without distribution info. Should only be used for tests.
+    pub fn new_without_distribution(
+        input: BoxedExecutor,
+        keyspace: Keyspace<S>,
+        keys: Vec<OrderPair>,
+        column_ids: Vec<ColumnId>,
+        executor_id: u64,
+    ) -> Self {
+        Self::new_inner(input, keyspace, keys, column_ids, executor_id, vec![], None)
+    }
+
+    fn new_inner(
+        input: BoxedExecutor,
+        keyspace: Keyspace<S>,
+        keys: Vec<OrderPair>,
+        column_ids: Vec<ColumnId>,
+        executor_id: u64,
+        distribution_keys: Vec<usize>,
+        vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
-        let arrange_columns_set: HashSet<usize> =
-            keys.iter().map(|k| k.column_idx).collect::<HashSet<_>>();
-        let dist_key_set = distribution_keys.iter().copied().collect::<HashSet<_>>();
-        assert!(
-            dist_key_set.is_subset(&arrange_columns_set),
-            "dist_key_set={:?}, arrange_columns_set={:?}",
-            dist_key_set,
-            arrange_columns_set
-        );
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
+
         let schema = input.schema().clone();
-        let column_descs = column_ids
+        let columns = column_ids
             .into_iter()
-            .zip_eq(schema.fields.iter().cloned())
+            .zip_eq(schema.fields.iter())
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
-        Self {
-            input,
-            state_table: StateTable::new(
+
+        let state_table = match vnodes {
+            Some(vnodes) => StateTable::new_with_distribution(
                 keyspace,
-                column_descs,
+                columns,
                 arrange_order_types,
-                Some(distribution_keys),
+                arrange_columns.clone(),
+                distribution_keys,
+                vnodes,
+            ),
+            None => StateTable::new_without_distribution(
+                keyspace,
+                columns,
+                arrange_order_types,
                 arrange_columns.clone(),
             ),
+        };
+
+        Self {
+            input,
+            state_table,
             arrange_columns: arrange_columns.clone(),
             info: ExecutorInfo {
                 schema,
@@ -223,13 +260,12 @@ mod tests {
         ];
         let table =
             CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types, vec![0]);
-        let mut materialize_executor = Box::new(MaterializeExecutor::new(
+        let mut materialize_executor = Box::new(MaterializeExecutor::new_without_distribution(
             Box::new(source),
             keyspace,
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             1,
-            vec![0],
         ))
         .execute();
 

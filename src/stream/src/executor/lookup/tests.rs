@@ -126,13 +126,12 @@ fn create_arrangement(
 
     let keyspace = Keyspace::table_root(memory_state_store, &table_id);
 
-    Box::new(MaterializeExecutor::new(
+    Box::new(MaterializeExecutor::new_without_distribution(
         Box::new(source),
         keyspace,
         arrangement_col_arrange_rules(),
         column_ids,
         1,
-        vec![0usize],
     ))
 }
 
