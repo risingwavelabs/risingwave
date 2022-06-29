@@ -185,24 +185,24 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
-                if let Some(table_scan_info) = second_stage.table_scan_info.clone() {
+                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.vnode_bitmaps {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
-                    let (parallel_unit_ids, vnode_ranges_mapping): (Vec<_>, Vec<_>) =
-                        table_scan_info.vnode_bitmaps.into_iter().unzip();
+                    let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
+                        vnode_bitmaps.into_iter().unzip();
                     let workers = self
                         .front_env
                         .worker_node_manager()
                         .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
-                    for (idx, (worker_node, vnode_ranges)) in
-                        (workers.into_iter().zip_eq(vnode_ranges_mapping.into_iter())).enumerate()
+                    for (idx, (worker_node, vnode_bitmap)) in
+                        (workers.into_iter().zip_eq(vnode_bitmaps.into_iter())).enumerate()
                     {
                         let second_stage_plan_node = self.convert_plan_node(
                             &*second_stage.root,
                             &mut None,
-                            Some(vnode_ranges),
+                            Some(vnode_bitmap),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
                             root: Some(second_stage_plan_node),
@@ -280,17 +280,21 @@ impl LocalQueryExecution {
                 })
             }
             PlanNodeType::BatchSeqScan => {
-                let node_body = execution_plan_node.node.clone();
-                let NodeBody::RowSeqScan(mut scan_node) = node_body else {
-                    unreachable!();
-                };
-                assert!(vnode_bitmap.is_some());
-                scan_node.vnode_bitmap = vnode_bitmap;
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::RowSeqScan(ref mut scan_node) => {
+                        assert!(vnode_bitmap.is_some());
+                        scan_node.vnode_bitmap = vnode_bitmap;
+                    }
+                    NodeBody::SysRowSeqScan(_) => {}
+                    _ => unreachable!(),
+                }
+
                 Ok(PlanNodeProst {
                     children: vec![],
                     // TODO: Generate meaningful identify
                     identity: Uuid::new_v4().to_string(),
-                    node_body: Some(NodeBody::RowSeqScan(scan_node)),
+                    node_body: Some(node_body),
                 })
             }
             _ => {

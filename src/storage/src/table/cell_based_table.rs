@@ -291,6 +291,7 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
 /// Get
 impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
     /// Get vnode value with `indices` on the given `row`. Should not be used directly.
+    #[expect(clippy::let_and_return)]
     fn compute_vnode(&self, row: &Row, indices: &[usize]) -> VirtualNode {
         let vnode = if indices.is_empty() {
             DEFAULT_VNODE
@@ -344,19 +345,17 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         }
 
         let result = deserializer.take();
-        Ok(result
-            .map(|(vnode, _pk, row)| {
-                // This table should only to used to access entries with vnode specified in
-                // `self.vnodes`.
-                // FIXME: use assert when batch scan pruning is implemented.
-                // assert!(self.vnodes.is_set(vnode as usize).unwrap());
-                if self.vnodes.is_set(vnode as usize).unwrap() {
-                    Some(row)
-                } else {
-                    None
-                }
-            })
-            .flatten())
+        Ok(result.and_then(|(vnode, _pk, row)| {
+            // This table should only to used to access entries with vnode specified in
+            // `self.vnodes`.
+            // FIXME: use assert when batch scan pruning is implemented.
+            // assert!(self.vnodes.is_set(vnode as usize).unwrap());
+            if self.vnodes.is_set(vnode as usize).unwrap() {
+                Some(row)
+            } else {
+                None
+            }
+        }))
     }
 
     /// Get a single row by range scan

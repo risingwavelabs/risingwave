@@ -298,7 +298,10 @@ impl StageRunner {
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
-            let vnode_bitmaps = &table_scan_info.vnode_bitmaps;
+            let vnode_bitmaps = table_scan_info
+                .vnode_bitmaps
+                .as_ref()
+                .expect("No unpartitioned table (system table) in distributed mode.");
 
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
             let workers = self

@@ -165,7 +165,9 @@ impl Query {
 #[derive(Clone)]
 pub struct TableScanInfo {
     /// Indicates data distribution and partition of the table.
-    pub vnode_bitmaps: HashMap<ParallelUnitId, Buffer>,
+    ///
+    /// `None` if it's `Single` distributition (system table).
+    pub vnode_bitmaps: Option<HashMap<ParallelUnitId, Buffer>>,
 }
 
 /// Fragment part of `Query`.
@@ -234,7 +236,11 @@ impl QueryStageBuilder {
             exchange_info: self.exchange_info,
             parallelism: match &self.table_scan_info {
                 None => self.parallelism,
-                Some(info) => info.vnode_bitmaps.len() as u32,
+                Some(info) => info
+                    .vnode_bitmaps
+                    .as_ref()
+                    .map(|m| m.len() as u32)
+                    .unwrap_or(1),
             },
             table_scan_info: self.table_scan_info,
         });
@@ -387,14 +393,25 @@ impl BatchPlanFragmenter {
                 // Check out the comments for `has_table_scan` in `QueryStage`.
                 if let Some(scan_node) = node.as_batch_seq_scan() {
                     let table_desc = scan_node.logical().table_desc();
+                    let is_sys_table = scan_node.logical().is_sys_table();
                     assert!(
-                        builder.table_scan_info.is_none(),
+                        builder.table_scan_info.is_none()
+                            || builder
+                                .table_scan_info
+                                .as_ref()
+                                .unwrap()
+                                .vnode_bitmaps
+                                .is_none(),
                         "multiple table scan inside a stage"
                     );
                     builder.table_scan_info = Some(TableScanInfo {
-                        vnode_bitmaps: vnode_mapping_to_owner_mapping(
-                            table_desc.vnode_mapping.clone().unwrap(),
-                        ),
+                        vnode_bitmaps: if is_sys_table {
+                            None
+                        } else {
+                            Some(vnode_mapping_to_owner_mapping(
+                                table_desc.vnode_mapping.clone().unwrap(),
+                            ))
+                        },
                     });
                 }
             }
