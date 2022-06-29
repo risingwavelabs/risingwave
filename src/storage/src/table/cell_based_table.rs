@@ -129,13 +129,14 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
     /// This is parameterized on cell based row serializer.
-    // TODO: allow specifying the distribution keys and vnodes.
     pub fn new_partial(
         keyspace: Keyspace<S>,
         table_columns: Vec<ColumnDesc>,
         column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
+        dist_key_indices: Vec<usize>,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         Self::new_inner(
             keyspace,
@@ -143,8 +144,8 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
             column_ids,
             order_types,
             pk_indices,
-            vec![],
-            Self::fallback_vnodes(),
+            dist_key_indices,
+            vnodes,
         )
     }
 }

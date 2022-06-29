@@ -156,22 +156,22 @@ impl std::fmt::Debug for Bitmap {
 }
 
 impl Bitmap {
-    pub fn new(num_bits: usize) -> ArrayResult<Self> {
+    pub fn new(num_bits: usize) -> Self {
         let len = Self::num_of_bytes(num_bits);
-        Ok(Self {
+        Self {
             bits: vec![0; len].into(),
             num_bits,
             num_high_bits: 0,
-        })
+        }
     }
 
-    pub fn all_high_bits(num_bits: usize) -> ArrayResult<Self> {
+    pub fn all_high_bits(num_bits: usize) -> Self {
         let len = Self::num_of_bytes(num_bits);
-        Ok(Self {
+        Self {
             bits: vec![0xff; len].into(),
             num_bits,
             num_high_bits: num_bits,
-        })
+        }
     }
 
     pub fn from_bytes_with_num_bits(buf: Bytes, num_bits: usize) -> Self {
@@ -464,9 +464,9 @@ mod tests {
 
     #[test]
     fn test_bitmap_length() {
-        assert_eq!(64, Bitmap::new(63 * 8).unwrap().num_of_buffer_bytes());
-        assert_eq!(64, Bitmap::new(64 * 8).unwrap().num_of_buffer_bytes());
-        assert_eq!(128, Bitmap::new(65 * 8).unwrap().num_of_buffer_bytes());
+        assert_eq!(64, Bitmap::new(63 * 8).num_of_buffer_bytes());
+        assert_eq!(64, Bitmap::new(64 * 8).num_of_buffer_bytes());
+        assert_eq!(128, Bitmap::new(65 * 8).num_of_buffer_bytes());
     }
 
     #[test]
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn test_bitmap_init() {
-        let bm1 = Bitmap::new(1).unwrap();
+        let bm1 = Bitmap::new(1);
         let bm2 = (vec![false]).try_into().unwrap();
         assert_eq!(bm1, bm2);
     }

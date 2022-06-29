@@ -37,6 +37,7 @@ pub struct BatchQueryExecutor<S: StateStore> {
     info: ExecutorInfo,
 
     /// Indices of the columns on which key distribution depends.
+    // TODO: remove this since distribution is already specified in the `table`.
     key_indices: Vec<usize>,
 
     /// vnode bitmap used to filter data belong to this parallel unit.
@@ -83,6 +84,7 @@ where
             .collect_data_chunk(self.schema(), Some(self.batch_size))
             .await?
         {
+            // TODO: real parallel scan
             // Filter out rows
             let filtered_data_chunk = match self.filter_chunk(data_chunk) {
                 Some(chunk) => chunk,
