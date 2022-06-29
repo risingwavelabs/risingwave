@@ -537,13 +537,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk,
                         self.append_only_optimize,
                     ) {
-                        yield chunk
-                            .map(|v| match v {
-                                Message::Chunk(chunk) => {
-                                    Message::Chunk(chunk.reorder_columns(&self.output_indices))
-                                }
-                                barrier @ Message::Barrier(_) => barrier,
-                            })?;
+                        yield chunk.map(|v| match v {
+                            Message::Chunk(chunk) => {
+                                Message::Chunk(chunk.reorder_columns(&self.output_indices))
+                            }
+                            barrier @ Message::Barrier(_) => barrier,
+                        })?;
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {
