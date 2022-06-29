@@ -298,8 +298,9 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
-        gen_iterator_test_sstable_from_kv_pair, iterator_test_key_of, iterator_test_key_of_epoch,
-        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
+        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_value_of,
+        mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::BoxedBackwardHummockIterator;
     use crate::hummock::sstable::Sstable;
@@ -1094,5 +1095,45 @@ mod tests {
             meta: sst.meta.clone(),
             blocks: vec![],
         }
+    }
+
+    #[tokio::test]
+    async fn test_min_epoch() {
+        let sstable_store = mock_sstable_store();
+        let table0 = gen_iterator_test_sstable_with_incr_epoch(
+            0,
+            default_builder_opt_for_test(),
+            |x| x * 3,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+            1,
+        )
+        .await;
+
+        let cache = create_small_table_cache();
+        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
+
+        let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(
+            BackwardSSTableIterator::new(handle0, sstable_store),
+        )];
+
+        let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
+        let mi = BackwardMergeIterator::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let mut ui =
+            BackwardUserIterator::with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch, None);
+        ui.rewind().await.unwrap();
+
+        let mut i = 0;
+        while ui.is_valid() {
+            let key = ui.key();
+            let key_epoch = get_epoch(key);
+            assert!(key_epoch > min_epoch);
+
+            i += 1;
+            ui.next().await.unwrap();
+        }
+
+        let expect_count = TEST_KEYS_COUNT - min_epoch as usize;
+        assert_eq!(i, expect_count);
     }
 }

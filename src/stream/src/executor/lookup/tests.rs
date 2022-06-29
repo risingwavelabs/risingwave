@@ -247,6 +247,7 @@ async fn test_lookup_this_epoch() {
             ReadOptions {
                 epoch: u64::MAX,
                 table_id: Default::default(),
+                ttl: None,
             },
         )
         .await

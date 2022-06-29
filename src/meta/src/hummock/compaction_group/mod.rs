@@ -58,30 +58,6 @@ impl CompactionGroup {
     pub fn table_id_to_options(&self) -> &HashMap<u32, TableOption> {
         &self.table_id_to_options
     }
-
-    // pub fn build_table_option(table_properties: &HashMap<String, String>) -> TableOption {
-    //     // now we only support ttl for TableOption
-    //     let mut result = TableOption::default();
-    //     match table_properties.get(hummock::PROPERTIES_TTL_KEY) {
-    //         Some(ttl_string) => {
-    //             match ttl_string.trim().parse::<u32>() {
-    //                 Ok(ttl_u32) => result.ttl = Some(ttl_u32),
-    //                 Err(e) => {
-    //                     tracing::info!(
-    //                         "build_table_option parse option ttl_string {} fail {}",
-    //                         ttl_string,
-    //                         e
-    //                     );
-    //                     result.ttl = None;
-    //                 }
-    //             };
-    //         }
-
-    //         None => {}
-    //     }
-
-    //     result
-    // }
 }
 
 impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {

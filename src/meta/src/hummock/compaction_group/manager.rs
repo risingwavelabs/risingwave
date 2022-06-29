@@ -91,7 +91,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             // `StateDefault`.
             CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
             // CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
-            table_option.clone(),
+            table_option,
         ));
         // internal states
         for table_id in table_fragments.internal_table_ids() {
@@ -99,7 +99,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             pairs.push((
                 Prefix::from(table_id),
                 CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
-                table_option.clone(),
+                table_option,
             ));
         }
         self.inner
@@ -270,7 +270,7 @@ impl CompactionGroupManagerInner {
             compaction_group.member_prefixes.insert(*prefix);
             compaction_group
                 .table_id_to_options
-                .insert(prefix.into(), table_option.clone());
+                .insert(prefix.into(), *table_option);
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
@@ -338,7 +338,7 @@ impl CompactionGroupManagerInner {
     ) -> Result<TableOption> {
         let compaction_group = self.compaction_group(compaction_group_id)?;
         match compaction_group.table_id_to_options().get(&table_id) {
-            Some(table_option) => Ok(table_option.clone()),
+            Some(table_option) => Ok(*table_option),
 
             None => Ok(TableOption::default()),
         }
@@ -396,7 +396,7 @@ mod tests {
                 &[(
                     Prefix::from(1u32),
                     StaticCompactionGroupId::StateDefault.into(),
-                    table_option.clone(),
+                    table_option,
                 )],
                 env.meta_store(),
             )
@@ -409,7 +409,7 @@ mod tests {
                 &[(
                     Prefix::from(2u32),
                     StaticCompactionGroupId::MaterializedView.into(),
-                    table_option.clone(),
+                    table_option,
                 )],
                 env.meta_store(),
             )

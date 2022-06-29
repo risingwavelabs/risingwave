@@ -173,6 +173,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await
@@ -408,6 +409,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await
@@ -548,6 +550,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await
