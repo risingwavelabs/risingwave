@@ -62,14 +62,14 @@ impl Expression for CaseExpression {
         let mut els = self
             .else_clause
             .as_deref()
-            .map(|else_clause| else_clause.eval_checked(&input).unwrap());
+            .map(|else_clause| else_clause.eval_checked(input).unwrap());
         let when_thens = self
             .when_clauses
             .iter()
             .map(|when_clause| {
                 (
-                    when_clause.when.eval_checked(&input).unwrap(),
-                    when_clause.then.eval_checked(&input).unwrap(),
+                    when_clause.when.eval_checked(input).unwrap(),
+                    when_clause.then.eval_checked(input).unwrap(),
                 )
             })
             .collect_vec();
