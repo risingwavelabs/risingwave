@@ -73,7 +73,6 @@ impl Expression for NestedConstructExpression {
                     builder.append_null()
                 }
             })?;
-            dbg!(&chunk);
             builder
                 .finish()
                 .map(|a| Arc::new(ArrayImpl::List(a)))

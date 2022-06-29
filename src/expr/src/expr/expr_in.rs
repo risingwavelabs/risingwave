@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 
@@ -59,7 +60,7 @@ impl Expression for InExpression {
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let input_array = self.left.wrapping_eval(input)?;
         let mut output_array = BoolArrayBuilder::new(input_array.len())?;
-        for (data, vis) in input_array.iter().zip(input.vis().iter()) {
+        for (data, vis) in input_array.iter().zip_eq(input.vis().iter()) {
             if vis {
                 let ret = self.exists(&data.to_owned_datum());
                 output_array.append(Some(ret))?;

@@ -58,7 +58,6 @@ impl Expression for CaseExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let input = input.clone().compact()?;
         let vis = input.vis();
         let mut els = self
             .else_clause
