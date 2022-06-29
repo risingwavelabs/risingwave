@@ -105,7 +105,7 @@ impl StreamChunk {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(rows.len()))
-            .collect::<ArrayResult<Vec<_>>>()?;
+            .collect::<Vec<_>>();
         let mut ops = vec![];
 
         for (op, row) in rows {
@@ -362,8 +362,7 @@ impl StreamChunkTestExt for StreamChunk {
                 _ => todo!("unsupported type: {c:?}"),
             })
             .map(|ty| ty.create_array_builder(1))
-            .collect::<ArrayResult<Vec<_>>>()
-            .unwrap();
+            .collect::<Vec<_>>();
         let mut visibility = vec![];
         for mut line in lines {
             line = line.trim();

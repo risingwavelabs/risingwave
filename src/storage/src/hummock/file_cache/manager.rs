@@ -73,7 +73,7 @@ mod tests {
             .expect("env $RISINGWAVE_CI must be 'true' or 'false'");
 
         let tempdir = if ci {
-            tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
+            tempfile::Builder::new().tempdir_in("/risingwave")
         } else {
             tempfile::tempdir().unwrap()
         };

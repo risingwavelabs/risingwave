@@ -16,7 +16,6 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -139,7 +138,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                         .data_type
                         .create_array_builder(K_PROCESSING_WINDOW_SIZE)
                 })
-                .try_collect()?;
+                .collect();
             let mut array_len = 0;
             while want_to_produce > 0 && !self.min_heap.is_empty() {
                 let top_elem = self.min_heap.pop().unwrap();

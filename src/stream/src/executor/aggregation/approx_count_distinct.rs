@@ -324,7 +324,7 @@ impl<const DENSE_BITS: usize> StreamingAggStateImpl for StreamingApproxCountDist
     }
 
     fn new_builder(&self) -> ArrayBuilderImpl {
-        ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0).unwrap())
+        ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0))
     }
 
     fn reset(&mut self) {

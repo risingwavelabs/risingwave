@@ -115,7 +115,7 @@ mod tests {
         expected_eval_row_result: Vec<bool>,
     ) -> Result<()> {
         let input_array = {
-            let mut builder = DecimalArrayBuilder::new(3)?;
+            let mut builder = DecimalArrayBuilder::new(3);
             builder.append(Some(Decimal::from_str("0.1").unwrap()))?;
             builder.append(Some(Decimal::from_str("-0.1").unwrap()))?;
             builder.append(None)?;

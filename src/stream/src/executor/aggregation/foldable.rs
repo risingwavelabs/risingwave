@@ -358,7 +358,7 @@ macro_rules! impl_fold_agg {
             }
 
             fn new_builder(&self) -> ArrayBuilderImpl {
-                ArrayBuilderImpl::$result_variant(<$result as Array>::Builder::new(0).unwrap())
+                ArrayBuilderImpl::$result_variant(<$result as Array>::Builder::new(0))
             }
 
             fn reset(&mut self) {

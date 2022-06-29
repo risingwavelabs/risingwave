@@ -47,12 +47,12 @@ impl ArrayBuilder for ListArrayBuilder {
     type ArrayType = ListArray;
 
     #[cfg(not(test))]
-    fn new(_capacity: usize) -> ArrayResult<Self> {
+    fn new(_capacity: usize) -> Self {
         panic!("Must use with_meta.")
     }
 
     #[cfg(test)]
-    fn new(capacity: usize) -> ArrayResult<Self> {
+    fn new(capacity: usize) -> Self {
         Self::with_meta(
             capacity,
             ArrayMeta::List {
@@ -62,15 +62,15 @@ impl ArrayBuilder for ListArrayBuilder {
         )
     }
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> ArrayResult<Self> {
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self {
         if let ArrayMeta::List { datatype } = meta {
-            Ok(Self {
+            Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 offsets: vec![0],
-                value: Box::new(datatype.create_array_builder(capacity)?),
+                value: Box::new(datatype.create_array_builder(capacity)),
                 value_type: *datatype,
                 len: 0,
-            })
+            }
         } else {
             panic!("must be ArrayMeta::List");
         }
@@ -211,7 +211,7 @@ impl Array for ListArray {
             ArrayMeta::List {
                 datatype: Box::new(self.value_type.clone()),
             },
-        )?;
+        );
         Ok(ArrayBuilderImpl::List(array_builder))
     }
 
@@ -502,8 +502,7 @@ mod tests {
             ArrayMeta::List {
                 datatype: Box::new(DataType::Int32),
             },
-        )
-        .unwrap();
+        );
         list_values.iter().for_each(|v| {
             builder
                 .append(v.as_ref().map(|s| s.as_scalar_ref()))
@@ -537,8 +536,7 @@ mod tests {
             ArrayMeta::List {
                 datatype: Box::new(DataType::Int32),
             },
-        )
-        .unwrap();
+        );
         builder.append_array(&part1).unwrap();
         builder.append_array(&part2).unwrap();
 
@@ -651,8 +649,7 @@ mod tests {
                     datatype: Box::new(DataType::Int32),
                 }),
             },
-        )
-        .unwrap();
+        );
         nested_list_values.iter().for_each(|v| {
             builder
                 .append(v.as_ref().map(|s| s.as_scalar_ref()))

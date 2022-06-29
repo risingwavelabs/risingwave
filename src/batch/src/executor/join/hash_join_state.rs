@@ -198,7 +198,7 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
             .full_data_types()
             .iter()
             .map(|data_type| data_type.create_array_builder(build_table.params.batch_size()))
-            .try_collect()?;
+            .collect();
 
         Ok(Self {
             build_table: hash_map,
@@ -1018,7 +1018,7 @@ impl<K: HashKey> ProbeTable<K> {
             .full_data_types()
             .iter()
             .map(|data_type| data_type.create_array_builder(self.params.batch_size()))
-            .try_collect()?;
+            .collect();
 
         let new_arrays: Vec<_> = mem::replace(&mut self.array_builders, new_array_builders)
             .into_iter()

@@ -350,9 +350,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // --- Create array builders ---
                 // As the datatype is retrieved from schema, it contains both group key and
                 // aggregation state outputs.
-                let mut builders = schema
-                    .create_array_builders(dirty_cnt * 2)
-                    .map_err(StreamExecutorError::eval_error)?;
+                let mut builders = schema.create_array_builders(dirty_cnt * 2);
                 let mut new_ops = Vec::with_capacity(dirty_cnt);
 
                 // --- Retrieve modified states and put the changes into the builders ---

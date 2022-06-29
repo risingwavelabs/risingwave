@@ -51,7 +51,7 @@ impl Expression for NestedConstructExpression {
                 ArrayMeta::Struct {
                     children: fields.clone(),
                 },
-            )?;
+            );
             builder.append_array_refs(columns, input.capacity())?;
             builder
                 .finish()
@@ -65,7 +65,7 @@ impl Expression for NestedConstructExpression {
                 ArrayMeta::List {
                     datatype: datatype.clone(),
                 },
-            )?;
+            );
             chunk.rows_with_holes().try_for_each(|row| {
                 if let Some(row) = row {
                     builder.append_row_ref(row)
