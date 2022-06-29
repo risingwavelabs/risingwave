@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+
 pub mod compaction_config;
 mod level_selector;
 mod manual_compaction_picker;
@@ -220,18 +222,16 @@ impl CompactStatus {
         let new_version_levels =
             new_version.get_compaction_group_levels_mut(compact_task.compaction_group_id);
 
-        let mut l0_remove_position = None;
-        for input_level in &compact_task.input_ssts {
-            HummockVersion::level_delete_ssts(
-                &mut new_version_levels[input_level.level_idx as usize],
-                &removed_table,
-                &mut l0_remove_position,
-            );
-        }
-        HummockVersion::level_insert_ssts(
-            &mut new_version_levels[compact_task.target_level as usize],
+        HummockVersion::apply_compact_ssts(
+            new_version_levels,
+            &compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.level_idx)
+                .collect_vec(),
+            &removed_table,
+            compact_task.target_level,
             compact_task.sorted_output_ssts.clone(),
-            &l0_remove_position,
         );
 
         new_version

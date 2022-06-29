@@ -274,26 +274,30 @@ where
 
             for (id, version_delta) in &hummock_version_deltas {
                 for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-                    let mut l0_remove_position = None;
+                    let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
+                    let mut delete_sst_ids_set = HashSet::new();
+                    let mut insert_sst_level = u32::MAX;
+                    let mut insert_table_infos = vec![];
                     for level_delta in &level_deltas.level_deltas {
-                        let operand = &mut redo_state.get_compaction_group_levels_mut(
-                            *compaction_group_id as CompactionGroupId,
-                        )[level_delta.level_idx as usize];
                         if !level_delta.removed_table_ids.is_empty() {
-                            HummockVersion::level_delete_ssts(
-                                operand,
-                                &HashSet::from_iter(level_delta.removed_table_ids.iter().cloned()),
-                                &mut l0_remove_position,
-                            );
+                            delete_sst_levels.push(level_delta.level_idx);
+                            delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
                         }
                         if !level_delta.inserted_table_infos.is_empty() {
-                            HummockVersion::level_insert_ssts(
-                                operand,
-                                level_delta.inserted_table_infos.clone(),
-                                &l0_remove_position,
-                            );
+                            insert_sst_level = level_delta.level_idx;
+                            insert_table_infos
+                                .extend(level_delta.inserted_table_infos.iter().cloned());
                         }
                     }
+                    let operand = &mut redo_state
+                        .get_compaction_group_levels_mut(*compaction_group_id as CompactionGroupId);
+                    HummockVersion::apply_compact_ssts(
+                        operand,
+                        &delete_sst_levels,
+                        &delete_sst_ids_set,
+                        insert_sst_level,
+                        insert_table_infos,
+                    );
                 }
                 redo_state.id = *id;
                 redo_state.max_committed_epoch = version_delta.max_committed_epoch;
