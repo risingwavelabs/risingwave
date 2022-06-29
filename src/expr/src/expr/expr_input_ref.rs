@@ -14,7 +14,6 @@
 
 use std::convert::TryFrom;
 use std::ops::Index;
-use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum};
@@ -37,21 +36,7 @@ impl Expression for InputRefExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let array = input.column_at(self.idx).array();
-        // TODO(yuhao): This is a workaround to let `InputRefExpression` visibility aware. We should
-        // compact chunks before using expressions.
-        let bitmap = input.visibility();
-        let cardinality = input.cardinality();
-        match bitmap {
-            Some(bitmap) => {
-                if input.cardinality() != input.capacity() {
-                    Ok(Arc::new(array.compact(bitmap, cardinality)?))
-                } else {
-                    Ok(array)
-                }
-            }
-            None => Ok(array),
-        }
+        Ok(input.column_at(self.idx).array())
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

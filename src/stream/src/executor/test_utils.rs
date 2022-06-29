@@ -160,3 +160,132 @@ pub fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<Keyspace<MemoryStateS
     }
     returned_vec
 }
+
+pub mod global_simple_agg {
+    /// Infer column desc for state table.
+    /// The column desc layout is
+    /// [ `group_key` (only for hash agg) / `sort_key` (only for extreme) /
+    /// `value`(the agg call return type)].
+    /// This is the Row layout insert into state table.
+    /// For different agg call, different executor (hash agg or simple agg), the layout will be
+    /// different.
+    pub fn generate_column_descs(
+        agg_call: &AggCall,
+        group_keys: &[usize],
+        pk_indices: &[usize],
+        agg_schema: &Schema,
+        input_ref: &dyn Executor,
+    ) -> Vec<ColumnDesc> {
+        let mut column_descs = Vec::with_capacity(group_keys.len() + 1);
+        let mut next_column_id = 0;
+
+        // Define a closure for DRY.
+        let mut add_column_desc = |data_type: DataType| {
+            column_descs.push(ColumnDesc::unnamed(
+                ColumnId::new(next_column_id),
+                data_type,
+            ));
+            next_column_id += 1;
+        };
+
+        for (idx, _) in group_keys.iter().enumerate() {
+            add_column_desc(agg_schema.fields[idx].data_type.clone());
+        }
+
+        // For max, min, the table descs should include sort key.
+        // The added columns should be (sort_key, pk from input data).
+        if (agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min) && !agg_call.append_only
+        {
+            // Add value as part of sort key.
+            add_column_desc(agg_call.return_type.clone());
+
+            for pk_idx in pk_indices {
+                add_column_desc(input_ref.schema().fields[*pk_idx].data_type.clone());
+            }
+        }
+
+        // Agg value should also be part of state table.
+        add_column_desc(agg_call.return_type.clone());
+
+        column_descs
+    }
+
+    /// Generate state table for agg executor.
+    /// Relational pk = `table_desc.len` - 1.
+    /// it's test only.
+    pub fn generate_state_table<S: StateStore>(
+        ks: Keyspace<S>,
+        agg_call: &AggCall,
+        group_keys: &[usize],
+        pk_indices: &[usize],
+        agg_schema: &Schema,
+        input_ref: &dyn Executor,
+    ) -> StateTable<S> {
+        let table_desc =
+            generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
+        // Always leave 1 space for agg call value.
+        let relational_pk_len = table_desc.len() - 1;
+        let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
+
+        StateTable::new(
+            ks,
+            table_desc,
+            // Primary key do not includes group key.
+            vec![
+                // Now we only infer order type for min/max in a naive way.
+                if agg_call.kind == AggKind::Max {
+                    OrderType::Descending
+                } else {
+                    OrderType::Ascending
+                };
+                relational_pk_len
+            ],
+            if dist_keys.is_empty() {
+                None
+            } else {
+                Some(dist_keys)
+            },
+            (0..relational_pk_len).collect(),
+        )
+    }
+    use itertools::Itertools;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::expr::AggKind;
+    use risingwave_storage::table::state_table::StateTable;
+    use risingwave_storage::{Keyspace, StateStore};
+
+    use crate::executor::aggregation::{generate_agg_schema, AggCall};
+    use crate::executor::{BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices};
+
+    pub fn new_boxed_simple_agg_executor(
+        keyspace: Vec<Keyspace<impl StateStore>>,
+        input: BoxedExecutor,
+        agg_calls: Vec<AggCall>,
+        pk_indices: PkIndices,
+        executor_id: u64,
+        key_indices: Vec<usize>,
+    ) -> Box<dyn Executor> {
+        let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
+        let state_tables = keyspace
+            .iter()
+            .zip_eq(agg_calls.iter())
+            .map(|(ks, agg_call)| {
+                generate_state_table(
+                    ks.clone(),
+                    agg_call,
+                    &key_indices,
+                    &pk_indices,
+                    &agg_schema,
+                    input.as_ref(),
+                )
+            })
+            .collect();
+
+        Box::new(
+            GlobalSimpleAggExecutor::new(input, agg_calls, pk_indices, executor_id, state_tables)
+                .unwrap(),
+        )
+    }
+}

@@ -56,6 +56,16 @@ pub type ExpressionRef = Arc<dyn Expression>;
 pub trait Expression: std::fmt::Debug + Sync + Send {
     fn return_type(&self) -> DataType;
 
+    /// Eval the result with extra checks.
+    fn eval_checked(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let res = self.eval(input)?;
+
+        // TODO: Decide to use assert or debug_assert by benchmarks.
+        assert_eq!(res.len(), input.capacity());
+
+        Ok(res)
+    }
+
     /// Evaluate the expression
     ///
     /// # Arguments
@@ -128,7 +138,7 @@ impl RowExpression {
 
     pub fn eval(&mut self, row: &Row, data_types: &[DataType]) -> Result<ArrayRef> {
         let input = DataChunk::from_rows(slice::from_ref(row), data_types)?;
-        self.expr.eval(&input)
+        self.expr.eval_checked(&input)
     }
 
     pub fn return_type(&self) -> DataType {
