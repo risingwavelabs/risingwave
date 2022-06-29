@@ -148,6 +148,28 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
             vnodes,
         )
     }
+
+    /// Create a read-only [`CellBasedTableBase`] given a complete set of `columns` and a partial
+    /// set of `column_ids`. The output will only contains columns with the given ids in the same
+    /// order.
+    /// This is parameterized on cell based row serializer.
+    pub fn new_partial_without_distribution(
+        keyspace: Keyspace<S>,
+        table_columns: Vec<ColumnDesc>,
+        column_ids: Vec<ColumnId>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_inner(
+            keyspace,
+            table_columns,
+            column_ids,
+            order_types,
+            pk_indices,
+            vec![],
+            Self::fallback_vnodes(),
+        )
+    }
 }
 
 impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
@@ -283,8 +305,8 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         // This table should only be used to access entries with vnode specified in `self.vnodes`.
         assert!(
             self.vnodes.is_set(vnode as usize).unwrap(),
-            "vnode {} should not be accessed by this table",
-            vnode,
+            "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
+            vnode, self.table_columns, self.dist_key_indices
         );
         vnode
     }

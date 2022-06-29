@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
@@ -70,20 +68,30 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-        let vnodes = Bitmap::all_high_bits(VIRTUAL_NODE_COUNT); // TODO: use vnodes from scheduler to parallelize scan
 
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new_partial(
-            keyspace,
-            column_descs,
-            column_ids,
-            order_types,
-            pk_indices,
-            dist_key_indices.clone(),
-            vnodes.into(),
-        );
 
-        let hash_filter = params.vnode_bitmap.expect("no vnode bitmap");
+        let table = match params.vnode_bitmap {
+            Some(vnodes) => CellBasedTable::new_partial(
+                keyspace,
+                column_descs,
+                column_ids,
+                order_types,
+                pk_indices,
+                dist_key_indices.clone(),
+                vnodes.into(),
+            ),
+            None => {
+                assert!(dist_key_indices.is_empty());
+                CellBasedTable::new_partial_without_distribution(
+                    keyspace,
+                    column_descs,
+                    column_ids,
+                    order_types,
+                    pk_indices,
+                )
+            }
+        };
 
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
@@ -94,8 +102,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
                 pk_indices: params.pk_indices,
                 identity: "BatchQuery".to_owned(),
             },
-            dist_key_indices,
-            hash_filter,
             pk_descs,
         );
 
