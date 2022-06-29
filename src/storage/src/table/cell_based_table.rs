@@ -300,11 +300,12 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         };
 
         // This table should only be used to access entries with vnode specified in `self.vnodes`.
-        assert!(
-            self.vnodes.is_set(vnode as usize).unwrap(),
-            "vnode {} should not be accessed by this table",
-            vnode,
-        );
+        // FIXME: use assert when batch scan pruning is implemented.
+        // assert!(
+        //     self.vnodes.is_set(vnode as usize).unwrap(),
+        //     "vnode {} should not be accessed by this table",
+        //     vnode,
+        // );
         vnode
     }
 
@@ -343,12 +344,19 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         }
 
         let result = deserializer.take();
-        Ok(result.map(|(vnode, _pk, row)| {
-            // This table should only to used to access entries with vnode specified in
-            // `self.vnodes`.
-            assert!(self.vnodes.is_set(vnode as usize).unwrap());
-            row
-        }))
+        Ok(result
+            .map(|(vnode, _pk, row)| {
+                // This table should only to used to access entries with vnode specified in
+                // `self.vnodes`.
+                // FIXME: use assert when batch scan pruning is implemented.
+                // assert!(self.vnodes.is_set(vnode as usize).unwrap());
+                if self.vnodes.is_set(vnode as usize).unwrap() {
+                    Some(row)
+                } else {
+                    None
+                }
+            })
+            .flatten())
     }
 
     /// Get a single row by range scan
