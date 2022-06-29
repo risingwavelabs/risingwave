@@ -14,7 +14,7 @@
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -60,7 +60,7 @@ impl FilterExecutor {
 
             if let Bool(vis) = vis_array.as_ref() {
                 let mut sliced_data_chunk =
-                    SlicedDataChunk::new_checked(data_chunk.with_visibility(vis.try_into()?))?;
+                    SlicedDataChunk::new_checked(data_chunk.with_visibility(vis.iter().collect()))?;
 
                 loop {
                     let (left_data, output) = data_chunk_builder.append_chunk(sliced_data_chunk)?;
