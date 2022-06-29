@@ -29,6 +29,7 @@ use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
+use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
@@ -45,7 +46,7 @@ use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Complete, InFlight};
-use crate::barrier::ChangedTableState::NoTable;
+use crate::barrier::ChangedTableState::{Create, Drop};
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv};
@@ -68,9 +69,6 @@ struct ScheduledBarriers {
 
     /// When `buffer` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
-
-    /// Save the state and table_id of the last configuration change
-    changed_table_id: RwLock<ChangedTableState>,
 }
 /// The table state of command
 #[derive(Debug, Clone)]
@@ -85,43 +83,17 @@ impl ScheduledBarriers {
         Self {
             buffer: RwLock::new(VecDeque::new()),
             changed_tx: watch::channel(()).0,
-            changed_table_id: RwLock::new(NoTable),
-        }
-    }
-
-    /// If the front of buffer is plain, return true.
-    async fn first_no_plain(&self) -> bool {
-        match self.buffer.read().await.front() {
-            Some((command, _)) => !matches!(command, Command::Plain { .. }),
-            None => false,
         }
     }
 
     /// Pop a scheduled barrier from the buffer, or a default checkpoint barrier if not exists.
-    async fn pop_or_default(&self, must_plain: bool) -> Option<Scheduled> {
+    async fn pop_or_default(&self) -> Scheduled {
         let mut buffer = self.buffer.write().await;
 
-        if must_plain
-            && match buffer.front() {
-                Some((command, _)) => !matches!(command, Command::Plain { .. }),
-                None => false,
-            }
-        {
-            return None;
-        }
         // If no command scheduled, create periodic checkpoint barrier by default.
-        match buffer.pop_front() {
-            Some((command, notifier)) => {
-                if command.should_pause_inject_barrier() {
-                    *self.changed_table_id.write().await = command.changed_table_id();
-                }
-                Some((command, notifier))
-            }
-            None => Some((
-                Command::checkpoint(self.changed_table_id.read().await.clone()),
-                Default::default(),
-            )),
-        }
+        buffer
+            .pop_front()
+            .unwrap_or_else(|| (Command::checkpoint(), Default::default()))
     }
 
     /// Wait for at least one scheduled barrier in the buffer.
@@ -137,15 +109,9 @@ impl ScheduledBarriers {
     }
 
     /// Push a scheduled barrier into the buffer.
-    async fn push(&self, mut scheduled: Scheduled) {
+    async fn push(&self, scheduled: Scheduled) {
         let mut buffer = self.buffer.write().await;
         // if command is Plain, add create id,
-        if let Command::Plain {
-            changed_table_id, ..
-        } = &mut scheduled.0
-        {
-            *changed_table_id = self.changed_table_id.read().await.clone();
-        }
         buffer.push_back(scheduled);
         if buffer.len() == 1 {
             self.changed_tx.send(()).ok();
@@ -160,10 +126,7 @@ impl ScheduledBarriers {
             Some((_, notifiers)) => notifiers.extend(new_notifiers),
             None => {
                 // If no command scheduled, create periodic checkpoint barrier by default.
-                buffer.push_back((
-                    Command::checkpoint(self.changed_table_id.read().await.clone()),
-                    new_notifiers.into_iter().collect(),
-                ));
+                buffer.push_back((Command::checkpoint(), new_notifiers.into_iter().collect()));
                 if buffer.len() == 1 {
                     self.changed_tx.send(()).ok();
                 }
@@ -220,10 +183,20 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 }
 
 struct CheckpointControl<S: MetaStore> {
-    /// Signal whether the barrier with building actor is sent
-    is_build_actor: bool,
     /// Save the state and message of barrier in order
     command_ctx_queue: VecDeque<EpochNode<S>>,
+}
+/// The changed table id vec.
+#[derive(Default)]
+pub struct ChangedTableId {
+    create_table_id: Vec<TableId>,
+    drop_table_id: Vec<TableId>,
+}
+impl ChangedTableId {
+    pub fn can_actor_send_or_collect(&self, s: ActorState, table_id: &TableId) -> bool {
+        s == ActorState::Running && !self.drop_table_id.contains(table_id)
+            || s == ActorState::Inactive && self.create_table_id.contains(table_id)
+    }
 }
 
 impl<S> CheckpointControl<S>
@@ -232,8 +205,24 @@ where
 {
     fn new() -> Self {
         Self {
-            is_build_actor: false,
             command_ctx_queue: VecDeque::default(),
+        }
+    }
+
+    /// Get all create(drop) actor id from queue.
+    fn get_changed_table_id(&self) -> ChangedTableId {
+        let mut create_table_id = vec![];
+        let mut drop_table_id = vec![];
+        self.command_ctx_queue.iter().for_each(|node| {
+            match node.command_ctx.command.changed_table_id() {
+                Create(table_id) => create_table_id.push(table_id),
+                Drop(table_id) => drop_table_id.push(table_id),
+                _ => {}
+            }
+        });
+        ChangedTableId {
+            create_table_id,
+            drop_table_id,
         }
     }
 
@@ -259,12 +248,9 @@ where
             timer: Some(timer),
             result: None,
             state: InFlight,
-            command_ctx: command_ctx.clone(),
+            command_ctx,
             notifiers,
         });
-        if command_ctx.command.should_pause_inject_barrier() {
-            self.is_build_actor = true;
-        }
     }
 
     /// Change the state of this `prev_epoch` to `Complete`. Return continuous nodes
@@ -285,12 +271,11 @@ where
             node.result = Some(result);
         };
         // Find all continuous nodes with 'Complete' starting from first node
-        let index = match self.command_ctx_queue.iter().find_position(|x| {
-            if x.command_ctx.command.should_pause_inject_barrier() && matches!(x.state, Complete) {
-                self.is_build_actor = false;
-            };
-            !matches!(x.state, Complete)
-        }) {
+        let index = match self
+            .command_ctx_queue
+            .iter()
+            .find_position(|x| !matches!(x.state, Complete))
+        {
             Some((index, _)) => index,
             None => self.command_ctx_queue.len(),
         };
@@ -299,27 +284,17 @@ where
 
     /// Remove all nodes from queue and return them.
     fn fail(&mut self) -> impl Iterator<Item = EpochNode<S>> + '_ {
-        self.command_ctx_queue.iter().for_each(|node| {
-            if !matches!(node.command_ctx.command, Command::Plain { .. }) {
-                self.is_build_actor = false;
-            }
-        });
         self.command_ctx_queue.drain(..)
     }
 
     /// Pause inject barrier until True
-    fn can_inject_barrier(&self, in_flight_barrier_nums: usize, first_no_plain: bool) -> bool {
-        !((self.is_build_actor && first_no_plain)
-            || self
-                .command_ctx_queue
-                .iter()
-                .filter(|x| matches!(x.state, InFlight))
-                .count()
-                >= in_flight_barrier_nums)
-    }
-
-    fn is_build_actor(&self) -> bool {
-        self.is_build_actor
+    fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
+        !self
+            .command_ctx_queue
+            .iter()
+            .filter(|x| matches!(x.state, InFlight))
+            .count()
+            >= in_flight_barrier_nums
     }
 }
 
@@ -440,13 +415,11 @@ where
                 }
                 // there's barrier scheduled.
                 _ = self.scheduled_barriers.wait_one(), if checkpoint_control.can_inject_barrier(
-                    self.in_flight_barrier_nums,
-                    self.scheduled_barriers.first_no_plain().await
+                    self.in_flight_barrier_nums
                 ) => { }
                 // Wait for the minimal interval,
                 _ = min_interval.tick(), if checkpoint_control.can_inject_barrier(
-                    self.in_flight_barrier_nums,
-                    self.scheduled_barriers.first_no_plain().await
+                    self.in_flight_barrier_nums
                 ) => { }
             }
 
@@ -454,21 +427,12 @@ where
                 barrier_timer.observe_duration();
             }
             barrier_timer = Some(self.metrics.barrier_send_latency.start_timer());
-            let (command, notifiers) = match self
-                .scheduled_barriers
-                .pop_or_default(checkpoint_control.is_build_actor())
-                .await
-            {
-                Some((command, notifiers)) => (command, notifiers),
-                None => {
-                    continue;
-                }
+            let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
+            let mut changed_table_id = checkpoint_control.get_changed_table_id();
+            if let Create(table_id) = command.changed_table_id() {
+                changed_table_id.create_table_id.push(table_id);
             };
-            let creating_table_id = match command {
-                Command::DropMaterializedView(_) => NoTable,
-                _ => command.changed_table_id(),
-            };
-            let info = self.resolve_actor_info(creating_table_id).await;
+            let info = self.resolve_actor_info(changed_table_id).await;
             // When there's no actors exist in the cluster, we don't need to send the barrier. This
             // is an advance optimization. Besides if another barrier comes immediately,
             // it may send a same epoch and fail the epoch check.
@@ -560,6 +524,12 @@ where
                     // TODO(chi): add distributed tracing
                     span: vec![],
                 };
+                tracing::info!(
+                    "Barrier{:?},send{:?},collect{:?}",
+                    barrier,
+                    actor_ids_to_send,
+                    actor_ids_to_collect
+                );
                 async move {
                     let mut client = self.env.stream_client_pool().get(node).await?;
 
@@ -734,14 +704,14 @@ where
     }
 
     /// Resolve actor information from cluster and fragment manager.
-    async fn resolve_actor_info(&self, creating_table_id: ChangedTableState) -> BarrierActorInfo {
+    async fn resolve_actor_info(&self, changed_table_id: ChangedTableId) -> BarrierActorInfo {
         let all_nodes = self
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, Some(Running))
             .await;
         let all_actor_infos = self
             .fragment_manager
-            .load_all_actors(creating_table_id)
+            .load_all_actors(changed_table_id)
             .await;
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }

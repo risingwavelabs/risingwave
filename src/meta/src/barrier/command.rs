@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
 use crate::barrier::ChangedTableState;
-use crate::barrier::ChangedTableState::{Create, Drop};
+use crate::barrier::ChangedTableState::{Create, Drop, NoTable};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -44,10 +44,7 @@ pub enum Command {
     ///
     /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
-    Plain {
-        mutation: Option<Mutation>,
-        changed_table_id: ChangedTableState,
-    },
+    Plain(Option<Mutation>),
 
     /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableId`]. The
     /// catalog has ensured that this materialized view is safe to be dropped by reference counts
@@ -73,11 +70,8 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn checkpoint(changed_table_id: ChangedTableState) -> Self {
-        Self::Plain {
-            mutation: None,
-            changed_table_id,
-        }
+    pub fn checkpoint() -> Self {
+        Self::Plain(None)
     }
 
     pub fn changed_table_id(&self) -> ChangedTableState {
@@ -85,9 +79,7 @@ impl Command {
             Command::CreateMaterializedView {
                 table_fragments, ..
             } => Create(table_fragments.table_id()),
-            Command::Plain {
-                changed_table_id, ..
-            } => changed_table_id.clone(),
+            Command::Plain(_) => NoTable,
             Command::DropMaterializedView(table_id) => Drop(*table_id),
         }
     }
@@ -95,7 +87,7 @@ impl Command {
     /// If we need to send a barrier to modify actor configuration, we will pause the barrier
     /// injection. return true
     pub fn should_pause_inject_barrier(&self) -> bool {
-        !matches!(self, Command::Plain { .. })
+        !matches!(self, Command::Plain(_))
     }
 }
 
@@ -143,7 +135,7 @@ where
     /// Generate a mutation for the given command.
     pub async fn to_mutation(&self) -> Result<Option<Mutation>> {
         let mutation = match &self.command {
-            Command::Plain { mutation, .. } => mutation.clone(),
+            Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
                 let actors = self.fragment_manager.get_table_actor_ids(table_id).await?;
@@ -205,7 +197,7 @@ where
     /// Do some stuffs after barriers are collected, for the given command.
     pub async fn post_collect(&self) -> Result<()> {
         match &self.command {
-            Command::Plain { .. } => {}
+            Command::Plain(_) => {}
 
             Command::DropMaterializedView(table_id) => {
                 // Tell compute nodes to drop actors.
