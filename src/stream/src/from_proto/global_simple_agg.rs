@@ -16,11 +16,11 @@
 
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
-use crate::executor::SimpleAggExecutor;
+use crate::executor::GlobalSimpleAggExecutor;
 
-pub struct SimpleAggExecutorBuilder;
+pub struct GlobalSimpleAggExecutorBuilder;
 
-impl ExecutorBuilder for SimpleAggExecutorBuilder {
+impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &StreamNode,
@@ -36,7 +36,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
 
         let state_tables = generate_state_tables_from_proto(store, &node.internal_tables);
 
-        Ok(SimpleAggExecutor::new(
+        Ok(GlobalSimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
             params.pk_indices,

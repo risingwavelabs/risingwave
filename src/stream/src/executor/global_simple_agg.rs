@@ -29,20 +29,20 @@ use crate::executor::aggregation::{
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
 
-/// `SimpleAggExecutor` is the aggregation operator for streaming system.
+/// `GlobalSimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
 /// constructor.
 ///
-/// `SimpleAggExecutor` maintain multiple states together. If there are `n`
+/// `GlobalSimpleAggExecutor` maintain multiple states together. If there are `n`
 /// states and `n` expressions, there will be `n` columns as output.
 ///
 /// As the engine processes data in chunks, it is possible that multiple update
 /// messages could consolidate to a single row update. For example, our source
 /// emits 1000 inserts in one chunk, and we aggregates count function on that.
-/// Current `SimpleAggExecutor` will only emit one row for a whole chunk.
+/// Current `GlobalSimpleAggExecutor` will only emit one row for a whole chunk.
 /// Therefore, we "automatically" implemented a window function inside
-/// `SimpleAggExecutor`.
-pub struct SimpleAggExecutor<S: StateStore> {
+/// `GlobalSimpleAggExecutor`.
+pub struct GlobalSimpleAggExecutor<S: StateStore> {
     input: Box<dyn Executor>,
     info: ExecutorInfo,
 
@@ -65,7 +65,7 @@ pub struct SimpleAggExecutor<S: StateStore> {
     state_tables: Vec<StateTable<S>>,
 }
 
-impl<S: StateStore> Executor for SimpleAggExecutor<S> {
+impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -83,7 +83,7 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
     }
 }
 
-impl<S: StateStore> SimpleAggExecutor<S> {
+impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
@@ -99,7 +99,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             info: ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: format!("SimpleAggExecutor-{:X}", executor_id),
+                identity: format!("GlobalSimpleAggExecutor-{:X}", executor_id),
             },
             input_pk_indices: input_info.pk_indices,
             input_schema: input_info.schema,
@@ -223,7 +223,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let SimpleAggExecutor {
+        let GlobalSimpleAggExecutor {
             input,
             info,
             input_pk_indices,
