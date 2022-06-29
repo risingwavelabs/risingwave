@@ -226,6 +226,7 @@ pub mod global_simple_agg {
         // Always leave 1 space for agg call value.
         let relational_pk_len = table_desc.len() - 1;
         let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
+
         StateTable::new(
             ks,
             table_desc,

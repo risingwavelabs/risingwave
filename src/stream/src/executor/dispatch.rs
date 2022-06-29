@@ -541,6 +541,7 @@ impl Dispatcher for HashDataDispatcher {
 
             let (ops, columns, visibility) = chunk.into_inner();
 
+            // TODO: use bitmap builder
             let mut vis_maps = vec![vec![]; num_outputs];
             let mut last_hash_value_when_update_delete: usize = 0;
             let mut new_ops: Vec<Op> = Vec::with_capacity(ops.len());
