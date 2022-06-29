@@ -189,6 +189,10 @@ impl Array for ListArray {
         &self.bitmap
     }
 
+    fn into_null_bitmap(self) -> Bitmap {
+        self.bitmap
+    }
+
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
     }
@@ -245,7 +249,7 @@ impl ListArray {
         value_type: DataType,
     ) -> ArrayResult<ListArray> {
         let cardinality = null_bitmap.len();
-        let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
+        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let mut offsets = vec![0];
         let mut values = values.into_iter().peekable();
         let mut builderimpl = values.peek().unwrap().as_ref().unwrap().create_builder(0)?;

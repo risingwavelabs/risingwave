@@ -209,6 +209,10 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         &self.bitmap
     }
 
+    fn into_null_bitmap(self) -> Bitmap {
+        self.bitmap
+    }
+
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
     }

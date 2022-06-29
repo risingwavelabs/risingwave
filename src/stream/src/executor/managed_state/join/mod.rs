@@ -23,9 +23,9 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::OrderType;
@@ -33,6 +33,7 @@ use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::monitor::StreamingMetrics;
 
 type DegreeType = u64;
@@ -70,11 +71,9 @@ impl JoinRow {
         self.degree
     }
 
-    pub fn dec_degree(&mut self) -> RwResult<DegreeType> {
+    pub fn dec_degree(&mut self) -> StreamExecutorResult<DegreeType> {
         if self.degree == 0 {
-            return Err(
-                ErrorCode::InternalError("Tried to decrement zero join row degree".into()).into(),
-            );
+            bail!("Tried to decrement zero join row degree");
         }
         self.degree -= 1;
         Ok(self.degree)
@@ -281,22 +280,28 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
     /// WARNING: This will NOT remove anything from remote storage.
-    pub async fn remove_state<'a>(&mut self, key: &K) -> Option<HashValueType> {
+    pub async fn remove_state<'a>(
+        &mut self,
+        key: &K,
+    ) -> StreamExecutorResult<Option<HashValueType>> {
         let state = self.inner.pop(key);
         self.metrics.total_lookup_count += 1;
-        match state {
+        Ok(match state {
             Some(_) => state,
             None => {
                 self.metrics.lookup_miss_count += 1;
-                Some(self.fetch_cached_state(key).await.unwrap())
+                Some(self.fetch_cached_state(key).await?)
             }
-        }
+        })
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     /// Will return a empty `JoinEntryState` even when state does not exist in remote.
-    async fn fetch_cached_state(&self, key: &K) -> RwResult<JoinEntryState> {
-        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
+    async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
+        let key = key
+            .clone()
+            .deserialize(self.join_key_data_types.iter())
+            .map_err(StreamExecutorError::serde_error)?;
 
         let table_iter = self
             .state_table
@@ -315,16 +320,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(JoinEntryState::with_cached(cached))
     }
 
-    pub async fn flush(&mut self) -> RwResult<()> {
+    pub async fn flush(&mut self) -> StreamExecutorResult<()> {
         self.metrics.flush();
-        self.state_table
-            .commit(self.current_epoch)
-            .await
-            .map_err(RwError::from)
+        self.state_table.commit(self.current_epoch).await?;
+        Ok(())
     }
 
     /// Insert a key
-    pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()> {
+    pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(join_key) {
             entry.insert(pk, value.clone());
         }
@@ -335,7 +338,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a key
-    pub fn delete(&mut self, join_key: &K, pk: Row, value: JoinRow) -> RwResult<()> {
+    pub fn delete(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(join_key) {
             entry.remove(pk);
         }
@@ -350,7 +353,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.put(key.clone(), state);
     }
 
-    pub fn inc_degree(&mut self, join_row: &mut JoinRow) -> RwResult<()> {
+    pub fn inc_degree(&mut self, join_row: &mut JoinRow) -> StreamExecutorResult<()> {
         let old_row = join_row.clone().into_row();
         join_row.inc_degree();
         let new_row = join_row.clone().into_row();
@@ -359,7 +362,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(())
     }
 
-    pub fn dec_degree(&mut self, join_row: &mut JoinRow) -> RwResult<()> {
+    pub fn dec_degree(&mut self, join_row: &mut JoinRow) -> StreamExecutorResult<()> {
         let old_row = join_row.clone().into_row();
         join_row.dec_degree()?;
         let new_row = join_row.clone().into_row();

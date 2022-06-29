@@ -30,9 +30,8 @@ use crate::executor::dispatch::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::create_in_memory_keyspace_agg;
-use crate::executor::{
-    Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor, SimpleAggExecutor,
-};
+use crate::executor::test_utils::global_simple_agg::new_boxed_simple_agg_executor;
+use crate::executor::{Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor};
 use crate::task::SharedContext;
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
@@ -159,7 +158,8 @@ async fn test_merger_sum_aggr() {
 
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;
-    let aggregator = SimpleAggExecutor::new(
+    let aggregator = new_boxed_simple_agg_executor(
+        create_in_memory_keyspace_agg(2),
         merger.boxed(),
         vec![
             AggCall {
@@ -175,15 +175,13 @@ async fn test_merger_sum_aggr() {
                 append_only,
             },
         ],
-        create_in_memory_keyspace_agg(2),
         vec![],
         2,
         vec![],
-    )
-    .unwrap();
+    );
 
     let projection = ProjectExecutor::new(
-        aggregator.boxed(),
+        aggregator,
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests

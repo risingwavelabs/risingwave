@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
+use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -350,7 +350,7 @@ impl<K: HashKey> ProbeTable<K> {
         assert_eq!(result_row_id, chunk_len);
         // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
-        new_filter.try_into().map_err(Into::into)
+        Ok(new_filter.into_iter().collect())
     }
 
     fn remove_duplicate_rows_for_left_semi(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -390,7 +390,7 @@ impl<K: HashKey> ProbeTable<K> {
         assert_eq!(result_row_id, chunk_len);
         // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
-        new_filter.try_into().map_err(Into::into)
+        Ok(new_filter.into_iter().collect())
     }
 
     fn remove_duplicate_rows_for_left_anti(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -433,7 +433,7 @@ impl<K: HashKey> ProbeTable<K> {
         assert_eq!(result_row_id, chunk_len);
         // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
-        new_filter.try_into().map_err(Into::into)
+        Ok(new_filter.into_iter().collect())
     }
 
     fn remove_duplicate_rows_for_right_outer(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -469,7 +469,7 @@ impl<K: HashKey> ProbeTable<K> {
                 new_filter.push(filter_bit);
             }
         }
-        new_filter.try_into().map_err(Into::into)
+        Ok(new_filter.into_iter().collect())
     }
 
     fn remove_duplicate_rows_for_right_anti(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -538,7 +538,7 @@ impl<K: HashKey> ProbeTable<K> {
         // push the last probe_match vec back because the probe may not be finished
         probe_matched_list.push_back(last_probe_matched.unwrap());
         self.probe_matched_list = Some(probe_matched_list);
-        new_filter.try_into().map_err(Into::into)
+        Ok(new_filter.into_iter().collect())
     }
 
     fn remove_duplicate_rows(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -617,7 +617,7 @@ impl<K: HashKey> ProbeTable<K> {
 
     fn get_non_equi_cond_filter(&mut self, data_chunk: &DataChunk) -> Result<Bitmap> {
         let array = self.params.cond.as_mut().unwrap().eval(data_chunk)?;
-        array.as_bool().try_into().map_err(Into::into)
+        Ok(array.as_bool().iter().collect())
     }
 
     pub(super) fn join_remaining(&mut self) -> Result<Option<DataChunk>> {

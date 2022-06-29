@@ -541,6 +541,7 @@ impl Dispatcher for HashDataDispatcher {
 
             let (ops, columns, visibility) = chunk.into_inner();
 
+            // TODO: use bitmap builder
             let mut vis_maps = vec![vec![]; num_outputs];
             let mut last_hash_value_when_update_delete: usize = 0;
             let mut new_ops: Vec<Op> = Vec::with_capacity(ops.len());
@@ -614,7 +615,7 @@ impl Dispatcher for HashDataDispatcher {
                 .zip_eq(self.outputs.iter_mut())
                 .zip_eq(self.fragment_ids.iter())
             {
-                let vis_map = vis_map.try_into().unwrap();
+                let vis_map = vis_map.into_iter().collect();
                 // columns is not changed in this function
                 let new_stream_chunk =
                     StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
