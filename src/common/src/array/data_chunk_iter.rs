@@ -302,18 +302,13 @@ impl Row {
     }
 
     /// Compute hash value of a row on corresponding indices.
-    pub fn hash_by_indices<H>(
-        &self,
-        hash_indices: &[usize],
-        hash_builder: &H,
-    ) -> HashCode
+    pub fn hash_by_indices<H>(&self, hash_indices: &[usize], hash_builder: &H) -> HashCode
     where
         H: BuildHasher,
     {
         let mut hasher = hash_builder.build_hasher();
         for idx in hash_indices {
-            let datum = &self.0[*idx];
-            hash_datum(datum, &mut hasher);
+            hash_datum(&self.0[*idx], &mut hasher);
         }
         HashCode(hasher.finish())
     }

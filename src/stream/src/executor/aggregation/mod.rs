@@ -27,7 +27,7 @@ use risingwave_common::array::{
     NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{Field, Schema, ColumnDesc, ColumnId};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
@@ -489,25 +489,52 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     })
 }
 
-/// Get the pk keys len (Do not count group key).
-/// For hash agg, add with group key to get internal table primary key len.
-/// For simple agg,
-pub fn get_key_len(agg_call: &AggCall) -> usize {
-    match agg_call.kind {
-        // If append_only, do not need order key.
-        AggKind::Min | AggKind::Max => {
-            if agg_call.append_only {
-                0
-            } else {
-                1
-            }
-        }
-        // These agg call do not have keys besides group key.
-        AggKind::Sum
-        | AggKind::Count
-        | AggKind::SingleValue
-        | AggKind::RowCount
-        | AggKind::ApproxCountDistinct => 0,
-        _ => unimplemented!("{:?} do not implemented!", agg_call.kind),
+/// Parse from stream proto plan internal tables, generate state tables used by agg.
+pub fn generate_state_tables_from_proto(
+    store: impl StateStore,
+    internal_tables: &[risingwave_pb::catalog::Table],
+) -> Vec<StateTable<impl StateStore>> {
+    let mut state_tables = Vec::with_capacity(internal_tables.len());
+    for table_catalog in internal_tables {
+        // Parse info from proto and create state table.
+        let state_table = {
+            let table_columns = table_catalog
+                .columns
+                .iter()
+                .map(|col| col.column_desc.as_ref().unwrap().into())
+                .collect();
+            let order_types = table_catalog
+                .orders
+                .iter()
+                .map(|order_type| {
+                    OrderType::from_prost(
+                        &risingwave_pb::plan_common::OrderType::from_i32(*order_type).unwrap(),
+                    )
+                })
+                .collect();
+            let dist_key_indices = table_catalog
+                .distribution_keys
+                .iter()
+                .map(|dist_index| *dist_index as usize)
+                .collect();
+            let pk_indices = table_catalog
+                .pk
+                .iter()
+                .map(|pk_index| *pk_index as usize)
+                .collect();
+            StateTable::new(
+                Keyspace::table_root(
+                    store.clone(),
+                    &risingwave_common::catalog::TableId::new(table_catalog.id),
+                ),
+                table_columns,
+                order_types,
+                Some(dist_key_indices),
+                pk_indices,
+            )
+        };
+
+        state_tables.push(state_table)
     }
+    state_tables
 }

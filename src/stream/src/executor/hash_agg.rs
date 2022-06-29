@@ -29,15 +29,14 @@ use risingwave_common::error::Result;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::{
     expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
     StreamExecutorResult,
 };
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, generate_state_table,
-    AggCall, AggState,
+    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -108,29 +107,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
         // FIXME: the vnodes must be Some in production. This is for compatibility with the test
         // code.
         vnodes: Option<Arc<Bitmap>>,
+        state_tables: Vec<StateTable<S>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-
-        let mut state_tables = Vec::with_capacity(agg_calls.len());
-        for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
-            state_tables.push(generate_state_table(
-                ks.clone(),
-                agg_call,
-                &key_indices,
-                &input_info.pk_indices,
-                &schema,
-                input.as_ref(),
-                vnodes.clone(),
-            ));
-        }
 
         Ok(Self {
             input,
@@ -469,9 +455,11 @@ mod tests {
     use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
+    use risingwave_storage::table::state_table::StateTable;
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
+    use crate::executor::test_utils::global_simple_agg::generate_state_table;
     use crate::executor::test_utils::*;
     use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
 
@@ -481,9 +469,9 @@ mod tests {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
-        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
+        state_tables: Vec<StateTable<S>>,
     }
 
     impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -494,11 +482,11 @@ mod tests {
             Ok(Box::new(HashAggExecutor::<K, S>::new(
                 args.input,
                 args.agg_calls,
-                args.keyspace,
                 args.pk_indices,
                 args.executor_id,
                 args.key_indices,
                 None,
+                args.state_tables,
             )?))
         }
     }
@@ -515,13 +503,28 @@ mod tests {
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
+        let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
+        let state_tables = keyspace
+            .iter()
+            .zip_eq(agg_calls.iter())
+            .map(|(ks, agg_call)| {
+                generate_state_table(
+                    ks.clone(),
+                    agg_call,
+                    &key_indices,
+                    &pk_indices,
+                    &agg_schema,
+                    input.as_ref(),
+                )
+            })
+            .collect();
         let args = HashAggExecutorDispatcherArgs {
             input,
             agg_calls,
             key_indices,
-            keyspace,
             pk_indices,
             executor_id,
+            state_tables,
         };
         let kind = calc_hash_key_kind(&keys);
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args).unwrap()

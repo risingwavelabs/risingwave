@@ -27,22 +27,33 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::{CellBasedTable, READ_WRITE};
+use super::cell_based_table::{CellBasedTableBase, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
+use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
+use crate::row_serializer::RowSerializer;
 use crate::{Keyspace, StateStore};
 
+/// Identical to `StateTable`. Used when we want to
+/// rows to have dedup pk cell encoding.
+pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
+
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
+pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
+
+/// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
+/// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTable<S: StateStore> {
+pub struct StateTableBase<S: StateStore, SER: RowSerializer> {
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTable<S, READ_WRITE>,
+    cell_based_table: CellBasedTableBase<S, SER, READ_WRITE>,
 }
 
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
     // TODO: remove this after all state table usages are replaced by `new_with_distribution`.
     pub fn new(
@@ -67,7 +78,7 @@ impl<S: StateStore> StateTable<S> {
             order_types,
             pk_indices,
             vec![],
-            CellBasedTable::<S, READ_WRITE>::fallback_vnodes(),
+            CellBasedTableBase::<S, SER, READ_WRITE>::fallback_vnodes(),
         )
     }
 
@@ -81,7 +92,7 @@ impl<S: StateStore> StateTable<S> {
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTable::new(
+            cell_based_table: CellBasedTableBase::new(
                 keyspace,
                 columns,
                 order_types,
@@ -92,8 +103,8 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    /// Get the underlying [`CellBasedTable`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &CellBasedTable<S, READ_WRITE> {
+    /// Get the underlying [`CellBasedTableBase`]. Should only be used for tests.
+    pub fn cell_based_table(&self) -> &CellBasedTableBase<S, SER, READ_WRITE> {
         &self.cell_based_table
     }
 

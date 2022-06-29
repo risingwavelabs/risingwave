@@ -131,6 +131,28 @@ impl From<&ProstDataType> for DataType {
     }
 }
 
+impl Display for DataType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataType::Boolean => f.write_str("boolean"),
+            DataType::Int16 => f.write_str("smallint"),
+            DataType::Int32 => f.write_str("integer"),
+            DataType::Int64 => f.write_str("bigint"),
+            DataType::Float32 => f.write_str("real"),
+            DataType::Float64 => f.write_str("double precision"),
+            DataType::Decimal => f.write_str("numeric"),
+            DataType::Date => f.write_str("date"),
+            DataType::Varchar => f.write_str("character varying"),
+            DataType::Time => f.write_str("time without time zone"),
+            DataType::Timestamp => f.write_str("timestamp without time zone"),
+            DataType::Timestampz => f.write_str("timestamp with time zone"),
+            DataType::Interval => f.write_str("interval"),
+            DataType::Struct { .. } => f.write_str("record"),
+            DataType::List { datatype } => write!(f, "{}[]", datatype),
+        }
+    }
+}
+
 impl DataType {
     pub fn create_array_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
         use crate::array::*;
@@ -165,7 +187,7 @@ impl DataType {
         })
     }
 
-    fn prost_type_name(&self) -> TypeName {
+    pub fn prost_type_name(&self) -> TypeName {
         match self {
             DataType::Int16 => TypeName::Int16,
             DataType::Int32 => TypeName::Int32,
@@ -592,8 +614,8 @@ impl Hash for ScalarImpl {
                     Self::Bool(b) => b.hash(state),
                     Self::Utf8(s) => state.write(s.as_bytes()),
                     Self::Decimal(decimal) => decimal.normalize().hash(state),
-                    Self::Struct(v) => v.hash(state), // TODO: check if this is consistent to `StructArray::hash_at`
-                    Self::List(v) => v.hash(state),   // TODO: check if this is consistent to `ListArray::hash_at`
+                    Self::Struct(v) => v.hash(state), // TODO: check if this is consistent with `StructArray::hash_at`
+                    Self::List(v) => v.hash(state),   // TODO: check if this is consistent with `ListArray::hash_at`
                 }
             };
         }
