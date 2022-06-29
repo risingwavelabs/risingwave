@@ -251,12 +251,17 @@ impl MetaClient {
         &self,
         users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
+        granted_by: Option<String>,
+        revoke_by: String,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<u64> {
+        let granted_by = granted_by.unwrap_or_default();
         let request = RevokePrivilegeRequest {
             users,
             privileges,
+            granted_by,
+            revoke_by,
             revoke_grant_option,
             cascade,
         };

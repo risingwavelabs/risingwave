@@ -20,12 +20,11 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::*;
 use crate::executor::aggregation::{
-    agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, generate_state_table,
-    AggCall, AggState,
+    agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
@@ -92,26 +91,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
+        state_tables: Vec<StateTable<S>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
-
-        // Create state tables for each agg call.
-        let mut state_tables = Vec::with_capacity(agg_calls.len());
-        for (agg_call, ks) in agg_calls.iter().zip_eq(&keyspace) {
-            state_tables.push(generate_state_table(
-                ks.clone(),
-                agg_call,
-                &key_indices,
-                &input_info.pk_indices,
-                &schema,
-                input.as_ref(),
-            ));
-        }
 
         Ok(Self {
             input,
@@ -296,13 +282,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use global_simple_agg::*;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
     use risingwave_expr::expr::*;
+    use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::executor::aggregation::AggArgs;
+    use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::*;
     use crate::executor::*;
 
@@ -367,9 +353,13 @@ mod tests {
             },
         ];
 
-        let simple_agg = Box::new(
-            SimpleAggExecutor::new(Box::new(source), agg_calls, keyspace, vec![2], 1, vec![])
-                .unwrap(),
+        let simple_agg = test_utils::global_simple_agg::new_boxed_simple_agg_executor(
+            keyspace.clone(),
+            Box::new(source),
+            agg_calls,
+            vec![2],
+            1,
+            vec![],
         );
         let mut simple_agg = simple_agg.execute();
 

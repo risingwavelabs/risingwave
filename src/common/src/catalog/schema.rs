@@ -219,7 +219,7 @@ impl FromIterator<Field> for Schema {
 pub mod test_utils {
     use super::*;
 
-    fn field_n<const N: usize>(data_type: DataType) -> Schema {
+    pub fn field_n<const N: usize>(data_type: DataType) -> Schema {
         Schema::new(vec![Field::unnamed(data_type); N])
     }
 

@@ -57,6 +57,8 @@ pub trait UserInfoWriter: Send + Sync {
         &self,
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
+        granted_by: Option<UserName>,
+        revoke_by: UserName,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<()>;
@@ -98,12 +100,21 @@ impl UserInfoWriter for UserInfoWriterImpl {
         &self,
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
+        granted_by: Option<UserName>,
+        revoke_by: UserName,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .revoke_privilege(users, privileges, revoke_grant_option, cascade)
+            .revoke_privilege(
+                users,
+                privileges,
+                granted_by,
+                revoke_by,
+                revoke_grant_option,
+                cascade,
+            )
             .await?;
         self.wait_version(version).await
     }

@@ -369,6 +369,9 @@ def section_streaming(panels):
             panels.target(
                 "rate(stream_source_output_rows_counts[15s])", "source_id = {{source_id}}"
             ),
+            panels.target(
+                "rate(partition_input_count[5s])", "{{actor_id}}-{{source_id}}-{{partition}}"
+            )
         ]),
     ]
 
