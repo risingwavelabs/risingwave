@@ -205,7 +205,6 @@ impl ObserverManager {
                 )
             }
             Info::HummockSnapshot(_hummock_snapshot) => {
-                // NOTE:DO NOTHING,FOR NOW WE DONT USE HUMMOCK SNAPSHOT
                 self._hummock_snapshot_manager
                     .update_snapshot_status(_hummock_snapshot.epoch)
                     .await;
