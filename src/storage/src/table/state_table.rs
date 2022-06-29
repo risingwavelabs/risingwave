@@ -128,7 +128,7 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
     pub async fn get_row<'a>(
         &'a self,
-        pk: &'_ Row,
+        pk: &'a Row,
         epoch: u64,
     ) -> StorageResult<Option<Cow<'a, Row>>> {
         let pk_bytes = serialize_pk(pk, self.pk_serializer());
