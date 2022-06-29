@@ -174,6 +174,9 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
 
+    /// Get the owned null `Bitmap` from `Array`.
+    fn into_null_bitmap(self) -> Bitmap;
+
     /// Check if an element is `null` or not.
     fn is_null(&self, idx: usize) -> bool {
         self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
@@ -463,6 +466,12 @@ macro_rules! impl_array {
             pub fn null_bitmap(&self) -> &Bitmap {
                 match self {
                     $( Self::$variant_name(inner) => inner.null_bitmap(), )*
+                }
+            }
+
+            pub fn into_null_bitmap(self) -> Bitmap {
+                match self {
+                    $( Self::$variant_name(inner) => inner.into_null_bitmap(), )*
                 }
             }
 
