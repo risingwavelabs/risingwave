@@ -219,42 +219,21 @@ impl CompactStatus {
         }
         let new_version_levels =
             new_version.get_compaction_group_levels_mut(compact_task.compaction_group_id);
-        if compact_task.target_level == 0 {
-            assert_eq!(compact_task.input_ssts[0].level_idx, 0);
-            let mut new_table_infos = vec![];
-            let mut find_remove_position = false;
-            let mut new_total_file_size = 0;
-            for (idx, table) in new_version_levels[0].table_infos.iter().enumerate() {
-                if !removed_table.contains(&table.id) {
-                    new_table_infos.push(new_version_levels[0].table_infos[idx].clone());
-                    new_total_file_size += table.file_size;
-                } else if !find_remove_position {
-                    new_total_file_size += compact_task
-                        .sorted_output_ssts
-                        .iter()
-                        .map(|sst| sst.file_size)
-                        .sum::<u64>();
-                    new_table_infos.extend(compact_task.sorted_output_ssts.clone());
-                    find_remove_position = true;
-                }
-            }
-            new_version_levels[compact_task.target_level as usize].table_infos = new_table_infos;
-            new_version_levels[compact_task.target_level as usize].total_file_size =
-                new_total_file_size;
-        } else {
-            for input_level in &compact_task.input_ssts {
-                HummockVersion::level_delete_ssts(
-                    &mut new_version_levels[input_level.level_idx as usize],
-                    &removed_table,
-                    &mut None,
-                );
-            }
-            HummockVersion::level_insert_ssts(
-                &mut new_version_levels[compact_task.target_level as usize],
-                compact_task.sorted_output_ssts.clone(),
-                &None,
+
+        let mut l0_remove_position = None;
+        for input_level in &compact_task.input_ssts {
+            HummockVersion::level_delete_ssts(
+                &mut new_version_levels[input_level.level_idx as usize],
+                &removed_table,
+                &mut l0_remove_position,
             );
         }
+        HummockVersion::level_insert_ssts(
+            &mut new_version_levels[compact_task.target_level as usize],
+            compact_task.sorted_output_ssts.clone(),
+            &l0_remove_position,
+        );
+
         new_version
     }
 
