@@ -123,7 +123,6 @@ impl Binder {
             };
             Ok(FunctionCall::new(function_type, inputs)?.into())
         } else {
-            log::warn!("fuck! {:?}", f.name);
             Err(ErrorCode::NotImplemented(
                 format!("unsupported function: {:?}", f.name),
                 112.into(),
