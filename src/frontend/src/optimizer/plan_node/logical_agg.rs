@@ -301,19 +301,21 @@ impl LogicalAgg {
     }
 }
 
-/// `LogicalAggBuilder` extracts agg calls and references to group columns from select list, in
-/// preparation for generating a plan like `LogicalProject - LogicalAgg - LogicalProject`.
+/// `LogicalAggBuilder` extracts agg calls and references to group columns from select list and
+/// build the plan like `LogicalAgg - LogicalProject`.
+/// it is constructed by `group_exprs` and collect and rewrite the expression in selection and
+/// having clause.
 struct LogicalAggBuilder {
+    /// the builder of the input Project
     input_proj_builder: LogicalProjectBuilder,
+    /// the column [0..input_group_key_num) in the project's output is the group key
     input_group_key_num: usize,
+    /// the group keys column indices in the project's output
     group_keys: Vec<usize>,
-    /// When dedup (rewriting AggCall inputs), it is the index into projects.
-    /// When rewriting InputRef outside AggCall, where it is required to refer to a group column,
-    /// this is the index into LogicalAgg::schema.
-    /// This 2 indices happen to be the same because we always put group exprs at the beginning of
-    /// schema, and they are at the beginning of projects.
-    pub agg_calls: Vec<PlanAggCall>,
-    pub error: Option<ErrorCode>,
+    /// the agg calls
+    agg_calls: Vec<PlanAggCall>,
+    /// the error during the expression rewriting
+    error: Option<ErrorCode>,
 }
 
 impl LogicalAggBuilder {
