@@ -1,4 +1,4 @@
-struct DynamicRangeFilter {
+struct DynamicFilter {
     prev_val: Datum,
 }
 

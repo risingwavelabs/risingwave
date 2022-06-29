@@ -108,12 +108,12 @@ message HashJoinNode {
 
 
 message DynamicFilterNode {
-  repeated int32 left_key = 2;
-  repeated int32 right_key = 3;
+  uint32 left_key = 1;
+  uint32 right_key = 2;
   // Must be one of <, <=, >, >=
-  expr.ExprNode condition = 4;
+  expr.ExprNode condition = 3;
   // Used for internal table states.
-  catalog.Table left_table = 6;
+  catalog.Table left_table = 4;
 
   repeated uint32 dist_key_l = 8;
   // It is true when the right side of the inequality predicate is monotonically:
@@ -259,6 +259,7 @@ message StreamNode {
     LookupUnionNode lookup_union = 117;
     UnionNode union = 118;
     DeltaIndexJoinNode delta_index_join = 119;
+    DynamicFilterNode dynamic_filter = 120;
   }
   // The id for the operator.
   uint64 operator_id = 1;
