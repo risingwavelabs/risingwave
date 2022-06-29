@@ -228,6 +228,8 @@ impl<S: MetaStore> UserManager<S> {
             .collect();
     }
 
+    // Check whether new_privilege is a subset of origin_privilege, and check grand_option if
+    // `need_grand_option` is set.
     #[inline(always)]
     fn check_privilege(
         origin_privilege: &GrantPrivilege,
@@ -391,7 +393,7 @@ impl<S: MetaStore> UserManager<S> {
         let revoke_by = core
             .user_info
             .get(&revoke_by)
-            .ok_or_else(|| InternalError(format!("Session user {} does not exist", &revoke_by)))
+            .ok_or_else(|| InternalError(format!("User {} does not exist", &revoke_by)))
             .cloned()?;
         let same_user = !granted_by.is_empty() && granted_by != revoke_by.name;
         if !revoke_by.is_supper {
