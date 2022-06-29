@@ -174,8 +174,7 @@ mod tests {
              3
              4
              5",
-        )
-        .with_invisible_holes();
+        );
         let output = searched_case_expr.eval(&input).unwrap();
         assert_eq!(output.datum_at(0), Some(3.1f32.into()));
         assert_eq!(output.datum_at(1), Some(3.1f32.into()));
@@ -207,8 +206,7 @@ mod tests {
              4
              3
              4",
-        )
-        .with_invisible_holes();
+        );
         let output = searched_case_expr.eval(&input).unwrap();
         assert_eq!(output.datum_at(0), Some(3.1f32.into()));
         assert_eq!(output.datum_at(1), None);
