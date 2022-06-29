@@ -246,6 +246,7 @@ mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
 mod stream_index_scan;
+mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_project;
 mod stream_simple_agg;
@@ -278,7 +279,7 @@ pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
-pub use logical_multi_join::LogicalMultiJoin;
+pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_project::LogicalProject;
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
@@ -294,6 +295,7 @@ pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
 pub use stream_index_scan::StreamIndexScan;
+pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
 pub use stream_simple_agg::StreamSimpleAgg;
@@ -361,6 +363,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, HashAgg }
+            , { Stream, LocalSimpleAgg }
             , { Stream, SimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
@@ -440,6 +443,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TableScan }
             , { Stream, Source }
             , { Stream, HashAgg }
+            , { Stream, LocalSimpleAgg }
             , { Stream, SimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }

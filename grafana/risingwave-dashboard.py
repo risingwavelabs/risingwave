@@ -98,6 +98,11 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="decbytes", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
+    def timeseries_row(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="row", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
     def timeseries_kilobytes(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="deckbytes", fillOpacity=10,
@@ -337,6 +342,20 @@ def quantile(f, percentiles):
 def section_streaming(panels):
     return [
         panels.row("Streaming"),
+        panels.timeseries_count(
+            "Barrier Number", [
+                panels.target("all_barrier_nums", "all_barrier"),
+                panels.target("in_flight_barrier_nums", "in_flight_barrier"),
+            ]),
+        panels.timeseries_latency(
+            "Barrier Send Latency",
+            quantile(lambda quantile, legend: panels.target(
+                f"histogram_quantile({quantile}, sum(rate(meta_barrier_send_duration_seconds_bucket[15s])) by (le))", f"barrier_send_latency_p{legend}"
+            ), [50, 90, 99, 999, "max"]) + [
+                panels.target(
+                    "rate(meta_barrier_send_duration_seconds_sum[15s]) / rate(meta_barrier_send_duration_seconds_count[15s])", "barrier_send_latency_avg"
+                ),
+            ]),
         panels.timeseries_latency(
             "Barrier Latency",
             quantile(lambda quantile, legend: panels.target(
@@ -350,6 +369,9 @@ def section_streaming(panels):
             panels.target(
                 "rate(stream_source_output_rows_counts[15s])", "source_id = {{source_id}}"
             ),
+            panels.target(
+                "rate(partition_input_count[5s])", "{{actor_id}}-{{source_id}}-{{partition}}"
+            )
         ]),
     ]
 
@@ -376,6 +398,16 @@ def section_streaming_actors(outer_panels):
             panels.timeseries_actor_latency("Actor Execution Time", [
                 panels.target(
                     "rate(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_row("Actor Input Row", [
+                panels.target(
+                    "rate(stream_actor_in_record_cnt[1m]) > 0", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_row("Actor Output Row", [
+                panels.target(
+                    "rate(stream_actor_out_record_cnt[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency_small("Tokio: Actor Fast Poll Time", [
@@ -559,11 +591,23 @@ def section_hummock(panels):
         panels.timeseries_latency("Read Duration - Iter", [
             *quantile(lambda quantile, legend:
                       panels.target(
-                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}",
+                          legend == "max"
                       ),
                       [90, 99, 999, "max"]),
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_iter_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_iter_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
+            ),
+        ]),
+        panels.timeseries_latency("Read Duration - Iter Pure Scan", [
+            *quantile(lambda quantile, legend:
+                      panels.target(
+                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_scan_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}",
+                          legend == "max"
+                      ),
+                      [90, 99, 999, "max"]),
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_scan_iter_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_iter_scan_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_ops("Block Ops", [

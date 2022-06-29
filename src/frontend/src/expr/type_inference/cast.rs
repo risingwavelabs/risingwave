@@ -48,7 +48,7 @@ pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<
     // Essentially a filter_map followed by a try_reduce, which is unstable.
     let mut ret_type = None;
     for e in &exprs {
-        if e.is_null() {
+        if e.is_unknown() {
             continue;
         }
         ret_type = match ret_type {
@@ -73,6 +73,16 @@ pub enum CastContext {
     Implicit,
     Assign,
     Explicit,
+}
+
+impl From<&CastContext> for String {
+    fn from(c: &CastContext) -> Self {
+        match c {
+            CastContext::Implicit => "IMPLICIT".to_string(),
+            CastContext::Assign => "ASSIGN".to_string(),
+            CastContext::Explicit => "EXPLICIT".to_string(),
+        }
+    }
 }
 
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
@@ -121,14 +131,7 @@ fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
         T::Interval,
     ] {
         m.insert((t, T::Varchar), CastContext::Assign);
-        // Casting from string is explicit-only in PG.
-        // But as we bind string literals to `varchar` rather than `unknown`, allowing them in
-        //  assign context enables this shorter statement:
-        // `insert into t values ('2022-01-01')`
-        // If it was explicit:
-        // `insert into t values ('2022-01-01'::date)`
-        // `insert into t values (date '2022-01-01')`
-        m.insert((T::Varchar, t), CastContext::Assign);
+        m.insert((T::Varchar, t), CastContext::Explicit);
     }
 
     // Misc casts allowed by PG that are neither in implicit cast sequences nor from/to string.
@@ -157,6 +160,13 @@ fn insert_cast_seq(
             m.insert((*source_type, *target_type), cast_context);
         }
     }
+}
+
+pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
+    CAST_MAP
+        .iter()
+        .map(|((src, target), ctx)| (*src, *target, *ctx))
+        .collect_vec()
 }
 
 lazy_static::lazy_static! {
@@ -237,7 +247,7 @@ mod tests {
                 " TTT TTT     ",
                 " TTTT TT     ",
                 " TTTTT T     ",
-                "TTTTTTT TTTTT", // varchar
+                "             ", // varchar
                 "       T TT  ",
                 "       TT TT ",
                 "       TTT T ",

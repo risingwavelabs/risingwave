@@ -17,12 +17,13 @@ use std::ops::Bound;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_common::types::ScalarImpl;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::RowSeqScanNode;
+use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
+use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::catalog::ColumnId;
-use crate::expr::Literal;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 use crate::utils::{is_full_range, ScanRange};
@@ -66,7 +67,11 @@ impl BatchSeqScan {
     pub fn clone_with_dist(&self) -> Self {
         Self::new_inner(
             self.logical.clone(),
-            Distribution::SomeShard,
+            if self.logical.is_sys_table() {
+                Distribution::Single
+            } else {
+                Distribution::SomeShard
+            },
             self.scan_range.clone(),
         )
     }
@@ -82,7 +87,7 @@ impl_plan_tree_node_for_leaf! { BatchSeqScan }
 
 impl fmt::Display for BatchSeqScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fn lb_to_string(name: &str, lb: &Bound<Literal>) -> String {
+        fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
             let (op, v) = match lb {
                 Bound::Included(v) => (">=", v),
                 Bound::Excluded(v) => (">", v),
@@ -90,7 +95,7 @@ impl fmt::Display for BatchSeqScan {
             };
             format!("{} {} {:?}", name, op, v)
         }
-        fn ub_to_string(name: &str, ub: &Bound<Literal>) -> String {
+        fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
             let (op, v) = match ub {
                 Bound::Included(v) => ("<=", v),
                 Bound::Excluded(v) => ("<", v),
@@ -98,7 +103,7 @@ impl fmt::Display for BatchSeqScan {
             };
             format!("{} {} {:?}", name, op, v)
         }
-        fn range_to_string(name: &str, range: &(Bound<Literal>, Bound<Literal>)) -> String {
+        fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
             match (&range.0, &range.1) {
                 (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
                 (Bound::Unbounded, ub) => ub_to_string(name, ub),
@@ -150,16 +155,30 @@ impl ToDistributedBatch for BatchSeqScan {
 
 impl ToBatchProst for BatchSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
-        NodeBody::RowSeqScan(RowSeqScanNode {
-            table_desc: Some(self.logical.table_desc().to_protobuf()),
-            column_ids: self
-                .logical
-                .output_column_ids()
-                .iter()
-                .map(ColumnId::get_id)
-                .collect(),
-            scan_range: Some(self.scan_range.to_protobuf()),
-        })
+        let column_descs = self
+            .logical
+            .column_descs()
+            .iter()
+            .map(ProstColumnDesc::from)
+            .collect();
+
+        if self.logical.is_sys_table() {
+            NodeBody::SysRowSeqScan(SysRowSeqScanNode {
+                table_name: self.logical.table_name().to_string(),
+                column_descs,
+            })
+        } else {
+            NodeBody::RowSeqScan(RowSeqScanNode {
+                table_desc: Some(self.logical.table_desc().to_protobuf()),
+                column_ids: self
+                    .logical
+                    .output_column_ids()
+                    .iter()
+                    .map(ColumnId::get_id)
+                    .collect(),
+                scan_range: Some(self.scan_range.to_protobuf()),
+            })
+        }
     }
 }
 

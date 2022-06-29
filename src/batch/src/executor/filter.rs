@@ -109,11 +109,21 @@ impl BoxedExecutorBuilder for FilterExecutor {
 
         let expr_node = filter_node.get_search_condition()?;
         let expr = build_from_prost(expr_node)?;
-        Ok(Box::new(Self {
+        Ok(Box::new(Self::new(
             expr,
-            child: inputs.remove(0),
-            identity: source.plan_node().get_identity().clone(),
-        }))
+            inputs.remove(0),
+            source.plan_node().get_identity().clone(),
+        )))
+    }
+}
+
+impl FilterExecutor {
+    pub fn new(expr: BoxedExpression, input: BoxedExecutor, identity: String) -> Self {
+        Self {
+            expr,
+            child: input,
+            identity,
+        }
     }
 }
 
