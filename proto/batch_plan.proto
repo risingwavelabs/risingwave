@@ -14,7 +14,7 @@ message RowSeqScanNode {
   repeated int32 column_ids = 2;
   ScanRange scan_range = 3;
   // The partition to read for scan tasks.
-  // 
+  //
   // Will be filled by the scheduler.
   common.Buffer vnode_bitmap = 4;
 }
