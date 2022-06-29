@@ -37,7 +37,7 @@ pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
-    buffer_release_notifier: Arc<mpsc::UnboundedSender<SharedBufferEvent>>,
+    buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
 }
 
 impl Deref for SharedBufferBatchInner {
@@ -87,7 +87,7 @@ impl SharedBufferBatch {
     pub fn new(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
-        buffer_release_notifier: Arc<mpsc::UnboundedSender<SharedBufferEvent>>,
+        buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
         compaction_group_id: CompactionGroupId,
     ) -> Self {
         let size: usize = Self::measure_batch_size(&sorted_items);
@@ -312,7 +312,7 @@ mod tests {
         let shared_buffer_batch = SharedBufferBatch::new(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
-            Arc::new(mpsc::unbounded_channel().0),
+            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
         );
 
@@ -389,7 +389,7 @@ mod tests {
         let shared_buffer_batch = SharedBufferBatch::new(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
-            Arc::new(mpsc::unbounded_channel().0),
+            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
         );
 
