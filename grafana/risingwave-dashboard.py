@@ -404,12 +404,12 @@ def section_streaming_actors(outer_panels):
             ]),
             panels.timeseries_usage_rate("Actor Output Buffer Usage Rate", [
                 panels.target(
-                    "rate(stream_actor_output_buffer_usage_rate[1m]) > 0", "{{actor_id}}"
+                    "stream_actor_output_buffer_usage_rate", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_row("Actor Input Row", [
                 panels.target(
-                    "rate(stream_actor_in_record_cnt[15s]) > 0", "{{actor_id}}"
+                    "rate(stream_actor_in_record_cnt[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_row("Actor Output Row", [

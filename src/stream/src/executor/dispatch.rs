@@ -135,7 +135,7 @@ pub fn new_output(
     let tx_clone = tx.clone();
     let actor_id_str = actor_id.to_string();
     let task = tokio::spawn(async move {
-        // for calculat percent rate
+        // for calculate percent rate
         let scaled_full_size = LOCAL_OUTPUT_CHANNEL_SIZE as f64 * 0.01;
         loop {
             metrics
