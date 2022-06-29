@@ -63,10 +63,6 @@ pub struct SimpleAggExecutor<S: StateStore> {
     /// Relational state tables used by this executor.
     /// One-to-one map with AggCall.
     state_tables: Vec<StateTable<S>>,
-
-    #[allow(dead_code)]
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> Executor for SimpleAggExecutor<S> {
@@ -93,7 +89,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_tables: Vec<StateTable<S>>,
     ) -> Result<Self> {
         let input_info = input.info();
@@ -110,7 +105,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             input_schema: input_info.schema,
             states: None,
             agg_calls,
-            key_indices,
             state_tables,
         })
     }
@@ -236,7 +230,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             input_schema,
             mut states,
             agg_calls,
-            key_indices: _,
             mut state_tables,
         } = self;
         let mut input = input.execute();

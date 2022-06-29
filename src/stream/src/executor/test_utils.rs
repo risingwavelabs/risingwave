@@ -288,7 +288,6 @@ pub mod global_simple_agg {
                 agg_calls,
                 pk_indices,
                 executor_id,
-                key_indices,
                 state_tables,
             )
             .unwrap(),

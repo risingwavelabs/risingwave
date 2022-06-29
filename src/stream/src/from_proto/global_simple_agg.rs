@@ -33,13 +33,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
-        // Build vector of keyspace via table ids.
-        // One keyspace for one agg call.
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
+
         let state_tables = generate_state_tables_from_proto(store, &node.internal_tables);
 
         Ok(SimpleAggExecutor::new(
@@ -47,7 +41,6 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             agg_calls,
             params.pk_indices,
             params.executor_id,
-            key_indices,
             state_tables,
         )?
         .boxed())
