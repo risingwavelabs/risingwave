@@ -15,9 +15,7 @@
 //! Global Streaming Hash Aggregators
 
 use std::marker::PhantomData;
-use std::sync::Arc;
 
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_storage::table::state_table::StateTable;
 
@@ -33,7 +31,6 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     key_indices: Vec<usize>,
     pk_indices: PkIndices,
     executor_id: u64,
-    vnodes: Arc<Bitmap>,
     state_tables: Vec<StateTable<S>>,
 }
 
@@ -48,7 +45,6 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.pk_indices,
             args.executor_id,
             args.key_indices,
-            Some(args.vnodes),
             args.state_tables,
         )?
         .boxed())
@@ -65,7 +61,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
-        dbg!(&node);
         let key_indices = node
             .get_group_keys()
             .iter()
@@ -82,7 +77,10 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
-        let state_tables = generate_state_tables_from_proto(store, &node.internal_tables);
+
+        let vnodes = params.vnode_bitmap.expect("vnodes not set for hash agg");
+        let state_tables =
+            generate_state_tables_from_proto(store, &node.internal_tables, Some(vnodes.into()));
 
         let args = HashAggExecutorDispatcherArgs {
             input,
@@ -90,7 +88,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             key_indices,
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
-            vnodes: params.vnode_bitmap.expect("vnodes not set").into(),
             state_tables,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)

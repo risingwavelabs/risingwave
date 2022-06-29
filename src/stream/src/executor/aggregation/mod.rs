@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::any::Any;
+use std::sync::Arc;
 
 pub use agg_call::*;
 pub use agg_state::*;
@@ -394,15 +395,18 @@ pub async fn generate_managed_agg_state<S: StateStore>(
 }
 
 /// Parse from stream proto plan internal tables, generate state tables used by agg.
-pub fn generate_state_tables_from_proto(
-    store: impl StateStore,
+/// The `vnodes` is generally `Some` for Hash Agg and `None` for Simple Agg.
+pub fn generate_state_tables_from_proto<S: StateStore>(
+    store: S,
     internal_tables: &[risingwave_pb::catalog::Table],
-) -> Vec<StateTable<impl StateStore>> {
+    vnodes: Option<Arc<Bitmap>>,
+) -> Vec<StateTable<S>> {
     let mut state_tables = Vec::with_capacity(internal_tables.len());
+
     for table_catalog in internal_tables {
         // Parse info from proto and create state table.
         let state_table = {
-            let table_columns = table_catalog
+            let columns = table_catalog
                 .columns
                 .iter()
                 .map(|col| col.column_desc.as_ref().unwrap().into())
@@ -426,16 +430,27 @@ pub fn generate_state_tables_from_proto(
                 .iter()
                 .map(|pk_index| *pk_index as usize)
                 .collect();
-            StateTable::new(
-                Keyspace::table_root(
-                    store.clone(),
-                    &risingwave_common::catalog::TableId::new(table_catalog.id),
+
+            let keyspace = Keyspace::table_root(
+                store.clone(),
+                &risingwave_common::catalog::TableId::new(table_catalog.id),
+            );
+
+            match vnodes.clone() {
+                // Hash Agg
+                Some(vnodes) => StateTable::new_with_distribution(
+                    keyspace,
+                    columns,
+                    order_types,
+                    pk_indices,
+                    dist_key_indices,
+                    vnodes,
                 ),
-                table_columns,
-                order_types,
-                Some(dist_key_indices),
-                pk_indices,
-            )
+                // Simple Agg, or Hash Agg in tests
+                None => {
+                    StateTable::new_without_distribution(keyspace, columns, order_types, pk_indices)
+                }
+            }
         };
 
         state_tables.push(state_table)

@@ -40,7 +40,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
-        let state_tables = generate_state_tables_from_proto(store, &node.internal_tables);
+        let state_tables = generate_state_tables_from_proto(store, &node.internal_tables, None);
 
         Ok(SimpleAggExecutor::new(
             params.input.remove(0),
