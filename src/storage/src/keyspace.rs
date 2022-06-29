@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::prefixed_range;
 
 use crate::error::StorageResult;
@@ -32,6 +33,8 @@ pub struct Keyspace<S: StateStore> {
     prefix: Vec<u8>,
 
     table_id: TableId,
+
+    table_option: TableOption,
 }
 
 impl<S: StateStore> Keyspace<S> {
@@ -43,6 +46,14 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
+        Self::table_root_with_properties(store, id, &HashMap::default())
+    }
+
+    pub fn table_root_with_properties(
+        store: S,
+        id: &TableId,
+        properties: &HashMap<String, String>,
+    ) -> Self {
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
@@ -53,6 +64,7 @@ impl<S: StateStore> Keyspace<S> {
             store,
             prefix,
             table_id: *id,
+            table_option: TableOption::build_table_option(properties),
         }
     }
 
@@ -65,6 +77,7 @@ impl<S: StateStore> Keyspace<S> {
             store: self.store.clone(),
             prefix,
             table_id: self.table_id,
+            table_option: self.table_option,
         }
     }
 
@@ -92,6 +105,7 @@ impl<S: StateStore> Keyspace<S> {
                 ReadOptions {
                     epoch,
                     table_id: Some(self.table_id),
+                    ttl: self.table_option.ttl.clone(),
                 },
             )
             .await
@@ -111,6 +125,7 @@ impl<S: StateStore> Keyspace<S> {
                 ReadOptions {
                     epoch,
                     table_id: Some(self.table_id),
+                    ttl: self.table_option.ttl.clone(),
                 },
             )
             .await
@@ -151,6 +166,7 @@ impl<S: StateStore> Keyspace<S> {
                 ReadOptions {
                     epoch,
                     table_id: Some(self.table_id),
+                    ttl: self.table_option.ttl.clone(),
                 },
             )
             .await?;
@@ -187,6 +203,7 @@ impl<S: StateStore> Keyspace<S> {
                 ReadOptions {
                     epoch,
                     table_id: Some(self.table_id),
+                    ttl: self.table_option.ttl.clone(),
                 },
             )
             .await?;
