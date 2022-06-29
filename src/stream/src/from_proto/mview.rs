@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 
@@ -49,10 +51,6 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .map(|key| *key as usize)
             .collect();
 
-        let vnodes = params
-            .vnode_bitmap
-            .expect("vnode for materialize is not set");
-
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
@@ -60,7 +58,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             column_ids,
             params.executor_id,
             distribution_keys,
-            vnodes.into(),
+            params.vnode_bitmap.map(Arc::new),
         );
 
         Ok(executor.boxed())
@@ -100,10 +98,6 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|key| *key as usize)
             .collect();
 
-        let vnodes = params
-            .vnode_bitmap
-            .expect("vnode for materialize is not set");
-
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
@@ -111,7 +105,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             column_ids,
             params.executor_id,
             distribution_keys,
-            vnodes.into(),
+            params.vnode_bitmap.map(Arc::new),
         );
 
         Ok(executor.boxed())

@@ -808,7 +808,7 @@ mod tests {
             u64::MAX,
         )?;
 
-        let mut materialize = MaterializeExecutor::new_without_distribution(
+        let mut materialize = MaterializeExecutor::new_for_test(
             Box::new(source_exec),
             keyspace.clone(),
             vec![OrderPair::new(0, OrderType::Ascending)],

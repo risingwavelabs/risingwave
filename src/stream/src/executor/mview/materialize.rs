@@ -43,38 +43,10 @@ pub struct MaterializeExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
+    /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
+    /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
+    /// should be `None`.
     pub fn new(
-        input: BoxedExecutor,
-        keyspace: Keyspace<S>,
-        keys: Vec<OrderPair>,
-        column_ids: Vec<ColumnId>,
-        executor_id: u64,
-        distribution_keys: Vec<usize>,
-        vnodes: Arc<Bitmap>,
-    ) -> Self {
-        Self::new_inner(
-            input,
-            keyspace,
-            keys,
-            column_ids,
-            executor_id,
-            distribution_keys,
-            Some(vnodes),
-        )
-    }
-
-    /// Create a new `MaterializeExecutor` without distribution info. Should only be used for tests.
-    pub fn new_without_distribution(
-        input: BoxedExecutor,
-        keyspace: Keyspace<S>,
-        keys: Vec<OrderPair>,
-        column_ids: Vec<ColumnId>,
-        executor_id: u64,
-    ) -> Self {
-        Self::new_inner(input, keyspace, keys, column_ids, executor_id, vec![], None)
-    }
-
-    fn new_inner(
         input: BoxedExecutor,
         keyspace: Keyspace<S>,
         keys: Vec<OrderPair>,
@@ -102,12 +74,15 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 distribution_keys,
                 vnodes,
             ),
-            None => StateTable::new_without_distribution(
-                keyspace,
-                columns,
-                arrange_order_types,
-                arrange_columns.clone(),
-            ),
+            None => {
+                assert!(distribution_keys.is_empty());
+                StateTable::new_without_distribution(
+                    keyspace,
+                    columns,
+                    arrange_order_types,
+                    arrange_columns.clone(),
+                )
+            }
         };
 
         Self {
@@ -120,6 +95,17 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
         }
+    }
+
+    /// Create a new `MaterializeExecutor` without distribution info for test purpose.
+    pub fn new_for_test(
+        input: BoxedExecutor,
+        keyspace: Keyspace<S>,
+        keys: Vec<OrderPair>,
+        column_ids: Vec<ColumnId>,
+        executor_id: u64,
+    ) -> Self {
+        Self::new(input, keyspace, keys, column_ids, executor_id, vec![], None)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -260,7 +246,7 @@ mod tests {
         ];
         let table =
             CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types, vec![0]);
-        let mut materialize_executor = Box::new(MaterializeExecutor::new_without_distribution(
+        let mut materialize_executor = Box::new(MaterializeExecutor::new_for_test(
             Box::new(source),
             keyspace,
             vec![OrderPair::new(0, OrderType::Ascending)],
