@@ -76,7 +76,7 @@ impl Rule for PullUpCorrelatedPredicate {
         let on = apply_on.and(Condition {
             conjunctions: cor_exprs,
         });
-        Some(LogicalJoin::new(apply_left, project.into(), join_type, on).into())
+        Some(LogicalJoin::new(apply_left, project.into(), join_type, on, false).into())
     }
 }
 

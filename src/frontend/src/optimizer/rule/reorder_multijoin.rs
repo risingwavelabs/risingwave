@@ -102,6 +102,7 @@ mod tests {
             relation_c.clone().into(),
             join_type,
             Condition::true_cond(),
+            false,
         );
 
         let on_1: ExprImpl = ExprImpl::FunctionCall(Box::new(
@@ -119,6 +120,7 @@ mod tests {
             relation_b.clone().into(),
             join_type,
             Condition::with_expr(on_1),
+            false,
         );
         let multijoin_builder = LogicalMultiJoinBuilder::new(join_1.into());
         let multi_join = multijoin_builder.build();

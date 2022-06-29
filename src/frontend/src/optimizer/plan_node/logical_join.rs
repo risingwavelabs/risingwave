@@ -26,7 +26,8 @@ use super::{
 };
 use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchNestedLoopJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
+    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
+    LogicalFilter, StreamFilter,
 };
 use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
@@ -45,6 +46,7 @@ pub struct LogicalJoin {
     on: Condition,
     join_type: JoinType,
     output_indices: Vec<usize>,
+    is_lookup_join: bool,
 }
 
 impl fmt::Display for LogicalJoin {
@@ -78,10 +80,23 @@ fn has_duplicate_index(indices: &[usize]) -> bool {
 }
 
 impl LogicalJoin {
-    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
+    pub(crate) fn new(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        on: Condition,
+        is_lookup_join: bool,
+    ) -> Self {
         let out_column_num =
             Self::out_column_num(left.schema().len(), right.schema().len(), join_type);
-        Self::new_with_output_indices(left, right, join_type, on, (0..out_column_num).collect())
+        Self::new_with_output_indices(
+            left,
+            right,
+            join_type,
+            on,
+            (0..out_column_num).collect(),
+            is_lookup_join,
+        )
     }
 
     pub(crate) fn new_with_output_indices(
@@ -90,6 +105,7 @@ impl LogicalJoin {
         join_type: JoinType,
         on: Condition,
         output_indices: Vec<usize>,
+        is_lookup_join: bool,
     ) -> Self {
         assert!(!has_duplicate_index(&output_indices));
         let ctx = left.ctx();
@@ -110,6 +126,7 @@ impl LogicalJoin {
             on,
             join_type,
             output_indices,
+            is_lookup_join,
         }
     }
 
@@ -118,8 +135,16 @@ impl LogicalJoin {
         right: PlanRef,
         join_type: JoinType,
         on_clause: ExprImpl,
+        is_lookup_join: bool,
     ) -> PlanRef {
-        Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
+        Self::new(
+            left,
+            right,
+            join_type,
+            Condition::with_expr(on_clause),
+            is_lookup_join,
+        )
+        .into()
     }
 
     pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
@@ -300,6 +325,7 @@ impl LogicalJoin {
             self.join_type,
             self.on.clone(),
             output_indices,
+            self.is_lookup_join,
         )
     }
 
@@ -311,6 +337,7 @@ impl LogicalJoin {
             self.join_type,
             cond,
             self.output_indices.clone(),
+            self.is_lookup_join,
         )
     }
 
@@ -466,6 +493,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
             self.join_type,
             self.on.clone(),
             self.output_indices.clone(),
+            self.is_lookup_join,
         )
     }
 
@@ -501,6 +529,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
             self.join_type,
             new_on,
             new_output_indices.clone(),
+            self.is_lookup_join,
         );
 
         let new_i2o = ColIndexMapping::with_remaining_columns(
@@ -587,6 +616,7 @@ impl ColPrunable for LogicalJoin {
             self.join_type,
             on,
             new_output_indices,
+            self.is_lookup_join,
         )
         .into()
     }
@@ -654,7 +684,8 @@ impl PredicatePushdown for LogicalJoin {
 
         let new_left = self.left.predicate_pushdown(left_predicate);
         let new_right = self.right.predicate_pushdown(right_predicate);
-        let new_join = LogicalJoin::new(new_left, new_right, join_type, new_on);
+        let new_join =
+            LogicalJoin::new(new_left, new_right, join_type, new_on, self.is_lookup_join);
         LogicalFilter::create(new_join.into(), predicate)
     }
 }
@@ -672,7 +703,7 @@ impl ToBatch for LogicalJoin {
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {
-            // Convert to Hash Join for equal joins
+            // Convert to Hash Join or Lookup Join for equal joins, depending on self.is_lookup_join
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
@@ -686,8 +717,12 @@ impl ToBatch for LogicalJoin {
                     self.left.schema().len(),
                 );
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-                let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
-                let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
+                let batch_join = if self.is_lookup_join {
+                    BatchLookupJoin::new(logical_join, eq_cond).into()
+                } else {
+                    BatchHashJoin::new(logical_join, eq_cond).into()
+                };
+                let logical_filter = LogicalFilter::new(batch_join, predicate.non_eq_cond());
                 let plan = BatchFilter::new(logical_filter).into();
                 if self.output_indices != default_indices {
                     let logical_project = LogicalProject::with_mapping(
@@ -701,6 +736,8 @@ impl ToBatch for LogicalJoin {
                 } else {
                     Ok(plan)
                 }
+            } else if self.is_lookup_join {
+                Ok(BatchLookupJoin::new(logical_join, predicate).into())
             } else {
                 Ok(BatchHashJoin::new(logical_join, predicate).into())
             }
@@ -888,6 +925,7 @@ mod tests {
             right.into(),
             join_type,
             Condition::with_expr(on),
+            false,
         );
 
         // Perform the prune
@@ -956,6 +994,7 @@ mod tests {
                 right.clone().into(),
                 join_type,
                 Condition::with_expr(on.clone()),
+                false,
             );
 
             let offset = if join.is_right_join() { 3 } else { 0 };
@@ -1031,6 +1070,7 @@ mod tests {
             right.into(),
             join_type,
             Condition::with_expr(on),
+            false,
         );
 
         // Perform the prune
@@ -1124,6 +1164,7 @@ mod tests {
             right.into(),
             join_type,
             Condition::with_expr(on_cond),
+            false,
         );
 
         // Perform `to_batch`
@@ -1278,6 +1319,7 @@ mod tests {
             right.into(),
             join_type,
             Condition::with_expr(on),
+            false,
         );
 
         // Perform the prune

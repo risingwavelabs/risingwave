@@ -28,6 +28,7 @@ pub struct BoundJoin {
     pub left: Relation,
     pub right: Relation,
     pub cond: ExprImpl,
+    pub is_lookup_join: bool,
 }
 
 impl Binder {
@@ -57,6 +58,7 @@ impl Binder {
                 left: root,
                 right,
                 cond: ExprImpl::literal_bool(true),
+                is_lookup_join: false,
             }));
         }
         Ok(Some(root))
@@ -65,13 +67,19 @@ impl Binder {
     fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
-            let (constraint, join_type) = match join.join_operator {
-                JoinOperator::Inner(constraint) => (constraint, JoinType::Inner),
-                JoinOperator::LeftOuter(constraint) => (constraint, JoinType::LeftOuter),
-                JoinOperator::RightOuter(constraint) => (constraint, JoinType::RightOuter),
-                JoinOperator::FullOuter(constraint) => (constraint, JoinType::FullOuter),
+            let (constraint, is_lookup_join, join_type) = match join.join_operator {
+                JoinOperator::Inner(constraint, is_lookup_join) => {
+                    (constraint, is_lookup_join, JoinType::Inner)
+                }
+                JoinOperator::LeftOuter(constraint, is_lookup_join) => {
+                    (constraint, is_lookup_join, JoinType::LeftOuter)
+                }
+                JoinOperator::RightOuter(constraint, _) => {
+                    (constraint, false, JoinType::RightOuter)
+                }
+                JoinOperator::FullOuter(constraint, _) => (constraint, false, JoinType::FullOuter),
                 // Cross join equals to inner join with with no constraint.
-                JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
+                JoinOperator::CrossJoin => (JoinConstraint::None, false, JoinType::Inner),
             };
             let right: Relation;
             let cond: ExprImpl;
@@ -97,6 +105,7 @@ impl Binder {
                 left: root,
                 right,
                 cond,
+                is_lookup_join,
             };
             root = Relation::Join(Box::new(join));
         }

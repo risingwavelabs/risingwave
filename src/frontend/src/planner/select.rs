@@ -269,7 +269,7 @@ impl Planner {
         if is_correlated {
             LogicalApply::create(left, right, join_type, on)
         } else {
-            LogicalJoin::create(left, right, join_type, on)
+            LogicalJoin::create(left, right, join_type, on, false)
         }
     }
 }

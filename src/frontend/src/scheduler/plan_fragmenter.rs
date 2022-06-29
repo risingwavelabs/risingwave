@@ -485,6 +485,7 @@ mod tests {
                 batch_exchange_node2.clone(),
                 JoinType::Inner,
                 Condition::true_cond(),
+                false,
             ),
             EqJoinPredicate::new(
                 Condition::true_cond(),

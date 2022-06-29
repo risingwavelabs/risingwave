@@ -93,6 +93,7 @@ mod tests {
             right.clone().into(),
             join_type,
             Condition::true_cond(),
+            false,
         );
         let filter_on_join = LogicalFilter::new(join_0.into(), Condition::with_expr(on_0));
 
@@ -111,6 +112,7 @@ mod tests {
             filter_on_join.into(),
             join_type,
             Condition::with_expr(on_1.clone()),
+            false,
         );
         let multijoin_builder = LogicalMultiJoinBuilder::new(join_1.into());
         let multi_join = multijoin_builder.build();

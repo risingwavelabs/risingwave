@@ -82,7 +82,14 @@ impl Planner {
         let right = self.plan_relation(join.right)?;
         let join_type = join.join_type;
         let on_clause = join.cond;
-        Ok(LogicalJoin::create(left, right, join_type, on_clause))
+        let is_lookup_join = join.is_lookup_join;
+        Ok(LogicalJoin::create(
+            left,
+            right,
+            join_type,
+            on_clause,
+            is_lookup_join,
+        ))
     }
 
     pub(super) fn plan_window_table_function(

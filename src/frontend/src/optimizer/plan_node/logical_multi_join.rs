@@ -288,6 +288,7 @@ impl LogicalMultiJoin {
                     self.inputs[index].clone(),
                     JoinType::Inner,
                     Condition::true_cond(),
+                    false,
                 )
                 .into()
             });
