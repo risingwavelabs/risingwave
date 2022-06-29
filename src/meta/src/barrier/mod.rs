@@ -111,7 +111,6 @@ impl ScheduledBarriers {
     /// Push a scheduled barrier into the buffer.
     async fn push(&self, scheduled: Scheduled) {
         let mut buffer = self.buffer.write().await;
-        // if command is Plain, add create id,
         buffer.push_back(scheduled);
         if buffer.len() == 1 {
             self.changed_tx.send(()).ok();
@@ -414,13 +413,9 @@ where
                     continue;
                 }
                 // there's barrier scheduled.
-                _ = self.scheduled_barriers.wait_one(), if checkpoint_control.can_inject_barrier(
-                    self.in_flight_barrier_nums
-                ) => { }
+                _ = self.scheduled_barriers.wait_one(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {}
                 // Wait for the minimal interval,
-                _ = min_interval.tick(), if checkpoint_control.can_inject_barrier(
-                    self.in_flight_barrier_nums
-                ) => { }
+                _ = min_interval.tick(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {}
             }
 
             if let Some(barrier_timer) = barrier_timer {
@@ -524,12 +519,6 @@ where
                     // TODO(chi): add distributed tracing
                     span: vec![],
                 };
-                tracing::info!(
-                    "Barrier{:?},send{:?},collect{:?}",
-                    barrier,
-                    actor_ids_to_send,
-                    actor_ids_to_collect
-                );
                 async move {
                     let mut client = self.env.stream_client_pool().get(node).await?;
 
