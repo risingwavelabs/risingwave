@@ -443,9 +443,11 @@ impl StateStore for HummockStorage {
         self.local_version_manager.get_uncommitted_ssts(epoch)
     }
 
-    fn clear_shared_buffer(&self) -> StorageResult<()> {
-        self.local_version_manager.clear_shared_buffer();
-        Ok(())
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move {
+            self.local_version_manager.clear_shared_buffer().await;
+            Ok(())
+        }
     }
 }
 

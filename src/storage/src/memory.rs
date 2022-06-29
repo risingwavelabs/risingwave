@@ -239,8 +239,8 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn clear_shared_buffer(&self) -> StorageResult<()> {
-        Ok(())
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move { Ok(()) }
     }
 }
 

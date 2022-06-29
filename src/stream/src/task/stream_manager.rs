@@ -208,9 +208,9 @@ impl LocalStreamManager {
         })
     }
 
-    pub fn clear_storage_buffer(&self) {
+    pub async fn clear_storage_buffer(&self) {
         dispatch_state_store!(self.state_store(), store, {
-            store.clear_shared_buffer().unwrap();
+            store.clear_shared_buffer().await.unwrap();
         });
     }
 
@@ -258,7 +258,7 @@ impl LocalStreamManager {
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
         self.collect_barrier(barrier.epoch.prev).await;
         // Clear shared buffer in storage to release memory
-        self.clear_storage_buffer();
+        self.clear_storage_buffer().await;
         self.core.lock().drop_all_actors();
 
         Ok(())
