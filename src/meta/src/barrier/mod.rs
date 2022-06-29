@@ -16,11 +16,12 @@ use std::collections::{HashMap, VecDeque};
 use std::iter::once;
 use std::mem::take;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use log::debug;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -322,6 +323,19 @@ where
             env,
             in_flight_barrier_nums,
         }
+    }
+
+    /// Flush means waiting for the next barrier to collect.
+    pub async fn flush(&self) -> Result<()> {
+        let start = Instant::now();
+
+        debug!("start barrier flush");
+        self.wait_for_next_barrier_to_collect().await?;
+
+        let elapsed = Instant::now().duration_since(start);
+        debug!("barrier flushed in {:?}", elapsed);
+
+        Ok(())
     }
 
     pub async fn start(barrier_manager: BarrierManagerRef<S>) -> (JoinHandle<()>, Sender<()>) {

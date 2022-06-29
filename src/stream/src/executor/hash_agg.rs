@@ -200,8 +200,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
         let hash_codes = data_chunk.get_hash_values(key_indices, CRC32FastBuilder)?;
-        let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone())
-            .map_err(StreamExecutorError::eval_error)?;
+        let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
         let (columns, vis) = data_chunk.into_parts();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
@@ -455,9 +454,8 @@ mod tests {
     use risingwave_storage::table::state_table::StateTable;
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::executor::aggregation::{
-        generate_agg_schema, generate_state_table, AggArgs, AggCall,
-    };
+    use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
+    use crate::executor::test_utils::global_simple_agg::generate_state_table;
     use crate::executor::test_utils::*;
     use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
 

@@ -105,7 +105,7 @@ pub fn create_executor(
         NodeBody::TopN => TopNExecutorBuilder,
         NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
         NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
-        NodeBody::GlobalSimpleAgg => SimpleAggExecutorBuilder,
+        NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
         NodeBody::HashAgg => HashAggExecutorBuilder,
         NodeBody::HashJoin => HashJoinExecutorBuilder,
         NodeBody::HopWindow => HopWindowExecutorBuilder,
