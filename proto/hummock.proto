@@ -214,7 +214,7 @@ message HummockPinnedVersion {
 
 message HummockPinnedSnapshot {
   uint32 context_id = 1;
-  repeated uint64 snapshot_id = 2;
+  uint64 minimal_pinned_snapshot = 2;
 }
 
 message HummockStaleSstables {

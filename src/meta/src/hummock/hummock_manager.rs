@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::Future;
 use std::ops::DerefMut;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -45,8 +46,7 @@ use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::model::{
-    sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
-    INVALID_TIMESTAMP,
+    sstable_id_info, CurrentHummockVersionId, HummockPinnedVersionExt, INVALID_TIMESTAMP,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{IdCategory, MetaSrvEnv};
@@ -68,6 +68,7 @@ pub struct HummockManager<S: MetaStore> {
     // be requested before versioning lock.
     compaction: RwLock<Compaction>,
     versioning: RwLock<Versioning>,
+    max_committed_epoch: AtomicU64,
 
     metrics: Arc<MetaMetrics>,
 
@@ -139,6 +140,7 @@ struct Versioning {
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
+    unpinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     stale_sstables: BTreeMap<HummockVersionId, HummockStaleSstables>,
     sstable_id_infos: BTreeMap<HummockSSTableId, SstableIdInfo>,
 }
@@ -175,6 +177,7 @@ where
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
             compactor_manager,
+            max_committed_epoch: AtomicU64::new(0),
         };
 
         instance.load_meta_store_state().await?;
@@ -265,13 +268,21 @@ where
                 .hummock_versions
                 .insert(init_version.id, init_version);
         }
+        self.max_committed_epoch.store(
+            versioning_guard
+                .hummock_versions
+                .get(&versioning_guard.current_version_id.id())
+                .unwrap()
+                .max_committed_epoch,
+            Ordering::Relaxed,
+        );
 
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
             .await?
             .into_iter()
             .map(|p| (p.context_id, p))
             .collect();
-        versioning_guard.pinned_snapshots = HummockPinnedSnapshot::list(self.env.meta_store())
+        versioning_guard.unpinned_snapshots = HummockPinnedSnapshot::list(self.env.meta_store())
             .await?
             .into_iter()
             .map(|p| (p.context_id, p))
@@ -415,60 +426,10 @@ where
     /// `max_commited_epoch`).
     pub async fn pin_snapshot(
         &self,
-        context_id: HummockContextId,
-        last_pinned: HummockEpoch,
+        _context_id: HummockContextId,
+        _last_pinned: HummockEpoch,
     ) -> Result<HummockSnapshot> {
-        let mut versioning_guard = self.versioning.write().await;
-
-        // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
-        // visible in the snapshot.
-        let version_id = versioning_guard.current_version_id.id();
-
-        let max_committed_epoch = versioning_guard
-            .hummock_versions
-            .get(&version_id)
-            .unwrap()
-            .max_committed_epoch;
-
-        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
-        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
-            context_id,
-            HummockPinnedSnapshot {
-                context_id,
-                snapshot_id: vec![],
-            },
-        );
-
-        // Unpin the snapshots pinned by meta but frontend doesn't know.
-        let to_unpin = context_pinned_snapshot
-            .snapshot_id
-            .iter()
-            .filter(|e| **e > last_pinned && **e < max_committed_epoch)
-            .cloned()
-            .collect_vec();
-        let mut snapshots_change = !to_unpin.is_empty();
-        for epoch in to_unpin {
-            context_pinned_snapshot.unpin_snapshot(epoch);
-        }
-
-        if !context_pinned_snapshot
-            .snapshot_id
-            .contains(&max_committed_epoch)
-        {
-            snapshots_change = true;
-            context_pinned_snapshot.pin_snapshot(max_committed_epoch);
-        }
-
-        if snapshots_change {
-            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
-        }
-
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
-        }
-
+        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
         Ok(HummockSnapshot {
             epoch: max_committed_epoch,
         })
@@ -476,29 +437,9 @@ where
 
     pub async fn unpin_snapshot(
         &self,
-        context_id: HummockContextId,
-        hummock_snapshots: impl AsRef<[HummockSnapshot]>,
+        _context_id: HummockContextId,
+        _hummock_snapshots: impl AsRef<[HummockSnapshot]>,
     ) -> Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
-        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
-
-        let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
-            None => {
-                return Ok(());
-            }
-            Some(context_pinned_snapshot) => context_pinned_snapshot,
-        };
-        for hummock_snapshot in hummock_snapshots.as_ref() {
-            context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
-        }
-        commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
-
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
-        }
-
         Ok(())
     }
 
@@ -524,7 +465,7 @@ where
             assert!(hummock_snapshot.epoch <= _max_committed_epoch);
         }
 
-        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
+        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.unpinned_snapshots);
         let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
             None => {
                 return Ok(());
@@ -532,20 +473,10 @@ where
             Some(context_pinned_snapshot) => context_pinned_snapshot,
         };
 
-        let to_unpin = context_pinned_snapshot
-            .snapshot_id
-            .iter()
-            // hummock_snapshot.epoch should always <= max committed epoch.
-            .filter(|e| **e < hummock_snapshot.epoch)
-            .cloned()
-            .collect_vec();
         // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
         // epochs below specific watermark.
-        for epoch in &to_unpin {
-            context_pinned_snapshot.unpin_snapshot(*epoch);
-        }
-
-        if !to_unpin.is_empty() {
+        if context_pinned_snapshot.minimal_pinned_snapshot < hummock_snapshot.epoch {
+            context_pinned_snapshot.minimal_pinned_snapshot = hummock_snapshot.epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
         }
 
@@ -617,9 +548,9 @@ where
                         .unwrap()
                         .max_committed_epoch;
                     versioning_guard
-                        .pinned_snapshots
+                        .unpinned_snapshots
                         .values()
-                        .flat_map(|v| v.snapshot_id.clone())
+                        .map(|v| v.minimal_pinned_snapshot)
                         .fold(max_committed_epoch, std::cmp::min)
                 };
 
@@ -983,6 +914,7 @@ where
             current_version_id,
             sstable_id_infos
         )?;
+        self.max_committed_epoch.store(epoch, Ordering::Release);
 
         // Update metrics
         trigger_commit_stat(&self.metrics, versioning.current_version_ref());
