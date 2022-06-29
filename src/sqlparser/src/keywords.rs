@@ -83,7 +83,6 @@ define_keywords!(
     ARRAY_MAX_CARDINALITY,
     AS,
     ASC,
-    ASCII,
     ASENSITIVE,
     ASYMMETRIC,
     AT,
