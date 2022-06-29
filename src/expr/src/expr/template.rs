@@ -51,7 +51,7 @@ macro_rules! gen_eval {
         fn eval(&self, data_chunk: &DataChunk) -> $crate::Result<ArrayRef> {
             paste! {
                 $(
-                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].wrapping_eval(data_chunk)?;
+                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_checked(data_chunk)?;
                     let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
                 )*
 

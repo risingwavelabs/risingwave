@@ -38,7 +38,7 @@ impl Expression for CoalesceExpression {
         let children_array = self
             .children
             .iter()
-            .map(|c| c.wrapping_eval(input))
+            .map(|c| c.eval_checked(input))
             .collect::<Result<Vec<_>>>()?;
 
         let len = children_array[0].len();

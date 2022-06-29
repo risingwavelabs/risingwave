@@ -42,7 +42,7 @@ impl Expression for NestedConstructExpression {
         let columns = self
             .elements
             .iter()
-            .map(|e| e.wrapping_eval(input))
+            .map(|e| e.eval_checked(input))
             .collect::<Result<Vec<_>>>()?;
 
         if let DataType::Struct { fields } = &self.data_type {

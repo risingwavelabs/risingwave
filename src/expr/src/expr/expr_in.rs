@@ -58,7 +58,7 @@ impl Expression for InExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let input_array = self.left.wrapping_eval(input)?;
+        let input_array = self.left.eval_checked(input)?;
         let mut output_array = BoolArrayBuilder::new(input_array.len())?;
         for (data, vis) in input_array.iter().zip_eq(input.vis().iter()) {
             if vis {

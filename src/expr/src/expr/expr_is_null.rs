@@ -57,7 +57,7 @@ impl Expression for IsNullExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let child_arr = self.child.wrapping_eval(input)?;
+        let child_arr = self.child.eval_checked(input)?;
         let arr = BoolArray::new(
             Bitmap::all_high_bits(input.capacity())?,
             !child_arr.null_bitmap(),
@@ -79,7 +79,7 @@ impl Expression for IsNotNullExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let child_arr = self.child.wrapping_eval(input)?;
+        let child_arr = self.child.eval_checked(input)?;
         let null_bitmap = match Arc::try_unwrap(child_arr) {
             Ok(child_arr) => child_arr.into_null_bitmap(),
             Err(child_arr) => child_arr.null_bitmap().clone(),
