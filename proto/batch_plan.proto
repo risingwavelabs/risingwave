@@ -16,7 +16,7 @@ message RowSeqScanNode {
   // The partition to read for scan tasks.
   // 
   // Will be filled by the scheduler.
-  repeated common.RangeInclusive vnode_ranges = 4;
+  common.Buffer vnode_bitmap = 4;
 }
 
 message SysRowSeqScanNode {

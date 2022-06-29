@@ -420,7 +420,7 @@ mod tests {
                 ],
                 distribution_keys: vec![],
                 appendonly: false,
-                vnode_mapping: None,
+                vnode_mapping: Some(vec![]),
             }),
             vec![],
             ctx,

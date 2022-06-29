@@ -147,6 +147,26 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
             Self::fallback_vnodes(),
         )
     }
+
+    /// See also [`CellBasedTableBase::new_partial`].
+    pub fn new_partial_with_vnodes(
+        keyspace: Keyspace<S>,
+        table_columns: Vec<ColumnDesc>,
+        column_ids: Vec<ColumnId>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        vnodes: Bitmap,
+    ) -> Self {
+        Self::new_inner(
+            keyspace,
+            table_columns,
+            column_ids,
+            order_types,
+            pk_indices,
+            vec![],
+            Arc::new(vnodes),
+        )
+    }
 }
 
 impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {

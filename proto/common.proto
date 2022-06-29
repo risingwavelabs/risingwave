@@ -77,14 +77,6 @@ message ParallelUnitMapping {
   repeated uint32 data = 3;
 }
 
-// A range bounded inclusively below and above (`start..=end`).
-//
-// Corresponds to [`std::ops::RangeInclusive`].
-message RangeInclusive {
-  uint64 start = 1;
-  uint64 end = 2;
-}
-
 // Bitmap that records whether vnodes are present.
 message VNodeBitmap {
   uint32 table_id = 1;

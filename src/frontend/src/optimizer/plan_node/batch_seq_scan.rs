@@ -178,7 +178,7 @@ impl ToBatchProst for BatchSeqScan {
                     .collect(),
                 scan_range: Some(self.scan_range.to_protobuf()),
                 // To be filled by the scheduler.
-                vnode_ranges: vec![],
+                vnode_bitmap: None,
             })
         }
     }

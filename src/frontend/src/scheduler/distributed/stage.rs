@@ -20,13 +20,12 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::consistent_hashing::VNodeRanges;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
-use risingwave_pb::common::{HostAddress, WorkerNode};
+use risingwave_pb::common::{Buffer, HostAddress, WorkerNode};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -299,9 +298,9 @@ impl StageRunner {
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
-            let vnode_ranges_mapping = &table_scan_info.vnode_ranges_mapping;
+            let vnode_bitmaps = &table_scan_info.vnode_bitmaps;
 
-            let parallel_unit_ids = vnode_ranges_mapping.keys().cloned().collect_vec();
+            let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
             let workers = self
                 .worker_node_manager
                 .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
@@ -316,7 +315,7 @@ impl StageRunner {
                     stage_id: self.stage.id,
                     task_id: i as u32,
                 };
-                let vnode_ranges = vnode_ranges_mapping[&parallel_unit_id].clone();
+                let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
                 let plan_fragment = self.create_plan_fragment(i as u32, Some(vnode_ranges));
                 futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
             }
@@ -369,12 +368,8 @@ impl StageRunner {
         Ok(())
     }
 
-    fn create_plan_fragment(
-        &self,
-        task_id: TaskId,
-        vnode_ranges: Option<VNodeRanges>,
-    ) -> PlanFragment {
-        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id, vnode_ranges);
+    fn create_plan_fragment(&self, task_id: TaskId, vnode_bitmap: Option<Buffer>) -> PlanFragment {
+        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id, vnode_bitmap);
         let exchange_info = self.stage.exchange_info.clone();
 
         PlanFragment {
@@ -387,7 +382,7 @@ impl StageRunner {
         &self,
         execution_plan_node: &ExecutionPlanNode,
         task_id: TaskId,
-        vnode_ranges: Option<VNodeRanges>,
+        vnode_bitmap: Option<Buffer>,
     ) -> PlanNodeProst {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
@@ -435,7 +430,8 @@ impl StageRunner {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
-                scan_node.vnode_ranges = vnode_ranges.unwrap();
+                assert!(vnode_bitmap.is_some());
+                scan_node.vnode_bitmap = vnode_bitmap;
                 PlanNodeProst {
                     children: vec![],
                     // TODO: Generate meaningful identify
@@ -447,7 +443,7 @@ impl StageRunner {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, task_id, vnode_ranges.clone()))
+                    .map(|e| self.convert_plan_node(e, task_id, vnode_bitmap.clone()))
                     .collect();
 
                 PlanNodeProst {

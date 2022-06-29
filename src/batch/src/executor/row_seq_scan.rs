@@ -18,13 +18,13 @@ use futures::pin_mut;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
-use risingwave_pb::common::RangeInclusive;
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::{
     BatchDedupPkIter, CellBasedIter, CellBasedTable,
@@ -182,21 +182,14 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
             let batch_stats = source.context().stats();
-            let table = CellBasedTable::new_partial(
+            let table = CellBasedTable::new_partial_with_vnodes(
                 keyspace.clone(),
                 column_descs,
                 column_ids,
                 order_types,
                 pk_indices,
+                Bitmap::try_from(seq_scan_node.vnode_bitmap.as_ref().unwrap())?,
             );
-
-            let vnode_ranges = seq_scan_node.vnode_ranges.clone();
-            vnode_ranges
-                .iter()
-                .map(|RangeInclusive { start, end }| {
-                    todo!("create vnode range iterators");
-                })
-                .collect_vec();
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
                 let iter = table.batch_dedup_pk_iter(source.epoch, &pk_descs).await?;

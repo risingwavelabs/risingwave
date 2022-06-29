@@ -22,7 +22,6 @@ use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::consistent_hashing::VNodeRanges;
 use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -31,6 +30,7 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
+use risingwave_pb::common::Buffer;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -158,7 +158,7 @@ impl LocalQueryExecution {
         &self,
         execution_plan_node: &ExecutionPlanNode,
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
-        vnode_ranges: Option<VNodeRanges>,
+        vnode_bitmap: Option<Buffer>,
     ) -> SchedulerResult<PlanNodeProst> {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
@@ -190,7 +190,7 @@ impl LocalQueryExecution {
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
                     let (parallel_unit_ids, vnode_ranges_mapping): (Vec<_>, Vec<_>) =
-                        table_scan_info.vnode_ranges_mapping.into_iter().unzip();
+                        table_scan_info.vnode_bitmaps.into_iter().unzip();
                     let workers = self
                         .front_env
                         .worker_node_manager()
@@ -284,7 +284,8 @@ impl LocalQueryExecution {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
-                scan_node.vnode_ranges = vnode_ranges.unwrap();
+                assert!(vnode_bitmap.is_some());
+                scan_node.vnode_bitmap = vnode_bitmap;
                 Ok(PlanNodeProst {
                     children: vec![],
                     // TODO: Generate meaningful identify
@@ -296,7 +297,7 @@ impl LocalQueryExecution {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, second_stages, vnode_ranges.clone()))
+                    .map(|e| self.convert_plan_node(e, second_stages, vnode_bitmap.clone()))
                     .collect::<SchedulerResult<Vec<PlanNodeProst>>>()?;
 
                 Ok(PlanNodeProst {

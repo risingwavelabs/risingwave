@@ -16,10 +16,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use risingwave_common::consistent_hashing::{vnode_mapping_to_ranges, VNodeRanges};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeInfo;
+use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldProst;
 use uuid::Uuid;
 
@@ -164,7 +165,7 @@ impl Query {
 #[derive(Clone)]
 pub struct TableScanInfo {
     /// Indicates data distribution and partition of the table.
-    pub vnode_ranges_mapping: HashMap<ParallelUnitId, VNodeRanges>,
+    pub vnode_bitmaps: HashMap<ParallelUnitId, Buffer>,
 }
 
 /// Fragment part of `Query`.
@@ -233,7 +234,7 @@ impl QueryStageBuilder {
             exchange_info: self.exchange_info,
             parallelism: match &self.table_scan_info {
                 None => self.parallelism,
-                Some(info) => info.vnode_ranges_mapping.len() as u32,
+                Some(info) => info.vnode_bitmaps.len() as u32,
             },
             table_scan_info: self.table_scan_info,
         });
@@ -391,8 +392,8 @@ impl BatchPlanFragmenter {
                         "multiple table scan inside a stage"
                     );
                     builder.table_scan_info = Some(TableScanInfo {
-                        vnode_ranges_mapping: vnode_mapping_to_ranges(
-                            &table_desc.vnode_mapping.clone().unwrap(),
+                        vnode_bitmaps: vnode_mapping_to_owner_mapping(
+                            table_desc.vnode_mapping.clone().unwrap(),
                         ),
                     });
                 }
@@ -419,6 +420,23 @@ impl BatchPlanFragmenter {
 
         builder.children_stages.push(child_stage);
     }
+}
+
+// TODO: let frontend store owner_mapping directly?
+fn vnode_mapping_to_owner_mapping(
+    vnode_mapping: Vec<ParallelUnitId>,
+) -> HashMap<ParallelUnitId, Buffer> {
+    let mut m: HashMap<ParallelUnitId, BitmapBuilder> = HashMap::new();
+    let num_vnodes = vnode_mapping.len();
+    for (i, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {
+        let bitmap = m
+            .entry(parallel_unit_id)
+            .or_insert_with(|| BitmapBuilder::zeroed(num_vnodes));
+        bitmap.set(i, true);
+    }
+    m.into_iter()
+        .map(|(k, v)| (k, v.finish().to_protobuf()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -484,7 +502,7 @@ mod tests {
                 ],
                 distribution_keys: vec![],
                 appendonly: false,
-                vnode_mapping: None,
+                vnode_mapping: Some(vec![]),
             }),
             vec![],
             ctx,
