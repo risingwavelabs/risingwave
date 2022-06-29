@@ -50,7 +50,6 @@ pub mod aws_utils;
 pub mod dummy_connector;
 mod macros;
 pub mod sink;
-pub mod state;
 
 pub use base::ConnectorState;
 pub use datagen::DATAGEN_CONNECTOR;
