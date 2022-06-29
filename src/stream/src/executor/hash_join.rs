@@ -538,7 +538,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.append_only_optimize,
                     ) {
                         yield chunk
-                            .map_err(StreamExecutorError::eval_error)
                             .map(|v| match v {
                                 Message::Chunk(chunk) => {
                                     Message::Chunk(chunk.reorder_columns(&self.output_indices))
