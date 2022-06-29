@@ -16,11 +16,11 @@
 
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
-use crate::executor::SimpleAggExecutor;
+use crate::executor::GlobalSimpleAggExecutor;
 
-pub struct SimpleAggExecutorBuilder;
+pub struct GlobalSimpleAggExecutorBuilder;
 
-impl ExecutorBuilder for SimpleAggExecutorBuilder {
+impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &StreamNode,
@@ -33,21 +33,14 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
-        // Build vector of keyspace via table ids.
-        // One keyspace for one agg call.
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
+
         let state_tables = generate_state_tables_from_proto(store, &node.internal_tables, None);
 
-        Ok(SimpleAggExecutor::new(
+        Ok(GlobalSimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
             params.pk_indices,
             params.executor_id,
-            key_indices,
             state_tables,
         )?
         .boxed())
