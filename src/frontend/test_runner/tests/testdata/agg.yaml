@@ -329,3 +329,11 @@
       StreamSimpleAgg { aggs: [count, sum($0), min($0), max($1)] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
+- sql: |
+    /* dup group key */
+    with t(v1) as (values (1), (2), (1)) select v1 from t group by v1, v1;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_keys: [0, 0], agg_calls: [] }
+        LogicalProject { exprs: [$0] }
+          LogicalValues { rows: [[1:Int32], [2:Int32], [1:Int32]], schema: Schema { fields: [:Int32] } }
