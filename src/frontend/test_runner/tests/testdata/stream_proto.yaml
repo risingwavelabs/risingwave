@@ -737,7 +737,7 @@
                   isNullable: true
                 name: "agg#1"
             hashAgg:
-              distributionKeys:
+              groupKeys:
                 - 0
               aggCalls:
                 - type: COUNT

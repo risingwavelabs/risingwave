@@ -342,6 +342,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
+        _grantor: UserName,
     ) -> Result<()> {
         let privileges = privileges
             .into_iter()
@@ -366,7 +367,10 @@ impl UserInfoWriter for MockUserInfoWriter {
         &self,
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
+        _granted_by: Option<UserName>,
+        _revoke_by: UserName,
         revoke_grant_option: bool,
+        _cascade: bool,
     ) -> Result<()> {
         for user_name in users {
             if let Some(u) = self.user_info.write().get_user_mut(&user_name) {

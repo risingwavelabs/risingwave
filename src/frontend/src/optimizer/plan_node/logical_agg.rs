@@ -130,45 +130,81 @@ impl LogicalAgg {
         let base = self.input.plan_base();
         let schema = &base.schema;
         let fields = schema.fields();
+        let append_only = self.input.append_only();
         for agg_call in &self.agg_calls {
-            let mut internal_pk_indices = vec![];
             let mut columns = vec![];
             let mut column_names = HashMap::new(); // avoid duplicate column name
             let mut order_desc = vec![];
             for &idx in &self.group_keys {
-                let column_id = columns.len() as i32;
-                internal_pk_indices.push(column_id as usize); // Currently our column index is same as column id
-                column_mapping.insert(idx, column_id);
-                let mut column_desc =
-                    ColumnDesc::from_field_with_column_id(&fields[idx], column_id);
-                let column_name = column_desc.name.clone();
-                if let Some(occurence) = column_names.get_mut(&column_name) {
-                    column_desc.name = format!("{}_{}", column_name, occurence);
-                    *occurence += 1;
-                } else {
-                    column_names.insert(column_name, 0);
-                }
-                columns.push(ColumnCatalog {
-                    column_desc: column_desc.clone(),
-                    is_hidden: false,
-                });
+                Self::add_column_desc(
+                    &mut columns,
+                    &mut column_mapping,
+                    &mut column_names,
+                    fields,
+                    idx,
+                );
                 order_desc.push(OrderedColumnDesc {
-                    column_desc,
+                    column_desc: columns
+                        .last()
+                        .map(|col_catalog| col_catalog.column_desc.clone())
+                        .unwrap(),
                     order: OrderType::Ascending,
                 })
             }
             match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg => {
+                    if !append_only {
+                        // Add sort key as part of pk.
+                        // TODO: Need to check whether string agg needs this.
+                        for input in &agg_call.inputs {
+                            Self::add_column_desc(
+                                &mut columns,
+                                &mut column_mapping,
+                                &mut column_names,
+                                fields,
+                                input.index,
+                            );
+                            order_desc.push(OrderedColumnDesc {
+                                column_desc: columns
+                                    .last()
+                                    .map(|col_catalog| col_catalog.column_desc.clone())
+                                    .unwrap(),
+                                order: if agg_call.agg_kind == AggKind::Min {
+                                    OrderType::Ascending
+                                } else {
+                                    OrderType::Descending
+                                },
+                            });
+                        }
+
+                        // Add upstream pk.
+                        for pk_index in &base.pk_indices {
+                            Self::add_column_desc(
+                                &mut columns,
+                                &mut column_mapping,
+                                &mut column_names,
+                                fields,
+                                *pk_index,
+                            );
+                            order_desc.push(OrderedColumnDesc {
+                                column_desc: columns
+                                    .last()
+                                    .map(|col_catalog| col_catalog.column_desc.clone())
+                                    .unwrap(),
+                                order: OrderType::Ascending,
+                            });
+                        }
+                    }
+
+                    // TODO: Remove this (3474)
                     for input in &agg_call.inputs {
-                        let column_id = columns.len() as i32;
-                        column_mapping.insert(input.index, column_id);
-                        columns.push(ColumnCatalog {
-                            column_desc: ColumnDesc::from_field_with_column_id(
-                                &fields[input.index],
-                                column_id,
-                            ),
-                            is_hidden: false,
-                        });
+                        Self::add_column_desc(
+                            &mut columns,
+                            &mut column_mapping,
+                            &mut column_names,
+                            fields,
+                            input.index,
+                        );
                     }
                 }
                 AggKind::Sum
@@ -186,22 +222,56 @@ impl LogicalAgg {
                     });
                 }
             }
+            // Always reserve 1 for agg call value. See related issue (#3474).
+            let relational_pk_len = columns.len() - 1;
             table_catalogs.push(TableCatalog {
                 id: TableId::placeholder(),
                 associated_source_id: None,
                 name: String::new(),
                 columns,
                 order_desc,
-                pks: internal_pk_indices,
+                pks: (0..relational_pk_len).collect(),
                 is_index_on: None,
                 distribution_keys: base.dist.dist_column_indices().to_vec(),
-                appendonly: false,
+                appendonly: append_only,
                 owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
                 vnode_mapping: None,
                 properties: HashMap::default(),
             });
         }
         (table_catalogs, column_mapping)
+    }
+
+    /// Add a column catalog to the end of `columns`. Also update the `column_mapping` and
+    /// `column_names`.
+    fn add_column_desc(
+        columns: &mut Vec<ColumnCatalog>,
+        column_mapping: &mut HashMap<usize, i32>,
+        column_names: &mut HashMap<String, i32>,
+        fields: &[Field],
+        input_index: usize,
+    ) {
+        // Maintain the input column index -> relational table index.
+        let column_id = columns.len() as i32;
+        column_mapping.insert(input_index, column_id);
+
+        // Add column desc.
+        let mut column_desc =
+            ColumnDesc::from_field_with_column_id(&fields[input_index], column_id);
+
+        // Avoid column name duplicate.
+        let column_name = column_desc.name.clone();
+        if let Some(occurence) = column_names.get_mut(&column_name) {
+            column_desc.name = format!("{}_{}", column_name, occurence);
+            *occurence += 1;
+        } else {
+            column_names.insert(column_name, 0);
+        }
+
+        columns.push(ColumnCatalog {
+            column_desc,
+            is_hidden: false,
+        });
     }
 
     /// Two phase streaming agg.

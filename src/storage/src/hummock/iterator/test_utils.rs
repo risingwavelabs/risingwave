@@ -19,7 +19,9 @@ use futures::executor::block_on;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_object_store::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
+use risingwave_object_store::object::{
+    HybridObjectStore, InMemObjectStore, ObjectStoreImpl, ObjectStoreRef,
+};
 
 use crate::hummock::iterator::{BoxedForwardHummockIterator, ReadOptions};
 use crate::hummock::sstable_store::SstableStore;
@@ -47,7 +49,10 @@ pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::new(
-        Box::new(InMemObjectStore::new(false)),
+        Box::new(HybridObjectStore::new(
+            Arc::new(InMemObjectStore::new(true)),
+            Arc::new(InMemObjectStore::new(false)),
+        )),
         Arc::new(ObjectStoreMetrics::unused()),
     )))
 }
