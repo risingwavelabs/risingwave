@@ -33,7 +33,7 @@
 //! This is called a "validity bitmap" in the Arrow documentation.
 //! This file is adapted from [arrow-rs](https://github.com/apache/arrow-rs)
 
-use std::ops::{BitAnd, BitOr};
+use std::ops::{BitAnd, BitOr, Not};
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -162,6 +162,15 @@ impl Bitmap {
             bits: vec![0; len].into(),
             num_bits,
             num_high_bits: 0,
+        })
+    }
+
+    pub fn all_high_bits(num_bits: usize) -> ArrayResult<Self> {
+        let len = Self::num_of_bytes(num_bits);
+        Ok(Self {
+            bits: vec![0xff; len].into(),
+            num_bits,
+            num_high_bits: num_bits,
         })
     }
 
@@ -300,6 +309,15 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
             .map(|(&a, &b)| a | b)
             .collect();
         Ok(Bitmap::from_bytes_with_num_bits(bits, self.num_bits))
+    }
+}
+
+impl<'a> Not for &'a Bitmap {
+    type Output = Bitmap;
+
+    fn not(self) -> Self::Output {
+        let bits = self.bits.iter().map(|b| !b).collect();
+        Bitmap::from_bytes_with_num_bits(bits, self.num_bits)
     }
 }
 
