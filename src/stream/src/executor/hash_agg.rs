@@ -455,9 +455,8 @@ mod tests {
     use risingwave_storage::table::state_table::StateTable;
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::executor::aggregation::{
-        generate_agg_schema, generate_state_table, AggArgs, AggCall,
-    };
+    use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
+    use crate::executor::test_utils::global_simple_agg::generate_state_table;
     use crate::executor::test_utils::*;
     use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
 
