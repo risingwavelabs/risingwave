@@ -43,7 +43,7 @@ impl LogicalProjectBuilder {
     /// output
     pub fn add_expr(&mut self, expr: &ExprImpl) -> usize {
         if let Some(idx) = self.exprs_index.get(expr) {
-            return *idx;
+            *idx
         } else {
             let index = self.exprs.len();
             self.exprs.push(expr.clone());
@@ -56,7 +56,7 @@ impl LogicalProjectBuilder {
         if expr.has_subquery() {
             return None;
         }
-        self.exprs_index.get(expr).map(|idx| *idx)
+        self.exprs_index.get(expr).copied()
     }
 
     pub fn exprs_num(&self) -> usize {
