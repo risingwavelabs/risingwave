@@ -183,10 +183,20 @@ pub trait StateStoreIter: Send + 'static {
 pub struct ReadOptions {
     pub epoch: u64,
     pub table_id: Option<TableId>,
+    pub ttl: Option<u32>,
 }
 
 #[derive(Default, Clone)]
 pub struct WriteOptions {
     pub epoch: u64,
     pub table_id: TableId,
+}
+
+impl ReadOptions {
+    pub fn min_epoch(&self) -> u64 {
+        match self.ttl {
+            Some(ttl_u32) => self.epoch - ttl_u32 as u64,
+            None => 0,
+        }
+    }
 }
