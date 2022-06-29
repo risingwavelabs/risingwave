@@ -13,10 +13,17 @@
 // limitations under the License.
 
 pub mod alloc;
+pub mod cache;
+pub mod coding;
 pub mod error;
 pub mod file;
 pub mod filter;
-pub mod manager;
+pub mod meta;
+pub mod store;
+pub mod utils;
+
+#[cfg(test)]
+pub mod test_utils;
 
 async fn asyncify<F, T>(f: F) -> error::Result<T>
 where

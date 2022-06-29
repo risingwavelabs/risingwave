@@ -4531,6 +4531,7 @@ version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bitvec",
  "byteorder",
  "bytes",
  "chrono",
@@ -4565,6 +4566,7 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
+ "regex",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_meta",

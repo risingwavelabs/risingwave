@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+bitvec = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -27,7 +28,7 @@ lz4 = "1.23.1"
 madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.8", features = ["future"] }
-nix = { version = "0.24.1", features = ["fs"] }
+nix = { version = "0.24.1", features = ["fs", "mman"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -35,6 +36,7 @@ paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.10"
 rand = "0.8"
+regex = "1"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
