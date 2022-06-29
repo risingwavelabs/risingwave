@@ -525,8 +525,7 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
     }
 
     /// Get a [`CellBasedIter`] with given `encoded_key_range`.
-    /// Differs from the streaming one, this iterator will wait for the epoch before iteration, and
-    /// the order of the rows among different virtual nodes is not guaranteed.
+    /// Differs from the streaming one, this iterator will wait for the epoch before iteration.
     pub(super) async fn batch_iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
@@ -537,8 +536,8 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         B: AsRef<[u8]> + Send,
     {
         // Currently batch does not expect scan order, so we just concat mutiple ranges.
-        // TODO: introduce ordered batch iterator
-        self.iter_with_encoded_key_range(encoded_key_range, epoch, true, false)
+        // TODO: introduce unordered batch iterator
+        self.iter_with_encoded_key_range(encoded_key_range, epoch, true, true)
             .await
     }
 
