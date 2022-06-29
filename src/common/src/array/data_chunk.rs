@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryFrom;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 use std::{fmt, iter};
@@ -99,7 +98,7 @@ impl DataChunk {
     pub fn new<V: Into<Vis>>(columns: Vec<Column>, vis: V) -> Self {
         let vis = vis.into();
         let capacity = match &vis {
-            Vis::Bitmap(b) => b.num_bits(),
+            Vis::Bitmap(b) => b.len(),
             Vis::Compact(c) => *c,
         };
         for column in &columns {
@@ -175,7 +174,7 @@ impl DataChunk {
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
         match &self.vis2 {
-            Vis::Bitmap(b) => b.num_bits(),
+            Vis::Bitmap(b) => b.len(),
             Vis::Compact(len) => *len,
         }
     }
@@ -574,7 +573,7 @@ impl DataChunkTestExt for DataChunk {
         let vis = if visibility.iter().all(|b| *b) {
             Vis::Compact(visibility.len())
         } else {
-            Vis::Bitmap(Bitmap::try_from(visibility).unwrap())
+            Vis::Bitmap(Bitmap::from_iter(visibility))
         };
         let chunk = DataChunk::new(columns, vis);
         chunk.assert_valid();

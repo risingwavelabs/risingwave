@@ -361,7 +361,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Insert],
-            Some(&(vec![true, false, false]).try_into().unwrap()),
+            Some(&(vec![true, false, false]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 3, 1]).into()],
         )
         .unwrap();
@@ -369,7 +369,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
-            Some(&(vec![true, true, true, true]).try_into().unwrap()),
+            Some(&(vec![true, true, true, true]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 3, 1, 2]).into()],
         )
         .unwrap();

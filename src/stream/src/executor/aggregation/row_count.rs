@@ -138,7 +138,7 @@ mod tests {
         state
             .apply_batch(
                 &[Op::Delete, Op::Insert],
-                Some(&(vec![false, true]).try_into().unwrap()),
+                Some(&(vec![false, true]).into_iter().collect()),
                 &[],
             )
             .unwrap();
@@ -150,7 +150,7 @@ mod tests {
         state
             .apply_batch(
                 &[Op::Delete, Op::Insert],
-                Some(&(vec![true, false]).try_into().unwrap()),
+                Some(&(vec![true, false]).into_iter().collect()),
                 &[],
             )
             .unwrap();
