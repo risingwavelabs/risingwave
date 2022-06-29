@@ -243,30 +243,17 @@ impl CompactStatus {
                 new_total_file_size;
         } else {
             for input_level in &compact_task.input_ssts {
-                new_version_levels[input_level.level_idx as usize].total_file_size -= input_level
-                    .table_infos
-                    .iter()
-                    .map(|sst| sst.file_size)
-                    .sum::<u64>();
-                new_version_levels[input_level.level_idx as usize]
-                    .table_infos
-                    .retain(|sst| !removed_table.contains(&sst.id));
+                HummockVersion::level_delete_ssts(
+                    &mut new_version_levels[input_level.level_idx as usize],
+                    &removed_table,
+                    &mut None,
+                );
             }
-            new_version_levels[compact_task.target_level as usize].total_file_size += compact_task
-                .sorted_output_ssts
-                .iter()
-                .map(|sst| sst.file_size)
-                .sum::<u64>();
-            new_version_levels[compact_task.target_level as usize]
-                .table_infos
-                .extend(compact_task.sorted_output_ssts.clone());
-            new_version_levels[compact_task.target_level as usize]
-                .table_infos
-                .sort_by(|sst1, sst2| {
-                    let a = sst1.key_range.as_ref().unwrap();
-                    let b = sst2.key_range.as_ref().unwrap();
-                    a.compare(b)
-                });
+            HummockVersion::level_insert_ssts(
+                &mut new_version_levels[compact_task.target_level as usize],
+                compact_task.sorted_output_ssts.clone(),
+                &None,
+            );
         }
         new_version
     }

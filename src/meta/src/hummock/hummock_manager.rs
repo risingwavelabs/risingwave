@@ -24,7 +24,6 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
     HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
@@ -281,45 +280,18 @@ where
                             *compaction_group_id as CompactionGroupId,
                         )[level_delta.level_idx as usize];
                         if !level_delta.removed_table_ids.is_empty() {
-                            let remove_set: HashSet<_> =
-                                level_delta.removed_table_ids.clone().into_iter().collect();
-                            let mut new_table_infos = Vec::with_capacity(operand.table_infos.len());
-                            let mut new_total_file_size = 0;
-                            for table_info in &operand.table_infos {
-                                if remove_set.contains(&table_info.id) {
-                                    if level_delta.level_idx == 0 && l0_remove_position.is_none() {
-                                        l0_remove_position = Some(new_table_infos.len());
-                                    }
-                                } else {
-                                    new_total_file_size += table_info.file_size;
-                                    new_table_infos.push(table_info.clone());
-                                }
-                            }
-                            operand.table_infos = new_table_infos;
-                            operand.total_file_size = new_total_file_size;
+                            HummockVersion::level_delete_ssts(
+                                operand,
+                                &HashSet::from_iter(level_delta.removed_table_ids.iter().cloned()),
+                                &mut l0_remove_position,
+                            );
                         }
                         if !level_delta.inserted_table_infos.is_empty() {
-                            operand.total_file_size += level_delta
-                                .inserted_table_infos
-                                .iter()
-                                .map(|sst| sst.file_size)
-                                .sum::<u64>();
-                            if let Some(l0_remove_pos) = l0_remove_position && level_delta.level_idx == 0 {
-                                    let (l, r) = operand.table_infos.split_at_mut(l0_remove_pos);
-                                    let mut new_table_infos = l.to_vec();
-                                    new_table_infos.extend(level_delta.inserted_table_infos.clone());
-                                    new_table_infos.extend_from_slice(r);
-                                    operand.table_infos = new_table_infos;
-                            } else {
-                                operand.table_infos.extend(level_delta.inserted_table_infos.clone());
-                                if level_delta.level_idx != 0 {
-                                    operand.table_infos.sort_by(|sst1, sst2| {
-                                        let a = sst1.key_range.as_ref().unwrap();
-                                        let b = sst2.key_range.as_ref().unwrap();
-                                        a.compare(b)
-                                    });
-                                }
-                            }
+                            HummockVersion::level_insert_ssts(
+                                operand,
+                                level_delta.inserted_table_infos.clone(),
+                                &l0_remove_position,
+                            );
                         }
                     }
                 }
