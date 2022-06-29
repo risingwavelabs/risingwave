@@ -30,7 +30,11 @@ use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, Equal, InputRef, Modulus,
 };
 use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
+use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
 
