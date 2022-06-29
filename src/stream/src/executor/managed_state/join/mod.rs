@@ -33,7 +33,7 @@ use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
-use crate::executor::error::StreamExecutorResult;
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::monitor::StreamingMetrics;
 
 type DegreeType = u64;
@@ -301,7 +301,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let key = key
             .clone()
             .deserialize(self.join_key_data_types.iter())
-            .map_err(|_| anyhow::anyhow!("deserialize key failed"))?;
+            .map_err(StreamExecutorError::serde_error)?;
 
         let table_iter = self
             .state_table
