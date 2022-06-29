@@ -56,20 +56,24 @@ impl CompactionPicker for TierCompactionPicker {
             }
             let mut compaction_bytes = table.file_size;
             let mut select_level_inputs = vec![table.clone()];
-            if table.file_size > self.config.min_compaction_bytes {
+            if table.file_size >= self.config.min_compaction_bytes {
                 // only merge small file until we support sub-level.
                 idx += 1;
                 continue;
             }
 
             let mut next_offset = idx + 1;
+            let max_compaction_bytes = std::cmp::min(
+                self.config.max_compaction_bytes,
+                self.config.max_bytes_for_level_base,
+            );
 
             for other in &levels[0].table_infos[idx + 1..] {
                 if level_handlers[0].is_pending_compact(&other.id) {
                     break;
                 }
                 // no need to trigger a bigger compaction
-                if compaction_bytes >= self.config.max_compaction_bytes {
+                if compaction_bytes >= max_compaction_bytes {
                     break;
                 }
                 compaction_bytes += other.file_size;
@@ -104,7 +108,7 @@ impl CompactionPicker for TierCompactionPicker {
                     level_idx: 0,
                     level_type: LevelType::Overlapping as i32,
                     table_infos: select_level_inputs,
-                    total_file_size: 0,
+                    total_file_size: compaction_bytes,
                 },
                 target_level: Level {
                     level_idx: 0,
@@ -113,6 +117,8 @@ impl CompactionPicker for TierCompactionPicker {
                     total_file_size: 0,
                 },
                 split_ranges: vec![],
+                compression_algorithm: "".to_string(),
+                target_file_size: 0,
             });
         }
         None
@@ -215,6 +221,8 @@ impl CompactionPicker for LevelCompactionPicker {
                 table_infos: target_level_inputs,
             },
             split_ranges: splits,
+            target_file_size: self.config.target_file_size_base,
+            compression_algorithm: "".to_string(),
         })
     }
 }

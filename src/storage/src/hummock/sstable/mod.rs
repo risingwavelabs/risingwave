@@ -16,6 +16,10 @@
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
+
+use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
+
 pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
@@ -25,7 +29,7 @@ pub mod builder;
 pub use builder::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
@@ -47,16 +51,43 @@ const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
 
-#[derive(Clone, Debug)]
 /// [`Sstable`] is a handle for accessing SST.
 pub struct Sstable {
     pub id: HummockSSTableId,
     pub meta: SstableMeta,
+    pub blocks: Vec<Arc<Block>>,
+}
+
+impl Debug for Sstable {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GrpcExchangeSource")
+            .field("id", &self.id)
+            .field("meta", &self.meta)
+            .finish()
+    }
 }
 
 impl Sstable {
     pub fn new(id: HummockSSTableId, meta: SstableMeta) -> Self {
-        Self { id, meta }
+        Self {
+            id,
+            meta,
+            blocks: vec![],
+        }
+    }
+
+    pub fn new_with_data(
+        id: HummockSSTableId,
+        meta: SstableMeta,
+        data: Bytes,
+    ) -> HummockResult<Self> {
+        let mut blocks = vec![];
+        for block_meta in &meta.block_metas {
+            let end_offset = (block_meta.offset + block_meta.len) as usize;
+            let block = Block::decode(data.slice(block_meta.offset as usize..end_offset))?;
+            blocks.push(Arc::new(block));
+        }
+        Ok(Self { id, meta, blocks })
     }
 
     pub fn has_bloom_filter(&self) -> bool {
@@ -83,7 +114,7 @@ impl Sstable {
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size()
+        8 /* id */ + self.meta.encoded_size() + self.blocks.iter().map(|block|block.data().len()).sum::<usize>()
     }
 
     #[cfg(test)]

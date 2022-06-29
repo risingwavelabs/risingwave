@@ -25,22 +25,33 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::CellBasedTable;
+use super::cell_based_table::{CellBasedTableBase, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
+use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
+use crate::row_serializer::RowSerializer;
 use crate::{Keyspace, StateStore};
 
+/// Identical to `StateTable`. Used when we want to
+/// rows to have dedup pk cell encoding.
+pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
+
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
+pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
+
+/// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
+/// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTable<S: StateStore> {
+pub struct StateTableBase<S: StateStore, SER: RowSerializer> {
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTable<S>,
+    cell_based_table: CellBasedTableBase<S, SER, READ_WRITE>,
 }
 
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     pub fn new(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
@@ -50,7 +61,7 @@ impl<S: StateStore> StateTable<S> {
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTable::new(
+            cell_based_table: CellBasedTableBase::new(
                 keyspace,
                 column_descs,
                 order_types,
@@ -60,8 +71,8 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    /// Get the underlying [`CellBasedTable`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &CellBasedTable<S> {
+    /// Get the underlying [`CellBasedTableBase`]. Should only be used for tests.
+    pub fn cell_based_table(&self) -> &CellBasedTableBase<S, SER, READ_WRITE> {
         &self.cell_based_table
     }
 
@@ -81,7 +92,11 @@ impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table. This function will return a Cow. If the value is from
     /// memtable, it will be a [`Cow::Borrowed`]. If is from cell based table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Cow<Row>>> {
+    pub async fn get_row<'a>(
+        &'a self,
+        pk: &'_ Row,
+        epoch: u64,
+    ) -> StorageResult<Option<Cow<'a, Row>>> {
         let pk_bytes = serialize_pk(pk, self.pk_serializer());
         let mem_table_res = self.mem_table.get_row_op(&pk_bytes);
         match mem_table_res {
@@ -141,14 +156,6 @@ impl<S: StateStore> StateTable<S> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.cell_based_table
             .batch_write_rows(mem_table, new_epoch)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn commit_with_value_meta(&mut self, new_epoch: u64) -> StorageResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.cell_based_table
-            .batch_write_rows_with_value_meta(mem_table, new_epoch)
             .await?;
         Ok(())
     }

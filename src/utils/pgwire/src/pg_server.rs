@@ -165,7 +165,7 @@ mod tests {
             self: Arc<Self>,
             sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
-            // split a statement and trim \' around the intput param to construct result.
+            // split a statement and trim \' around the input param to construct result.
             // Ex:
             //    SELECT 'a','b' -> result: a , b
             let res: Vec<Option<String>> = sql
@@ -213,7 +213,7 @@ mod tests {
     // - Input description(params description) should include all the generic params description we
     //   need.
     #[tokio::test]
-    async fn test_psql_extended_mode_exlicit_simple() {
+    async fn test_psql_extended_mode_explicit_simple() {
         let session_mgr = Arc::new(MockSessionManager {});
         tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
 
@@ -245,7 +245,7 @@ mod tests {
             let value: &str = rows[0].get(0);
             assert_eq!(value, "BB");
         }
-        // explict parameter (test portal)
+        // explicit parameter (test portal)
         {
             let transaction = client.transaction().await.unwrap();
             let statement = transaction

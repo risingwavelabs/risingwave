@@ -75,7 +75,7 @@ pub type F64ArrayBuilder = PrimitiveArrayBuilder<OrderedF64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<OrderedF32>;
 
 /// The hash source for `None` values when hashing an item.
-static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
+pub(crate) static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 
 /// A trait over all array builders.
 ///

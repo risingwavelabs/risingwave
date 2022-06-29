@@ -53,7 +53,6 @@ pub fn default_config_for_test() -> StorageConfig {
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
         share_buffer_upload_concurrency: 1,
-        enable_compression: true,
     }
 }
 
@@ -141,8 +140,11 @@ pub async fn gen_test_sstable_inner(
     policy: CachePolicy,
 ) -> Sstable {
     let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
-    let sst = Sstable { id: sst_id, meta };
-    sstable_store.put(sst.clone(), data, policy).await.unwrap();
+    let sst = Sstable::new(sst_id, meta.clone());
+    sstable_store
+        .put(Sstable::new(sst_id, meta.clone()), data, policy)
+        .await
+        .unwrap();
     sst
 }
 

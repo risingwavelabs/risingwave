@@ -367,7 +367,7 @@ set -e
 for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
-  cargo install $tool
+  cargo install $tool --locked
   echo
 done
 

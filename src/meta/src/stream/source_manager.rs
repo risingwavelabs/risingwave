@@ -579,7 +579,7 @@ where
     pub async fn create_source(&self, source: &Source) -> Result<()> {
         // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
         self.compaction_group_manager
-            .register_source(source.id)
+            .register_source(source.id, &HashMap::new())
             .await?;
         let futures = self
             .all_stream_clients()
@@ -652,6 +652,7 @@ where
                 "dropping source {}, but associated fragments still exists",
                 source_id
             );
+            core.source_fragments.remove(&source_id);
         }
 
         // Unregister afterwards and is safeguarded by CompactionGroupManager::purge_stale_members.

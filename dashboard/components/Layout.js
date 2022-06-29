@@ -16,9 +16,9 @@
  */
 import Head from 'next/head'
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 
-import React from 'react';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { styled, useTheme } from '@mui/material/styles';
 import Box from '@mui/material/Box';
 import Drawer from '@mui/material/Drawer';
@@ -98,25 +98,24 @@ const NavBarNavigationItem = styled('div')(() => ({
   alignItems: "center"
 }));
 
-const NavBarItem = (props) => {
+const NavBarItem = ({ text, icon }) => {
+  const { pathname } = useRouter();
   return (
-    <ListItemButton key={props.text} selected={props.currentPage === props.text}>
-      <Link href={"/" + props.text}>
+    <Link href={`/${text}`}>
+      <ListItemButton key={text} selected={pathname.slice(1) === text}>
         <NavBarNavigationItem>
-          <ListItemIcon>
-            {props.icon}
-          </ListItemIcon>
-          <span style={{ fontSize: "15px" }}>{capitalize(props.text)}</span>
+          <ListItemIcon>{icon}</ListItemIcon>
+          <span style={{ fontSize: "15px" }}>{capitalize(text)}</span>
         </NavBarNavigationItem>
-      </Link>
-    </ListItemButton>
+      </ListItemButton>
+    </Link>
   )
-}
+};
 
-export default function Layout(props) {
+export default function Layout({ children }) {
+  const { pathname } = useRouter();
   const theme = useTheme();
   const [open, setOpen] = useState(true);
-  const [currentPage, setCurrentPage] = useState(props.currentPage ? props.currentPage : " ");
   const handleDrawerOpen = () => {
     setOpen(true);
   };
@@ -124,17 +123,6 @@ export default function Layout(props) {
   const handleDrawerClose = () => {
     setOpen(false);
   };
-
-  const WrapNavItem = (props) => (
-    <>
-      <NavBarItem
-        text={props.text}
-        icon={props.icon}
-        currentPage={currentPage}
-        setCurrentPage={setCurrentPage}
-      />
-    </>
-  )
 
   return (
     <>
@@ -156,7 +144,7 @@ export default function Layout(props) {
               <MenuIcon />
             </IconButton>
             <div>
-              {capitalize(currentPage)}
+              {capitalize(pathname.slice(1) || ' ')}
             </div>
           </Toolbar>
         </AppBar>
@@ -191,18 +179,18 @@ export default function Layout(props) {
           </DrawerHeader>
           <Divider />
           <List>
-            <WrapNavItem
+            <NavBarItem
               text='cluster'
               icon={<ViewComfyIcon fontSize="small" />}
             />
-            <WrapNavItem
+            <NavBarItem
               text='streaming'
               icon={<DoubleArrowIcon fontSize="small" />}
             />
           </List>
           <Divider />
           <List>
-            <WrapNavItem
+            <NavBarItem
               text='about'
               icon={<InfoIcon fontSize="small" />}
             />
@@ -211,7 +199,7 @@ export default function Layout(props) {
         <Main open={open}>
           <div style={{height: "68px"}}></div>
           <div style={{width: "calc(100vw - 275px)", height: "calc(100% - 68px)"}}>
-            {props.children}
+            {children}
           </div>
         </Main>
       </Box>

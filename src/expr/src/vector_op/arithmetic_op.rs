@@ -20,7 +20,7 @@ use std::ops::Sub;
 use chrono::Duration;
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
 use risingwave_common::types::{
-    CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
+    CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF64,
 };
 
 use super::cast::date_to_timestamp;
@@ -199,6 +199,14 @@ where
     T1: TryInto<i32> + Debug,
 {
     interval_int_mul::<T2, T1, T3>(r, l)
+}
+
+#[inline(always)]
+pub fn interval_float_div<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
+where
+    T2: TryInto<OrderedF64> + Debug,
+{
+    l.div_float(r).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[cfg(test)]

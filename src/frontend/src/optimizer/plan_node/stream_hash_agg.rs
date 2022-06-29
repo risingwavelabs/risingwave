@@ -50,7 +50,7 @@ impl StreamHashAgg {
         self.logical.agg_calls()
     }
 
-    pub fn distribution_keys(&self) -> &[usize] {
+    pub fn group_keys(&self) -> &[usize] {
         self.logical.group_keys()
     }
 }
@@ -66,7 +66,7 @@ impl fmt::Display for StreamHashAgg {
             .field(
                 "group_keys",
                 &self
-                    .distribution_keys()
+                    .group_keys()
                     .iter()
                     .copied()
                     .map(InputRefDisplay)
@@ -93,8 +93,8 @@ impl ToStreamProst for StreamHashAgg {
         use risingwave_pb::stream_plan::*;
         let (internal_tables, column_mapping) = self.logical.infer_internal_table_catalog();
         ProstStreamNode::HashAgg(HashAggNode {
-            distribution_keys: self
-                .distribution_keys()
+            group_keys: self
+                .group_keys()
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect_vec(),

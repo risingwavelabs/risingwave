@@ -102,7 +102,7 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
         DataType::Timestamp => TypeOid::Timestamp,
         DataType::Timestampz => TypeOid::Timestampz,
         DataType::Decimal => TypeOid::Decimal,
-        DataType::Interval => TypeOid::Varchar,
+        DataType::Interval => TypeOid::Interval,
         DataType::Struct { .. } => TypeOid::Varchar,
         DataType::List { .. } => TypeOid::Varchar,
     }
