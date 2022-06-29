@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::LocalSstableInfo;
 
 use crate::error::StorageResult;
@@ -183,7 +184,7 @@ pub trait StateStoreIter: Send + 'static {
 pub struct ReadOptions {
     pub epoch: u64,
     pub table_id: Option<TableId>,
-    pub ttl: Option<u32>,
+    pub ttl: Option<u32>, // second
 }
 
 #[derive(Default, Clone)]
@@ -194,8 +195,9 @@ pub struct WriteOptions {
 
 impl ReadOptions {
     pub fn min_epoch(&self) -> u64 {
+        let epoch = Epoch(self.epoch);
         match self.ttl {
-            Some(ttl_u32) => self.epoch - ttl_u32 as u64,
+            Some(ttl_second_u32) => epoch.subtract_ms((ttl_second_u32 * 1000) as u64).0,
             None => 0,
         }
     }

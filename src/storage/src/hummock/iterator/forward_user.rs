@@ -116,7 +116,7 @@ pub struct UserIterator {
     /// Only reads values if `ts <= self.read_epoch`.
     read_epoch: Epoch,
 
-    /// Only reads values if `ts > self.min_epoch`.
+    /// Only reads values if `ts > self.min_epoch`. use for ttl
     min_epoch: Epoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.

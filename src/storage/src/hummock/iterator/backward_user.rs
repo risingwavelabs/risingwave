@@ -53,6 +53,7 @@ pub struct BackwardUserIterator {
     /// Only reads values if `epoch <= self.read_epoch`.
     read_epoch: Epoch,
 
+    /// Only reads values if `ts > self.min_epoch`. use for ttl
     min_epoch: Epoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.

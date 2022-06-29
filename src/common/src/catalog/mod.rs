@@ -216,7 +216,7 @@ impl From<&TableId> for risingwave_pb::plan_common::TableRefId {
 // directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
-    pub ttl: Option<u32>,
+    pub ttl: Option<u32>, // second
 }
 
 impl From<&risingwave_pb::hummock::TableOption> for TableOption {
@@ -234,7 +234,7 @@ impl From<&risingwave_pb::hummock::TableOption> for TableOption {
 impl From<&TableOption> for risingwave_pb::hummock::TableOption {
     fn from(table_option: &TableOption) -> Self {
         Self {
-            ttl: table_option.ttl.unwrap_or(0),
+            ttl: table_option.ttl.unwrap_or(hummock::TABLE_OPTION_DUMMY_TTL),
         }
     }
 }
