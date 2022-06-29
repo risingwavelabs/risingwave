@@ -23,7 +23,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
-use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::*;
@@ -31,9 +30,10 @@ use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::{Mutex, Notify};
 
-use super::error::StreamExecutorError;
-use super::monitor::StreamingMetrics;
-use super::*;
+use crate::executor::error::StreamExecutorError;
+use crate::executor::monitor::StreamingMetrics;
+use crate::executor::source::state::SourceStateHandler;
+use crate::executor::*;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
