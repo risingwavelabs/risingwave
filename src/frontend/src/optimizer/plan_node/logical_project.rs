@@ -33,7 +33,7 @@ use crate::utils::{ColIndexMapping, Condition, Substitute};
 /// the `LogicalProjectBuilder` is the way to construct a `LogicalProject` to dedup the duplicate
 /// expressions
 #[derive(Default)]
-struct LogicalProjectBuilder {
+pub struct LogicalProjectBuilder {
     exprs: Vec<ExprImpl>,
     exprs_index: HashMap<ExprImpl, usize>,
 }
@@ -50,6 +50,17 @@ impl LogicalProjectBuilder {
             self.exprs_index.insert(expr.clone(), index);
             index
         }
+    }
+
+    pub fn expr_index(&mut self, expr: &ExprImpl) -> Option<usize> {
+        if expr.has_subquery() {
+            return None;
+        }
+        self.exprs_index.get(expr).map(|idx| *idx)
+    }
+
+    pub fn exprs_num(&self) -> usize {
+        self.exprs.len()
     }
 
     /// build the `LogicalProject` from `LogicalProjectBuilder`
