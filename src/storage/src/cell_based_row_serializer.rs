@@ -14,27 +14,38 @@
 
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::ordered::serialize_pk_and_row;
 
-type KeyBytes = Vec<u8>;
-type ValueBytes = Vec<u8>;
+use crate::row_serializer::{KeyBytes, RowSerializer, ValueBytes};
 
 #[derive(Clone)]
 pub struct CellBasedRowSerializer {
-    pub column_ids: Vec<ColumnId>,
+    column_ids: Vec<ColumnId>,
 }
 
 impl CellBasedRowSerializer {
     pub fn new(column_ids: Vec<ColumnId>) -> Self {
         Self { column_ids }
     }
+}
+
+impl RowSerializer for CellBasedRowSerializer {
+    fn create(
+        _pk_indices: &[usize],
+        _column_descs: &[ColumnDesc],
+        column_ids: &[ColumnId],
+    ) -> Self {
+        Self {
+            column_ids: column_ids.to_vec(),
+        }
+    }
 
     /// Serialize key and value. The `row` must be in the same order with the column ids in this
     /// serializer.
-    pub fn serialize(
+    fn serialize(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
@@ -52,7 +63,7 @@ impl CellBasedRowSerializer {
     /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
     /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
     /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
-    pub fn serialize_without_filter(
+    fn serialize_without_filter(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
@@ -62,5 +73,11 @@ impl CellBasedRowSerializer {
         let key = [vnode.to_be_bytes().as_slice(), pk].concat();
         let res = serialize_pk_and_row(&key, &row, &self.column_ids)?;
         Ok(res)
+    }
+
+    /// Get column ids used by cell serializer to serialize.
+    /// TODO: This should probably not be exposed to user.
+    fn column_ids(&self) -> &[ColumnId] {
+        &self.column_ids
     }
 }

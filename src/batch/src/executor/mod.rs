@@ -28,7 +28,6 @@ mod row_seq_scan;
 mod sort_agg;
 mod sys_row_seq_scan;
 mod table_function;
-#[cfg(test)]
 pub mod test_utils;
 mod top_n;
 mod trace;

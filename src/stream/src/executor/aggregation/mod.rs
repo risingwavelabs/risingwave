@@ -26,7 +26,7 @@ use risingwave_common::array::{
     NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
@@ -350,88 +350,6 @@ pub fn generate_agg_schema(
     Schema { fields }
 }
 
-/// Infer column desc for state table.
-/// The column desc layout is
-/// [ `group_key` (only for hash agg) / `sort_key` (only for extreme) /
-/// `value`(the agg call return type)].
-/// This is the Row layout insert into state table.
-/// For different agg call, different executor (hash agg or simple agg), the layout will be
-/// different.
-pub fn generate_column_descs(
-    agg_call: &AggCall,
-    group_keys: &[usize],
-    pk_indices: &[usize],
-    agg_schema: &Schema,
-    input_ref: &dyn Executor,
-) -> Vec<ColumnDesc> {
-    let mut column_descs = Vec::with_capacity(group_keys.len() + 1);
-    let mut next_column_id = 0;
-
-    // Define a closure for DRY.
-    let mut add_column_desc = |data_type: DataType| {
-        column_descs.push(ColumnDesc::unnamed(
-            ColumnId::new(next_column_id),
-            data_type,
-        ));
-        next_column_id += 1;
-    };
-
-    for (idx, _) in group_keys.iter().enumerate() {
-        add_column_desc(agg_schema.fields[idx].data_type.clone());
-    }
-
-    // For max, min, the table descs should include sort key.
-    // The added columns should be (sort_key, pk from input data).
-    if (agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min) && !agg_call.append_only {
-        // Add value as part of sort key.
-        add_column_desc(agg_call.return_type.clone());
-
-        for pk_idx in pk_indices {
-            add_column_desc(input_ref.schema().fields[*pk_idx].data_type.clone());
-        }
-    }
-
-    // Agg value should also be part of state table.
-    add_column_desc(agg_call.return_type.clone());
-
-    column_descs
-}
-
-/// Generate state table for agg executor.
-/// Relational pk = `table_desc.len` - 1.
-pub fn generate_state_table<S: StateStore>(
-    ks: Keyspace<S>,
-    agg_call: &AggCall,
-    group_keys: &[usize],
-    pk_indices: &[usize],
-    agg_schema: &Schema,
-    input_ref: &dyn Executor,
-) -> StateTable<S> {
-    let table_desc = generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
-    // Always leave 1 space for agg call value.
-    let relational_pk_len = table_desc.len() - 1;
-    let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
-    StateTable::new(
-        ks,
-        table_desc,
-        // Primary key do not includes group key.
-        vec![
-            // Now we only infer order type for min/max in a naive way.
-            if agg_call.kind == AggKind::Max {
-                OrderType::Descending
-            } else {
-                OrderType::Ascending
-            };
-            relational_pk_len
-        ],
-        if dist_keys.is_empty() {
-            None
-        } else {
-            Some(dist_keys)
-        },
-        (0..relational_pk_len).collect(),
-    )
-}
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
 pub async fn generate_managed_agg_state<S: StateStore>(
@@ -475,25 +393,52 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     })
 }
 
-/// Get the pk keys len (Do not count group key).
-/// For hash agg, add with group key to get internal table primary key len.
-/// For simple agg,
-pub fn get_key_len(agg_call: &AggCall) -> usize {
-    match agg_call.kind {
-        // If append_only, do not need order key.
-        AggKind::Min | AggKind::Max => {
-            if agg_call.append_only {
-                0
-            } else {
-                1
-            }
-        }
-        // These agg call do not have keys besides group key.
-        AggKind::Sum
-        | AggKind::Count
-        | AggKind::SingleValue
-        | AggKind::RowCount
-        | AggKind::ApproxCountDistinct => 0,
-        _ => unimplemented!("{:?} do not implemented!", agg_call.kind),
+/// Parse from stream proto plan internal tables, generate state tables used by agg.
+pub fn generate_state_tables_from_proto(
+    store: impl StateStore,
+    internal_tables: &[risingwave_pb::catalog::Table],
+) -> Vec<StateTable<impl StateStore>> {
+    let mut state_tables = Vec::with_capacity(internal_tables.len());
+    for table_catalog in internal_tables {
+        // Parse info from proto and create state table.
+        let state_table = {
+            let table_columns = table_catalog
+                .columns
+                .iter()
+                .map(|col| col.column_desc.as_ref().unwrap().into())
+                .collect();
+            let order_types = table_catalog
+                .orders
+                .iter()
+                .map(|order_type| {
+                    OrderType::from_prost(
+                        &risingwave_pb::plan_common::OrderType::from_i32(*order_type).unwrap(),
+                    )
+                })
+                .collect();
+            let dist_key_indices = table_catalog
+                .distribution_keys
+                .iter()
+                .map(|dist_index| *dist_index as usize)
+                .collect();
+            let pk_indices = table_catalog
+                .pk
+                .iter()
+                .map(|pk_index| *pk_index as usize)
+                .collect();
+            StateTable::new(
+                Keyspace::table_root(
+                    store.clone(),
+                    &risingwave_common::catalog::TableId::new(table_catalog.id),
+                ),
+                table_columns,
+                order_types,
+                Some(dist_key_indices),
+                pk_indices,
+            )
+        };
+
+        state_tables.push(state_table)
     }
+    state_tables
 }
