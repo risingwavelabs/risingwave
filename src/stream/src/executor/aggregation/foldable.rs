@@ -433,7 +433,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
-            Some(&(vec![true, true, false, false]).try_into().unwrap()),
+            Some(&(vec![true, true, false, false]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
@@ -453,7 +453,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
-            Some(&(vec![true, true, false, false]).try_into().unwrap()),
+            Some(&(vec![true, true, false, false]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
@@ -509,7 +509,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
-            Some(&(vec![false, true, false, false]).try_into().unwrap()),
+            Some(&(vec![false, true, false, false]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
@@ -534,7 +534,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Insert],
-            Some(&(vec![false, true, false, true]).try_into().unwrap()),
+            Some(&(vec![false, true, false, true]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
@@ -555,7 +555,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
-            Some(&(vec![false, true, false, false]).try_into().unwrap()),
+            Some(&(vec![false, true, false, false]).into_iter().collect()),
             &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
         )
         .unwrap();
