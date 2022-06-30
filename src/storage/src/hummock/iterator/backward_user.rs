@@ -53,6 +53,9 @@ pub struct BackwardUserIterator {
     /// Only reads values if `epoch <= self.read_epoch`.
     read_epoch: Epoch,
 
+    /// Only reads values if `ts > self.min_epoch`. use for ttl
+    min_epoch: Epoch,
+
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
     _version: Option<Arc<PinnedVersion>>,
 }
@@ -64,7 +67,7 @@ impl BackwardUserIterator {
         iterator: BackwardMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::with_epoch(iterator, key_range, Epoch::MAX, None)
+        Self::with_epoch(iterator, key_range, Epoch::MAX, 0, None)
     }
 
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
@@ -72,6 +75,7 @@ impl BackwardUserIterator {
         iterator: BackwardMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        min_epoch: u64,
         version: Option<Arc<PinnedVersion>>,
     ) -> Self {
         Self {
@@ -83,6 +87,7 @@ impl BackwardUserIterator {
             last_val: Vec::new(),
             last_delete: true,
             read_epoch,
+            min_epoch,
             _version: version,
         }
     }
@@ -141,7 +146,7 @@ impl BackwardUserIterator {
             let epoch = get_epoch(full_key);
             let key = to_user_key(full_key);
 
-            if epoch <= self.read_epoch {
+            if epoch > self.min_epoch && epoch <= self.read_epoch {
                 if self.just_met_new_key {
                     self.last_key.clear();
                     self.last_key.extend_from_slice(key);
@@ -269,11 +274,12 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator {
         stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        min_epoch: u64,
         version: Option<Arc<PinnedVersion>>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::<Backward>::new(iterator_iter, stats);
         DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
-            iterator, key_range, read_epoch, version,
+            iterator, key_range, read_epoch, min_epoch, version,
         ))
     }
 }
@@ -293,8 +299,9 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
-        gen_iterator_test_sstable_from_kv_pair, iterator_test_key_of, iterator_test_key_of_epoch,
-        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
+        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_value_of,
+        mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::BoxedBackwardHummockIterator;
     use crate::hummock::sstable::Sstable;
@@ -1089,5 +1096,45 @@ mod tests {
             meta: sst.meta.clone(),
             blocks: vec![],
         }
+    }
+
+    #[tokio::test]
+    async fn test_min_epoch() {
+        let sstable_store = mock_sstable_store();
+        let table0 = gen_iterator_test_sstable_with_incr_epoch(
+            0,
+            default_builder_opt_for_test(),
+            |x| x * 3,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+            1,
+        )
+        .await;
+
+        let cache = create_small_table_cache();
+        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
+
+        let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(
+            BackwardSSTableIterator::new(handle0, sstable_store),
+        )];
+
+        let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
+        let mi = BackwardMergeIterator::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
+        let mut ui =
+            BackwardUserIterator::with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch, None);
+        ui.rewind().await.unwrap();
+
+        let mut i = 0;
+        while ui.is_valid() {
+            let key = ui.key();
+            let key_epoch = get_epoch(key);
+            assert!(key_epoch > min_epoch);
+
+            i += 1;
+            ui.next().await.unwrap();
+        }
+
+        let expect_count = TEST_KEYS_COUNT - min_epoch as usize;
+        assert_eq!(i, expect_count);
     }
 }

@@ -306,6 +306,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await?;

@@ -18,7 +18,7 @@ use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::config::constant::hummock;
+use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
@@ -57,30 +57,6 @@ impl CompactionGroup {
 
     pub fn table_id_to_options(&self) -> &HashMap<u32, TableOption> {
         &self.table_id_to_options
-    }
-
-    pub fn build_table_option(table_properties: &HashMap<String, String>) -> TableOption {
-        // now we only support ttl for TableOption
-        let mut result = TableOption::default();
-        match table_properties.get(hummock::PROPERTIES_TTL_KEY) {
-            Some(ttl_string) => {
-                match ttl_string.trim().parse::<u32>() {
-                    Ok(ttl_u32) => result.ttl = Some(ttl_u32),
-                    Err(e) => {
-                        tracing::info!(
-                            "build_table_option parse option ttl_string {} fail {}",
-                            ttl_string,
-                            e
-                        );
-                        result.ttl = None;
-                    }
-                };
-            }
-
-            None => {}
-        }
-
-        result
     }
 }
 
@@ -145,32 +121,5 @@ impl MetadataModel for CompactionGroup {
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
         Ok(self.group_id)
-    }
-}
-
-// TODO: TableOption is deplicated with the properties in table catalog, We can refactor later to
-// directly fetch such options from catalog when creating compaction jobs.
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct TableOption {
-    ttl: Option<u32>,
-}
-
-impl From<&risingwave_pb::hummock::TableOption> for TableOption {
-    fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
-        let ttl = if table_option.ttl == hummock::TABLE_OPTION_DUMMY_TTL {
-            None
-        } else {
-            Some(table_option.ttl)
-        };
-
-        Self { ttl }
-    }
-}
-
-impl From<&TableOption> for risingwave_pb::hummock::TableOption {
-    fn from(table_option: &TableOption) -> Self {
-        Self {
-            ttl: table_option.ttl.unwrap_or(0),
-        }
     }
 }
