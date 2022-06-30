@@ -203,7 +203,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         // --- Create array builders ---
         // As the datatype is retrieved from schema, it contains both group key and aggregation
         // state outputs.
-        let mut builders = schema.create_array_builders(2)?;
+        let mut builders = schema.create_array_builders(2);
         let mut new_ops = Vec::with_capacity(2);
 
         // --- Retrieve modified states and put the changes into the builders ---

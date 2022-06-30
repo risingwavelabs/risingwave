@@ -53,10 +53,10 @@ impl Expression for ConcatWsExpression {
 
         let row_len = input.capacity();
         let vis = input.vis();
-        let mut builder = Utf8ArrayBuilder::new(row_len)?;
+        let mut builder = Utf8ArrayBuilder::new(row_len);
 
         for row_idx in 0..row_len {
-            if !vis.is_set(row_idx).unwrap() {
+            if !vis.is_set(row_idx) {
                 builder.append(None)?;
                 continue;
             }

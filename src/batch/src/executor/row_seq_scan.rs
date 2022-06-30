@@ -21,7 +21,7 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
@@ -29,7 +29,7 @@ use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::{
     BatchDedupPkIter, CellBasedIter, CellBasedTable,
 };
-use risingwave_storage::table::TableIter;
+use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use crate::executor::monitor::BatchMetrics;
@@ -159,18 +159,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             table_desc.order_key.iter().map(|d| d.into()).collect();
         let order_types: Vec<OrderType> = pk_descs.iter().map(|desc| desc.order).collect();
 
-        let pk_indices = pk_descs
-            .iter()
-            .map(|desc| desc.column_desc.column_id)
-            .map(|pk_id| {
-                column_descs
-                    .iter()
-                    .find_position(|desc| desc.column_id == pk_id)
-                    .unwrap()
-                    .0
-            })
-            .collect_vec();
-
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
         let (pk_prefix_value, next_col_bounds) = get_scan_bound(
             scan_range.clone(),
@@ -179,28 +167,39 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 .map(|desc| desc.column_desc.data_type.clone()),
         );
 
+        let pk_indices = table_desc
+            .pk_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+
+        let dist_key_indices = table_desc
+            .dist_key_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        let vnodes = match seq_scan_node.vnode_bitmap.as_ref() {
+            Some(vnodes) => Bitmap::try_from(vnodes).unwrap(),
+            // This is possbile for dml. vnode_bitmap is not filled by scheduler.
+            None => Bitmap::all_high_bits(VIRTUAL_NODE_COUNT),
+        };
+
+        let distribution = Distribution {
+            vnodes: vnodes.into(),
+            dist_key_indices,
+        };
+
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
             let batch_stats = source.context().stats();
-
-            let table = match seq_scan_node.vnode_bitmap.as_ref() {
-                Some(vnodes) => CellBasedTable::new_partial_with_vnodes(
-                    keyspace.clone(),
-                    column_descs,
-                    column_ids,
-                    order_types,
-                    pk_indices,
-                    Bitmap::try_from(vnodes)?,
-                ),
-                // This is possbile for dml. vnode_bitmap is not filled by scheduler.
-                None => CellBasedTable::new_partial(
-                    keyspace.clone(),
-                    column_descs,
-                    column_ids,
-                    order_types,
-                    pk_indices,
-                ),
-            };
+            let table = CellBasedTable::new_partial(
+                keyspace.clone(),
+                column_descs,
+                column_ids,
+                order_types,
+                pk_indices,
+                distribution,
+            );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
                 let iter = table.batch_dedup_pk_iter(source.epoch, &pk_descs).await?;

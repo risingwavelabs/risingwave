@@ -70,6 +70,8 @@ impl TableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
             order_key: self.order_desc.iter().map(|v| v.into()).collect(),
+            pk_indices: self.pks.iter().map(|&k| k as u32).collect(),
+            dist_key_indices: self.distribution_keys.iter().map(|&k| k as u32).collect(),
         }
     }
 }

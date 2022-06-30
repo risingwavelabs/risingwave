@@ -77,7 +77,7 @@ impl StreamChunkBuilder {
         let column_builders = data_types
             .iter()
             .map(|datatype| datatype.create_array_builder(reduced_capacity))
-            .try_collect()?;
+            .collect();
         Ok(Self {
             ops,
             column_builders,
@@ -169,7 +169,7 @@ impl StreamChunkBuilder {
             .iter_mut()
             .zip_eq(&self.data_types)
             .map(|(builder, datatype)| {
-                std::mem::replace(builder, datatype.create_array_builder(self.capacity)?).finish()
+                std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
             })
             .try_collect()?;
         let new_columns = new_arrays

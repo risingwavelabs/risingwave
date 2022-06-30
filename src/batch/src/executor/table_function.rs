@@ -63,7 +63,7 @@ where
         // Simulate a do-while loop.
         while cur <= stop {
             let chunk_size = DEFAULT_CHUNK_BUFFER_SIZE;
-            let mut builder = T::Builder::new(chunk_size)?;
+            let mut builder = T::Builder::new(chunk_size);
 
             for _ in 0..chunk_size {
                 if cur > stop {
@@ -94,7 +94,7 @@ impl Unnest {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn eval(self) {
         let sum = self.array_refs.iter().map(|a| a.len()).sum();
-        let mut builder = self.return_type.create_array_builder(sum)?;
+        let mut builder = self.return_type.create_array_builder(sum);
         self.array_refs
             .iter()
             .try_for_each(|a| builder.append_array(a))?;

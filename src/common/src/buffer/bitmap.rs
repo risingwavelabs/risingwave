@@ -228,10 +228,7 @@ impl Bitmap {
     }
 
     pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
-        self.check_idx(idx)?;
-
-        // Justification
-        // We've already checked index here, so it's ok to use unsafe.
+        ensure!(idx < self.len());
         Ok(unsafe { self.is_set_unchecked(idx) })
     }
 
@@ -244,18 +241,16 @@ impl Bitmap {
     }
 
     /// Returns an iterator which starts from `offset`.
-    pub fn iter_from(&self, offset: usize) -> ArrayResult<BitmapIter<'_>> {
-        self.check_idx(offset)?;
-        Ok(BitmapIter {
+    ///
+    /// # Panics
+    /// Panics if `offset > len`.
+    pub fn iter_from(&self, offset: usize) -> BitmapIter<'_> {
+        assert!(offset < self.len());
+        BitmapIter {
             bits: &self.bits,
             idx: offset,
             num_bits: self.num_bits,
-        })
-    }
-
-    fn check_idx(&self, idx: usize) -> ArrayResult<()> {
-        ensure!(idx < self.len());
-        Ok(())
+        }
     }
 }
 
