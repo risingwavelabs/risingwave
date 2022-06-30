@@ -164,18 +164,12 @@ impl LocalStreamManager {
     }
 
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
-    pub async fn send_barrier(
+    pub fn send_barrier(
         &self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> Result<()> {
-        if barrier.mutation.is_some() {
-            // Update when configuration changes.
-            dispatch_hummock_state_store!(self.state_store(), store, {
-                store.update_compaction_group_cache().await?;
-            });
-        }
         let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
         barrier_manager.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
@@ -266,8 +260,7 @@ impl LocalStreamManager {
         };
 
         self.drain_collect_rx(barrier.epoch.prev);
-        self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)
-            .await?;
+        self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
         self.collect_barrier_and_sync(barrier.epoch.prev, false)
             .await;
         self.core.lock().drop_all_actors();
@@ -319,7 +312,11 @@ impl LocalStreamManager {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+    pub async fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+        // Ensure compaction group mapping is available locally.
+        dispatch_hummock_state_store!(self.state_store(), store, {
+            store.update_compaction_group_cache().await?;
+        });
         let mut core = self.core.lock();
         core.build_actors(actors, env)
     }

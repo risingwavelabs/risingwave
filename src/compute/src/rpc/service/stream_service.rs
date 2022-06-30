@@ -63,7 +63,10 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
 
         let actor_id = req.actor_id;
-        let res = self.mgr.build_actors(actor_id.as_slice(), self.env.clone());
+        let res = self
+            .mgr
+            .build_actors(actor_id.as_slice(), self.env.clone())
+            .await;
         match res {
             Err(e) => {
                 error!("failed to build actors {}", e);
@@ -138,8 +141,7 @@ impl StreamService for StreamServiceImpl {
             Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
 
         self.mgr
-            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
-            .await?;
+            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
