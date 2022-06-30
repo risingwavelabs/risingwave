@@ -151,6 +151,7 @@ mod tests {
 
     #[test]
     fn test_cell_based_deserializer() {
+        // ----------- specify table schema
         // let pk_indices = [0]; // For reference to know which columns are dedupped.
         let column_ids = vec![
             ColumnId::from(5),
@@ -171,25 +172,10 @@ mod tests {
             OrderType::Ascending,
             OrderType::Ascending,
         ];
-        // let table_ordered_column_descs =
-        //     table_column_descs.iter().zip_eq(order_types.iter()).map(
-        //         |(column_desc, order_type)| {
-        //             OrderedColumnDesc {
-        //                 column_desc: column_desc.clone(),
-        //                 order: order_type.clone(),
-        //             }
-        //         }
-        //     );
-        //                                                             vec![
-        //     OrderedColumnDesc { column_desc: table_column_descs[0].clone(), order:
-        // order_types[0]},     OrderedColumnDesc { column_desc:
-        // table_column_descs[1].clone(), order: order_types[1]},     OrderedColumnDesc {
-        // column_desc: table_column_descs[2].clone(), order: order_types[2]},
-        //     OrderedColumnDesc { column_desc: table_column_descs[3].clone(), order:
-        // order_types[3]}, ];
 
         let pk_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
 
+        // ----------- create data: pk + row
         let row1 = Row(vec![
             Some(ScalarImpl::Int32(2018)), // pk cannot be null
             Some(ScalarImpl::Utf8("abc".to_string())),
@@ -223,6 +209,7 @@ mod tests {
         let mut pk3 = vec![2; VIRTUAL_NODE_SIZE];
         pk_serializer.serialize(&Row(vec![Some(ScalarImpl::Int32(2020))]), &mut pk3);
 
+        // ----------- serialize pk and row
         let bytes1 = serialize_pk_and_row(&pk1, &dedup_row1, &dedup_column_ids).unwrap();
         let bytes2 = serialize_pk_and_row(&pk2, &dedup_row2, &dedup_column_ids).unwrap();
         let bytes3 = serialize_pk_and_row(&pk3, &dedup_row3, &dedup_column_ids).unwrap();
@@ -232,7 +219,7 @@ mod tests {
             .flatten()
             .collect_vec();
 
-        // ------- Init dedup pk cell based row deserializer
+        // ----------- init dedup pk cell based row deserializer
         let column_mapping = ColumnDescMapping::new(table_column_descs.clone());
 
         let pk_descs = vec![OrderedColumnDesc {
@@ -242,6 +229,7 @@ mod tests {
 
         let mut deserializer = DedupPkCellBasedRowDeserializer::new(column_mapping, &pk_descs);
 
+        // ----------- deserialize pk and row
         let mut actual = vec![];
         for (key_bytes, value_bytes) in bytes {
             let pk_and_row = deserializer
@@ -254,6 +242,7 @@ mod tests {
         let (_vnode, _pk, row) = deserializer.take().unwrap().unwrap();
         actual.push(row);
 
+        // ----------- verify results
         let expected = vec![row1, row2, row3];
         assert_eq!(expected, actual);
     }
