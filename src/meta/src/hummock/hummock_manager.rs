@@ -140,7 +140,6 @@ struct Versioning {
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
-    unpinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     stale_sstables: BTreeMap<HummockVersionId, HummockStaleSstables>,
     sstable_id_infos: BTreeMap<HummockSSTableId, SstableIdInfo>,
 }
@@ -282,7 +281,7 @@ where
             .into_iter()
             .map(|p| (p.context_id, p))
             .collect();
-        versioning_guard.unpinned_snapshots = HummockPinnedSnapshot::list(self.env.meta_store())
+        versioning_guard.pinned_snapshots = HummockPinnedSnapshot::list(self.env.meta_store())
             .await?
             .into_iter()
             .map(|p| (p.context_id, p))
@@ -465,7 +464,7 @@ where
             assert!(hummock_snapshot.epoch <= _max_committed_epoch);
         }
 
-        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.unpinned_snapshots);
+        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
         let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
             None => {
                 return Ok(());
@@ -548,7 +547,7 @@ where
                         .unwrap()
                         .max_committed_epoch;
                     versioning_guard
-                        .unpinned_snapshots
+                        .pinned_snapshots
                         .values()
                         .map(|v| v.minimal_pinned_snapshot)
                         .fold(max_committed_epoch, std::cmp::min)
