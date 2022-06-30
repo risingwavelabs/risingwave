@@ -22,7 +22,7 @@ use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&'static str; 6] = [
+const CONFIG_KEYS: [&str; 6] = [
     "RW_IMPLICIT_FLUSH",
     "QUERY_MODE",
     "RW_FORCE_DELTA_JOIN",
