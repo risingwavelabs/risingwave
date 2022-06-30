@@ -96,6 +96,7 @@ define_keywords!(
     BETWEEN,
     BIGINT,
     BINARY,
+    BIT_LENGTH,
     BLOB,
     BOOL,
     BOOLEAN,

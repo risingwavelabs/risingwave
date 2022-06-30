@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
-use risingwave_common::array::{DataChunk, Row, Vis};
+use risingwave_common::array::{Array, DataChunk, Row, Vis};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, DatumRef};
@@ -162,7 +162,7 @@ impl NestedLoopJoinExecutor {
         let mut output_array_builders: Vec<_> = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(num_tuples))
-            .try_collect()?;
+            .collect();
         for _i in 0..num_tuples {
             for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
                 builder.append_datum_ref(*datum_ref)?;
@@ -367,7 +367,7 @@ impl NestedLoopJoinExecutor {
             let new_chunk = Self::concatenate(&const_row_chunk, build_side_chunk)?;
             // Join with current row.
             let sel_vector = self.join_expr.eval(&new_chunk)?;
-            let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().try_into()?);
+            let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().iter().collect());
             self.build_table.advance_chunk();
             Ok(ProbeResult {
                 cur_row_finished: false,
@@ -605,7 +605,7 @@ mod tests {
         let length = 5;
         let mut columns = vec![];
         for i in 0..num_of_columns {
-            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
                 builder.append(Some(i as i32)).unwrap();
             }
@@ -616,7 +616,7 @@ mod tests {
         let bool_vec = vec![true, false, true, false, false];
         let chunk2: DataChunk = DataChunk::new(
             columns.clone(),
-            Vis::Bitmap((bool_vec.clone()).try_into().unwrap()),
+            Vis::Bitmap((bool_vec.clone()).into_iter().collect()),
         );
         let chunk = NestedLoopJoinExecutor::concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
@@ -624,7 +624,7 @@ mod tests {
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
         assert_eq!(
             chunk.visibility().cloned().unwrap(),
-            (bool_vec).try_into().unwrap()
+            (bool_vec).into_iter().collect()
         );
     }
 

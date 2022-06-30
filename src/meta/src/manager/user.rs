@@ -228,8 +228,14 @@ impl<S: MetaStore> UserManager<S> {
             .collect();
     }
 
+    // Check whether new_privilege is a subset of origin_privilege, and check grand_option if
+    // `need_grand_option` is set.
     #[inline(always)]
-    fn check_privilege(origin_privilege: &GrantPrivilege, new_privilege: &GrantPrivilege) -> bool {
+    fn check_privilege(
+        origin_privilege: &GrantPrivilege,
+        new_privilege: &GrantPrivilege,
+        need_grand_option: bool,
+    ) -> bool {
         assert_eq!(origin_privilege.object, new_privilege.object);
 
         let action_map = HashMap::<i32, bool>::from_iter(
@@ -240,7 +246,7 @@ impl<S: MetaStore> UserManager<S> {
         );
         for nao in &new_privilege.action_with_opts {
             if let Some(with_grant_option) = action_map.get(&nao.action) {
-                if !with_grant_option {
+                if !with_grant_option && need_grand_option {
                     return false;
                 }
             } else {
@@ -290,7 +296,7 @@ impl<S: MetaStore> UserManager<S> {
                         .iter()
                         .find(|p| p.object == new_grant_privilege.object)
                     {
-                        if !Self::check_privilege(privilege, new_grant_privilege) {
+                        if !Self::check_privilege(privilege, new_grant_privilege, true) {
                             return Err(RwError::from(InternalError(format!(
                                 "Cannot grant privilege without grant permission for user {}",
                                 grantor
@@ -373,6 +379,8 @@ impl<S: MetaStore> UserManager<S> {
         &self,
         users: &[UserName],
         revoke_grant_privileges: &[GrantPrivilege],
+        granted_by: UserName,
+        revoke_by: UserName,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<NotificationVersion> {
@@ -381,6 +389,35 @@ impl<S: MetaStore> UserManager<S> {
         let mut user_updated = HashMap::new();
         let mut users_info: VecDeque<UserInfo> = VecDeque::new();
         let mut visited = HashSet::new();
+        // check revoke permission
+        let revoke_by = core
+            .user_info
+            .get(&revoke_by)
+            .ok_or_else(|| InternalError(format!("User {} does not exist", &revoke_by)))
+            .cloned()?;
+        let same_user = !granted_by.is_empty() && granted_by != revoke_by.name;
+        if !revoke_by.is_supper {
+            for privilege in revoke_grant_privileges {
+                if let Some(user_privilege) = revoke_by
+                    .grant_privileges
+                    .iter()
+                    .find(|p| p.object == privilege.object)
+                {
+                    if !Self::check_privilege(user_privilege, privilege, same_user) {
+                        return Err(RwError::from(InternalError(format!(
+                            "Cannot revoke privilege without permission for user {}",
+                            &revoke_by.name
+                        ))));
+                    }
+                } else {
+                    return Err(RwError::from(InternalError(format!(
+                        "User {} do not have one of the privileges",
+                        &revoke_by.name
+                    ))));
+                }
+            }
+        }
+        // revoke privileges
         for user_name in users {
             let user = core
                 .user_info
@@ -541,6 +578,7 @@ mod tests {
         assert_eq!(users.len(), 4);
 
         let object = Object::TableId(0);
+        let other_object = Object::TableId(1);
         // Grant when grantor does not have privilege.
         let res = user_manager
             .grant_privilege(
@@ -647,6 +685,42 @@ mod tests {
             .iter()
             .all(|p| p.with_grant_option));
 
+        // Revoke without privilege action
+        let res = user_manager
+            .revoke_privilege(
+                &[test_user.to_string()],
+                &[make_privilege(object.clone(), &[Action::Connect], false)],
+                String::from(""),
+                test_sub_user.to_string(),
+                true,
+                false,
+            )
+            .await;
+        assert!(res.is_err());
+        let sub_user = user_manager.get_user(&test_sub_user.to_string()).await?;
+        assert_eq!(sub_user.grant_privileges.len(), 1);
+        let user = user_manager.get_user(&test_user.to_string()).await?;
+        assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
+        // Revoke without privilege object
+        let res = user_manager
+            .revoke_privilege(
+                &[test_user.to_string()],
+                &[make_privilege(
+                    other_object.clone(),
+                    &[Action::Connect],
+                    false,
+                )],
+                String::from(""),
+                test_sub_user.to_string(),
+                true,
+                false,
+            )
+            .await;
+        assert!(res.is_err());
+        let sub_user = user_manager.get_user(&test_sub_user.to_string()).await?;
+        assert_eq!(sub_user.grant_privileges.len(), 1);
+        let user = user_manager.get_user(&test_user.to_string()).await?;
+        assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
         // Revoke with restrict
         let res = user_manager
             .revoke_privilege(
@@ -661,6 +735,8 @@ mod tests {
                     ],
                     false,
                 )],
+                String::from(""),
+                DEFAULT_SUPPER_USER.to_string(),
                 true,
                 false,
             )
@@ -684,6 +760,8 @@ mod tests {
                     ],
                     false,
                 )],
+                String::from(""),
+                DEFAULT_SUPPER_USER.to_string(),
                 true,
                 true,
             )
@@ -705,6 +783,8 @@ mod tests {
                     &[Action::Select, Action::Insert, Action::Delete],
                     false,
                 )],
+                String::from(""),
+                DEFAULT_SUPPER_USER.to_string(),
                 false,
                 true,
             )

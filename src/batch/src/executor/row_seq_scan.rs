@@ -20,13 +20,10 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::expr_unary::new_unary_expr;
-use risingwave_expr::expr::{Expression, LiteralExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
-use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::{
     BatchDedupPkIter, CellBasedIter, CellBasedTable,
@@ -95,14 +92,6 @@ fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
         && matches!(bounds.end_bound(), Bound::Unbounded)
 }
 
-fn eval_as(lit: LiteralExpression, return_ty: DataType) -> Datum {
-    let mut const_expr = lit.boxed();
-    if const_expr.return_type() != return_ty {
-        const_expr = new_unary_expr(ExprType::Cast, return_ty, const_expr).unwrap();
-    }
-    const_expr.eval_row(Row::empty()).unwrap()
-}
-
 fn get_scan_bound(
     scan_range: ScanRange,
     mut pk_types: impl Iterator<Item = DataType>,
@@ -111,9 +100,9 @@ fn get_scan_bound(
         .eq_conds
         .iter()
         .map(|v| {
-            let lit = LiteralExpression::try_from(v).unwrap();
             let ty = pk_types.next().unwrap();
-            eval_as(lit, ty)
+            let scalar = ScalarImpl::bytes_to_scalar(v, &ty.to_protobuf()).unwrap();
+            Some(scalar)
         })
         .collect_vec());
     if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
@@ -122,9 +111,9 @@ fn get_scan_bound(
 
     let bound_ty = pk_types.next().unwrap();
     let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
-        let lit = LiteralExpression::try_from(bound.value.as_ref().unwrap()).unwrap();
+        let scalar = ScalarImpl::bytes_to_scalar(&bound.value, &bound_ty.to_protobuf()).unwrap();
 
-        let datum = eval_as(lit, bound_ty.clone());
+        let datum = Some(scalar);
         if bound.inclusive {
             Bound::Included(datum)
         } else {
@@ -198,10 +187,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 .iter()
                 .map(|desc| desc.column_desc.data_type.clone()),
         );
-        warn!(
-            "scan_range: {:#?}\npk_prefix_value: {:#?}",
-            scan_range, pk_prefix_value
-        );
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
@@ -212,7 +197,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 column_ids,
                 order_types,
                 pk_indices,
-                None,
             );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {

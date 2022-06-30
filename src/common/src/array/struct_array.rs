@@ -45,12 +45,12 @@ impl ArrayBuilder for StructArrayBuilder {
     type ArrayType = StructArray;
 
     #[cfg(not(test))]
-    fn new(_capacity: usize) -> ArrayResult<Self> {
+    fn new(_capacity: usize) -> Self {
         panic!("Must use with_meta.")
     }
 
     #[cfg(test)]
-    fn new(capacity: usize) -> ArrayResult<Self> {
+    fn new(capacity: usize) -> Self {
         Self::with_meta(
             capacity,
             ArrayMeta::Struct {
@@ -59,18 +59,18 @@ impl ArrayBuilder for StructArrayBuilder {
         )
     }
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> ArrayResult<Self> {
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self {
         if let ArrayMeta::Struct { children } = meta {
             let children_array = children
                 .iter()
                 .map(|a| a.create_array_builder(capacity))
-                .try_collect()?;
-            Ok(Self {
+                .collect();
+            Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 children_array,
                 children_type: children,
                 len: 0,
-            })
+            }
         } else {
             panic!("must be ArrayMeta::Struct");
         }
@@ -192,6 +192,10 @@ impl Array for StructArray {
         &self.bitmap
     }
 
+    fn into_null_bitmap(self) -> Bitmap {
+        self.bitmap
+    }
+
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
     }
@@ -210,7 +214,7 @@ impl Array for StructArray {
             ArrayMeta::Struct {
                 children: self.children_type.clone(),
             },
-        )?;
+        );
         Ok(ArrayBuilderImpl::Struct(array_builder))
     }
 
@@ -264,7 +268,7 @@ impl StructArray {
         children_type: Vec<DataType>,
     ) -> ArrayResult<StructArray> {
         let cardinality = null_bitmap.len();
-        let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
+        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let children = children.into_iter().map(Arc::new).collect_vec();
         Ok(StructArray {
             bitmap,
@@ -493,8 +497,7 @@ mod tests {
             ArrayMeta::Struct {
                 children: Arc::new([DataType::Int32, DataType::Float32]),
             },
-        )
-        .unwrap();
+        );
         struct_values.iter().for_each(|v| {
             builder
                 .append(v.as_ref().map(|s| s.as_scalar_ref()))

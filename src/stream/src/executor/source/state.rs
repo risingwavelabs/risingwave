@@ -18,11 +18,10 @@ use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
 use risingwave_common::error::{internal_error, Result as RwResult};
+use risingwave_connector::{SplitImpl, SplitMetaData};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::WriteOptions;
 use risingwave_storage::{Keyspace, StateStore};
-
-use crate::{SplitImpl, SplitMetaData};
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -127,9 +126,6 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-
-    const TEST_EPOCH: u64 = 1000_u64;
-    const TEST_STATE_IDENTIFIER: &str = "t-p01";
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct TestSourceState {

@@ -401,14 +401,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager.clone(),
-        stream_manager.clone(),
+        stream_manager,
         source_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
     );
     let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
-    let stream_srv = StreamServiceImpl::<S>::new(env.clone(), stream_manager);
+    let stream_srv = StreamServiceImpl::<S>::new(
+        env.clone(),
+        barrier_manager.clone(),
+        fragment_manager.clone(),
+    );
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
