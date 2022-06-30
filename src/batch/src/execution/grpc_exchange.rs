@@ -87,6 +87,7 @@ impl ExchangeSource for GrpcExchangeSource {
                 data
             );
 
-        Ok(Some(data))
+            Ok(Some(data))
+        }
     }
 }
