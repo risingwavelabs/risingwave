@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::ops::Deref;
 
 use risingwave_common::array::Row;
@@ -62,7 +61,11 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
             .collect();
 
         let inner = CellBasedRowDeserializer::new(column_mapping);
-        Self { pk_deserializer, inner, pk_to_row_mapping }
+        Self {
+            pk_deserializer,
+            inner,
+            pk_to_row_mapping,
+        }
     }
 
     fn replace_dedupped_datums_into_row(&self, pk_datums: Vec<Datum>, row: Row) -> Row {
@@ -129,15 +132,14 @@ mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
     use risingwave_common::array::Row;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc};
     use risingwave_common::types::{DataType, ScalarImpl, VIRTUAL_NODE_SIZE};
-    use risingwave_common::util::ordered::serialize_pk_and_row;
-    use risingwave_common::util::ordered::OrderedRowSerializer;
+    use risingwave_common::util::ordered::{serialize_pk_and_row, OrderedRowSerializer};
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_common::catalog::OrderedColumnDesc;
 
-    use crate::dedup_pk_cell_based_row_deserializer::ColumnDescMapping;
-    use crate::dedup_pk_cell_based_row_deserializer::DedupPkCellBasedRowDeserializer;
+    use crate::dedup_pk_cell_based_row_deserializer::{
+        ColumnDescMapping, DedupPkCellBasedRowDeserializer,
+    };
 
     #[test]
     fn test_cell_based_deserializer() {
@@ -148,11 +150,7 @@ mod tests {
             ColumnId::from(7),
             ColumnId::from(1),
         ];
-        let dedup_column_ids = vec![
-            ColumnId::from(3),
-            ColumnId::from(7),
-            ColumnId::from(1),
-        ];
+        let dedup_column_ids = vec![ColumnId::from(3), ColumnId::from(7), ColumnId::from(1)];
         let table_column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
@@ -180,11 +178,12 @@ mod tests {
         //         }
         //     );
         //                                                             vec![
-        //     OrderedColumnDesc { column_desc: table_column_descs[0].clone(), order: order_types[0]},
-        //     OrderedColumnDesc { column_desc: table_column_descs[1].clone(), order: order_types[1]},
-        //     OrderedColumnDesc { column_desc: table_column_descs[2].clone(), order: order_types[2]},
-        //     OrderedColumnDesc { column_desc: table_column_descs[3].clone(), order: order_types[3]},
-        // ];
+        //     OrderedColumnDesc { column_desc: table_column_descs[0].clone(), order:
+        // order_types[0]},     OrderedColumnDesc { column_desc:
+        // table_column_descs[1].clone(), order: order_types[1]},     OrderedColumnDesc {
+        // column_desc: table_column_descs[2].clone(), order: order_types[2]},
+        //     OrderedColumnDesc { column_desc: table_column_descs[3].clone(), order:
+        // order_types[3]}, ];
 
         let pk_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
 
@@ -224,14 +223,19 @@ mod tests {
         let bytes1 = serialize_pk_and_row(&pk1, &dedup_row1.clone(), &dedup_column_ids).unwrap();
         let bytes2 = serialize_pk_and_row(&pk2, &dedup_row2.clone(), &dedup_column_ids).unwrap();
         let bytes3 = serialize_pk_and_row(&pk3, &dedup_row3.clone(), &dedup_column_ids).unwrap();
-        let bytes = [bytes1, bytes2, bytes3].concat().into_iter().flatten().collect_vec();
+        let bytes = [bytes1, bytes2, bytes3]
+            .concat()
+            .into_iter()
+            .flatten()
+            .collect_vec();
 
         // ------- Init dedup pk cell based row deserializer
         let column_mapping = ColumnDescMapping::new(table_column_descs.clone());
 
-        let pk_descs = vec![
-            OrderedColumnDesc { column_desc: table_column_descs[0].clone(), order: order_types[0]},
-        ];
+        let pk_descs = vec![OrderedColumnDesc {
+            column_desc: table_column_descs[0].clone(),
+            order: order_types[0],
+        }];
 
         let mut deserializer = DedupPkCellBasedRowDeserializer::new(column_mapping, &pk_descs);
 
