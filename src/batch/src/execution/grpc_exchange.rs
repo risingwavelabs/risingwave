@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
@@ -20,8 +21,10 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::{ExchangeSource as ProstExchangeSource, TaskOutputId};
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
-use risingwave_rpc_client::{ComputeClient, ExchangeSource};
+use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
+
+use crate::exchange_source::ExchangeSource;
 
 /// Use grpc client as the source.
 pub struct GrpcExchangeSource {
@@ -67,20 +70,22 @@ impl Debug for GrpcExchangeSource {
     }
 }
 
-#[async_trait::async_trait]
 impl ExchangeSource for GrpcExchangeSource {
-    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-        let res = match self.stream.next().await {
-            None => return Ok(None),
-            Some(r) => r,
-        };
-        let task_data = res?;
-        let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact()?;
-        trace!(
-            "Receiver taskOutput = {:?}, data = {:?}",
-            self.task_output_id,
-            data
-        );
+    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+
+    fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
+        async {
+            let res = match self.stream.next().await {
+                None => return Ok(None),
+                Some(r) => r,
+            };
+            let task_data = res?;
+            let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact()?;
+            trace!(
+                "Receiver taskOutput = {:?}, data = {:?}",
+                self.task_output_id,
+                data
+            );
 
         Ok(Some(data))
     }
