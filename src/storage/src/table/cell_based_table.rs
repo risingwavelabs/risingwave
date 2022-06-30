@@ -52,7 +52,7 @@ pub type AccessType = bool;
 pub const READ_ONLY: AccessType = false;
 pub const READ_WRITE: AccessType = true;
 
-pub const DEFAULT_VNODE: VirtualNode = 0x0000;
+pub const DEFAULT_VNODE: VirtualNode = 0;
 
 pub type DedupPkCellBasedTable<S, const T: AccessType> =
     CellBasedTableBase<S, DedupPkCellBasedRowSerializer, T>;
