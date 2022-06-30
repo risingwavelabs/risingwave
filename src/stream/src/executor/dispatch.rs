@@ -795,6 +795,7 @@ mod tests {
     use risingwave_common::catalog::Schema;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
+    use static_assertions::const_assert_eq;
     use tokio::sync::mpsc::channel;
 
     use super::*;
@@ -827,12 +828,14 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "this test only works if we use Crc32 hasher and VIRTUAL_NODE_COUNT = 2048"]
     async fn test_hash_dispatcher_complex() {
         test_hash_dispatcher_complex_inner().await
     }
 
     async fn test_hash_dispatcher_complex_inner() {
+        // This test only works when VIRTUAL_NODE_COUNT is 256.
+        const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
         let output_data_vecs = (0..num_outputs)
@@ -874,13 +877,13 @@ mod tests {
             *output_data_vecs[0].lock().unwrap()[0].as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I
-                +  4 6 8 D
-                +  5 7 9 D
+                +  4 6 8
+                +  5 7 9
                 +  0 0 0
                 -  1 1 1 D
                 U- 2 0 2
                 U+ 2 0 2
-                -  3 3 2    // Should rewrite UpdateDelete to Delete
+                -  3 3 2 D  // Should rewrite UpdateDelete to Delete
                 +  3 3 4    // Should rewrite UpdateInsert to Insert",
             )
         );
@@ -888,13 +891,13 @@ mod tests {
             *output_data_vecs[1].lock().unwrap()[0].as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I
-                +  4 6 8
-                +  5 7 9
+                +  4 6 8 D
+                +  5 7 9 D
                 +  0 0 0 D
                 -  1 1 1 D  // Should keep original invisible mark
                 U- 2 0 2 D  // Should keep UpdateDelete
                 U+ 2 0 2 D  // Should keep UpdateInsert
-                -  3 3 2 D  // Should rewrite UpdateDelete to Delete
+                -  3 3 2    // Should rewrite UpdateDelete to Delete
                 +  3 3 4 D  // Should rewrite UpdateInsert to Insert",
             )
         );
