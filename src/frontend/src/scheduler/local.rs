@@ -283,6 +283,7 @@ impl LocalQueryExecution {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::RowSeqScan(ref mut scan_node) => {
+                        assert!(vnode_bitmap.is_some());
                         scan_node.vnode_bitmap = vnode_bitmap;
                     }
                     NodeBody::SysRowSeqScan(_) => {}

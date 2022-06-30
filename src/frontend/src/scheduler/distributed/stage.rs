@@ -292,12 +292,17 @@ impl StageRunner {
     async fn schedule_tasks(&self) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.vnode_bitmaps.as_ref() {
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() {
             // If the stage has table scan nodes, we create tasks according to the data distribution
             // and partition of the table.
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
+            let vnode_bitmaps = table_scan_info
+                .vnode_bitmaps
+                .as_ref()
+                .expect("No unpartitioned table (system table) in distributed mode.");
+
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
             let workers = self
                 .worker_node_manager
@@ -428,6 +433,7 @@ impl StageRunner {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
+                assert!(vnode_bitmap.is_some());
                 scan_node.vnode_bitmap = vnode_bitmap;
                 PlanNodeProst {
                     children: vec![],
