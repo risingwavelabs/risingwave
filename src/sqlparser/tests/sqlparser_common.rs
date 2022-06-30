@@ -1838,14 +1838,10 @@ fn parse_aggregate_with_order_by() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
-            name: ObjectName(vec![Ident::new("FUN")]),
+            name: ObjectName(vec![Ident::new("STRING_AGG")]),
             args: vec![
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(
-                    Value::SingleQuotedString("a".to_owned())
-                ))),
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(
-                    Value::SingleQuotedString("b".to_owned())
-                ))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new("a")))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new("b")))),
             ],
             over: None,
             distinct: false,
