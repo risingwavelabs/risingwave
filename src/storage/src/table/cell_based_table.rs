@@ -264,6 +264,8 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
                 .to_vnode()
         };
 
+        tracing::error!(target: "events::storage::cell_based_table", "compute vnode: {:?} keys {:?} => {}", row, indices, vnode);
+
         // This table should only be used to access entries with vnode specified in `self.vnodes`.
         assert!(
             self.vnodes.is_set(vnode as usize).unwrap(),
