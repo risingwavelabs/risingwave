@@ -17,7 +17,6 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, DatabaseId, OrderedColumnDesc, SchemaId, TableId};
-use risingwave_common::session_config::DELTA_JOIN;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -75,11 +74,7 @@ impl StreamHashJoin {
         let dist_l = logical.left().distribution().clone();
         let dist_r = logical.right().distribution().clone();
 
-        let force_delta = if let Some(config) = ctx.inner().session_ctx.get_config(DELTA_JOIN) {
-            config.is_set(false)
-        } else {
-            false
-        };
+        let force_delta = ctx.inner().session_ctx.config().get_delta_join();
 
         // TODO: derive from input
         let base = PlanBase::new_stream(

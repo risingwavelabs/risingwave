@@ -57,7 +57,6 @@ pub mod test_utils;
 extern crate core;
 extern crate risingwave_common;
 
-mod config;
 pub mod user;
 
 use std::ffi::OsString;
