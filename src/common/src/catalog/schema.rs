@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::plan_common::Field as ProstField;
 
 use super::ColumnDesc;
-use crate::array::{ArrayBuilderImpl, ArrayResult};
+use crate::array::ArrayBuilderImpl;
 use crate::error::{ErrorCode, Result};
 use crate::types::DataType;
 
@@ -118,11 +118,11 @@ impl Schema {
     }
 
     /// Create array builders for all fields in this schema.
-    pub fn create_array_builders(&self, capacity: usize) -> ArrayResult<Vec<ArrayBuilderImpl>> {
+    pub fn create_array_builders(&self, capacity: usize) -> Vec<ArrayBuilderImpl> {
         self.fields
             .iter()
             .map(|field| field.data_type.create_array_builder(capacity))
-            .try_collect()
+            .collect()
     }
 
     pub fn to_prost(&self) -> Vec<ProstField> {

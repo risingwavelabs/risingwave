@@ -162,7 +162,7 @@ impl NestedLoopJoinExecutor {
         let mut output_array_builders: Vec<_> = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(num_tuples))
-            .try_collect()?;
+            .collect();
         for _i in 0..num_tuples {
             for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
                 builder.append_datum_ref(*datum_ref)?;
@@ -605,7 +605,7 @@ mod tests {
         let length = 5;
         let mut columns = vec![];
         for i in 0..num_of_columns {
-            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
                 builder.append(Some(i as i32)).unwrap();
             }
