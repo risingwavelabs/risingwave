@@ -1833,7 +1833,7 @@ fn parse_aggregate_with_group_by() {
 }
 
 #[test]
-fn parse_aggregare_with_order_by() {
+fn parse_aggregate_with_order_by() {
     let sql = "SELECT STRING_AGG(a, b ORDER BY b ASC, a DESC) FROM foo";
     let select = verified_only_select(sql);
     assert_eq!(
