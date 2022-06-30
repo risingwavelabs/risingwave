@@ -217,6 +217,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .collect();
 
     let scan = Box::new(RowSeqScanExecutor::new(
+        false,
         table.schema().clone(),
         ScanType::TableScan(
             table
@@ -279,6 +280,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
+        false,
         table.schema().clone(),
         ScanType::TableScan(
             table
@@ -350,6 +352,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
+        false,
         table.schema().clone(),
         ScanType::TableScan(
             table
@@ -426,6 +429,7 @@ async fn test_row_seq_scan() -> Result<()> {
         .collect();
 
     let executor = Box::new(RowSeqScanExecutor::new(
+        false,
         table.schema().clone(),
         ScanType::TableScan(
             table
