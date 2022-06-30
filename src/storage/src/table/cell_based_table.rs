@@ -273,14 +273,13 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         tracing::trace!(target: "events::storage::cell_based_table", "compute vnode: {:?} keys {:?} => {}", row, indices, vnode);
 
         // This table should only be used to access entries with vnode specified in `self.vnodes`.
-        // FIXME: use assert when batch scan pruning is implemented.
-        // assert!(
-        //     self.vnodes.is_set(vnode as usize).unwrap(),
-        //     "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
-        //     vnode,
-        //     self.table_columns,
-        //     self.dist_key_indices
-        // );
+        assert!(
+            self.vnodes.is_set(vnode as usize).unwrap(),
+            "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
+            vnode,
+            self.table_columns,
+            self.dist_key_indices
+        );
         vnode
     }
 
@@ -319,16 +318,11 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         }
 
         let result = deserializer.take();
-        Ok(result.and_then(|(vnode, _pk, row)| {
+        Ok(result.map(|(vnode, _pk, row)| {
             // This table should only to used to access entries with vnode specified in
             // `self.vnodes`.
-            // FIXME: use assert when batch scan pruning is implemented.
-            // assert!(self.vnodes.is_set(vnode as usize).unwrap());
-            if self.vnodes.is_set(vnode as usize).unwrap() {
-                Some(row)
-            } else {
-                None
-            }
+            assert!(self.vnodes.is_set(vnode as usize).unwrap());
+            row
         }))
     }
 
