@@ -31,7 +31,7 @@ use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::{
-    APPLICATION_NAME, DELTA_JOIN, EXTRA_FLOAT_DIGITS, IMPLICIT_FLUSH, QUERY_MODE,
+    APPLICATION_NAME, DATESTYLE, DELTA_JOIN, EXTRA_FLOAT_DIGITS, IMPLICIT_FLUSH, QUERY_MODE,
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
@@ -372,13 +372,17 @@ impl ConfigEntry {
 }
 
 fn build_default_session_config_map() -> HashMap<String, String> {
-    let mut m = HashMap::new();
-    m.insert(IMPLICIT_FLUSH.to_ascii_lowercase(), "false".to_string());
-    m.insert(DELTA_JOIN.to_ascii_lowercase(), "false".to_string());
-    m.insert(QUERY_MODE.to_ascii_lowercase(), "distributed".to_string());
-    m.insert(EXTRA_FLOAT_DIGITS.to_ascii_lowercase(), "1".to_string());
-    m.insert(APPLICATION_NAME.to_ascii_lowercase(), "".to_string());
-    m
+    maplit::hashmap! {
+        IMPLICIT_FLUSH => "false",
+        DELTA_JOIN => "false",
+        QUERY_MODE => "distributed",
+        EXTRA_FLOAT_DIGITS => "1",
+        APPLICATION_NAME => "",
+        DATESTYLE => "ISO, MDY",
+    }
+    .into_iter()
+    .map(|(k, v)| (k.to_ascii_lowercase(), v.to_string()))
+    .collect()
 }
 
 lazy_static::lazy_static! {
