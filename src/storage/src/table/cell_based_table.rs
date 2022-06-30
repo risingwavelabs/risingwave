@@ -145,27 +145,6 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
             distribution,
         )
     }
-
-    /// Create a read-only [`CellBasedTableBase`] given a complete set of `columns` and a partial
-    /// set of `column_ids`. The output will only contains columns with the given ids in the same
-    /// order.
-    /// This is parameterized on cell based row serializer.
-    pub fn new_partial_without_distribution(
-        keyspace: Keyspace<S>,
-        table_columns: Vec<ColumnDesc>,
-        column_ids: Vec<ColumnId>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_inner(
-            keyspace,
-            table_columns,
-            column_ids,
-            order_types,
-            pk_indices,
-            Distribution::fallback(),
-        )
-    }
 }
 
 impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
