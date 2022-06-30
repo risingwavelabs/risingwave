@@ -264,12 +264,12 @@ mod tests {
         let options = CacheFileOptions {
             fs_block_size: 4096,
             block_size: 4096,
-            fallocate_unit: 64 * 1024 * 1024,
+            fallocate_unit: 4 * 4096,
         };
         let cf = CacheFile::open(&path, options.clone()).await.unwrap();
         assert_eq!(cf.block_size, 4096);
         assert_eq!(cf.len(), 0);
-        assert_eq!(cf.size(), 64 * 1024 * 1024);
+        assert_eq!(cf.size(), 4 * 4096);
 
         let mut wbuf = DioBuffer::with_capacity_in(4096, &DIO_BUFFER_ALLOCATOR);
         wbuf.extend_from_slice(&[b'x'; 4096]);
@@ -277,16 +277,23 @@ mod tests {
 
         cf.append(wbuf.clone()).await.unwrap();
         assert_eq!(cf.len(), 4096);
-        assert_eq!(cf.size(), 64 * 1024 * 1024);
+        assert_eq!(cf.size(), 4 * 4096);
 
         let rbuf = cf.read(0, 4096).await.unwrap();
         assert_eq!(&rbuf, wbuf.as_ref());
+
+        cf.append(wbuf.clone()).await.unwrap();
+        cf.append(wbuf.clone()).await.unwrap();
+        cf.append(wbuf.clone()).await.unwrap();
+        cf.append(wbuf.clone()).await.unwrap();
+        assert_eq!(cf.len(), 5 * 4096);
+        assert_eq!(cf.size(), 8 * 4096);
 
         drop(cf);
 
         let cf = CacheFile::open(&path, options).await.unwrap();
         assert_eq!(cf.block_size, 4096);
-        assert_eq!(cf.len(), 4096);
-        assert_eq!(cf.size(), 4096 + 64 * 1024 * 1024);
+        assert_eq!(cf.len(), 5 * 4096);
+        assert_eq!(cf.size(), 9 * 4096);
     }
 }
