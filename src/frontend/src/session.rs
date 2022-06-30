@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
@@ -21,7 +20,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
@@ -29,10 +28,8 @@ use rand::RngCore;
 #[cfg(test)]
 use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
 use risingwave_common::config::FrontendConfig;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::session_config::{
-    APPLICATION_NAME, DATESTYLE, DELTA_JOIN, EXTRA_FLOAT_DIGITS, IMPLICIT_FLUSH, QUERY_MODE,
-};
+use risingwave_common::error::Result;
+use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -345,50 +342,7 @@ pub struct SessionImpl {
     // Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
-    config_map: RwLock<HashMap<String, ConfigEntry>>,
-}
-
-#[derive(Clone)]
-pub struct ConfigEntry {
-    str_val: String,
-}
-
-impl ConfigEntry {
-    pub fn new(str_val: String) -> Self {
-        ConfigEntry { str_val }
-    }
-
-    /// Only used for boolean configurations.
-    pub fn is_set(&self, default: bool) -> bool {
-        self.str_val.parse().unwrap_or(default)
-    }
-
-    pub fn get_val<V>(&self, default: V) -> V
-    where
-        for<'a> V: TryFrom<&'a str, Error = RwError>,
-    {
-        V::try_from(&self.str_val).unwrap_or(default)
-    }
-}
-
-fn build_default_session_config_map() -> HashMap<String, String> {
-    maplit::hashmap! {
-        IMPLICIT_FLUSH => "false",
-        DELTA_JOIN => "false",
-        QUERY_MODE => "distributed",
-        EXTRA_FLOAT_DIGITS => "1",
-        APPLICATION_NAME => "",
-        DATESTYLE => "ISO, MDY",
-    }
-    .into_iter()
-    .map(|(k, v)| (k.to_ascii_lowercase(), v.to_string()))
-    .collect()
-}
-
-lazy_static::lazy_static! {
-    static ref DEFAULT_SESSION_CONFIG_MAP: HashMap<String, String> = {
-        build_default_session_config_map()
-    };
+    config_map: RwLock<ConfigMap>,
 }
 
 impl SessionImpl {
@@ -401,7 +355,7 @@ impl SessionImpl {
             env,
             auth_context,
             user_authenticator,
-            config_map: Self::init_config_map(),
+            config_map: RwLock::new(Default::default()),
         }
     }
 
@@ -414,7 +368,7 @@ impl SessionImpl {
                 DEFAULT_SUPPER_USER.to_string(),
             )),
             user_authenticator: UserAuthenticator::None,
-            config_map: Self::init_config_map(),
+            config_map: Default::default(),
         }
     }
 
@@ -434,33 +388,12 @@ impl SessionImpl {
         &self.auth_context.user_name
     }
 
-    /// Set configuration values in this session.
-    /// For example, `set_config("RW_IMPLICIT_FLUSH", true)` will implicit flush for every inserts.
-    pub fn set_config(&self, key: &str, val: &str) -> Result<()> {
-        let lower_key = key.to_ascii_lowercase();
-        self.config_map
-            .read()
-            .get(&lower_key)
-            .ok_or_else(|| ErrorCode::UnrecognizedConfigurationParameter(key.to_string()))?;
-        self.config_map
-            .write()
-            .insert(lower_key, ConfigEntry::new(val.to_string()));
-        Ok(())
+    pub fn config(&self) -> RwLockReadGuard<ConfigMap> {
+        self.config_map.read()
     }
 
-    /// Get configuration values in this session.
-    pub fn get_config(&self, key: &str) -> Option<ConfigEntry> {
-        let key = key.to_ascii_lowercase();
-        let reader = self.config_map.read();
-        reader.get(&key).cloned()
-    }
-
-    fn init_config_map() -> RwLock<HashMap<String, ConfigEntry>> {
-        let mut map = HashMap::new();
-        for (key, value) in &*DEFAULT_SESSION_CONFIG_MAP {
-            map.insert(key.clone(), ConfigEntry::new(value.clone()));
-        }
-        RwLock::new(map)
+    pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
+        self.config_map.write().set(key, value)
     }
 }
 

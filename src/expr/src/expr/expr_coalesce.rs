@@ -42,12 +42,12 @@ impl Expression for CoalesceExpression {
             .collect::<Result<Vec<_>>>()?;
 
         let len = children_array[0].len();
-        let mut builder = self.return_type.create_array_builder(len)?;
+        let mut builder = self.return_type.create_array_builder(len);
         let vis = input.vis();
 
         for i in 0..len {
             let mut data = None;
-            if vis.is_set(i).unwrap() {
+            if vis.is_set(i) {
                 for array in &children_array {
                     let datum = array.datum_at(i);
                     if datum.is_some() {

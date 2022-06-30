@@ -105,7 +105,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
     /// Generate a row ID column.
     fn gen_row_id_column(&mut self, len: usize) -> Column {
-        let mut builder = I64ArrayBuilder::new(len).unwrap();
+        let mut builder = I64ArrayBuilder::new(len);
         let row_ids = self.source_desc.next_row_id_batch(len);
 
         for row_id in row_ids {

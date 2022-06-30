@@ -97,7 +97,7 @@ mod tests {
                     #[test]
                     fn [<test_trusted_len_for_ $suffix_name _array>]() {
                         use crate::array::$builder;
-                        let mut builder = $builder::new(3).unwrap();
+                        let mut builder = $builder::new(3);
                         for _ in 0..3 {
                             builder.append_null().unwrap();
                         }
