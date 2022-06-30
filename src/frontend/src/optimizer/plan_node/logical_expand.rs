@@ -25,6 +25,9 @@ use super::{
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
+/// [`LogicalExpand`] expand one row multiple times according to `expanded_keys`.
+///
+/// It can be used to implement distinct aggregation and group set.
 #[derive(Debug, Clone)]
 pub struct LogicalExpand {
     pub base: PlanBase,
@@ -39,7 +42,6 @@ impl LogicalExpand {
             assert!(*key < input_schema_len);
         }
         // The last column should be the flag.
-        // TODO: rethink here.
         let mut pk_indices = input.pk_indices().to_vec();
         pk_indices.push(input_schema_len);
 
@@ -87,7 +89,6 @@ impl PlanTreeNodeUnary for LogicalExpand {
         for key in expanded_keys.iter_mut().flat_map(|r| r.iter_mut()) {
             *key = input_col_change.map(*key);
         }
-        // TODO: rethink here.
         let (mut map, new_input_col_num) = input_col_change.into_parts();
         assert_eq!(new_input_col_num, input.schema().len());
         map.push(Some(new_input_col_num));
@@ -100,10 +101,9 @@ impl_plan_tree_node_for_unary! {LogicalExpand}
 
 impl fmt::Display for LogicalExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: rewrite here.
         write!(
             f,
-            "LogicalExpand {{ expanded_keys: {:?} }}",
+            "LogicalExpand {{ expanded_keys: {:#?} }}",
             self.expanded_keys
         )
     }
@@ -111,13 +111,11 @@ impl fmt::Display for LogicalExpand {
 
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        // TODO: rethink `prune_col`.
-
         let pos_of_flag = self.input.schema().len();
-        // TODO: rewrite here.
         let input_required_cols = required_cols
             .iter()
-            .filter_map(|i| if *i == pos_of_flag { None } else { Some(*i) })
+            .copied()
+            .filter(|i| *i != pos_of_flag)
             .collect_vec();
         let new_input = self.input.prune_col(&input_required_cols);
 
@@ -126,6 +124,7 @@ impl ColPrunable for LogicalExpand {
             &input_required_cols,
             self.input.schema().len(),
         );
+        // Filter those unneeded `expanded_keys`.
         let expanded_keys = self
             .expanded_keys
             .iter()
@@ -147,7 +146,6 @@ impl ColPrunable for LogicalExpand {
 
 impl PredicatePushdown for LogicalExpand {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        // TODO: rethink here.
         let new_input = self.input.predicate_pushdown(predicate);
         self.clone_with_input(new_input).into()
     }
@@ -220,7 +218,7 @@ mod tests {
         let expand = plan.as_logical_expand().unwrap();
         let expanded_keys = expand.expanded_keys();
         assert_eq!(expand.schema().len(), 2);
-        assert_eq!(expanded_keys, &vec![vec![0 as usize]]);
+        assert_eq!(expanded_keys, &vec![vec![0_usize]]);
 
         let values = expand.input();
         let values = values.as_logical_values().unwrap();

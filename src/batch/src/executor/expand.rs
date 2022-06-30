@@ -17,7 +17,7 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, PrimitiveArray};
+use risingwave_common::array::{DataChunk, PrimitiveArray, Vis};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -60,14 +60,17 @@ impl ExpandExecutor {
             let data_chunk: DataChunk = data_chunk?.compact()?;
             let cardinality = data_chunk.cardinality();
             let (columns, vis) = data_chunk.into_parts();
-            // TODO: use iter to rewrite.
-            let mut null_columns = vec![];
-            for column in &columns {
-                let array = column.array_ref();
-                let mut builder = array.create_builder(cardinality)?;
-                (0..cardinality).try_for_each(|_i| builder.append_null())?;
-                null_columns.push(Column::new(Arc::new(builder.finish()?)));
-            }
+            assert_eq!(vis, Vis::Compact(cardinality));
+
+            let null_columns: Vec<Column> = columns
+                .iter()
+                .map(|column| {
+                    let array = column.array_ref();
+                    let mut builder = array.create_builder(cardinality)?;
+                    (0..cardinality).try_for_each(|_i| builder.append_null())?;
+                    Ok::<Column, RwError>(Column::new(Arc::new(builder.finish()?)))
+                })
+                .try_collect()?;
 
             for (i, keys) in self.expanded_keys.iter().enumerate() {
                 let mut new_columns = null_columns.clone();
@@ -79,7 +82,6 @@ impl ExpandExecutor {
                     cardinality
                 ])?);
                 new_columns.push(flags);
-                // TODO: maybe rewrite `vis`.
                 let new_data_chunk = DataChunk::new(new_columns, vis.clone());
                 let mut sliced_data_chunk = SlicedDataChunk::new_checked(new_data_chunk)?;
                 loop {
@@ -188,15 +190,13 @@ mod tests {
         });
         let mut stream = expand_executor.execute();
         let res = stream.next().await.unwrap().unwrap();
-        assert_eq!(
-            res,
-            DataChunk::from_pretty(
-                "i i i I
+        let expected_chunk = DataChunk::from_pretty(
+            "i i i I
              1 2 . 0
              2 3 . 0
              . 2 3 1
-             . 3 4 1"
-            )
+             . 3 4 1",
         );
+        assert_eq!(res, expected_chunk);
     }
 }

@@ -51,7 +51,6 @@ impl BatchExpand {
 
 impl fmt::Display for BatchExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: rewrite here.
         write!(
             f,
             "BatchExpand {{ expanded_keys: {:#?} }}",

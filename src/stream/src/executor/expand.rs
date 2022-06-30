@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::fmt::Debug;
 
 use futures::StreamExt;
@@ -41,18 +55,23 @@ impl ExpandExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
+                    // TODO: handle dummy chunk.
                     let chunk = chunk.compact()?;
                     let (data_chunk, ops) = chunk.into_parts();
                     let cardinality = data_chunk.cardinality();
                     let (columns, _) = data_chunk.into_parts();
 
-                    let mut null_columns = vec![];
-                    for column in &columns {
-                        let array = column.array_ref();
-                        let mut builder = array.create_builder(cardinality)?;
-                        (0..cardinality).try_for_each(|_i| builder.append_null())?;
-                        null_columns.push(Column::new(Arc::new(builder.finish()?)));
-                    }
+                    let null_columns: Vec<Column> = columns
+                        .iter()
+                        .map(|column| {
+                            let array = column.array_ref();
+                            let mut builder = array.create_builder(cardinality)?;
+                            (0..cardinality).try_for_each(|_i| builder.append_null())?;
+                            Ok::<Column, StreamExecutorError>(Column::new(Arc::new(
+                                builder.finish()?,
+                            )))
+                        })
+                        .try_collect()?;
 
                     for (i, keys) in self.expanded_keys.iter().enumerate() {
                         let mut new_columns = null_columns.clone();
@@ -64,7 +83,6 @@ impl ExpandExecutor {
                             cardinality
                         ])?);
                         new_columns.push(flags);
-                        // TODO: maybe rewrite `vis`.
                         let stream_chunk = StreamChunk::new(ops.clone(), new_columns, None);
                         yield Message::Chunk(stream_chunk)
                     }
