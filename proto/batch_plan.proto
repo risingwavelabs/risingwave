@@ -187,6 +187,14 @@ message MergeSortExchangeNode {
   repeated plan_common.ColumnOrder column_orders = 2;
 }
 
+message LookupJoinNode {
+  plan_common.JoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  expr.ExprNode condition = 4;
+  repeated uint32 output_indices = 5;
+}
+
 message PlanNode {
   repeated PlanNode children = 1;
   oneof node_body {
@@ -210,6 +218,7 @@ message PlanNode {
     HopWindowNode hop_window = 25;
     TableFunctionNode table_function = 26;
     SysRowSeqScanNode sys_row_seq_scan = 27;
+    LookupJoinNode lookup_join = 28;
   }
   string identity = 24;
 }

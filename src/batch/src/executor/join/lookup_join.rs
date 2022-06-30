@@ -14,7 +14,7 @@
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
@@ -123,7 +123,7 @@ impl LookupJoinExecutor {
             if let Some(cond) = self.condition.as_ref() {
                 let visibility = cond.eval(&new_chunk)?;
                 Ok(Some(
-                    new_chunk.with_visibility(visibility.as_bool().try_into()?),
+                    new_chunk.with_visibility(visibility.as_bool().iter().collect()),
                 ))
             } else {
                 Ok(Some(new_chunk))

@@ -16,9 +16,7 @@ use std::option::Option::Some;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::data_chunk_iter::RowRef;
-use risingwave_common::array::{Array, DataChunk, Row, Vis};
+use risingwave_common::array::{Array, DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
