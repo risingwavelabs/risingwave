@@ -541,7 +541,7 @@ impl Dispatcher for HashDataDispatcher {
                 .map(|hash| *hash as usize % VIRTUAL_NODE_COUNT)
                 .collect_vec();
 
-            tracing::error!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, hash_values);
+            tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, hash_values);
 
             let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
                 .take(num_outputs)

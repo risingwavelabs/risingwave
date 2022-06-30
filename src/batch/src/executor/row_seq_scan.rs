@@ -149,8 +149,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             NodeBody::RowSeqScan
         )?;
 
-        dbg!(&seq_scan_node);
-
         let table_desc: &CellBasedTableDesc = seq_scan_node.get_table_desc()?;
         let table_id = TableId {
             table_id: table_desc.table_id,
