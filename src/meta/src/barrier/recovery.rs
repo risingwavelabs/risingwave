@@ -64,8 +64,12 @@ where
         debug!("recovery start!");
         let retry_strategy = Self::get_retry_strategy();
         let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let info = self.resolve_actor_info(None).await;
+            let mut info = self.resolve_actor_info(None).await;
             let mut new_epoch = prev_epoch.next();
+
+            // Migrate expired actors to newly joined node by changing actor_map
+            self.migrate_actors(&mut info).await;
+
             // Reset all compute nodes, stop and drop existing actors.
             self.reset_compute_nodes(&info, &prev_epoch, &new_epoch)
                 .await;
@@ -130,6 +134,50 @@ where
                 .flat_map(|r| r.create_mview_progress)
                 .collect(),
         )
+    }
+
+    async fn migrate_actors(&self, info: &mut BarrierActorInfo) {
+        loop {
+            let mut complete = true;
+            let mut origin_id: u32 = 0;
+            let mut origin_actors = Vec::new();
+            for (key, value) in &info.actor_map {
+                if !value.is_empty() && self.cluster_manager.get_worker_by_id(*key).await.is_none()
+                {
+                    // get origin node to migrate.
+                    complete = false;
+                    origin_actors = value.clone();
+                    origin_id = *key;
+                }
+            }
+            if complete {
+                break;
+            } else {
+                let mut target_id: u32 = 0;
+                let mut has_target = false;
+                loop {
+                    for (key, value) in &info.actor_map {
+                        if value.is_empty()
+                            && self.cluster_manager.get_worker_by_id(*key).await.is_some()
+                        {
+                            // get target node to migrate.
+                            has_target = true;
+                            target_id = *key;
+                        }
+                    }
+                    if has_target {
+                        for origin_actor in &origin_actors {
+                            info.actor_map
+                                .get_mut(&target_id)
+                                .unwrap()
+                                .push(*origin_actor);
+                        }
+                        info.actor_map.get_mut(&origin_id).unwrap().clear();
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
