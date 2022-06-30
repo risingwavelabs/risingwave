@@ -48,6 +48,7 @@ macro_rules! for_all_metrics {
             iter_size: Histogram,
             iter_item: Histogram,
             iter_duration: Histogram,
+            iter_scan_duration: Histogram,
 
             write_batch_tuple_counts: GenericCounter<AtomicU64>,
             write_batch_duration: Histogram,
@@ -194,10 +195,17 @@ impl StateStoreMetrics {
 
         let opts = histogram_opts!(
             "state_store_iter_duration",
-            "Total time of scan that have been issued to state store",
+            "Histogram of iterator scan and initialization time that have been issued to state store",
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let iter_duration = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_scan_duration",
+            "Histogram of iterator scan time that have been issued to state store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let iter_scan_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         // ----- write_batch -----
         let write_batch_tuple_counts = register_int_counter_with_registry!(
@@ -379,6 +387,7 @@ impl StateStoreMetrics {
             iter_size,
             iter_item,
             iter_duration,
+            iter_scan_duration,
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,

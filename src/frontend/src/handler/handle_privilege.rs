@@ -165,6 +165,7 @@ fn make_prost_privilege(
             };
             ActionWithGrantOption {
                 action: prost_action as i32,
+                granted_by: session.user_name().to_string(),
                 ..Default::default()
             }
         })
@@ -202,18 +203,23 @@ pub async fn handle_grant_privilege(
         {
             return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
         }
-        if let Some(granted_by) = granted_by {
-            if reader.get_user_by_name(&granted_by.value).is_none() {
+        if let Some(granted_by) = &granted_by {
+            let user = reader.get_user_by_name(&granted_by.value);
+            if user.is_none() {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
             }
-            // TODO: check whether if grantor is a super user or have the privilege to grant.
         }
     }
 
     let privileges = make_prost_privilege(&session, privileges, objects)?;
     let user_info_writer = session.env().user_info_writer();
     user_info_writer
-        .grant_privilege(users, privileges, with_grant_option)
+        .grant_privilege(
+            users,
+            privileges,
+            with_grant_option,
+            session.user_name().to_string(),
+        )
         .await?;
     Ok(PgResponse::empty_result(StatementType::GRANT_PRIVILEGE))
 }
@@ -229,10 +235,8 @@ pub async fn handle_revoke_privilege(
         grantees,
         granted_by,
         revoke_grant_option,
-        cascade: _,
+        cascade,
     } = stmt else { return Err(ErrorCode::BindError("Invalid revoke statement".to_string()).into()); };
-    // TODO: support cascade and restrict option, this requires to record granted_by in each
-    // actions.
     let users = grantees.into_iter().map(|g| g.value).collect::<Vec<_>>();
     {
         let user_reader = session.env().user_info_reader();
@@ -243,24 +247,34 @@ pub async fn handle_revoke_privilege(
         {
             return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
         }
-        if let Some(granted_by) = granted_by {
+        if let Some(ref granted_by) = granted_by {
             if reader.get_user_by_name(&granted_by.value).is_none() {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
             }
             // TODO: check whether if grantor is a super user or have the privilege to grant.
         }
     }
-
     let privileges = make_prost_privilege(&session, privileges, objects)?;
     let user_info_writer = session.env().user_info_writer();
+    let granted_by = granted_by.map(|g| g.value);
     user_info_writer
-        .revoke_privilege(users, privileges, revoke_grant_option)
+        .revoke_privilege(
+            users,
+            privileges,
+            granted_by,
+            session.user_name().to_string(),
+            revoke_grant_option,
+            cascade,
+        )
         .await?;
+
     Ok(PgResponse::empty_result(StatementType::REVOKE_PRIVILEGE))
 }
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::DEFAULT_SUPPER_USER;
+
     use super::*;
     use crate::test_utils::LocalFrontend;
 
@@ -298,14 +312,16 @@ mod tests {
                     action_with_opts: vec![
                         ActionWithGrantOption {
                             action: ProstAction::Connect as i32,
-                            with_grant_option: true
+                            with_grant_option: true,
+                            granted_by: DEFAULT_SUPPER_USER.to_string(),
                         },
                         ActionWithGrantOption {
                             action: ProstAction::Create as i32,
-                            with_grant_option: true
+                            with_grant_option: true,
+                            granted_by: DEFAULT_SUPPER_USER.to_string(),
                         }
                     ],
-                    object: Some(ProstObject::DatabaseId(database_id))
+                    object: Some(ProstObject::DatabaseId(database_id)),
                 }]
             );
         }

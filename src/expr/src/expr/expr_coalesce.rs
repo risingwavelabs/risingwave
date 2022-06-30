@@ -38,18 +38,22 @@ impl Expression for CoalesceExpression {
         let children_array = self
             .children
             .iter()
-            .map(|c| c.eval(input))
+            .map(|c| c.eval_checked(input))
             .collect::<Result<Vec<_>>>()?;
-        let mut builder = self.return_type.create_array_builder(input.cardinality())?;
 
         let len = children_array[0].len();
+        let mut builder = self.return_type.create_array_builder(len);
+        let vis = input.vis();
+
         for i in 0..len {
             let mut data = None;
-            for array in &children_array {
-                let datum = array.datum_at(i);
-                if datum.is_some() {
-                    data = datum;
-                    break;
+            if vis.is_set(i) {
+                for array in &children_array {
+                    let datum = array.datum_at(i);
+                    if datum.is_some() {
+                        data = datum;
+                        break;
+                    }
                 }
             }
             builder.append_datum(&data)?;

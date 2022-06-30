@@ -16,52 +16,97 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{Index, RangeBounds};
+use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::{CellBasedTable, READ_WRITE};
+use super::cell_based_table::{CellBasedTableBase, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
+use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
+use crate::row_serializer::RowSerializer;
 use crate::{Keyspace, StateStore};
 
+/// Identical to `StateTable`. Used when we want to
+/// rows to have dedup pk cell encoding.
+pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
+
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
+pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
+
+/// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
+/// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTable<S: StateStore> {
+pub struct StateTableBase<S: StateStore, SER: RowSerializer> {
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTable<S, READ_WRITE>,
+    cell_based_table: CellBasedTableBase<S, SER, READ_WRITE>,
 }
 
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
+    /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
+    // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
-        dist_key_indices: Option<Vec<usize>>,
+        _dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_without_distribution(keyspace, columns, order_types, pk_indices)
+    }
+
+    /// Create a state table without distribution, used for singleton executors and tests.
+    pub fn new_without_distribution(
+        keyspace: Keyspace<S>,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            keyspace,
+            columns,
+            order_types,
+            pk_indices,
+            vec![],
+            CellBasedTableBase::<S, SER, READ_WRITE>::fallback_vnodes(),
+        )
+    }
+
+    /// Create a state table with distribution specified with `dist_key_indices` and `vnodes`.
+    pub fn new_with_distribution(
+        keyspace: Keyspace<S>,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        dist_key_indices: Vec<usize>,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTable::new(
+            cell_based_table: CellBasedTableBase::new(
                 keyspace,
-                column_descs,
+                columns,
                 order_types,
                 pk_indices,
                 dist_key_indices,
+                vnodes,
             ),
         }
     }
 
-    /// Get the underlying [`CellBasedTable`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &CellBasedTable<S, READ_WRITE> {
+    /// Get the underlying [`CellBasedTableBase`]. Should only be used for tests.
+    pub fn cell_based_table(&self) -> &CellBasedTableBase<S, SER, READ_WRITE> {
         &self.cell_based_table
     }
 
@@ -83,7 +128,7 @@ impl<S: StateStore> StateTable<S> {
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
     pub async fn get_row<'a>(
         &'a self,
-        pk: &'_ Row,
+        pk: &'a Row,
         epoch: u64,
     ) -> StorageResult<Option<Cow<'a, Row>>> {
         let pk_bytes = serialize_pk(pk, self.pk_serializer());

@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
@@ -29,6 +31,7 @@ use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServic
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::*;
@@ -232,11 +235,13 @@ impl MetaClient {
         users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
+        granted_by: String,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
             users,
             privileges,
             with_grant_option,
+            granted_by,
         };
         let resp = self.inner.grant_privilege(request).await?;
         Ok(resp.version)
@@ -246,12 +251,19 @@ impl MetaClient {
         &self,
         users: Vec<String>,
         privileges: Vec<GrantPrivilege>,
+        granted_by: Option<String>,
+        revoke_by: String,
         revoke_grant_option: bool,
+        cascade: bool,
     ) -> Result<u64> {
+        let granted_by = granted_by.unwrap_or_default();
         let request = RevokePrivilegeRequest {
             users,
             privileges,
+            granted_by,
+            revoke_by,
             revoke_grant_option,
+            cascade,
         };
         let resp = self.inner.revoke_privilege(request).await?;
         Ok(resp.version)
@@ -317,6 +329,17 @@ impl MetaClient {
         let request = FlushRequest::default();
         self.inner.flush(request).await?;
         Ok(())
+    }
+
+    pub async fn list_table_fragments(
+        &self,
+        table_ids: &[u32],
+    ) -> Result<HashMap<u32, TableFragmentInfo>> {
+        let request = ListTableFragmentsRequest {
+            table_ids: table_ids.to_vec(),
+        };
+        let resp = self.inner.list_table_fragments(request).await?;
+        Ok(resp.table_fragments)
     }
 }
 
@@ -529,6 +552,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_materialized_source, CreateMaterializedSourceRequest, CreateMaterializedSourceResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

@@ -36,7 +36,7 @@ pub trait TableIter: Send {
         schema: &Schema,
         chunk_size: Option<usize>,
     ) -> StorageResult<Option<DataChunk>> {
-        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0))?;
+        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
 
         let mut row_count = 0;
         for _ in 0..chunk_size.unwrap_or(usize::MAX) {

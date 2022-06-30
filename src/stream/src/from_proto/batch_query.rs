@@ -64,7 +64,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             column_ids,
             order_types,
             pk_indices,
-            None,
         );
         let key_indices = node
             .get_distribution_keys()

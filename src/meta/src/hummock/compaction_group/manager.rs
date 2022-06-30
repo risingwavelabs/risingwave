@@ -82,7 +82,6 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         table_properties: &HashMap<String, String>,
     ) -> Result<()> {
         let table_option = CompactionGroup::build_table_option(table_properties);
-
         let mut pairs = vec![];
         // materialized_view or materialized_source
         pairs.push((
@@ -450,7 +449,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 1u32)
                 .unwrap();
-            assert_eq!(300, table_option.ttl);
+            assert_eq!(300, table_option.ttl.unwrap());
         }
 
         {
@@ -460,7 +459,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 2u32);
             assert!(table_option_default.is_ok());
-            assert_eq!(0, table_option_default.unwrap().ttl);
+            assert_eq!(None, table_option_default.unwrap().ttl);
         }
     }
 

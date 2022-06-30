@@ -241,13 +241,14 @@ mod logical_values;
 mod stream_delta_join;
 mod stream_exchange;
 mod stream_filter;
+mod stream_global_simple_agg;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
 mod stream_index_scan;
+mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_project;
-mod stream_simple_agg;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
@@ -288,13 +289,14 @@ pub use logical_values::LogicalValues;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
+pub use stream_global_simple_agg::StreamGlobalSimpleAgg;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
 pub use stream_index_scan::StreamIndexScan;
+pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
-pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
@@ -359,7 +361,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, HashAgg }
-            , { Stream, SimpleAgg }
+            , { Stream, LocalSimpleAgg }
+            , { Stream, GlobalSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }
@@ -437,7 +440,8 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TableScan }
             , { Stream, Source }
             , { Stream, HashAgg }
-            , { Stream, SimpleAgg }
+            , { Stream, LocalSimpleAgg }
+            , { Stream, GlobalSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }

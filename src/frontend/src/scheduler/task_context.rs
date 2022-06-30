@@ -42,11 +42,12 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         todo!()
     }
 
-    fn sys_catalog_reader_ref(&self) -> Option<SysCatalogReaderRef> {
+    fn catalog_reader_ref(&self) -> Option<SysCatalogReaderRef> {
         Some(Arc::new(SysCatalogReaderImpl::new(
             self.env.catalog_reader().clone(),
             self.env.user_info_reader().clone(),
             self.env.worker_node_manager_ref(),
+            self.env.meta_client_ref(),
             self.auth_context.clone(),
         )))
     }
