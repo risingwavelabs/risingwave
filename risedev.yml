@@ -503,7 +503,7 @@ template:
     listen-address: ${address}
 
     # Advertise address of Grafana
-    address: "127.0.0.1"
+    address: "0.0.0.0"
 
     # Listen port of Grafana
     port: 3001
