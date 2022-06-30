@@ -1,3 +1,5 @@
+control sortmode rowsort
+
 # Create a user.
 statement ok
 CREATE USER ddl_user WITH NOSUPERUSER CREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b';

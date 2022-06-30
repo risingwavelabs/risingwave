@@ -142,12 +142,14 @@ pub struct TTLCompactionFilter {
 
 impl CompactionFilter for TTLCompactionFilter {
     fn filter(&self, key: &[u8]) -> bool {
+        pub use risingwave_common::util::epoch::Epoch;
         let (table_id, epoch) = extract_table_id_and_epoch(key);
         match table_id {
             Some(table_id) => match self.table_id_to_ttl.get(&table_id) {
-                Some(ttl_u32) => {
-                    assert!(*ttl_u32 != TABLE_OPTION_DUMMY_TTL);
-                    epoch + (*ttl_u32) as u64 > self.expire
+                Some(ttl_second_u32) => {
+                    assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_TTL);
+                    let min_epoch = Epoch(self.expire).subtract_ms((*ttl_second_u32 * 1000) as u64);
+                    Epoch(epoch) > min_epoch
                 }
                 None => true,
             },
@@ -404,6 +406,7 @@ impl Compactor {
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
+        use risingwave_common::catalog::TableOption;
         tracing::info!("Ready to handle compaction task: {}", compact_task.task_id,);
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
@@ -498,7 +501,10 @@ impl Compactor {
             let id_to_ttl = compact_task
                 .table_options
                 .iter()
-                .filter(|id_to_option| id_to_option.1.ttl > 0)
+                .filter(|id_to_option| {
+                    let table_option: TableOption = id_to_option.1.into();
+                    table_option.ttl.is_some()
+                })
                 .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
                 .collect();
             let ttl_filter = Box::new(TTLCompactionFilter::new(id_to_ttl, compact_task.watermark));
