@@ -1,11 +1,3 @@
-mod query_mode;
-use std::ops::Deref;
-use std::str::FromStr;
-
-pub use query_mode::QueryMode;
-
-use crate::error::{ErrorCode, RwError};
-
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +11,14 @@ use crate::error::{ErrorCode, RwError};
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+mod query_mode;
+use std::ops::Deref;
+use std::str::FromStr;
+
+pub use query_mode::QueryMode;
+
+use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
