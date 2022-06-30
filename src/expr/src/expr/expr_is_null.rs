@@ -59,7 +59,7 @@ impl Expression for IsNullExpression {
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let child_arr = self.child.eval_checked(input)?;
         let arr = BoolArray::new(
-            Bitmap::all_high_bits(input.capacity())?,
+            Bitmap::all_high_bits(input.capacity()),
             !child_arr.null_bitmap(),
         );
 
@@ -84,7 +84,7 @@ impl Expression for IsNotNullExpression {
             Ok(child_arr) => child_arr.into_null_bitmap(),
             Err(child_arr) => child_arr.null_bitmap().clone(),
         };
-        let arr = BoolArray::new(Bitmap::all_high_bits(input.capacity())?, null_bitmap);
+        let arr = BoolArray::new(Bitmap::all_high_bits(input.capacity()), null_bitmap);
 
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
@@ -115,7 +115,7 @@ mod tests {
         expected_eval_row_result: Vec<bool>,
     ) -> Result<()> {
         let input_array = {
-            let mut builder = DecimalArrayBuilder::new(3)?;
+            let mut builder = DecimalArrayBuilder::new(3);
             builder.append(Some(Decimal::from_str("0.1").unwrap()))?;
             builder.append(Some(Decimal::from_str("-0.1").unwrap()))?;
             builder.append(None)?;

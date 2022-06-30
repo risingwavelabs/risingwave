@@ -154,37 +154,37 @@ impl Display for DataType {
 }
 
 impl DataType {
-    pub fn create_array_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
-        Ok(match self {
-            DataType::Boolean => BoolArrayBuilder::new(capacity)?.into(),
-            DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity)?.into(),
-            DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity)?.into(),
-            DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity)?.into(),
-            DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
-            DataType::Decimal => DecimalArrayBuilder::new(capacity)?.into(),
-            DataType::Date => NaiveDateArrayBuilder::new(capacity)?.into(),
-            DataType::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
-            DataType::Time => NaiveTimeArrayBuilder::new(capacity)?.into(),
-            DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
-            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
+        match self {
+            DataType::Boolean => BoolArrayBuilder::new(capacity).into(),
+            DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity).into(),
+            DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity).into(),
+            DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity).into(),
+            DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity).into(),
+            DataType::Decimal => DecimalArrayBuilder::new(capacity).into(),
+            DataType::Date => NaiveDateArrayBuilder::new(capacity).into(),
+            DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
+            DataType::Time => NaiveTimeArrayBuilder::new(capacity).into(),
+            DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
+            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Struct { fields } => StructArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::Struct {
                     children: fields.clone(),
                 },
-            )?
+            )
             .into(),
             DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
                     datatype: datatype.clone(),
                 },
-            )?
+            )
             .into(),
-        })
+        }
     }
 
     pub fn prost_type_name(&self) -> TypeName {
