@@ -827,6 +827,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "this test only works if we use Crc32 hasher and VIRTUAL_NODE_COUNT = 2048"]
     async fn test_hash_dispatcher_complex() {
         test_hash_dispatcher_complex_inner().await
     }
