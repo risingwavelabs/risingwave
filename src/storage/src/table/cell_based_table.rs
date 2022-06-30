@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use auto_enums::auto_enum;
 use bytes::BufMut;
+use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -465,30 +466,33 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
-        // For each vnode, construct an iterator.
-        // TODO: if there're some vnodes continuously in the range and we don't care about order, we
-        // can use a single iterator.
-        let mut iterators = Vec::with_capacity(self.vnodes.num_high_bits());
-
-        for vnode in self
+        // Vnodes that are set and should be accessed.
+        let vnodes = self
             .vnodes
             .iter()
             .enumerate()
             .filter(|&(_, set)| set)
-            .map(|(i, _)| i as VirtualNode)
-        {
+            .map(|(i, _)| i as VirtualNode);
+
+        // For each vnode, construct an iterator.
+        // TODO: if there're some vnodes continuously in the range and we don't care about order, we
+        // can use a single iterator.
+        let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            let iter = CellBasedIterInner::new(
-                &self.keyspace,
-                self.mapping.clone(),
-                raw_key_range,
-                epoch,
-                wait_epoch,
-            )
-            .await?
-            .into_stream();
-            iterators.push(iter);
-        }
+            async move {
+                let iter = CellBasedIterInner::new(
+                    &self.keyspace,
+                    self.mapping.clone(),
+                    raw_key_range,
+                    epoch,
+                    wait_epoch,
+                )
+                .await?
+                .into_stream();
+                Ok::<_, StorageError>(iter)
+            }
+        }))
+        .await?;
 
         #[auto_enum(futures::Stream)]
         let iter = match iterators.len() {
