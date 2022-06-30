@@ -106,7 +106,7 @@ impl<const NAME: usize> ConfigEntry for ConfigString<NAME> {
     }
 }
 
-struct ConfigI32<const NAME: usize, const DEFAULT: i32>(i32);
+struct ConfigI32<const NAME: usize, const DEFAULT: i32 = 0>(i32);
 
 impl<const NAME: usize, const DEFAULT: i32> Default for ConfigI32<NAME, DEFAULT> {
     fn default() -> Self {
