@@ -230,8 +230,12 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 let iter = table.batch_dedup_pk_iter(source.epoch, &pk_descs).await?;
                 ScanType::TableScan(iter)
             } else if pk_prefix_value.size() == pk_descs.len() {
-                keyspace.state_store().wait_epoch(source.epoch).await?;
-                let row = table.get_row(&pk_prefix_value, source.epoch).await?;
+                let row = if should_ignore {
+                    None
+                } else {
+                    keyspace.state_store().wait_epoch(source.epoch).await?;
+                    table.get_row(&pk_prefix_value, source.epoch).await?
+                };
                 ScanType::PointGet(row)
             } else {
                 assert!(pk_prefix_value.size() < pk_descs.len());
