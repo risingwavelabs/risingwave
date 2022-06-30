@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 use std::future::Future;
+use std::iter::repeat_with;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -22,6 +23,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -537,22 +539,22 @@ impl Dispatcher for HashDataDispatcher {
                 .unwrap()
                 .iter()
                 .map(|hash| *hash as usize % VIRTUAL_NODE_COUNT)
-                .collect::<Vec<_>>();
+                .collect_vec();
+
+            let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
+                .take(num_outputs)
+                .collect_vec();
+            let mut last_hash_value_when_update_delete: usize = 0;
+            let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
             let (ops, columns, visibility) = chunk.into_inner();
 
-            // TODO: use bitmap builder
-            let mut vis_maps = vec![vec![]; num_outputs];
-            let mut last_hash_value_when_update_delete: usize = 0;
-            let mut new_ops: Vec<Op> = Vec::with_capacity(ops.len());
             match visibility {
                 None => {
                     hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
                         // get visibility map for every output chunk
-                        for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                            vis_map.push(
-                                self.hash_mapping[*hash] == self.outputs[output_idx].actor_id(),
-                            );
+                        for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
+                            vis_map.append(self.hash_mapping[*hash] == output.actor_id());
                         }
                         // The 'update' message, noted by an UpdateDelete and a successive
                         // UpdateInsert, need to be rewritten to common
@@ -579,11 +581,10 @@ impl Dispatcher for HashDataDispatcher {
                         .zip_eq(visibility.iter())
                         .zip_eq(ops)
                         .for_each(|((hash, visible), op)| {
-                            for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                                vis_map.push(
-                                    visible
-                                        && self.hash_mapping[*hash]
-                                            == self.outputs[output_idx].actor_id(),
+                            for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
+                            {
+                                vis_map.append(
+                                    visible && self.hash_mapping[*hash] == output.actor_id(),
                                 );
                             }
                             if !visible {
@@ -615,7 +616,7 @@ impl Dispatcher for HashDataDispatcher {
                 .zip_eq(self.outputs.iter_mut())
                 .zip_eq(self.fragment_ids.iter())
             {
-                let vis_map = vis_map.into_iter().collect();
+                let vis_map = vis_map.finish();
                 // columns is not changed in this function
                 let new_stream_chunk =
                     StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
