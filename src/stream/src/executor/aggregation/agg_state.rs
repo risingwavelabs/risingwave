@@ -24,7 +24,7 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 
 /// States for [`crate::executor::LocalSimpleAggExecutor`],
-/// [`crate::executor::SimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
+/// [`crate::executor::GlobalSimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
 pub struct AggState<S: StateStore> {
     /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
     pub managed_states: Vec<ManagedStateImpl<S>>,
