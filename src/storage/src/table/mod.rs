@@ -43,7 +43,7 @@ impl Distribution {
     /// Fallback distribution for singleton or tests.
     pub fn fallback() -> Self {
         lazy_static::lazy_static! {
-            /// A bitmap that only the vnode `0x00` is set. Used for fallback or no distribution.
+            /// A bitmap that only the vnode `0x0000` is set. Used for fallback or no distribution.
             static ref FALLBACK_VNODES: Arc<Bitmap> = {
                 let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
                 vnodes.set(0, true);

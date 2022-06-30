@@ -78,6 +78,8 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
 
+        dbg!(&arrange_node);
+
         let keyspace = Keyspace::table_root(store, &TableId::from(arrange_node.table_id));
 
         let keys = arrange_node
@@ -100,6 +102,11 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|key| *key as usize)
             .collect();
 
+        // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
+        // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
+        let vnodes = None;
+        // let vnodes = params.vnode_bitmap.map(Arc::new);
+
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
@@ -107,7 +114,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             column_ids,
             params.executor_id,
             distribution_keys,
-            params.vnode_bitmap.map(Arc::new),
+            vnodes,
         );
 
         Ok(executor.boxed())

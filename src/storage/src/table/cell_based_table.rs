@@ -51,7 +51,7 @@ pub type AccessType = bool;
 pub const READ_ONLY: AccessType = false;
 pub const READ_WRITE: AccessType = true;
 
-pub const DEFAULT_VNODE: VirtualNode = 0;
+pub const DEFAULT_VNODE: VirtualNode = 0x0000;
 
 pub type DedupPkCellBasedTable<S, const T: AccessType> =
     CellBasedTableBase<S, DedupPkCellBasedRowSerializer, T>;
@@ -218,7 +218,12 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
                 pk_indices
                     .iter()
                     .position(|&pi| di == pi)
-                    .expect("distribution keys must be a subset of primary keys")
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "distribution keys {:?} must be a subset of primary keys {:?}",
+                            dist_key_indices, pk_indices
+                        )
+                    })
             })
             .collect_vec();
 
