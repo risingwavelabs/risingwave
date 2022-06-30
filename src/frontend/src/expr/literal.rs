@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::Row;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_expr::expr::expr_unary::new_unary_expr;
+use risingwave_expr::expr::{Expression, LiteralExpression};
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -54,6 +57,24 @@ impl Literal {
 
     pub fn get_data(&self) -> &Datum {
         &self.data
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.data.is_none()
+    }
+
+    /// This is a temporary workaround.
+    ///
+    /// TODO: evaluate expression in frontend.
+    /// Tracking issue <https://github.com/singularity-data/risingwave/issues/3479>
+    pub fn eval_as(&self, return_type: DataType) -> ScalarImpl {
+        assert!(self.data.is_some());
+        let lit = LiteralExpression::try_from(&self.to_expr_proto()).unwrap();
+        let mut const_expr = lit.boxed();
+        if const_expr.return_type() != return_type {
+            const_expr = new_unary_expr(ExprType::Cast, return_type, const_expr).unwrap();
+        }
+        const_expr.eval_row(Row::empty()).unwrap().unwrap()
     }
 }
 

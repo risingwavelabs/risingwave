@@ -278,6 +278,11 @@ impl Condition {
             for expr in group {
                 if let Some((input_ref, lit)) = expr.as_eq_const() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
+                    if lit.is_null() {
+                        // Always false
+                        return (ScanRange::full_table_scan(), Self::false_cond());
+                    }
+                    let lit = lit.eval_as(input_ref.data_type);
                     if let Some(l) = eq_cond && l != lit {
                         // Always false
                         return (
@@ -288,6 +293,11 @@ impl Condition {
                     eq_cond = Some(lit);
                 } else if let Some((input_ref, op, lit)) = expr.as_comparison_const() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
+                    if lit.is_null() {
+                        // Always false
+                        return (ScanRange::full_table_scan(), Self::false_cond());
+                    }
+                    let lit = lit.eval_as(input_ref.data_type);
                     match op {
                         ExprType::LessThan => {
                             ub.push((Bound::Excluded(lit), expr));

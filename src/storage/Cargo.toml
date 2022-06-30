@@ -31,6 +31,7 @@ log = "0.4"
 lz4 = "1.23.1"
 madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
+minstant = "0.1"
 moka = { version = "0.8", features = ["future"] }
 nix = { version = "0.24.1", features = ["fs"] }
 num-integer = "0.1"
