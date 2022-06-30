@@ -166,7 +166,7 @@ impl Query {
 pub struct TableScanInfo {
     /// Indicates data distribution and partition of the table.
     ///
-    /// `None` if it's `Single` distributition (system table).
+    /// `None` if it's `Single` distributition (system table, distinct agg).
     pub vnode_bitmaps: Option<HashMap<ParallelUnitId, Buffer>>,
 }
 
@@ -393,7 +393,7 @@ impl BatchPlanFragmenter {
                 // Check out the comments for `has_table_scan` in `QueryStage`.
                 if let Some(scan_node) = node.as_batch_seq_scan() {
                     let table_desc = scan_node.logical().table_desc();
-                    let is_sys_table = scan_node.logical().is_sys_table();
+                    let is_singleton = builder.parallelism == 1;
                     assert!(
                         builder.table_scan_info.is_none()
                             || builder
@@ -405,7 +405,7 @@ impl BatchPlanFragmenter {
                         "multiple table scan inside a stage"
                     );
                     builder.table_scan_info = Some(TableScanInfo {
-                        vnode_bitmaps: if is_sys_table {
+                        vnode_bitmaps: if is_singleton {
                             None
                         } else {
                             Some(vnode_mapping_to_owner_mapping(

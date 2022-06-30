@@ -188,6 +188,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let vnodes = match seq_scan_node.vnode_bitmap.as_ref() {
             Some(vnodes) => Bitmap::try_from(vnodes).unwrap(),
             // This is possbile for dml. vnode_bitmap is not filled by scheduler.
+            // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
             None => Bitmap::all_high_bits(VIRTUAL_NODE_COUNT),
         };
 
