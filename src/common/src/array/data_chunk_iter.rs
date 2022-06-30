@@ -90,7 +90,7 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
         if self.idx == len {
             None
         } else {
-            let ret = Some(if !vis.is_set(self.idx).unwrap() {
+            let ret = Some(if !vis.is_set(self.idx) {
                 None
             } else {
                 Some(RowRef {

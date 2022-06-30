@@ -1063,7 +1063,7 @@ mod tests {
 
         let mut start = 19260817i32..;
         let mut builders = (0..dimension)
-            .map(|_| I32ArrayBuilder::new(cardinality).unwrap())
+            .map(|_| I32ArrayBuilder::new(cardinality))
             .collect_vec();
         let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
         let mut output_ops = vec![vec![]; num_outputs];

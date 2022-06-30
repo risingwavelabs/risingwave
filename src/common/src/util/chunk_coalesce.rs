@@ -66,7 +66,7 @@ impl DataChunkBuilder {
                 .data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(self.batch_size))
-                .collect::<ArrayResult<Vec<ArrayBuilderImpl>>>()?;
+                .collect::<Vec<ArrayBuilderImpl>>();
 
             ensure!(self.buffered_count == 0);
         }
@@ -91,7 +91,7 @@ impl DataChunkBuilder {
         let mut new_return_offset = input_chunk.offset;
         match input_chunk.data_chunk.visibility() {
             Some(vis) => {
-                for vis in vis.iter_from(input_chunk.offset)? {
+                for vis in vis.iter_from(input_chunk.offset) {
                     new_return_offset += 1;
                     if !vis {
                         continue;

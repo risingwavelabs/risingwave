@@ -125,7 +125,6 @@ pub(crate) fn generate_output(
     } else {
         let columns = schema
             .create_array_builders(0)
-            .unwrap()
             .into_iter()
             .map(|x| Column::new(Arc::new(x.finish().unwrap())))
             .collect_vec();

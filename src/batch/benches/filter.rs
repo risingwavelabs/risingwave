@@ -45,7 +45,7 @@ fn gen_data(data_type: DataType, batch_size: usize, batch_num: usize) -> Vec<Dat
     let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
 
     for _ in 0..batch_num {
-        let mut array_builder = data_type.create_array_builder(batch_size).unwrap();
+        let mut array_builder = data_type.create_array_builder(batch_size);
 
         for _ in 0..batch_size {
             array_builder

@@ -248,14 +248,14 @@ impl SortAggExecutor {
         let group_builders = group_keys
             .iter()
             .map(|e| e.return_type().create_array_builder(1))
-            .try_collect();
+            .collect();
 
         let agg_builders = agg_states
             .iter()
             .map(|e| e.return_type().create_array_builder(1))
-            .try_collect();
+            .collect();
 
-        (group_builders.unwrap(), agg_builders.unwrap())
+        (group_builders, agg_builders)
     }
 }
 
