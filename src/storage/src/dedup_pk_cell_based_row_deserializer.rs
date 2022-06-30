@@ -12,24 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+
 use std::ops::Deref;
-use std::sync::Arc;
 
-use bytes::Bytes;
+
+
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_SIZE};
-use risingwave_common::util::ordered::deserialize_column_id;
-use risingwave_common::util::value_encoding::deserialize_cell;
+use risingwave_common::catalog::{OrderedColumnDesc};
+use risingwave_common::error::{Result};
+use risingwave_common::types::{Datum, VirtualNode};
+use risingwave_common::util::ordered::{OrderedRowDeserializer};
 
-use crate::table::cell_based_table::DEFAULT_VNODE;
+
+
 use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
-use risingwave_common::util::ordered::OrderedRowDeserializer;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::types::DataType;
-use risingwave_common::catalog::OrderedColumnDesc;
+
 
 #[derive(Clone)]
 pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
@@ -43,10 +40,7 @@ pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMappin
 }
 
 impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<Desc> {
-    pub fn new(
-        column_mapping: Desc,
-        pk_descs: &[OrderedColumnDesc],
-    ) -> Self {
+    pub fn new(column_mapping: Desc, pk_descs: &[OrderedColumnDesc]) -> Self {
         let (pk_data_types, pk_order_types) = pk_descs
             .iter()
             .map(|ordered_desc| {
@@ -63,7 +57,9 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
             .map(|d| {
                 let column_desc = &d.column_desc;
                 if column_desc.data_type.mem_cmp_eq_value_enc() {
-                    column_mapping.get(column_desc.column_id).map(|(_, index)| index)
+                    column_mapping
+                        .get(column_desc.column_id)
+                        .map(|(_, index)| index)
                 } else {
                     None
                 }
@@ -71,7 +67,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
             .collect();
 
         let inner = CellBasedRowDeserializer::new(column_mapping);
-        Self { inner, pk_deserializer, pk_to_row_mapping }
+        Self { pk_deserializer, inner, pk_to_row_mapping }
     }
 
     fn replace_dedupped_datums_into_row(&self, pk_datums: Vec<Datum>, row: Row) -> Row {
@@ -84,10 +80,17 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
         Row(row_inner)
     }
 
-    fn replace_dedupped_datums(&self, raw_result: Option<(VirtualNode, Vec<u8>, Row)>) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
+    fn replace_dedupped_datums(
+        &self,
+        raw_result: Option<(VirtualNode, Vec<u8>, Row)>,
+    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
         if let Some((_vnode, pk, row)) = raw_result {
             let pk_datums = self.pk_deserializer.deserialize(&pk)?;
-            Ok(Some((_vnode, pk, self.replace_dedupped_datums_into_row(pk_datums.into_vec(), row))))
+            Ok(Some((
+                _vnode,
+                pk,
+                self.replace_dedupped_datums_into_row(pk_datums.into_vec(), row),
+            )))
         } else {
             Ok(None)
         }
@@ -102,7 +105,6 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
     ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
         let raw_result = self.inner.deserialize(raw_key, cell)?;
         self.replace_dedupped_datums(raw_result)
-
     }
 
     // TODO: remove this once we refactored lookup in delta join with cell-based table
