@@ -128,6 +128,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
     }
 }
 
+#[cfg(test)]
 mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
@@ -137,13 +138,12 @@ mod tests {
     use risingwave_common::util::ordered::{serialize_pk_and_row, OrderedRowSerializer};
     use risingwave_common::util::sort_util::OrderType;
 
-    use crate::dedup_pk_cell_based_row_deserializer::{
-        ColumnDescMapping, DedupPkCellBasedRowDeserializer,
-    };
+    use super::DedupPkCellBasedRowDeserializer;
+    use crate::cell_based_row_deserializer::ColumnDescMapping;
 
     #[test]
     fn test_cell_based_deserializer() {
-        let pk_indices = [0];
+        // let pk_indices = [0]; // For reference to know which columns are dedupped.
         let column_ids = vec![
             ColumnId::from(5),
             ColumnId::from(3),
@@ -153,11 +153,6 @@ mod tests {
         let dedup_column_ids = vec![ColumnId::from(3), ColumnId::from(7), ColumnId::from(1)];
         let table_column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
-            ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
-            ColumnDesc::unnamed(column_ids[2], DataType::Int64),
-            ColumnDesc::unnamed(column_ids[3], DataType::Float64),
-        ];
-        let dedup_table_column_descs = vec![
             ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
             ColumnDesc::unnamed(column_ids[2], DataType::Int64),
             ColumnDesc::unnamed(column_ids[3], DataType::Float64),
@@ -220,9 +215,9 @@ mod tests {
         let mut pk3 = vec![2; VIRTUAL_NODE_SIZE];
         pk_serializer.serialize(&Row(vec![Some(ScalarImpl::Int32(2020))]), &mut pk3);
 
-        let bytes1 = serialize_pk_and_row(&pk1, &dedup_row1.clone(), &dedup_column_ids).unwrap();
-        let bytes2 = serialize_pk_and_row(&pk2, &dedup_row2.clone(), &dedup_column_ids).unwrap();
-        let bytes3 = serialize_pk_and_row(&pk3, &dedup_row3.clone(), &dedup_column_ids).unwrap();
+        let bytes1 = serialize_pk_and_row(&pk1, &dedup_row1, &dedup_column_ids).unwrap();
+        let bytes2 = serialize_pk_and_row(&pk2, &dedup_row2, &dedup_column_ids).unwrap();
+        let bytes3 = serialize_pk_and_row(&pk3, &dedup_row3, &dedup_column_ids).unwrap();
         let bytes = [bytes1, bytes2, bytes3]
             .concat()
             .into_iter()
