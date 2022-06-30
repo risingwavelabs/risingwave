@@ -16,9 +16,8 @@ use std::sync::Arc;
 
 use risingwave_pb::data::Column as ProstColumn;
 
-use super::Array;
+use super::{Array, ArrayResult};
 use crate::array::{ArrayImpl, ArrayRef};
-use crate::error::Result;
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
 /// implementation.
@@ -37,7 +36,7 @@ impl Column {
         ProstColumn { array: Some(array) }
     }
 
-    pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> Result<Self> {
+    pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> ArrayResult<Self> {
         Ok(Column {
             array: Arc::new(ArrayImpl::from_protobuf(col.get_array()?, cardinality)?),
         })
@@ -89,7 +88,7 @@ mod tests {
     #[test]
     fn test_column_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = I32ArrayBuilder::new(cardinality).unwrap();
+        let mut builder = I32ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder.append(Some(i as i32)).unwrap();
@@ -114,7 +113,7 @@ mod tests {
     #[test]
     fn test_bool_column_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = BoolArrayBuilder::new(cardinality).unwrap();
+        let mut builder = BoolArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             match i % 3 {
                 0 => builder.append(Some(false)).unwrap(),
@@ -137,7 +136,7 @@ mod tests {
     #[test]
     fn test_utf8_column_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = Utf8ArrayBuilder::new(cardinality).unwrap();
+        let mut builder = Utf8ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder.append(Some("abc")).unwrap();
@@ -161,7 +160,7 @@ mod tests {
     #[test]
     fn test_decimal_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = DecimalArrayBuilder::new(cardinality).unwrap();
+        let mut builder = DecimalArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder.append(Decimal::from_usize(i)).unwrap();
@@ -186,7 +185,7 @@ mod tests {
     #[test]
     fn test_naivedate_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = NaiveDateArrayBuilder::new(cardinality).unwrap();
+        let mut builder = NaiveDateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
@@ -216,7 +215,7 @@ mod tests {
     #[test]
     fn test_naivetime_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = NaiveTimeArrayBuilder::new(cardinality).unwrap();
+        let mut builder = NaiveTimeArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
@@ -248,7 +247,7 @@ mod tests {
     #[test]
     fn test_naivedatetime_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = NaiveDateTimeArrayBuilder::new(cardinality).unwrap();
+        let mut builder = NaiveDateTimeArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder

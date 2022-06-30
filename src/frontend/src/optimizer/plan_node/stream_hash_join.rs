@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, DatabaseId, OrderedColumnDesc, SchemaId, TableId};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
+use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::Distribution;
@@ -41,9 +46,13 @@ pub struct StreamHashJoin {
     /// be create automatically when building the executors on meta service. For testing purpose
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
-}
 
-pub static DELTA_JOIN: &str = "RW_FORCE_DELTA_JOIN";
+    dist_key_l: Distribution,
+    dist_key_r: Distribution,
+    /// Whether can optimize for append-only stream.
+    /// It is true if input of both side is append-only
+    is_append_only: bool,
+}
 
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
@@ -53,6 +62,7 @@ impl StreamHashJoin {
             JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
             _ => false,
         };
+
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
@@ -61,11 +71,10 @@ impl StreamHashJoin {
                 .composite(&logical.i2o_col_mapping()),
         );
 
-        let force_delta = if let Some(config) = ctx.inner().session_ctx.get_config(DELTA_JOIN) {
-            config.is_set(false)
-        } else {
-            false
-        };
+        let dist_l = logical.left().distribution().clone();
+        let dist_r = logical.right().distribution().clone();
+
+        let force_delta = ctx.inner().session_ctx.config().get_delta_join();
 
         // TODO: derive from input
         let base = PlanBase::new_stream(
@@ -81,6 +90,9 @@ impl StreamHashJoin {
             logical,
             eq_join_predicate,
             is_delta: force_delta,
+            dist_key_l: dist_l,
+            dist_key_r: dist_r,
+            is_append_only: append_only,
         }
     }
 
@@ -97,12 +109,12 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        l2o_mapping: &ColIndexMapping,
+        side2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
+                side2o_mapping.rewrite_provided_distribution(left)
             }
             (_, _) => panic!(),
         }
@@ -116,17 +128,36 @@ impl StreamHashJoin {
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ type: {:?}, predicate: {} }}",
-            if self.is_delta {
-                "StreamDeltaHashJoin"
-            } else {
-                "StreamHashJoin"
-            },
-            self.logical.join_type(),
-            self.eq_join_predicate()
-        )
+        let mut builder = if self.is_delta {
+            f.debug_struct("StreamDeltaHashJoin")
+        } else if self.is_append_only {
+            f.debug_struct("StreamAppendOnlyHashJoin")
+        } else {
+            f.debug_struct("StreamHashJoin")
+        };
+        builder
+            .field("type", &format_args!("{:?}", self.logical.join_type()))
+            .field("predicate", &format_args!("{}", self.eq_join_predicate()));
+
+        if self.append_only() {
+            builder.field("append_only", &format_args!("{}", true));
+        }
+        if self
+            .logical
+            .output_indices()
+            .iter()
+            .copied()
+            .eq(0..self.logical.internal_column_num())
+        {
+            builder.field("output_indices", &format_args!("all"));
+        } else {
+            builder.field(
+                "output_indices",
+                &format_args!("{:?}", self.logical.output_indices()),
+            );
+        }
+
+        builder.finish()
     }
 }
 
@@ -170,15 +201,69 @@ impl ToStreamProst for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            distribution_keys: self
-                .base
-                .dist
+            dist_key_l: self
+                .dist_key_l
+                .dist_column_indices()
+                .iter()
+                .map(|idx| *idx as u32)
+                .collect_vec(),
+            dist_key_r: self
+                .dist_key_r
                 .dist_column_indices()
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect_vec(),
             is_delta_join: self.is_delta,
-            ..Default::default()
+            left_table: Some(infer_internal_table_catalog(self.left()).to_prost(
+                SchemaId::placeholder() as u32,
+                DatabaseId::placeholder() as u32,
+            )),
+            right_table: Some(infer_internal_table_catalog(self.right()).to_prost(
+                SchemaId::placeholder() as u32,
+                DatabaseId::placeholder() as u32,
+            )),
+            output_indices: self
+                .logical
+                .output_indices()
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
+            is_append_only: self.is_append_only,
         })
+    }
+}
+
+fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
+    let base = input.plan_base();
+    let schema = &base.schema;
+    let pk_indices = &base.pk_indices;
+    let columns = schema
+        .fields()
+        .iter()
+        .map(|field| ColumnCatalog {
+            column_desc: ColumnDesc::from_field_without_column_id(field),
+            is_hidden: false,
+        })
+        .collect_vec();
+    let mut order_desc = vec![];
+    for &idx in pk_indices {
+        order_desc.push(OrderedColumnDesc {
+            column_desc: columns[idx].column_desc.clone(),
+            order: OrderType::Ascending,
+        });
+    }
+    TableCatalog {
+        id: TableId::placeholder(),
+        associated_source_id: None,
+        name: String::new(),
+        columns,
+        order_desc,
+        pks: pk_indices.clone(),
+        distribution_keys: base.dist.dist_column_indices().to_vec(),
+        is_index_on: None,
+        appendonly: input.append_only(),
+        owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+        vnode_mapping: None,
+        properties: HashMap::default(),
     }
 }

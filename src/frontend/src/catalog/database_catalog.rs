@@ -15,17 +15,20 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
+
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
+    owner: String,
 }
 
 impl DatabaseCatalog {
@@ -48,6 +51,19 @@ impl DatabaseCatalog {
         self.schema_by_name.keys().cloned().collect_vec()
     }
 
+    pub fn get_all_schema_info(&self) -> Vec<ProstSchema> {
+        self.schema_by_name
+            .values()
+            .cloned()
+            .map(|schema| ProstSchema {
+                id: schema.id(),
+                database_id: self.id,
+                name: schema.name(),
+                owner: schema.owner(),
+            })
+            .collect_vec()
+    }
+
     pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
         self.schema_by_name.get(name)
     }
@@ -58,11 +74,15 @@ impl DatabaseCatalog {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.schema_by_name.is_empty()
+        self.schema_by_name.len() == 1 && self.schema_by_name.contains_key(PG_CATALOG_SCHEMA_NAME)
     }
 
     pub fn id(&self) -> DatabaseId {
         self.id
+    }
+
+    pub fn owner(&self) -> String {
+        self.owner.clone()
     }
 }
 impl From<&ProstDatabase> for DatabaseCatalog {
@@ -72,6 +92,7 @@ impl From<&ProstDatabase> for DatabaseCatalog {
             name: db.name.clone(),
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),
+            owner: db.owner.clone(),
         }
     }
 }

@@ -18,8 +18,10 @@ use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
+use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_table::gen_create_table_plan;
+use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::OptimizerContext;
@@ -39,12 +41,41 @@ pub(super) fn handle_explain(
             materialized: true,
             query,
             name,
+            with_options,
             ..
-        } => gen_create_mv_plan(&*session, planner.ctx(), query, name)?.0,
-
-        Statement::CreateTable { name, columns, .. } => {
-            gen_create_table_plan(&*session, planner.ctx(), name, columns)?.0
+        } => {
+            gen_create_mv_plan(
+                &*session,
+                planner.ctx(),
+                query,
+                name,
+                handle_with_properties("explain create_mv", with_options)?,
+            )?
+            .0
         }
+
+        Statement::CreateTable {
+            name,
+            columns,
+            with_options,
+            ..
+        } => {
+            gen_create_table_plan(
+                &*session,
+                planner.ctx(),
+                name,
+                columns,
+                handle_with_properties("explain create_table", with_options)?,
+            )?
+            .0
+        }
+
+        Statement::CreateIndex {
+            name,
+            table_name,
+            columns,
+            ..
+        } => gen_create_index_plan(&*session, planner.ctx(), name, table_name, columns)?.0,
 
         stmt => {
             let bound = {
@@ -74,5 +105,6 @@ pub(super) fn handle_explain(
             "QUERY PLAN".to_owned(),
             TypeOid::Varchar,
         )],
+        true,
     ))
 }

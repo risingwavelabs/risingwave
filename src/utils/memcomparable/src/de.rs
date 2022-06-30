@@ -578,7 +578,7 @@ impl<B: Buf> Deserializer<B> {
             }
             scale = 0;
         } else if mantissa % 10 == 0 {
-            // Remove uncessary zeros.
+            // Remove unnecessary zeros.
             // e.g. 0.01_11_10 should be 0.01_11_1
             mantissa /= 10;
             scale -= 1;
@@ -608,6 +608,14 @@ impl<B: Buf> Deserializer<B> {
         let secs = self.input.get_i64() ^ (1 << 63);
         let nsecs = self.input.get_u32();
         Ok((secs, nsecs))
+    }
+
+    /// Deserialize struct and list value. Returns `bytes`.
+    pub fn deserialize_struct_or_list(&mut self) -> Result<Vec<u8>> {
+        let len = self.input.get_u32();
+        let mut bytes = vec![0; len as usize];
+        self.input.copy_to_slice(&mut bytes);
+        Ok(bytes)
     }
 }
 

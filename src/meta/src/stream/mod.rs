@@ -17,7 +17,6 @@ mod scheduler;
 mod source_manager;
 mod stream_graph;
 mod stream_manager;
-
 #[cfg(test)]
 mod test_fragmenter;
 
@@ -51,14 +50,25 @@ pub fn record_table_vnode_mappings(
             hash_mapping_manager.set_fragment_state_table(fragment_id, node.table_id);
         }
         NodeBody::HashAgg(node) => {
-            let table_ids = node.get_table_ids();
-            for table_id in table_ids {
-                hash_mapping_manager.set_fragment_state_table(fragment_id, *table_id);
+            for table in &node.internal_tables {
+                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
+            }
+        }
+        NodeBody::LocalSimpleAgg(node) => {
+            for table in &node.internal_tables {
+                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
+            }
+        }
+        NodeBody::GlobalSimpleAgg(node) => {
+            for table in &node.internal_tables {
+                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
             }
         }
         NodeBody::HashJoin(node) => {
-            hash_mapping_manager.set_fragment_state_table(fragment_id, node.left_table_id);
-            hash_mapping_manager.set_fragment_state_table(fragment_id, node.right_table_id);
+            hash_mapping_manager
+                .set_fragment_state_table(fragment_id, node.left_table.as_ref().unwrap().id);
+            hash_mapping_manager
+                .set_fragment_state_table(fragment_id, node.right_table.as_ref().unwrap().id);
         }
         _ => {}
     }

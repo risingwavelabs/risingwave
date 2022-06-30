@@ -14,7 +14,6 @@
 
 mod delete;
 mod filter;
-mod generate_series;
 mod generic_exchange;
 mod hash_agg;
 mod hop_window;
@@ -27,7 +26,8 @@ mod order_by;
 mod project;
 mod row_seq_scan;
 mod sort_agg;
-#[cfg(test)]
+mod sys_row_seq_scan;
+mod table_function;
 pub mod test_utils;
 mod top_n;
 mod trace;
@@ -38,7 +38,6 @@ use async_recursion::async_recursion;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
-pub use generate_series::*;
 pub use generic_exchange::*;
 pub use hash_agg::*;
 pub use hop_window::*;
@@ -57,11 +56,13 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
+pub use table_function::*;
 pub use top_n::*;
 pub use trace::*;
 pub use update::*;
 pub use values::*;
 
+use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -183,8 +184,9 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::HashAgg => HashAggExecutorBuilder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
-            NodeBody::GenerateSeries => GenerateSeriesExecutorBuilder,
+            NodeBody::TableFunction => TableFunctionExecutorBuilder,
             NodeBody::HopWindow => HopWindowExecutor,
+            NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();

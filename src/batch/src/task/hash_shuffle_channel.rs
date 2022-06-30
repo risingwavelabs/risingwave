@@ -26,14 +26,16 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
+use crate::task::data_chunk_in_channel::DataChunkInChannel;
+use crate::task::BOUNDED_BUFFER_SIZE;
 
 pub struct HashShuffleSender {
-    senders: Vec<mpsc::UnboundedSender<Option<DataChunk>>>,
+    senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     hash_info: exchange_info::HashInfo,
 }
 
 pub struct HashShuffleReceiver {
-    receiver: mpsc::UnboundedReceiver<Option<DataChunk>>,
+    receiver: mpsc::Receiver<Option<DataChunkInChannel>>,
 }
 
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<usize>> {
@@ -62,7 +64,7 @@ fn generate_new_data_chunks(
     chunk: &DataChunk,
     hash_info: &exchange_info::HashInfo,
     hash_values: &[usize],
-) -> Result<Vec<DataChunk>> {
+) -> Vec<DataChunk> {
     let output_count = hash_info.output_count as usize;
     let mut vis_maps = vec![vec![]; output_count];
     hash_values.iter().for_each(|hash| {
@@ -76,9 +78,9 @@ fn generate_new_data_chunks(
     });
     let mut res = Vec::with_capacity(output_count);
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
-        let vis_map: Bitmap = vis_map_vec.try_into()?;
+        let vis_map: Bitmap = vis_map_vec.into_iter().collect();
         let vis_map = if let Some(visibility) = chunk.get_visibility_ref() {
-            vis_map.bitand(visibility)?
+            vis_map.bitand(visibility)
         } else {
             vis_map
         };
@@ -90,7 +92,7 @@ fn generate_new_data_chunks(
         );
         res.push(new_data_chunk);
     }
-    Ok(res)
+    res
 }
 
 impl ChanSender for HashShuffleSender {
@@ -109,7 +111,7 @@ impl ChanSender for HashShuffleSender {
 impl HashShuffleSender {
     async fn send_chunk(&mut self, chunk: DataChunk) -> Result<()> {
         let hash_values = generate_hash_values(&chunk, &self.hash_info)?;
-        let new_data_chunks = generate_new_data_chunks(&chunk, &self.hash_info, &hash_values)?;
+        let new_data_chunks = generate_new_data_chunks(&chunk, &self.hash_info, &hash_values);
 
         for (sink_id, new_data_chunk) in new_data_chunks.into_iter().enumerate() {
             trace!(
@@ -121,7 +123,8 @@ impl HashShuffleSender {
             // `generate_new_data_chunks` may generate an empty chunk.
             if new_data_chunk.cardinality() > 0 {
                 self.senders[sink_id]
-                    .send(Some(new_data_chunk))
+                    .send(Some(DataChunkInChannel::new(new_data_chunk)))
+                    .await
                     .to_rw_result_with(|| "HashShuffleSender::send".into())?;
             }
         }
@@ -129,15 +132,19 @@ impl HashShuffleSender {
     }
 
     async fn send_done(&mut self) -> Result<()> {
-        self.senders.iter_mut().try_for_each(|s| {
-            s.send(None)
-                .to_rw_result_with(|| "HashShuffleSender::send".into())
-        })
+        for sender in &self.senders {
+            sender
+                .send(None)
+                .await
+                .to_rw_result_with(|| "HashShuffleSender::send".into())?;
+        }
+
+        Ok(())
     }
 }
 
 impl ChanReceiver for HashShuffleReceiver {
-    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>>;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {
@@ -160,7 +167,7 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (ChanSenderImpl, Vec<
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
     for _ in 0..output_count {
-        let (s, r) = mpsc::unbounded_channel();
+        let (s, r) = mpsc::channel(BOUNDED_BUFFER_SIZE);
         senders.push(s);
         receivers.push(r);
     }

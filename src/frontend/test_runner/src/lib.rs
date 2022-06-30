@@ -18,7 +18,7 @@
 
 mod resolve_id;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -32,7 +32,7 @@ use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
 use risingwave_frontend::FrontendOpts;
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{ObjectName, Statement, WithProperties};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -178,7 +178,7 @@ impl TestCase {
 
         if let Some(ref config_map) = self.with_config_map {
             for (key, val) in config_map {
-                session.set_config(key, val);
+                session.set_config(key, val).unwrap();
             }
         }
 
@@ -248,7 +248,7 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(session.clone());
+            let context = OptimizerContext::new(session.clone(), Arc::from(sql));
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -263,8 +263,13 @@ impl TestCase {
                     }
                     result = Some(ret);
                 }
-                Statement::CreateTable { name, columns, .. } => {
-                    create_table::handle_create_table(context, name, columns).await?;
+                Statement::CreateTable {
+                    name,
+                    columns,
+                    with_options,
+                    ..
+                } => {
+                    create_table::handle_create_table(context, name, columns, with_options).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,
@@ -286,9 +291,11 @@ impl TestCase {
                     or_replace: false,
                     name,
                     query,
+                    with_options,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, query).await?;
+                    create_mv::handle_create_mv(context, name, query, WithProperties(with_options))
+                        .await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
@@ -379,6 +386,7 @@ impl TestCase {
                 context,
                 Box::new(q),
                 ObjectName(vec!["test".into()]),
+                HashMap::new(),
             )?;
 
             // Only generate stream_plan if it is specified in test case
@@ -485,12 +493,12 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
             if expected_err == actual_err {
                 Ok(())
             } else {
-                return Err(anyhow!(
+                Err(anyhow!(
                     "Expected {context} error: {}\n  Actual {context} error: {}",
                     expected_err,
                     actual_err,
                     context = ctx
-                ));
+                ))
             }
         }
     }

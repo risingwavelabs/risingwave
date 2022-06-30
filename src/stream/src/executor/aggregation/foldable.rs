@@ -19,11 +19,13 @@ use std::marker::PhantomData;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 
 use super::{StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 
 /// A trait over all fold functions.
 ///
@@ -31,10 +33,16 @@ use super::{StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
 /// `I`: Input type.
 pub trait StreamingFoldable<R: Scalar, I: Scalar>: std::fmt::Debug + Send + Sync + 'static {
     /// Called on `Insert` or `UpdateInsert`.
-    fn accumulate(result: Option<&R>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<R>>;
+    fn accumulate(
+        result: Option<&R>,
+        input: Option<I::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<R>>;
 
     /// Called on `Delete` or `UpdateDelete`.
-    fn retract(result: Option<&R>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<R>>;
+    fn retract(
+        result: Option<&R>,
+        input: Option<I::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<R>>;
 
     /// Get initial value of this foldable function.
     fn initial() -> Option<R> {
@@ -88,11 +96,15 @@ where
     I: Scalar + Into<S> + std::ops::Neg<Output = I>,
     S: Scalar + num_traits::CheckedAdd<Output = S> + num_traits::CheckedSub<Output = S>,
 {
-    fn accumulate(result: Option<&S>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<S>> {
+    fn accumulate(
+        result: Option<&S>,
+        input: Option<I::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
                 x.checked_add(&(y.to_owned_scalar()).into())
-                    .ok_or_else(|| RwError::from(ErrorCode::NumericValueOutOfRange))?,
+                    .ok_or_else(|| RwError::from(ErrorCode::NumericValueOutOfRange))
+                    .map_err(StreamExecutorError::eval_error)?,
             ),
             (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some((y.to_owned_scalar()).into()),
@@ -100,11 +112,15 @@ where
         })
     }
 
-    fn retract(result: Option<&S>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<S>> {
+    fn retract(
+        result: Option<&S>,
+        input: Option<I::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
                 x.checked_sub(&(y.to_owned_scalar()).into())
-                    .ok_or_else(|| RwError::from(ErrorCode::NumericValueOutOfRange))?,
+                    .ok_or_else(|| RwError::from(ErrorCode::NumericValueOutOfRange))
+                    .map_err(StreamExecutorError::eval_error)?,
             ),
             (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some((-y.to_owned_scalar()).into()),
@@ -131,7 +147,7 @@ where
     fn accumulate(
         result: Option<&i64>,
         input: Option<S::ScalarRefType<'_>>,
-    ) -> Result<Option<i64>> {
+    ) -> StreamExecutorResult<Option<i64>> {
         Ok(match (result, input) {
             (Some(x), Some(_)) => Some(x + 1),
             (Some(x), None) => Some(*x),
@@ -139,7 +155,10 @@ where
         })
     }
 
-    fn retract(result: Option<&i64>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<i64>> {
+    fn retract(
+        result: Option<&i64>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<i64>> {
         Ok(match (result, input) {
             (Some(x), Some(_)) => Some(x - 1),
             (Some(x), None) => Some(*x),
@@ -166,7 +185,10 @@ impl<S> StreamingFoldable<S, S> for Minimizable<S>
 where
     S: Scalar + Ord,
 {
-    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+    fn accumulate(
+        result: Option<&S>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(x.clone().min(y.to_owned_scalar())),
             (None, Some(y)) => Some(y.to_owned_scalar()),
@@ -175,10 +197,11 @@ where
         })
     }
 
-    fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
-        Err(RwError::from(ErrorCode::InternalError(
-            "insert only for minimum".to_string(),
-        )))
+    fn retract(
+        _result: Option<&S>,
+        _input: Option<S::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
+        bail!("insert only for minimum")
     }
 }
 
@@ -196,7 +219,10 @@ impl<S> StreamingFoldable<S, S> for Maximizable<S>
 where
     S: Scalar + Ord,
 {
-    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+    fn accumulate(
+        result: Option<&S>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(x.clone().max(y.to_owned_scalar())),
             (None, Some(y)) => Some(y.to_owned_scalar()),
@@ -205,10 +231,11 @@ where
         })
     }
 
-    fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
-        Err(RwError::from(ErrorCode::InternalError(
-            "insert only for maximum".to_string(),
-        )))
+    fn retract(
+        _result: Option<&S>,
+        _input: Option<S::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
+        bail!("insert only for maximum")
     }
 }
 
@@ -223,7 +250,7 @@ where
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &I,
-    ) -> Result<()> {
+    ) -> StreamExecutorResult<()> {
         match visibility {
             None => {
                 for (op, data) in ops.iter().zip_eq(data.iter()) {
@@ -264,7 +291,7 @@ where
     I: Array,
     S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
-    fn get_output_concrete(&self) -> Result<Option<R::OwnedItem>> {
+    fn get_output_concrete(&self) -> StreamExecutorResult<Option<R::OwnedItem>> {
         Ok(self.result.clone())
     }
 }
@@ -293,7 +320,7 @@ where
         Self::default()
     }
 
-    pub fn new_with_datum(x: Datum) -> Result<Self> {
+    pub fn new_with_datum(x: Datum) -> StreamExecutorResult<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(R::OwnedItem::try_from(scalar)?);
@@ -322,16 +349,16 @@ macro_rules! impl_fold_agg {
                 ops: Ops<'_>,
                 visibility: Option<&Bitmap>,
                 data: &[&ArrayImpl],
-            ) -> Result<()> {
+            ) -> StreamExecutorResult<()> {
                 self.apply_batch_concrete(ops, visibility, data[0].into())
             }
 
-            fn get_output(&self) -> Result<Datum> {
-                Ok(self.result.map(Scalar::to_scalar_value))
+            fn get_output(&self) -> StreamExecutorResult<Datum> {
+                Ok(self.result.clone().map(Scalar::to_scalar_value))
             }
 
             fn new_builder(&self) -> ArrayBuilderImpl {
-                ArrayBuilderImpl::$result_variant(<$result as Array>::Builder::new(0).unwrap())
+                ArrayBuilderImpl::$result_variant(<$result as Array>::Builder::new(0))
             }
 
             fn reset(&mut self) {
@@ -342,21 +369,37 @@ macro_rules! impl_fold_agg {
 }
 
 // Implement all supported combination of input and output for `StreamingFoldAgg`.
-impl_fold_agg! { I16Array, Int16, I16Array }
-impl_fold_agg! { I32Array, Int32, I32Array }
-impl_fold_agg! { I64Array, Int64, I64Array }
-impl_fold_agg! { F32Array, Float32, F32Array }
-impl_fold_agg! { F64Array, Float64, F64Array }
-impl_fold_agg! { F64Array, Float64, F32Array }
+// count
+impl_fold_agg! { I64Array, Int64, I64Array } // max/min
 impl_fold_agg! { I64Array, Int64, F64Array }
 impl_fold_agg! { I64Array, Int64, F32Array }
-impl_fold_agg! { I64Array, Int64, I32Array }
-impl_fold_agg! { I64Array, Int64, I16Array }
+impl_fold_agg! { I64Array, Int64, I32Array } // sum
+impl_fold_agg! { I64Array, Int64, I16Array } // sum
 impl_fold_agg! { I64Array, Int64, BoolArray }
 impl_fold_agg! { I64Array, Int64, Utf8Array }
 impl_fold_agg! { I64Array, Int64, DecimalArray }
-impl_fold_agg! { DecimalArray, Decimal, I64Array }
+impl_fold_agg! { I64Array, Int64, StructArray }
+impl_fold_agg! { I64Array, Int64, ListArray }
+impl_fold_agg! { I64Array, Int64, IntervalArray }
+impl_fold_agg! { I64Array, Int64, NaiveTimeArray }
+impl_fold_agg! { I64Array, Int64, NaiveDateArray }
+impl_fold_agg! { I64Array, Int64, NaiveDateTimeArray }
+// max/min
+impl_fold_agg! { I16Array, Int16, I16Array }
+impl_fold_agg! { I32Array, Int32, I32Array }
+impl_fold_agg! { F32Array, Float32, F32Array }
+impl_fold_agg! { F64Array, Float64, F64Array }
 impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
+impl_fold_agg! { Utf8Array, Utf8, Utf8Array }
+impl_fold_agg! { StructArray, Struct, StructArray }
+impl_fold_agg! { IntervalArray, Interval, IntervalArray }
+impl_fold_agg! { NaiveTimeArray, NaiveTime, NaiveTimeArray }
+impl_fold_agg! { NaiveDateArray, NaiveDate, NaiveDateArray }
+impl_fold_agg! { NaiveDateTimeArray, NaiveDateTime, NaiveDateTimeArray }
+// sum
+impl_fold_agg! { DecimalArray, Decimal, I64Array }
+// avg
+impl_fold_agg! { F64Array, Float64, F32Array }
 
 #[cfg(test)]
 mod tests {
@@ -390,7 +433,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
-            Some(&(vec![true, true, false, false]).try_into().unwrap()),
+            Some(&(vec![true, true, false, false]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
@@ -410,7 +453,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
-            Some(&(vec![true, true, false, false]).try_into().unwrap()),
+            Some(&(vec![true, true, false, false]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
@@ -466,7 +509,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
-            Some(&(vec![false, true, false, false]).try_into().unwrap()),
+            Some(&(vec![false, true, false, false]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
@@ -491,7 +534,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Insert],
-            Some(&(vec![false, true, false, true]).try_into().unwrap()),
+            Some(&(vec![false, true, false, true]).into_iter().collect()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
@@ -512,7 +555,7 @@ mod tests {
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
-            Some(&(vec![false, true, false, false]).try_into().unwrap()),
+            Some(&(vec![false, true, false, false]).into_iter().collect()),
             &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
         )
         .unwrap();

@@ -91,6 +91,8 @@ pub struct StreamingConfig {
     // pub chunk_size: u32,
     #[serde(default = "default::checkpoint_interval_ms")]
     pub checkpoint_interval_ms: u32,
+    #[serde(default = "default::in_flight_barrier_nums")]
+    pub in_flight_barrier_nums: usize,
 }
 
 impl Default for StreamingConfig {
@@ -157,6 +159,10 @@ pub struct StorageConfig {
     /// Local object store root. We should call `get_local_object_store` to get the object store.
     #[serde(default = "default::local_object_store")]
     pub local_object_store: String,
+
+    /// Number of tasks shared buffer can upload in parallel.
+    #[serde(default = "default::share_buffer_upload_concurrency")]
+    pub share_buffer_upload_concurrency: usize,
 }
 
 impl Default for StorageConfig {
@@ -218,11 +224,11 @@ mod default {
     }
 
     pub fn share_buffers_sync_parallelism() -> u32 {
-        2
+        1
     }
 
     pub fn share_buffer_compaction_worker_threads_number() -> u32 {
-        2
+        4
     }
 
     pub fn shared_buffer_threshold() -> u32 {
@@ -263,6 +269,36 @@ mod default {
     }
 
     pub fn checkpoint_interval_ms() -> u32 {
-        100
+        250
+    }
+    pub fn in_flight_barrier_nums() -> usize {
+        40
+    }
+    pub fn share_buffer_upload_concurrency() -> usize {
+        8
+    }
+}
+
+pub mod constant {
+    pub mod hummock {
+        use bitflags::bitflags;
+        bitflags! {
+
+            #[derive(Default)]
+            pub struct CompactionFilterFlag: u32 {
+                const NONE = 0b00000000;
+                const STATE_CLEAN = 0b00000010;
+                const TTL = 0b00000100;
+            }
+        }
+
+        impl From<CompactionFilterFlag> for u32 {
+            fn from(flag: CompactionFilterFlag) -> Self {
+                flag.bits()
+            }
+        }
+
+        pub const TABLE_OPTION_DUMMY_TTL: u32 = 0;
+        pub const PROPERTIES_TTL_KEY: &str = "ttl";
     }
 }

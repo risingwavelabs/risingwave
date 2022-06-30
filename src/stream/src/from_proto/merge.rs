@@ -41,6 +41,8 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 rxs.remove(0),
                 actor_context,
                 x_node.operator_id,
+                params.actor_id,
+                stream.streaming_metrics.clone(),
             )
             .boxed())
         } else {
@@ -51,6 +53,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 rxs,
                 actor_context,
                 x_node.operator_id,
+                stream.streaming_metrics.clone(),
             )
             .boxed())
         }

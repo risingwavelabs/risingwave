@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
+use risingwave_common::array::{Array, DataChunk, Row, Vis};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, DatumRef};
@@ -48,6 +48,9 @@ pub struct NestedLoopJoinExecutor {
     /// Executor should handle different join type.
     join_type: JoinType,
     schema: Schema,
+    /// We may only need certain columns.
+    /// output_indices are the indices of the columns that we needed.
+    output_indices: Vec<usize>,
     /// Return data chunk in batch.
     chunk_builder: DataChunkBuilder,
     /// Cache the chunk that has not been written into chunk builder
@@ -118,27 +121,27 @@ impl NestedLoopJoinExecutor {
                 NestedLoopJoinState::FirstProbe => {
                     let ret = self.probe(true, &mut state).await?;
                     if let Some(data_chunk) = ret {
-                        yield data_chunk;
+                        yield data_chunk.reorder_columns(&self.output_indices);
                     }
                 }
                 NestedLoopJoinState::Probe => {
                     let ret = self.probe(false, &mut state).await?;
                     if let Some(data_chunk) = ret {
-                        yield data_chunk;
+                        yield data_chunk.reorder_columns(&self.output_indices);
                     }
                 }
 
                 NestedLoopJoinState::ProbeRemaining => {
                     let ret = self.probe_remaining()?;
                     if let Some(data_chunk) = ret {
-                        yield data_chunk;
+                        yield data_chunk.reorder_columns(&self.output_indices);
                     }
                     state = NestedLoopJoinState::Done;
                 }
 
                 NestedLoopJoinState::Done => {
                     if let Some(data_chunk) = self.chunk_builder.consume_all()? {
-                        yield data_chunk;
+                        yield data_chunk.reorder_columns(&self.output_indices);
                     } else {
                         break;
                     };
@@ -156,10 +159,10 @@ impl NestedLoopJoinExecutor {
         num_tuples: usize,
         data_types: &[DataType],
     ) -> Result<DataChunk> {
-        let mut output_array_builders = data_types
+        let mut output_array_builders: Vec<_> = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(num_tuples))
-            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+            .collect();
         for _i in 0..num_tuples {
             for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
                 builder.append_datum_ref(*datum_ref)?;
@@ -170,7 +173,7 @@ impl NestedLoopJoinExecutor {
         let result_columns = output_array_builders
             .into_iter()
             .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .collect::<Result<Vec<Column>>>()?;
+            .try_collect()?;
 
         Ok(DataChunk::new(result_columns, num_tuples))
     }
@@ -224,8 +227,16 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                 .cloned()
                 .collect(),
         };
-
-        let schema = Schema { fields };
+        let output_indices: Vec<usize> = nested_loop_join_node
+            .output_indices
+            .iter()
+            .map(|&x| x as usize)
+            .collect();
+        let original_schema = Schema { fields };
+        let actual_schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
         match join_type {
             JoinType::Inner
             | JoinType::LeftOuter
@@ -240,8 +251,11 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                 Ok(Box::new(Self {
                     join_expr,
                     join_type,
-                    chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
-                    schema,
+                    chunk_builder: DataChunkBuilder::with_default_size(
+                        original_schema.data_types(),
+                    ),
+                    schema: actual_schema,
+                    output_indices,
                     last_chunk: None,
                     probe_side_schema,
                     probe_side_source: outer_table_source,
@@ -353,7 +367,7 @@ impl NestedLoopJoinExecutor {
             let new_chunk = Self::concatenate(&const_row_chunk, build_side_chunk)?;
             // Join with current row.
             let sel_vector = self.join_expr.eval(&new_chunk)?;
-            let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().try_into()?);
+            let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().iter().collect());
             self.build_table.advance_chunk();
             Ok(ProbeResult {
                 cur_row_finished: false,
@@ -591,7 +605,7 @@ mod tests {
         let length = 5;
         let mut columns = vec![];
         for i in 0..num_of_columns {
-            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
                 builder.append(Some(i as i32)).unwrap();
             }
@@ -602,7 +616,7 @@ mod tests {
         let bool_vec = vec![true, false, true, false, false];
         let chunk2: DataChunk = DataChunk::new(
             columns.clone(),
-            Vis::Bitmap((bool_vec.clone()).try_into().unwrap()),
+            Vis::Bitmap((bool_vec.clone()).into_iter().collect()),
         );
         let chunk = NestedLoopJoinExecutor::concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
@@ -610,7 +624,7 @@ mod tests {
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
         assert_eq!(
             chunk.visibility().cloned().unwrap(),
-            (bool_vec).try_into().unwrap()
+            (bool_vec).into_iter().collect()
         );
     }
 
@@ -637,6 +651,7 @@ mod tests {
             probe_remain_chunk_idx: 0,
             probe_remain_row_idx: 0,
             identity: "NestedLoopJoinExecutor2".to_string(),
+            output_indices: vec![0, 1],
         };
         let const_row_chunk = source
             .convert_datum_refs_to_chunk(&row, 5, &probe_side_schema.data_types())
@@ -783,6 +798,7 @@ mod tests {
                 probe_remain_chunk_idx: 0,
                 probe_remain_row_idx: 0,
                 identity: "NestedLoopJoinExecutor2".to_string(),
+                output_indices: (0..schema.len()).into_iter().collect(),
             })
         }
 

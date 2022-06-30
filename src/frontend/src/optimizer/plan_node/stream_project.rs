@@ -30,7 +30,8 @@ pub struct StreamProject {
 
 impl fmt::Display for StreamProject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamProject")
+        let mut builder = f.debug_struct("StreamProject");
+        builder.field("exprs", self.logical.exprs()).finish()
     }
 }
 

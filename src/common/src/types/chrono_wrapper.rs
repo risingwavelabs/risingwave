@@ -20,7 +20,7 @@ use std::io::Write;
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 use super::{CheckedAdd, IntervalUnit};
-use crate::error::ErrorCode::{InternalError, IoError};
+use crate::array::ArrayResult;
 use crate::error::{Result, RwError};
 use crate::util::value_encoding::error::ValueEncodingError;
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
@@ -109,17 +109,14 @@ impl NaiveDateWrapper {
         ))
     }
 
-    /// Converted to the number of days since 1970.1.1 for compatibility with existing Java
-    /// frontend. TODO: Save days directly when using Rust frontend.
-    pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
-            .write(&(self.0.num_days_from_ce() - UNIX_EPOCH_DAYS).to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+            .write(&(self.0.num_days_from_ce()).to_be_bytes())
+            .map_err(Into::into)
     }
 
-    pub fn from_protobuf(days: i32) -> Result<Self> {
-        Self::with_days(days + UNIX_EPOCH_DAYS)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+    pub fn from_protobuf(days: i32) -> ArrayResult<Self> {
+        Self::with_days(days).map_err(Into::into)
     }
 }
 
@@ -138,22 +135,20 @@ impl NaiveTimeWrapper {
         ))
     }
 
-    /// Converted to microsecond timestamps for compatibility with existing Java frontend.
-    /// TODO: Save nanoseconds directly when using Rust frontend.
-    pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
             .write(
-                &(self.0.num_seconds_from_midnight() as i64 * 1_000_000
-                    + self.0.nanosecond() as i64 / 1000)
+                &(self.0.num_seconds_from_midnight() as u64 * 1_000_000_000
+                    + self.0.nanosecond() as u64)
                     .to_be_bytes(),
             )
-            .map_err(|e| RwError::from(IoError(e)))
+            .map_err(Into::into)
     }
 
-    pub fn from_protobuf(timestamp_micro: i64) -> Result<Self> {
-        let secs = (timestamp_micro / 1_000_000) as u32;
-        let nano = (timestamp_micro % 1_000_000) as u32 * 1000;
-        Self::with_secs_nano(secs, nano).map_err(|e| RwError::from(InternalError(e.to_string())))
+    pub fn from_protobuf(nano: u64) -> ArrayResult<Self> {
+        let secs = (nano / 1_000_000_000) as u32;
+        let nano = (nano % 1_000_000_000) as u32;
+        Self::with_secs_nano(secs, nano).map_err(Into::into)
     }
 }
 
@@ -175,19 +170,17 @@ impl NaiveDateTimeWrapper {
     }
 
     /// Although `NaiveDateTime` takes 12 bytes, we drop 4 bytes in protobuf encoding.
-    /// Converted to microsecond timestamps for compatibility with existing Java frontend.
-    /// TODO: Consider another way to save when using Rust frontend. Nanosecond timestamp can only
-    /// represent about 584 years
-    pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
+    /// TODO: Consider another way to save. Nanosecond timestamp can only represent about 584 years.
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
-            .write(&(self.0.timestamp_nanos() / 1000).to_be_bytes())
-            .map_err(|e| RwError::from(IoError(e)))
+            .write(&(self.0.timestamp_nanos()).to_be_bytes())
+            .map_err(Into::into)
     }
 
-    pub fn from_protobuf(timestamp_micro: i64) -> Result<Self> {
-        let secs = timestamp_micro / 1_000_000;
-        let nsecs = (timestamp_micro % 1_000_000) as u32 * 1000;
-        Self::with_secs_nsecs(secs, nsecs).map_err(|e| RwError::from(InternalError(e.to_string())))
+    pub fn from_protobuf(timestamp_nanos: i64) -> ArrayResult<Self> {
+        let secs = timestamp_nanos / 1_000_000_000;
+        let nsecs = (timestamp_nanos % 1_000_000_000) as u32;
+        Self::with_secs_nsecs(secs, nsecs).map_err(Into::into)
     }
 }
 
@@ -213,7 +206,9 @@ fn is_leap_year(year: i32) -> bool {
 }
 
 impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
-    fn checked_add(&self, rhs: IntervalUnit) -> Result<NaiveDateTimeWrapper> {
+    type Output = NaiveDateTimeWrapper;
+
+    fn checked_add(self, rhs: IntervalUnit) -> Option<NaiveDateTimeWrapper> {
         let mut date = self.0.date();
         if rhs.get_months() != 0 {
             // NaiveDate don't support add months. We need calculate manually
@@ -246,13 +241,9 @@ impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
             date = NaiveDate::from_ymd(year, month as u32, day as u32);
         }
         let mut datetime = NaiveDateTime::new(date, self.0.time());
-        datetime = datetime
-            .checked_add_signed(Duration::days(rhs.get_days().into()))
-            .ok_or_else(|| InternalError("Date out of range".to_string()))?;
-        datetime = datetime
-            .checked_add_signed(Duration::milliseconds(rhs.get_ms()))
-            .ok_or_else(|| InternalError("Date out of range".to_string()))?;
+        datetime = datetime.checked_add_signed(Duration::days(rhs.get_days().into()))?;
+        datetime = datetime.checked_add_signed(Duration::milliseconds(rhs.get_ms()))?;
 
-        Ok(NaiveDateTimeWrapper::new(datetime))
+        Some(NaiveDateTimeWrapper::new(datetime))
     }
 }

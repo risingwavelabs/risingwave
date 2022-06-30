@@ -21,6 +21,7 @@ mod column_proto_readers;
 mod data_chunk;
 pub mod data_chunk_iter;
 mod decimal_array;
+pub mod error;
 pub mod interval_array;
 mod iterator;
 pub mod list_array;
@@ -55,11 +56,11 @@ pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 
+pub use self::error::ArrayError;
 use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
 use crate::types::*;
+pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
@@ -74,7 +75,7 @@ pub type F64ArrayBuilder = PrimitiveArrayBuilder<OrderedF64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<OrderedF32>;
 
 /// The hash source for `None` values when hashing an item.
-static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
+pub(crate) static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 
 /// A trait over all array builders.
 ///
@@ -91,33 +92,35 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     type ArrayType: Array<Builder = Self>;
 
     /// Create a new builder with `capacity`.
-    fn new(capacity: usize) -> Result<Self> {
+    fn new(capacity: usize) -> Self {
         // No metadata by default.
         Self::with_meta(capacity, ArrayMeta::Simple)
     }
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self>;
+    /// # Panics
+    /// Panics if `meta`'s type mismatches with the array type.
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
 
     /// Append a value to builder.
     fn append(
         &mut self,
         value: Option<<<Self as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>,
-    ) -> Result<()>;
+    ) -> ArrayResult<()>;
 
-    fn append_null(&mut self) -> Result<()> {
+    fn append_null(&mut self) -> ArrayResult<()> {
         self.append(None)
     }
 
     /// Append an array to builder.
-    fn append_array(&mut self, other: &Self::ArrayType) -> Result<()>;
+    fn append_array(&mut self, other: &Self::ArrayType) -> ArrayResult<()>;
 
     /// Append an element in another array into builder.
-    fn append_array_element(&mut self, other: &Self::ArrayType, idx: usize) -> Result<()> {
+    fn append_array_element(&mut self, other: &Self::ArrayType, idx: usize) -> ArrayResult<()> {
         self.append(other.value_at(idx))
     }
 
     /// Finish build and return a new array.
-    fn finish(self) -> Result<Self::ArrayType>;
+    fn finish(self) -> ArrayResult<Self::ArrayType>;
 }
 
 /// A trait over all array.
@@ -173,6 +176,9 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
 
+    /// Get the owned null `Bitmap` from `Array`.
+    fn into_null_bitmap(self) -> Bitmap;
+
     /// Check if an element is `null` or not.
     fn is_null(&self, idx: usize) -> bool {
         self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
@@ -201,7 +207,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
         self.len() == 0
     }
 
-    fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl>;
+    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl>;
 
     fn array_meta(&self) -> ArrayMeta {
         ArrayMeta::Simple
@@ -222,13 +228,13 @@ pub enum ArrayMeta {
 trait CompactableArray: Array {
     /// Select some elements from `Array` based on `visibility` bitmap.
     /// `cardinality` is only used to decide capacity of the new `Array`.
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self>;
+    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self>;
 }
 
 impl<A: Array> CompactableArray for A {
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
+    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self> {
         use itertools::Itertools;
-        let mut builder = A::Builder::with_meta(cardinality, self.array_meta())?;
+        let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
         for (elem, visible) in self.iter().zip_eq(visibility.iter()) {
             if visible {
                 builder.append(elem)?;
@@ -382,51 +388,51 @@ for_all_variants! { array_builder_impl_enum }
 macro_rules! impl_array_builder {
     ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         impl ArrayBuilderImpl {
-            pub fn append_array(&mut self, other: &ArrayImpl) -> Result<()> {
+            pub fn append_array(&mut self, other: &ArrayImpl) -> ArrayResult<()> {
                 match self {
                     $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
                 }
             }
 
-            pub fn append_null(&mut self) -> Result<()> {
+            pub fn append_null(&mut self) -> ArrayResult<()> {
                 match self {
                     $( Self::$variant_name(inner) => inner.append(None), )*
                 }
             }
 
             /// Append a datum, return error while type not match.
-            pub fn append_datum(&mut self, datum: &Datum) -> Result<()> {
+            pub fn append_datum(&mut self, datum: &Datum) -> ArrayResult<()> {
                 match datum {
                     None => self.append_null(),
                     Some(ref scalar) => match (self, scalar) {
                         $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
-                        _ => Err(RwError::from(InternalError("Invalid datum type".to_string()))),
+                        _ => bail!("Invalid datum type".to_string()),
                     },
                 }
             }
 
             /// Append a datum ref, return error while type not match.
-            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) -> Result<()> {
+            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) -> ArrayResult<()> {
                 match datum_ref {
                     None => self.append_null(),
                     Some(scalar_ref) => match (self, scalar_ref) {
                         $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
-                        (this_builder, this_scalar_ref) => Err(RwError::from(InternalError(format!(
+                        (this_builder, this_scalar_ref) => bail!(
                             "Failed to append datum, array builder type: {}, scalar ref type: {}",
                             this_builder.get_ident(),
-                            this_scalar_ref.get_ident())
-                        ))),
+                            this_scalar_ref.get_ident()
+                        ),
                     },
                 }
             }
 
-            pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) -> Result<()> {
+            pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) -> ArrayResult<()> {
                 match self {
                     $( Self::$variant_name(inner) => inner.append_array_element(other.into(), idx), )*
                 }
             }
 
-            pub fn finish(self) -> Result<ArrayImpl> {
+            pub fn finish(self) -> ArrayResult<ArrayImpl> {
                 match self {
                     $( Self::$variant_name(inner) => Ok(inner.finish()?.into()), )*
                 }
@@ -465,6 +471,12 @@ macro_rules! impl_array {
                 }
             }
 
+            pub fn into_null_bitmap(self) -> Bitmap {
+                match self {
+                    $( Self::$variant_name(inner) => inner.into_null_bitmap(), )*
+                }
+            }
+
             pub fn to_protobuf(&self) -> ProstArray {
                 match self {
                     $( Self::$variant_name(inner) => inner.to_protobuf(), )*
@@ -484,7 +496,7 @@ macro_rules! impl_array {
             }
 
             /// Select some elements from `Array` based on `visibility` bitmap.
-            pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
+            pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self> {
                 match self {
                     $( Self::$variant_name(inner) => Ok(inner.compact(visibility, cardinality)?.into()), )*
                 }
@@ -536,7 +548,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+            pub fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
                 match self {
                     $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
                 }
@@ -552,7 +564,7 @@ impl ArrayImpl {
         ArrayImplIterator::new(self)
     }
 
-    pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> Result<Self> {
+    pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> ArrayResult<Self> {
         use self::column_proto_readers::*;
         use crate::array::value_reader::*;
         let array = match array.array_type() {
@@ -597,12 +609,12 @@ mod tests {
 
     use super::*;
 
-    fn filter<'a, A, F>(data: &'a A, pred: F) -> Result<A>
+    fn filter<'a, A, F>(data: &'a A, pred: F) -> ArrayResult<A>
     where
         A: Array + 'a,
         F: Fn(Option<A::RefItem<'a>>) -> bool,
     {
-        let mut builder = A::Builder::with_meta(data.len(), data.array_meta())?;
+        let mut builder = A::Builder::with_meta(data.len(), data.array_meta());
         for i in 0..data.len() {
             if pred(data.value_at(i)) {
                 builder.append(data.value_at(i))?;
@@ -613,7 +625,7 @@ mod tests {
 
     #[test]
     fn test_filter() {
-        let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
+        let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
         for i in 0..=60 {
             builder.append(Some(i as i32)).unwrap();
         }
@@ -627,13 +639,13 @@ mod tests {
     fn vec_add<T1, T2, T3>(
         a: &PrimitiveArray<T1>,
         b: &PrimitiveArray<T2>,
-    ) -> Result<PrimitiveArray<T3>>
+    ) -> ArrayResult<PrimitiveArray<T3>>
     where
         T1: PrimitiveArrayItemType + AsPrimitive<T3>,
         T2: PrimitiveArrayItemType + AsPrimitive<T3>,
         T3: PrimitiveArrayItemType + CheckedAdd,
     {
-        let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;
+        let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
         for (a, b) in a.iter().zip_eq(b.iter()) {
             let item = match (a, b) {
                 (Some(a), Some(b)) => Some(a.as_() + b.as_()),
@@ -646,13 +658,13 @@ mod tests {
 
     #[test]
     fn test_vectorized_add() {
-        let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
+        let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
         for i in 0..=60 {
             builder.append(Some(i as i32)).unwrap();
         }
         let array1 = builder.finish().unwrap();
 
-        let mut builder = PrimitiveArrayBuilder::<i16>::new(0).unwrap();
+        let mut builder = PrimitiveArrayBuilder::<i16>::new(0);
         for i in 0..=60 {
             builder.append(Some(i as i16)).unwrap();
         }

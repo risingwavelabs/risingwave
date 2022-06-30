@@ -42,8 +42,10 @@ impl MetaNodeService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
-        cmd.arg("--host")
+        cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
+            .arg("--host")
+            .arg(config.address.clone())
             .arg("--dashboard-host")
             .arg(format!(
                 "{}:{}",
@@ -80,6 +82,12 @@ impl MetaNodeService {
 
         if config.unsafe_disable_recovery {
             cmd.arg("--disable-recovery");
+        }
+
+        if let Some(sec) = config.max_idle_secs_to_exit {
+            if sec > 0 {
+                cmd.arg("--dangerous-max-idle-secs").arg(format!("{}", sec));
+            }
         }
 
         Ok(())

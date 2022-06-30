@@ -18,6 +18,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -36,15 +37,24 @@
 #![feature(custom_test_frameworks)]
 #![feature(result_option_inspect)]
 #![feature(generators)]
-#![test_runner(hummock::test_runner::run_failpont_tests)]
+#![feature(lint_reasons)]
+#![feature(allocator_api)]
+#![feature(strict_provenance)]
+#![feature(let_else)]
+#![feature(proc_macro_hygiene)]
+#![feature(stmt_expr_attributes)]
+#![feature(type_changing_struct_update)]
+#![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
+pub mod dedup_pk_cell_based_row_serializer;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
 pub mod monitor;
 pub mod panic_store;
+pub mod row_serializer;
 pub mod storage_value;
 #[macro_use]
 pub mod store;

@@ -15,15 +15,14 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use prost::DecodeError;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, Row};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::for_all_variants;
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
-use risingwave_common::{ensure, for_all_variants};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::Expression;
+use crate::{bail, ensure, ExprError, Result};
 
 macro_rules! array_impl_literal_append {
     ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -36,9 +35,9 @@ macro_rules! array_impl_literal_append {
                     append_literal_to_arr(inner, None, $cardinality)?;
                 }
             )*
-            (_, _) => return Err(ErrorCode::NotImplemented(
-                "Do not support values in insert values executor".to_string(), None.into(),
-            ).into()),
+            (_, _) => $crate::bail!(
+                "Do not support values in insert values executor".to_string()
+            ),
         }
     };
 }
@@ -55,12 +54,12 @@ impl Expression for LiteralExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut array_builder = self.return_type.create_array_builder(input.cardinality())?;
-        let cardinality = input.cardinality();
+        let mut array_builder = self.return_type.create_array_builder(input.capacity());
+        let capacity = input.capacity();
         let builder = &mut array_builder;
         let literal = &self.literal;
-        for_all_variants! {array_impl_literal_append, builder, literal, cardinality}
-        array_builder.finish().map(Arc::new)
+        for_all_variants! {array_impl_literal_append, builder, literal, capacity}
+        array_builder.finish().map(Arc::new).map_err(Into::into)
     }
 
     fn eval_row(&self, _input: &Row) -> Result<Datum> {
@@ -122,11 +121,11 @@ impl LiteralExpression {
 }
 
 impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.expr_type == Type::ConstantValue as i32);
-        let ret_type = DataType::from(prost.get_return_type()?);
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
         if prost.rex_node.is_none() {
             return Ok(Self {
                 return_type: ret_type,
@@ -134,28 +133,25 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
             });
         }
 
-        if let RexNode::Constant(prost_value) = prost.get_rex_node()? {
+        if let RexNode::Constant(prost_value) = prost.get_rex_node().unwrap() {
             // TODO: We need to unify these
-            let value =
-                ScalarImpl::bytes_to_scalar(prost_value.get_body(), prost.get_return_type()?)?;
+            let value = ScalarImpl::bytes_to_scalar(
+                prost_value.get_body(),
+                prost.get_return_type().unwrap(),
+            )?;
             Ok(Self {
                 return_type: ret_type,
                 literal: Some(value),
             })
         } else {
-            Err(RwError::from(ErrorCode::ProstError(DecodeError::new(
-                "Cannot parse the RexNode",
-            ))))
+            bail!("Cannot parse the RexNode");
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{I32Array, PrimitiveArray, StructValue};
+    use risingwave_common::array::{I32Array, StructValue};
     use risingwave_common::array_nonnull;
     use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
@@ -300,12 +296,6 @@ mod tests {
             }),
             rex_node: bytes.map(|bs| RexNode::Constant(ConstantValue { body: bs })),
         }
-    }
-
-    #[allow(dead_code)]
-    fn create_column(vec: &[Option<i32>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
     }
 
     #[test]

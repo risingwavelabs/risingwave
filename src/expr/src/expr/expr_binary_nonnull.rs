@@ -19,6 +19,7 @@ use risingwave_common::array::{
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
+use crate::expr::expr_binary_bytes::new_concat_op;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::for_all_cmp_variants;
@@ -361,7 +362,12 @@ pub fn new_binary_expr(
                     { interval, timestamp, timestamp, interval_timestamp_add },
                     { interval, date, timestamp, interval_date_add },
                     { date, interval, timestamp, date_interval_add },
+                    { date, int32, date, date_int_add },
+                    { int32, date, date, int_date_add },
+                    { date, time, timestamp, date_time_add },
+                    { time, date, timestamp, time_date_add },
                     { interval, interval, interval, general_add },
+                    { time, interval, time, time_interval_add },
                 },
             }
         }
@@ -375,7 +381,10 @@ pub fn new_binary_expr(
                     { timestamp, interval, timestamp, timestamp_interval_sub },
                     { date, date, int32, date_date_sub },
                     { date, interval, timestamp, date_interval_sub },
+                    { time, time, interval, time_time_sub },
+                    { time, interval, time, time_interval_sub },
                     { interval, interval, interval, general_sub },
+                    { date, int32, date, date_int_sub },
                 },
             }
         }
@@ -400,6 +409,12 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_div,
                 {
+                    { interval, int16, interval, interval_float_div },
+                    { interval, int32, interval, interval_float_div },
+                    { interval, int64, interval, interval_float_div },
+                    { interval, float32, interval, interval_float_div },
+                    { interval, float64, interval, interval_float_div },
+                    { interval, decimal, interval, interval_float_div },
                 },
             }
         }
@@ -473,6 +488,7 @@ pub fn new_binary_expr(
             l, r, ret, position,
         )),
         Type::TumbleStart => new_tumble_start(l, r, ret),
+        Type::ConcatOp => new_concat_op(l, r, ret),
 
         tp => {
             unimplemented!(

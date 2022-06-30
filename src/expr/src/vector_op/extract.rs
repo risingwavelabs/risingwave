@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use chrono::{Datelike, Timelike};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper};
+
+use crate::{bail, Result};
 
 fn extract_time<T>(time: T, time_unit: &str) -> Result<Decimal>
 where
@@ -25,10 +25,7 @@ where
         "HOUR" => Ok(time.hour().into()),
         "MINUTE" => Ok(time.minute().into()),
         "SECOND" => Ok(time.second().into()),
-        _ => Err(RwError::from(InternalError(format!(
-            "Unsupported time unit {} in extract function",
-            time_unit
-        )))),
+        _ => bail!("Unsupported time unit {} in extract function", time_unit),
     }
 }
 
@@ -43,10 +40,7 @@ where
         // Sun = 0 and Sat = 6
         "DOW" => Ok(date.weekday().num_days_from_sunday().into()),
         "DOY" => Ok(date.ordinal().into()),
-        _ => Err(RwError::from(InternalError(format!(
-            "Unsupported time unit {} in extract function",
-            time_unit
-        )))),
+        _ => bail!("Unsupported time unit {} in extract function", time_unit),
     }
 }
 

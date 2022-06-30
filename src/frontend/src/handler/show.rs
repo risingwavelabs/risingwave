@@ -55,10 +55,7 @@ fn schema_or_default(schema: &Option<Ident>) -> &str {
         .map_or_else(|| DEFAULT_SCHEMA_NAME, |s| &s.value)
 }
 
-pub async fn handle_show_object(
-    context: OptimizerContext,
-    command: ShowObject,
-) -> Result<PgResponse> {
+pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader().read_guard();
 
@@ -87,6 +84,7 @@ pub async fn handle_show_object(
             .iter_materialized_source()
             .map(|t| t.name.clone())
             .collect(),
+        ShowObject::Sink { _schema } => todo!(),
         ShowObject::Columns { table } => {
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);
@@ -99,6 +97,7 @@ pub async fn handle_show_object(
                     PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
                     PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
                 ],
+                true,
             ));
         }
     };
@@ -113,6 +112,7 @@ pub async fn handle_show_object(
         rows.len() as i32,
         rows,
         vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
+        true,
     ))
 }
 

@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures::future::{select, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use madsim::time::Instant;
 
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk};
+use crate::executor::monitor::StreamingMetrics;
 
 #[derive(Debug, PartialEq)]
 pub enum AlignedMessage {
@@ -27,7 +31,13 @@ pub enum AlignedMessage {
 }
 
 #[try_stream(ok = AlignedMessage, error = StreamExecutorError)]
-pub async fn barrier_align(mut left: BoxedMessageStream, mut right: BoxedMessageStream) {
+pub async fn barrier_align(
+    mut left: BoxedMessageStream,
+    mut right: BoxedMessageStream,
+    actor_id: u64,
+    metrics: Arc<StreamingMetrics>,
+) {
+    let actor_id = actor_id.to_string();
     use madsim::rand::Rng;
     loop {
         let prefer_left: bool = madsim::rand::thread_rng().gen();
@@ -67,11 +77,16 @@ pub async fn barrier_align(mut left: BoxedMessageStream, mut right: BoxedMessage
             Either::Left((Some(msg), _)) => match msg? {
                 Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                 Message::Barrier(_) => loop {
+                    let start_time = Instant::now();
                     // received left barrier, waiting for right barrier
                     match right.next().await.unwrap()? {
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
+                            metrics
+                                .join_barrier_align_duration
+                                .with_label_values(&[&actor_id, "right"])
+                                .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
                     }
@@ -80,11 +95,16 @@ pub async fn barrier_align(mut left: BoxedMessageStream, mut right: BoxedMessage
             Either::Right((Some(msg), _)) => match msg? {
                 Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                 Message::Barrier(_) => loop {
+                    let start_time = Instant::now();
                     // received right barrier, waiting for left barrier
                     match left.next().await.unwrap()? {
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
+                            metrics
+                                .join_barrier_align_duration
+                                .with_label_values(&[&actor_id, "left"])
+                                .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
                     }
@@ -99,11 +119,18 @@ mod tests {
     use std::time::Duration;
 
     use async_stream::try_stream;
-    use futures::TryStreamExt;
+    use futures::{Stream, TryStreamExt};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use tokio::time::sleep;
 
     use super::*;
+
+    fn barrier_align_for_test(
+        left: BoxedMessageStream,
+        right: BoxedMessageStream,
+    ) -> impl Stream<Item = Result<AlignedMessage, StreamExecutorError>> {
+        barrier_align(left, right, 0, Arc::new(StreamingMetrics::unused()))
+    }
 
     #[tokio::test]
     async fn test_barrier_align() {
@@ -122,7 +149,10 @@ mod tests {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
         }
         .boxed();
-        let output: Vec<_> = barrier_align(left, right).try_collect().await.unwrap();
+        let output: Vec<_> = barrier_align_for_test(left, right)
+            .try_collect()
+            .await
+            .unwrap();
         assert_eq!(
             output,
             vec![
@@ -149,7 +179,10 @@ mod tests {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
         }
         .boxed();
-        let _output: Vec<_> = barrier_align(left, right).try_collect().await.unwrap();
+        let _output: Vec<_> = barrier_align_for_test(left, right)
+            .try_collect()
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -165,6 +198,9 @@ mod tests {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
         }
         .boxed();
-        let _output: Vec<_> = barrier_align(left, right).try_collect().await.unwrap();
+        let _output: Vec<_> = barrier_align_for_test(left, right)
+            .try_collect()
+            .await
+            .unwrap();
     }
 }

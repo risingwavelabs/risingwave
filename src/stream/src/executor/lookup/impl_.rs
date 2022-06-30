@@ -20,7 +20,8 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::make_cell_based_row_deserializer;
+use risingwave_storage::table::cell_based_table::DEFAULT_VNODE;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -176,13 +177,6 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices.len()
         );
 
-        // check whether output column mapping is valid.
-        assert_eq!(
-            column_mapping.len(),
-            output_column_length,
-            "column mapping mismatched"
-        );
-
         // resolve mapping from join keys in stream row -> joins keys for arrangement.
         let key_indices_mapping = arrangement_order_rules
             .iter()
@@ -227,7 +221,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 col_types: arrangement_datatypes,
                 // special thing about this pair of serializer and deserializer: the serializer only
                 // serializes join key, while the deserializer will take join key + pk into account.
-                deserializer: CellBasedRowDeserializer::new(arrangement_col_descs.clone()),
+                deserializer: make_cell_based_row_deserializer(arrangement_col_descs.clone()),
                 serializer: OrderedRowSerializer::new(arrangement_order_types),
                 col_descs: arrangement_col_descs,
                 order_rules: arrangement_order_rules,
@@ -264,7 +258,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         #[for_await]
         for msg in input {
-            let msg = msg.map_err(StreamExecutorError::input_error)?;
+            let msg = msg?;
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
                     if self.arrangement.use_current_epoch {
@@ -402,6 +396,9 @@ impl<S: StateStore> LookupExecutor<S> {
         // Serialize join key to a state store key.
         let key_prefix = {
             let mut key_prefix = vec![];
+            // Manually encode a vnode here to match the encoding of cell-based table
+            // TODO: refactor lookup with cell-based table
+            key_prefix.extend(DEFAULT_VNODE.to_be_bytes());
             self.arrangement
                 .serializer
                 .serialize_datums(lookup_row.0.iter(), &mut key_prefix);
@@ -415,18 +412,20 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let mut all_rows = vec![];
 
+        // The key is truncated in `arrange_keyspace` so there's no vnode to decode
+        // TODO: refactor lookup with cell-based table and remove `deserialize_with_vnode`
         for (pk_with_cell_id, cell) in all_cells {
             tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}", pk_with_cell_id, cell);
-            if let Some((_, row)) = self
+            if let Some((_, _, row)) = self
                 .arrangement
                 .deserializer
-                .deserialize(&pk_with_cell_id, &cell)?
+                .deserialize_without_vnode(&pk_with_cell_id, &cell)?
             {
                 all_rows.push(row);
             }
         }
 
-        if let Some((_, last_row)) = self.arrangement.deserializer.take() {
+        if let Some((_, _, last_row)) = self.arrangement.deserializer.take() {
             all_rows.push(last_row);
         }
 

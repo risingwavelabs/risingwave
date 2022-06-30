@@ -278,7 +278,7 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator {
     }
 }
 
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 #[cfg(test)]
 mod tests {
     use std::cmp::Reverse;
@@ -1087,6 +1087,7 @@ mod tests {
         Sstable {
             id: sst.id,
             meta: sst.meta.clone(),
+            blocks: vec![],
         }
     }
 }

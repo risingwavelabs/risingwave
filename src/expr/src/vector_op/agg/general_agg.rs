@@ -78,7 +78,9 @@ where
     }
 
     pub(super) fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
-        builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()))
+        builder
+            .append(self.result.as_ref().map(|x| x.as_scalar_ref()))
+            .map_err(Into::into)
     }
 
     pub(super) fn update_and_output_with_sorted_groups_concrete(
@@ -183,24 +185,40 @@ macro_rules! impl_aggregator {
         }
     };
 }
+
+// max/min
 impl_aggregator! { I16Array, Int16, I16Array, Int16 }
 impl_aggregator! { I32Array, Int32, I32Array, Int32 }
 impl_aggregator! { I64Array, Int64, I64Array, Int64 }
-impl_aggregator! { F32Array, Float32, F32Array, Float32 }
-impl_aggregator! { F64Array, Float64, F64Array, Float64 }
-impl_aggregator! { DecimalArray, Decimal, DecimalArray, Decimal }
+impl_aggregator! { F32Array, Float32, F32Array, Float32 } // sum
+impl_aggregator! { F64Array, Float64, F64Array, Float64 } // sum
+impl_aggregator! { DecimalArray, Decimal, DecimalArray, Decimal } // sum
 impl_aggregator! { Utf8Array, Utf8, Utf8Array, Utf8 }
 impl_aggregator! { BoolArray, Bool, BoolArray, Bool } // TODO(#359): remove once unnecessary
-impl_aggregator! { I16Array, Int16, I64Array, Int64 }
-impl_aggregator! { I32Array, Int32, I64Array, Int64 }
+impl_aggregator! { StructArray, Struct, StructArray, Struct }
+impl_aggregator! { ListArray, List, ListArray, List }
+impl_aggregator! { IntervalArray, Interval, IntervalArray, Interval }
+impl_aggregator! { NaiveTimeArray, NaiveTime, NaiveTimeArray, NaiveTime }
+impl_aggregator! { NaiveDateArray, NaiveDate, NaiveDateArray, NaiveDate }
+impl_aggregator! { NaiveDateTimeArray, NaiveDateTime, NaiveDateTimeArray, NaiveDateTime }
+
+// count
+impl_aggregator! { I16Array, Int16, I64Array, Int64 } // sum
+impl_aggregator! { I32Array, Int32, I64Array, Int64 } // sum
 impl_aggregator! { F32Array, Float32, I64Array, Int64 }
 impl_aggregator! { F64Array, Float64, I64Array, Int64 }
 impl_aggregator! { DecimalArray, Decimal, I64Array, Int64 }
 impl_aggregator! { Utf8Array, Utf8, I64Array, Int64 }
 impl_aggregator! { BoolArray, Bool, I64Array, Int64 }
+impl_aggregator! { StructArray, Struct, I64Array, Int64 }
+impl_aggregator! { ListArray, List, I64Array, Int64 }
+impl_aggregator! { IntervalArray, Interval, I64Array, Int64 }
+impl_aggregator! { NaiveTimeArray, NaiveTime, I64Array, Int64 }
+impl_aggregator! { NaiveDateArray, NaiveDate, I64Array, Int64 }
+impl_aggregator! { NaiveDateTimeArray, NaiveDateTime, I64Array, Int64 }
+
+// sum
 impl_aggregator! { I64Array, Int64, DecimalArray, Decimal }
-impl_aggregator! { StructArray, Struct, StructArray, Struct }
-impl_aggregator! { ListArray, List, ListArray, List }
 
 #[cfg(test)]
 mod tests {
@@ -225,7 +243,7 @@ mod tests {
         let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, false)?;
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
-        builder.finish()
+        builder.finish().map_err(Into::into)
     }
 
     #[test]
@@ -240,7 +258,7 @@ mod tests {
                 Arc::new(input.into()),
                 &agg_type,
                 return_type,
-                ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)?),
+                ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)),
             );
             if !result.is_empty() {
                 let actual = actual?;
@@ -279,7 +297,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
+            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
         )?;
         let actual = actual.as_int64();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -298,7 +316,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            DecimalArrayBuilder::new(0)?.into(),
+            DecimalArrayBuilder::new(0).into(),
         )?;
         let actual: &DecimalArray = (&actual).into();
         let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
@@ -318,7 +336,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)?),
+            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
         )?;
         let actual = actual.as_float32();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -337,7 +355,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)?),
+            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
         )?;
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -356,7 +374,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)?),
+            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
         )?;
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -375,7 +393,7 @@ mod tests {
                 Arc::new(input),
                 &agg_type,
                 return_type,
-                ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
+                ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
             )?;
             let actual = actual.as_int64();
             let actual = actual.iter().collect::<Vec<_>>();

@@ -1,0 +1,157 @@
+statement ok
+CREATE TABLE nics_metrics (
+    device_id VARCHAR,
+    device_type VARCHAR,
+    metric_name VARCHAR,
+    aggregation VARCHAR,
+    nic_name VARCHAR,
+    report_time TIMESTAMP,
+    link_bandwidth FLOAT,
+    value FLOAT,
+);
+
+statement ok
+CREATE TABLE tcp_metrics (
+    device_id VARCHAR,
+    device_type VARCHAR,
+    report_time TIMESTAMP,
+    metric_name VARCHAR,
+    domain VARCHAR,
+    value FLOAT,
+);
+
+statement ok
+INSERT INTO nics_metrics VALUES
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', 'tx_bytes', 'avg', 'eth0', '2022-06-08 09:37:02', '9100000', '71456460'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', 'tx_bytes', 'avg', 'eth0', '2022-06-08 09:38:03', '9100000', '666606187'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', 'tx_bytes', 'avg', 'eth0', '2022-06-08 09:39:03', '9100000', '804539010');
+
+statement ok
+INSERT INTO tcp_metrics VALUES
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:37:54', 'retrans_rate', 'all', '0.245309986782795776'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:37:54', 'srtt', 'all', '554.4752006561499'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:37:54', 'download_speed', 'all', '131.5221997377209'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:38:54', 'retrans_rate', 'all', '0.24800597740570458'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:38:54', 'srtt', 'all', '636.00260113591'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:38:54', 'download_speed', 'all', '116.841272498187'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:39:54', 'retrans_rate', 'all', '0.24821624079901723'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:39:54', 'srtt', 'all', '599.9202978109153'),
+('812b4ba287f5ee0bc9d43bbf5bbe87fb', '3', '2022-06-08 09:39:54', 'download_speed', 'all', '149.7339243859982');
+
+statement ok
+CREATE MATERIALIZED VIEW high_util_tcp_metrics AS
+SELECT
+    tcp.device_id AS device_id,
+    tcp.window_end AS window_end,
+    tcp.metric_name AS metric_name,
+    tcp.metric_value AS metric_value
+FROM
+    (
+        SELECT
+            device_id,
+            window_end,
+            metric_name,
+            AVG(value) AS metric_value
+        FROM
+            TUMBLE(
+                tcp_metrics,
+                report_time,
+                INTERVAL '3' MINUTE
+            )
+        WHERE
+            domain = 'all'
+        GROUP BY
+            device_id,
+            window_end,
+            metric_name
+    ) AS tcp
+    JOIN (
+        SELECT
+            device_id,
+            window_end,
+            AVG((value * 8 / 10) / link_bandwidth) AS avg_util
+        FROM
+            TUMBLE(
+                nics_metrics,
+                report_time,
+                INTERVAL '3' MINUTE
+            )
+        WHERE
+            metric_name = 'tx_bytes'
+            AND aggregation = 'avg'
+        GROUP BY
+            device_id,
+            window_end
+    ) AS nic ON tcp.device_id = nic.device_id
+    AND tcp.window_end = nic.window_end
+WHERE
+    avg_util >= 50;
+
+statement ok
+CREATE MATERIALIZED VIEW retrans_incidents AS
+SELECT
+    device_id,
+    window_end AS trigger_time,
+    metric_value AS trigger_value
+FROM
+    high_util_tcp_metrics
+WHERE
+    metric_name = 'retrans_rate'
+    AND metric_value > 0.15;
+
+statement ok
+CREATE MATERIALIZED VIEW rtt_incidents AS
+SELECT
+    device_id,
+    window_end AS trigger_time,
+    metric_value AS trigger_value
+FROM
+    high_util_tcp_metrics
+WHERE
+    metric_name = 'srtt'
+    AND metric_value > 500.0;
+
+statement ok
+CREATE MATERIALIZED VIEW download_incidents AS
+SELECT
+    device_id,
+    window_end AS trigger_time,
+    metric_value AS trigger_value
+FROM
+    high_util_tcp_metrics
+WHERE
+    metric_name = 'download_speed'
+    AND metric_value < 200.0;
+
+query TTT
+select * from retrans_incidents;
+----
+812b4ba287f5ee0bc9d43bbf5bbe87fb 2022-06-08 09:42:00 0.24821624079901722
+
+query TTT
+select * from rtt_incidents;
+----
+812b4ba287f5ee0bc9d43bbf5bbe87fb 2022-06-08 09:42:00 599.9202978109153
+
+query TTT
+select * from download_incidents;
+----
+812b4ba287f5ee0bc9d43bbf5bbe87fb 2022-06-08 09:42:00 149.7339243859982
+
+statement ok
+DROP MATERIALIZED VIEW download_incidents;
+
+statement ok
+DROP MATERIALIZED VIEW retrans_incidents;
+
+statement ok
+DROP MATERIALIZED VIEW rtt_incidents;
+
+statement ok
+DROP MATERIALIZED VIEW high_util_tcp_metrics;
+
+statement ok
+DROP TABLE tcp_metrics;
+
+statement ok
+DROP TABLE nics_metrics;

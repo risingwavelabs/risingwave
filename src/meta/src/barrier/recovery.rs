@@ -14,15 +14,16 @@
 
 use std::collections::HashSet;
 use std::iter::Map;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::try_join_all;
 use log::{debug, error};
-use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::Epoch as ProstEpoch;
-use risingwave_pb::stream_service::inject_barrier_response::CreateMviewProgress;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
     UpdateActorsRequest,
@@ -65,7 +66,6 @@ where
         let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
             let info = self.resolve_actor_info(None).await;
             let mut new_epoch = prev_epoch.next();
-
             // Reset all compute nodes, stop and drop existing actors.
             self.reset_compute_nodes(&info, &prev_epoch, &new_epoch)
                 .await;
@@ -89,24 +89,30 @@ where
             let prev_epoch = new_epoch;
             new_epoch = prev_epoch.next();
             // checkpoint, used as init barrier to initialize all executors.
-            let command_ctx = CommandContext::new(
+            let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
                 self.env.stream_client_pool_ref(),
-                &info,
-                &prev_epoch,
-                &new_epoch,
+                info,
+                prev_epoch,
+                new_epoch,
                 Command::checkpoint(),
-            );
+            ));
 
-            match self.inject_barrier(&command_ctx).await {
-                Ok(response) => {
+            let command_ctx_clone = command_ctx.clone();
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            if let Err(err) = self.inject_barrier(command_ctx_clone, tx).await {
+                error!("inject_barrier failed: {}", err);
+                return Err(err);
+            }
+            match rx.recv().await.unwrap() {
+                (_, Ok(response)) => {
                     if let Err(err) = command_ctx.post_collect().await {
                         error!("post_collect failed: {}", err);
                         return Err(err);
                     }
                     Ok((new_epoch, response))
                 }
-                Err(err) => {
+                (_, Err(err)) => {
                     error!("inject_barrier failed: {}", err);
                     Err(err)
                 }
@@ -116,14 +122,14 @@ where
         .expect("Retry until recovery success.");
         debug!("recovery success");
 
-        return (
+        (
             new_epoch,
             self.fragment_manager.all_chain_actor_ids().await,
             responses
                 .into_iter()
                 .flat_map(|r| r.create_mview_progress)
                 .collect(),
-        );
+        )
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
@@ -138,11 +144,7 @@ where
             };
             async move {
                 let client = &self.env.stream_client_pool().get(node).await?;
-                client
-                    .to_owned()
-                    .sync_sources(request)
-                    .await
-                    .to_rw_result()?;
+                client.to_owned().sync_sources(request).await?;
 
                 Ok::<_, RwError>(())
             }
@@ -183,8 +185,7 @@ where
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
                     info: actor_infos.clone(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
@@ -195,8 +196,7 @@ where
                     actors: node_actors.get(node_id).cloned().unwrap_or_default(),
                     ..Default::default()
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         Ok(())
@@ -216,8 +216,7 @@ where
                     request_id,
                     actor_id: actors.to_owned(),
                 })
-                .await
-                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
+                .await?;
         }
 
         Ok(())
@@ -247,7 +246,7 @@ where
                             }),
                         })
                         .await
-                        .to_rw_result()
+                        .map_err(RwError::from)
                 })
                 .await
                 .expect("Force stop actors until success");

@@ -15,6 +15,7 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
+use risingwave_common::catalog::RESERVED_PG_CATALOG_TABLE_ID;
 use risingwave_common::error::Result;
 use tokio::sync::RwLock;
 
@@ -116,7 +117,7 @@ where
 type IdCategoryType = u8;
 
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
-#[allow(non_snake_case, non_upper_case_globals)]
+#[expect(non_snake_case, non_upper_case_globals)]
 pub mod IdCategory {
     use super::IdCategoryType;
 
@@ -164,7 +165,14 @@ where
             test: Arc::new(StoredIdGenerator::new(meta_store.clone(), "test", None).await),
             database: Arc::new(StoredIdGenerator::new(meta_store.clone(), "database", None).await),
             schema: Arc::new(StoredIdGenerator::new(meta_store.clone(), "schema", None).await),
-            table: Arc::new(StoredIdGenerator::new(meta_store.clone(), "table", None).await),
+            table: Arc::new(
+                StoredIdGenerator::new(
+                    meta_store.clone(),
+                    "table",
+                    Some(RESERVED_PG_CATALOG_TABLE_ID + 1),
+                )
+                .await,
+            ),
             worker: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as i32 + 1))
                     .await,
@@ -295,15 +303,6 @@ mod tests {
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
             async move { manager.generate::<{ IdCategory::Test }>().await }
-        }))
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>>>()?;
-        assert_eq!(ids, (0..10000).collect::<Vec<_>>());
-
-        let ids = future::join_all((0..10000).map(|_i| {
-            let manager = &manager;
-            async move { manager.generate::<{ IdCategory::Table }>().await }
         }))
         .await
         .into_iter()

@@ -14,16 +14,14 @@
 
 use std::convert::TryFrom;
 use std::ops::Index;
-use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk, Row};
-use risingwave_common::ensure;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::Expression;
+use crate::{bail, ensure, ExprError, Result};
 
 /// `InputRefExpression` references to a column in input relation
 #[derive(Debug)]
@@ -38,21 +36,7 @@ impl Expression for InputRefExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let array = input.column_at(self.idx).array();
-        // TODO(yuhao): This is a workaround to let `InputRefExpression` visibility aware. We should
-        // compact chunks before using expressions.
-        let bitmap = input.visibility();
-        let cardinality = input.cardinality();
-        match bitmap {
-            Some(bitmap) => {
-                if input.cardinality() != input.capacity() {
-                    Ok(Arc::new(array.compact(bitmap, cardinality)?))
-                } else {
-                    Ok(array)
-                }
-            }
-            None => Ok(array),
-        }
+        Ok(input.column_at(self.idx).array())
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
@@ -72,21 +56,19 @@ impl InputRefExpression {
 }
 
 impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type()? == Type::InputRef);
+        ensure!(prost.get_expr_type().unwrap() == Type::InputRef);
 
-        let ret_type = DataType::from(prost.get_return_type()?);
-        if let RexNode::InputRef(input_ref_node) = prost.get_rex_node()? {
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        if let RexNode::InputRef(input_ref_node) = prost.get_rex_node().unwrap() {
             Ok(Self {
                 return_type: ret_type,
                 idx: input_ref_node.column_idx as usize,
             })
         } else {
-            Err(RwError::from(ErrorCode::InternalError(
-                "expects a input ref node".to_string(),
-            )))
+            bail!("Expect an input ref node")
         }
     }
 }

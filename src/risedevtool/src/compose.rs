@@ -42,6 +42,15 @@ pub struct ComposeService {
     pub user: Option<String>,
     pub container_name: String,
     pub network_mode: Option<String>,
+    pub healthcheck: Option<HealthCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct HealthCheck {
+    test: Vec<String>,
+    interval: String,
+    timeout: String,
+    retries: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +133,20 @@ fn get_cmd_envs(cmd: &Command) -> Result<BTreeMap<String, String>> {
     Ok(result)
 }
 
+fn health_check_port(port: u16) -> HealthCheck {
+    HealthCheck {
+        test: vec![
+            "CMD".into(),
+            "printf".into(),
+            "".into(),
+            format!("/dev/tcp/127.0.0.1/{}", port),
+        ],
+        interval: "1s".to_string(),
+        timeout: "5s".to_string(),
+        retries: 5,
+    }
+}
+
 impl Compose for ComputeNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compute-node");
@@ -155,6 +178,7 @@ impl Compose for ComputeNodeConfig {
                 .map(|x| x.id.clone())
                 .chain(provide_minio.iter().map(|x| x.id.clone()))
                 .collect(),
+            healthcheck: Some(health_check_port(self.port)),
             ..Default::default()
         })
     }
@@ -186,6 +210,7 @@ impl Compose for MetaNodeConfig {
                 self.exporter_port.to_string(),
                 self.dashboard_port.to_string(),
             ],
+            healthcheck: Some(health_check_port(self.port)),
             ..Default::default()
         })
     }
@@ -208,6 +233,7 @@ impl Compose for FrontendConfig {
             ports: vec![format!("{}:{}", self.port, self.port)],
             expose: vec![self.port.to_string()],
             depends_on: provide_meta_node.iter().map(|x| x.id.clone()).collect(),
+            healthcheck: Some(health_check_port(self.port)),
             ..Default::default()
         })
     }
@@ -243,6 +269,7 @@ impl Compose for CompactorConfig {
                 .map(|x| x.id.clone())
                 .chain(provide_minio.iter().map(|x| x.id.clone()))
                 .collect(),
+            healthcheck: Some(health_check_port(self.port)),
             ..Default::default()
         })
     }
@@ -278,6 +305,7 @@ mkdir -p "/data/{bucket_name}"
             ],
             volumes: vec![format!("{}:/data", self.id)],
             expose: vec![self.port.to_string(), self.console_port.to_string()],
+            healthcheck: Some(health_check_port(self.port)),
             ..Default::default()
         })
     }
@@ -321,7 +349,12 @@ impl Compose for RedPandaConfig {
                 self.outside_port.to_string(),
             ],
             volumes: vec![format!("{}:/var/lib/redpanda/data", self.id)],
-            ports: vec![format!("{}:{}", self.outside_port, self.outside_port)],
+            ports: vec![
+                format!("{}:{}", self.outside_port, self.outside_port),
+                // Redpanda admin port
+                "9644:9644".to_string(),
+            ],
+            healthcheck: Some(health_check_port(self.outside_port)),
             ..Default::default()
         })
     }
@@ -346,6 +379,7 @@ impl Compose for PrometheusConfig {
             expose: vec![self.port.to_string()],
             ports: vec![format!("{}:{}", self.port, self.port)],
             volumes: vec![format!("{}:/prometheus", self.id)],
+            healthcheck: Some(health_check_port(self.port)),
             ..Default::default()
         };
 
@@ -390,6 +424,7 @@ impl Compose for GrafanaConfig {
                 "./grafana-risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/grafana-risedev-dashboard.yml".to_string(),
                 "./risingwave-dashboard.json:/risingwave-dashboard.json".to_string()
             ],
+            healthcheck: Some(health_check_port(self.port)),
             ..Default::default()
         };
 
@@ -412,6 +447,7 @@ impl Compose for EtcdConfig {
                 format!("{}:{}", self.peer_port, self.peer_port),
             ],
             volumes: vec![format!("{}:/etcd-data", self.id)],
+            healthcheck: Some(health_check_port(self.port)),
             ..Default::default()
         };
 

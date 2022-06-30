@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound::*;
+use std::ops::{Bound, RangeBounds};
 use std::{ptr, u64};
 
 use bytes::{Buf, BufMut};
@@ -54,6 +56,7 @@ pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
 }
 
 /// Extracts epoch part from key
+#[inline(always)]
 pub fn get_epoch(full_key: &[u8]) -> Epoch {
     let mut epoch: Epoch = 0;
 
@@ -71,12 +74,24 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 }
 
 /// Extract table id in key prefix
+#[inline(always)]
 pub fn get_table_id(full_key: &[u8]) -> Option<u32> {
     if full_key[0] == b't' {
         let mut buf = &full_key[1..];
         Some(buf.get_u32())
     } else {
         None
+    }
+}
+
+pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (Option<u32>, Epoch) {
+    match get_table_id(full_key) {
+        Some(table_id) => {
+            let epoch = get_epoch(full_key);
+            (Some(table_id), epoch)
+        }
+
+        None => (None, 0),
     }
 }
 
@@ -149,6 +164,51 @@ fn next_key_no_alloc(key: &[u8]) -> Option<(&[u8], u8)> {
 }
 
 // End Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
+
+/// Get the end bound of the given `prefix` when transforming it to a key range.
+fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+    if let Some((s, e)) = next_key_no_alloc(prefix) {
+        let mut res = Vec::with_capacity(s.len() + 1);
+        res.extend_from_slice(s);
+        res.push(e);
+        Excluded(res)
+    } else {
+        Unbounded
+    }
+}
+
+/// Transform the given `prefix` to a key range.
+pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+    if prefix.is_empty() {
+        (Unbounded, Unbounded)
+    } else {
+        (Included(prefix.to_vec()), end_bound_of_prefix(prefix))
+    }
+}
+
+/// Prepend the `prefix` to the given key `range`.
+pub fn prefixed_range<B: AsRef<[u8]>>(
+    range: impl RangeBounds<B>,
+    prefix: &[u8],
+) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+    let start = match range.start_bound() {
+        Included(b) => Included([prefix, b.as_ref()].concat()),
+        Excluded(_) => unimplemented!(),
+        Unbounded => Included(prefix.to_vec()),
+    };
+
+    let end = match range.end_bound() {
+        Included(b) => Included([prefix, b.as_ref()].concat()),
+        Excluded(b) => {
+            let b = b.as_ref();
+            assert!(!b.is_empty());
+            Excluded([prefix, b].concat())
+        }
+        Unbounded => end_bound_of_prefix(prefix),
+    };
+
+    (start, end)
+}
 
 /// [`FullKey`] can be created on either a `Vec<u8>` or a `&[u8]`.
 ///

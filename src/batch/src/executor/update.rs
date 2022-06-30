@@ -99,18 +99,18 @@ impl UpdateExecutor {
             let len = data_chunk.cardinality();
 
             let updated_data_chunk = {
-                let columns = self
+                let columns: Vec<_> = self
                     .exprs
                     .iter_mut()
                     .map(|expr| expr.eval(&data_chunk).map(Column::new))
-                    .collect::<Result<Vec<_>>>()?;
+                    .try_collect()?;
 
                 DataChunk::new(columns, len)
             };
 
             // Merge two data chunks into (U-, U+) pairs.
             // TODO: split chunks
-            let mut builders = schema.create_array_builders(len * 2)?;
+            let mut builders = schema.create_array_builders(len * 2);
             for row in data_chunk
                 .rows()
                 .zip_eq(updated_data_chunk.rows())
@@ -123,7 +123,7 @@ impl UpdateExecutor {
             let columns = builders
                 .into_iter()
                 .map(|b| b.finish().map(|a| a.into()))
-                .collect::<Result<Vec<_>>>()?;
+                .try_collect()?;
 
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -151,7 +151,7 @@ impl UpdateExecutor {
 
         // Create ret value
         {
-            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1)?;
+            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_updated as i64))?;
 
             let array = array_builder.finish()?;
@@ -176,11 +176,11 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 
         let table_id = TableId::from(&update_node.table_source_ref_id);
 
-        let exprs = update_node
+        let exprs: Vec<_> = update_node
             .get_exprs()
             .iter()
             .map(build_from_prost)
-            .collect::<Result<Vec<BoxedExpression>>>()?;
+            .try_collect()?;
 
         Ok(Box::new(Self::new(
             table_id,

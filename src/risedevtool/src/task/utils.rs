@@ -18,7 +18,7 @@ use anyhow::{anyhow, Result};
 
 use crate::{AwsS3Config, MetaNodeConfig, MinioConfig};
 
-/// Add a meta node to the parameters
+/// Add a meta node to the parameters.
 pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) -> Result<()> {
     match provide_meta_node {
         [] => {
@@ -41,16 +41,25 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
     Ok(())
 }
 
+/// Add a storage backend to the parameters. Returns whether this is a shared backend.
 pub fn add_storage_backend(
     id: &str,
     provide_minio: &[MinioConfig],
     provide_aws_s3: &[AwsS3Config],
+    allow_hummock_in_memory: bool,
     cmd: &mut Command,
-) -> Result<()> {
-    match (provide_minio, provide_aws_s3) {
-        ([], []) => return Err(anyhow!(
-            "{} is not compatible with in-memory state backend. Need to enable either minio or aws-s3.", id
-        )),
+) -> Result<bool> {
+    let is_shared_backend = match (provide_minio, provide_aws_s3) {
+        ([], []) => {
+            if allow_hummock_in_memory {
+                cmd.arg("--state-store").arg("hummock+memory");
+                false
+            } else {
+                return Err(anyhow!(
+                    "{} is not compatible with in-memory state backend. Need to enable either minio or aws-s3.", id
+                ));
+            }
+        }
         ([minio], []) => {
             cmd.arg("--state-store").arg(format!(
                 "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
@@ -76,5 +85,5 @@ pub fn add_storage_backend(
         }
     };
 
-    Ok(())
+    Ok(is_shared_backend)
 }

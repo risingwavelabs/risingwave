@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::sync::Arc;
 
@@ -23,7 +23,6 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
@@ -53,6 +52,7 @@ pub fn default_config_for_test() -> StorageConfig {
         disable_remote_compactor: false,
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
+        share_buffer_upload_concurrency: 1,
     }
 }
 
@@ -82,7 +82,8 @@ pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>)
             inf: false,
         }),
         file_size: batches.len() as u64,
-        vnode_bitmaps: vec![],
+        table_ids: vec![],
+        unit_id: u64::MAX,
     }
 }
 
@@ -121,12 +122,13 @@ pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
 pub fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
-) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
-    let mut b = SSTableBuilder::new(opts);
+) -> (Bytes, SstableMeta, Vec<u32>) {
+    let mut b = SSTableBuilder::new(0, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }
-    b.finish()
+    let (_, data, meta, table_ids) = b.finish();
+    (data, meta, table_ids)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -138,8 +140,11 @@ pub async fn gen_test_sstable_inner(
     policy: CachePolicy,
 ) -> Sstable {
     let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
-    let sst = Sstable { id: sst_id, meta };
-    sstable_store.put(sst.clone(), data, policy).await.unwrap();
+    let sst = Sstable::new(sst_id, meta.clone());
+    sstable_store
+        .put(Sstable::new(sst_id, meta.clone()), data, policy)
+        .await
+        .unwrap();
     sst
 }
 

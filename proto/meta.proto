@@ -69,8 +69,29 @@ message FlushResponse {
   common.Status status = 1;
 }
 
+message ListTableFragmentsRequest {
+  repeated uint32 table_ids = 1;
+}
+
+message ListTableFragmentsResponse {
+  message ActorInfo {
+    uint32 id = 1;
+    stream_plan.StreamNode node = 2;
+    repeated stream_plan.Dispatcher dispatcher = 3;
+  }
+  message FragmentInfo {
+    uint32 id = 1;
+    repeated ActorInfo actors = 4;
+  }
+  message TableFragmentInfo {
+    repeated FragmentInfo fragments = 1;
+  }
+  map<uint32, TableFragmentInfo> table_fragments = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
+  rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
 }
 
 // Below for cluster service.
@@ -131,7 +152,6 @@ message MetaSnapshot {
   repeated catalog.Schema schema = 3;
   repeated catalog.Source source = 4;
   repeated catalog.Table table = 5;
-  repeated catalog.VirtualTable view = 6;
   repeated user.UserInfo users = 7;
 }
 
@@ -160,4 +180,15 @@ message SubscribeResponse {
 
 service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+}
+
+message MetaLeaderInfo {
+  string node_address = 1;
+  uint64 lease_id = 2;
+}
+
+message MetaLeaseInfo {
+  MetaLeaderInfo leader = 1;
+  uint64 lease_register_time = 2;
+  uint64 lease_expire_time = 3;
 }

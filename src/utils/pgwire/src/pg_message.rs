@@ -21,7 +21,7 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_response::StatementType;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
@@ -32,9 +32,11 @@ pub enum FeMessage {
     Startup(FeStartupMessage),
     Query(FeQueryMessage),
     Parse(FeParseMessage),
+    Password(FePasswordMessage),
     Describe(FeDescribeMessage),
     Bind(FeBindMessage),
     Execute(FeExecuteMessage),
+    Close(FeCloseMessage),
     Sync,
     CancelQuery,
     Terminate,
@@ -68,47 +70,97 @@ pub struct FeQueryMessage {
 }
 
 #[derive(Debug)]
-pub struct FeBindMessage {}
+pub struct FeBindMessage {
+    pub format_codes: Vec<i16>,
+    pub result_format_codes: Vec<i16>,
+    pub params: Vec<Bytes>,
+    pub portal_name: Bytes,
+    pub statement_name: Bytes,
+}
 
 #[derive(Debug)]
 pub struct FeExecuteMessage {
+    pub portal_name: Bytes,
     pub max_rows: i32,
 }
 
 #[derive(Debug)]
 pub struct FeParseMessage {
+    pub statement_name: Bytes,
     pub query_string: Bytes,
+    pub type_ids: Vec<i32>,
+}
+
+#[derive(Debug)]
+pub struct FePasswordMessage {
+    pub password: Bytes,
 }
 
 #[derive(Debug)]
 pub struct FeDescribeMessage {
     // 'S' to describe a prepared statement; or 'P' to describe a portal.
     pub kind: u8,
+    pub query_name: Bytes,
+}
+
+#[derive(Debug)]
+pub struct FeCloseMessage {
+    pub kind: u8,
+    pub query_name: Bytes,
 }
 
 impl FeDescribeMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let kind = buf.get_u8();
-        let _pstmt_name = read_null_terminated(&mut buf)?;
+        let query_name = read_null_terminated(&mut buf)?;
 
-        if kind != b'S' {
-            unimplemented!("only prepared statement Describe is implemented");
-        }
-
-        Ok(FeMessage::Describe(FeDescribeMessage { kind }))
+        Ok(FeMessage::Describe(FeDescribeMessage { query_name, kind }))
     }
 }
 
 impl FeBindMessage {
+    // Bind Message Header
+    // +-----+-----------+
+    // | 'B' | int32 len |
+    // +-----+-----------+
+    // Bind Message Body
+    // +----------------+---------------+
+    // | str portalname | str statement |
+    // +----------------+---------------+
+    // +---------------------+------------------+-------+
+    // | int16 numFormatCode | int16 FormatCode |  ...  |
+    // +---------------------+------------------+-------+
+    // +-----------------+-------------------+---------------+
+    // | int16 numParams | int32 valueLength |  byte value.. |
+    // +-----------------+-------------------+---------------+
+    // +----------------------------------+------------------+-------+
+    // | int16 numResultColumnFormatCodes | int16 FormatCode |  ...  |
+    // +----------------------------------+------------------+-------+
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let portal_name = read_null_terminated(&mut buf)?;
-        let _pstmt_name = read_null_terminated(&mut buf)?;
+        let statement_name = read_null_terminated(&mut buf)?;
+        // Read FormatCode
+        let len = buf.get_i16();
+        let format_codes = (0..len).map(|_| buf.get_i16()).collect();
+        // Read Params
+        let len = buf.get_i16();
+        let params = (0..len)
+            .map(|_| {
+                let val_len = buf.get_i32();
+                buf.copy_to_bytes(val_len as usize)
+            })
+            .collect();
+        // Read ResultFormatCode
+        let len = buf.get_i16();
+        let result_format_codes = (0..len).map(|_| buf.get_i16()).collect();
 
-        if !portal_name.is_empty() {
-            unimplemented!("named portals not implemented");
-        }
-
-        Ok(FeMessage::Bind(FeBindMessage {}))
+        Ok(FeMessage::Bind(FeBindMessage {
+            format_codes,
+            params,
+            result_format_codes,
+            portal_name,
+            statement_name,
+        }))
     }
 }
 
@@ -117,29 +169,34 @@ impl FeExecuteMessage {
         let portal_name = read_null_terminated(&mut buf)?;
         let max_rows = buf.get_i32();
 
-        if !portal_name.is_empty() {
-            unimplemented!("named portals not implemented");
-        }
-
-        if max_rows != 0 {
-            unimplemented!("row limit in Execute message not supported");
-        }
-
-        Ok(FeMessage::Execute(FeExecuteMessage { max_rows }))
+        Ok(FeMessage::Execute(FeExecuteMessage {
+            portal_name,
+            max_rows,
+        }))
     }
 }
 
 impl FeParseMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
-        let _pstmt_name = read_null_terminated(&mut buf)?;
+        let statement_name = read_null_terminated(&mut buf)?;
         let query_string = read_null_terminated(&mut buf)?;
         let nparams = buf.get_i16();
 
-        if nparams != 0 {
-            unimplemented!("query params not implemented");
-        }
+        let type_ids: Vec<i32> = (0..nparams).map(|_| buf.get_i32()).collect();
 
-        Ok(FeMessage::Parse(FeParseMessage { query_string }))
+        Ok(FeMessage::Parse(FeParseMessage {
+            statement_name,
+            query_string,
+            type_ids,
+        }))
+    }
+}
+
+impl FePasswordMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let password = read_null_terminated(&mut buf)?;
+
+        Ok(FeMessage::Password(FePasswordMessage { password }))
     }
 }
 
@@ -157,6 +214,14 @@ impl FeQueryMessage {
                 format!("Input end error: {}", err),
             )),
         }
+    }
+}
+
+impl FeCloseMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let kind = buf.get_u8();
+        let query_name = read_null_terminated(&mut buf)?;
+        Ok(FeMessage::Close(FeCloseMessage { kind, query_name }))
     }
 }
 
@@ -181,6 +246,8 @@ impl FeMessage {
             b'E' => FeExecuteMessage::parse(sql_bytes),
             b'S' => Ok(FeMessage::Sync),
             b'X' => Ok(FeMessage::Terminate),
+            b'C' => FeCloseMessage::parse(sql_bytes),
+            b'p' => FePasswordMessage::parse(sql_bytes),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("Unsupported tag of regular message: {}", val),
@@ -242,19 +309,23 @@ fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
 #[derive(Debug)]
 pub enum BeMessage<'a> {
     AuthenticationOk,
+    AuthenticationCleartextPassword,
+    AuthenticationMD5Password(&'a [u8; 4]),
     CommandComplete(BeCommandCompleteMessage),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
     EncryptionResponse,
     EmptyQueryResponse,
     ParseComplete,
     BindComplete,
-    ParameterDescription,
+    PortalSuspended,
+    ParameterDescription(&'a [TypeOid]),
     NoData,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
     ErrorResponse(BoxedError),
+    CloseComplete,
 }
 
 #[derive(Debug)]
@@ -283,6 +354,30 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'R');
                 buf.put_i32(8);
                 buf.put_i32(0);
+            }
+
+            // AuthenticationCleartextPassword
+            // +-----+----------+-----------+
+            // | 'R' | int32(8) | int32(3)  |
+            // +-----+----------+-----------+
+            BeMessage::AuthenticationCleartextPassword => {
+                buf.put_u8(b'R');
+                buf.put_i32(8);
+                buf.put_i32(3);
+            }
+
+            // AuthenticationMD5Password
+            // +-----+----------+-----------+----------------+
+            // | 'R' | int32(12) | int32(5)  |  Byte4(salt)  |
+            // +-----+----------+-----------+----------------+
+            //
+            // The 4-byte random salt will be used by client to send encrypted password as
+            // concat('md5', md5(concat(md5(concat(password, username)), random-salt))).
+            BeMessage::AuthenticationMD5Password(salt) => {
+                buf.put_u8(b'R');
+                buf.put_i32(12);
+                buf.put_i32(5);
+                buf.put_slice(&salt[..]);
             }
 
             // ParameterStatus
@@ -429,14 +524,28 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |_| Ok(()))?;
             }
 
-            BeMessage::ParameterDescription => {
+            BeMessage::CloseComplete => {
+                buf.put_u8(b'3');
+                write_body(buf, |_| Ok(()))?;
+            }
+
+            BeMessage::PortalSuspended => {
+                buf.put_u8(b's');
+                write_body(buf, |_| Ok(()))?;
+            }
+            // ParameterDescription
+            // +-----+-----------+--------------------+---------------+-----+---------------+
+            // | 't' | int32 len | int16 ParameterNum | int32 typeOID | ... | int32 typeOID |
+            // +-----+-----------+-----------------+--+---------------+-----+---------------+
+            BeMessage::ParameterDescription(para_descs) => {
                 buf.put_u8(b't');
                 write_body(buf, |buf| {
-                    // we don't support params, so always 0
-                    buf.put_i16(0);
+                    buf.put_i16(para_descs.len() as i16);
+                    for oid in para_descs.iter() {
+                        buf.put_i32(oid.as_number());
+                    }
                     Ok(())
-                })
-                .unwrap();
+                })?;
             }
 
             BeMessage::NoData => {

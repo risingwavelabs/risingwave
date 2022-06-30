@@ -16,10 +16,9 @@ use std::fmt::Formatter;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::types::Row;
-/// Port from StatementType.java.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types)]
 pub enum StatementType {
     INSERT,
     DELETE,
@@ -71,6 +70,8 @@ pub struct PgResponse {
     row_cnt: i32,
     notice: Option<String>,
     values: Vec<Row>,
+    // Used for row_limit mode to indicate whether run out of data
+    row_end: bool,
     row_desc: Vec<PgFieldDescriptor>,
 }
 
@@ -95,18 +96,20 @@ impl PgResponse {
         row_cnt: i32,
         values: Vec<Row>,
         row_desc: Vec<PgFieldDescriptor>,
+        row_end: bool,
     ) -> Self {
         Self {
             stmt_type,
             row_cnt,
             values,
             row_desc,
+            row_end,
             notice: None,
         }
     }
 
     pub fn empty_result(stmt_type: StatementType) -> Self {
-        Self::new(stmt_type, 0, vec![], vec![])
+        Self::new(stmt_type, 0, vec![], vec![], true)
     }
 
     pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
@@ -115,6 +118,7 @@ impl PgResponse {
             row_cnt: 0,
             values: vec![],
             row_desc: vec![],
+            row_end: true,
             notice: Some(notice),
         }
     }
@@ -145,11 +149,19 @@ impl PgResponse {
         self.stmt_type == StatementType::EMPTY
     }
 
+    pub fn is_row_end(&self) -> bool {
+        self.row_end
+    }
+
     pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_desc.clone()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Row> + '_ {
         self.values.iter()
+    }
+
+    pub fn values(&self) -> Vec<Row> {
+        self.values.clone()
     }
 }

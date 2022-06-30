@@ -21,8 +21,8 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
 use risedev::{
-    compose_deploy, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile, ComposeService,
-    ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
+    compose_deploy, compute_risectl_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
+    ComposeService, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
 };
 use serde::Deserialize;
 
@@ -162,7 +162,11 @@ fn main() -> Result<()> {
                     writeln!(
                         log_buffer,
                         "-- Frontend --\nAccess inside cluster: {}\ntpch-bench args: {}\n",
-                        style(format!("psql -d dev -h {} -p {}", c.address, c.port)).green(),
+                        style(format!(
+                            "psql -d dev -h {} -p {} -U root",
+                            c.address, c.port
+                        ))
+                        .green(),
                         style(&arg).green()
                     )?;
                     fs::write(
@@ -256,7 +260,7 @@ fn main() -> Result<()> {
                 let public_ip = &ec2_instance.public_ip;
                 writeln!(
                     log_buffer,
-                    "-- Meta Node --\nLogin to meta node by {}\nor using VSCode {}",
+                    "-- Meta Node --\nLogin to meta node by {}\nor using VSCode {}\n",
                     style(format!("ssh ubuntu@{}", public_ip)).green(),
                     style(format!(
                         "code --remote ssh-remote+ubuntu@{} <path>",
@@ -271,6 +275,9 @@ fn main() -> Result<()> {
                 yaml,
             )?;
         }
+
+        let env = compute_risectl_env(&services)?;
+        writeln!(log_buffer, "-- risectl --\n{}\n", style(env).green())?;
 
         compose_deploy(
             Path::new(&opts.directory),

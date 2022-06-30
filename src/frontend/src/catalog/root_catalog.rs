@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, TableId};
+use risingwave_common::catalog::{CatalogVersion, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
@@ -25,8 +25,9 @@ use super::source_catalog::SourceCatalog;
 use super::{CatalogError, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::{pg_catalog, DatabaseId, SchemaId};
 
 /// Root catalog of database catalog. Manage all database/schema/table in memory on frontend. it
 /// is protected by a `RwLock`. only [`crate::observer::observer_manager::ObserverManager`] will get
@@ -44,7 +45,7 @@ pub struct Catalog {
     db_name_by_id: HashMap<DatabaseId, String>,
 }
 
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for Catalog {
     fn default() -> Self {
         Self {
@@ -79,7 +80,19 @@ impl Catalog {
     pub fn create_schema(&mut self, proto: ProstSchema) {
         self.get_database_mut(proto.database_id)
             .unwrap()
-            .create_schema(proto);
+            .create_schema(proto.clone());
+
+        if proto.name == PG_CATALOG_SCHEMA_NAME {
+            pg_catalog::get_all_pg_catalogs()
+                .into_iter()
+                .for_each(|sys_table| {
+                    self.get_database_mut(proto.database_id)
+                        .unwrap()
+                        .get_schema_mut(proto.id)
+                        .unwrap()
+                        .create_sys_table(sys_table);
+                });
+        }
     }
 
     pub fn create_table(&mut self, proto: &ProstTable) {
@@ -133,6 +146,10 @@ impl Catalog {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_names())
     }
 
+    pub fn get_all_schema_info(&self, db_name: &str) -> Result<Vec<ProstSchema>> {
+        Ok(self.get_database_by_name(db_name)?.get_all_schema_info())
+    }
+
     pub fn get_all_database_names(&self) -> Vec<String> {
         self.database_by_name.keys().cloned().collect_vec()
     }
@@ -151,6 +168,17 @@ impl Catalog {
     ) -> Result<&TableCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
+    }
+
+    pub fn get_sys_table_by_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        table_name: &str,
+    ) -> Result<&SystemCatalog> {
+        self.get_schema_by_name(db_name, schema_name)?
+            .get_system_table_by_name(table_name)
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
     }
 

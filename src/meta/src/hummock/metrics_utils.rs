@@ -16,9 +16,10 @@ use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::enumerate;
-use prometheus::Histogram;
 use prost::Message;
-use risingwave_pb::hummock::{CompactMetrics, HummockVersion, TableSetStatistics};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_pb::hummock::HummockVersion;
 
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
@@ -37,9 +38,11 @@ pub fn trigger_sst_stat(
     compact_status: &CompactStatus,
     current_version: &HummockVersion,
 ) {
-    let level_sst_cnt = |level_idx: usize| current_version.levels[level_idx].table_infos.len();
-    let level_sst_size =
-        |level_idx: usize| current_version.levels[level_idx].total_file_size / 1024;
+    // TODO #2065: add metrics for all compaction groups
+    let levels =
+        current_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
+    let level_sst_cnt = |level_idx: usize| levels[level_idx].table_infos.len();
+    let level_sst_size = |level_idx: usize| levels[level_idx].total_file_size / 1024;
     for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
         let sst_num = level_sst_cnt(idx);
         let compact_cnt = level_handler.get_pending_file_count();
@@ -89,75 +92,4 @@ pub fn trigger_sst_stat(
             );
         }
     }
-}
-
-fn single_level_stat_bytes<T: FnMut(String) -> Histogram>(
-    mut metric_vec: T,
-    level_stat: &TableSetStatistics,
-) {
-    if level_stat.size_kb > 0 {
-        let level_label = level_stat.level_idx.to_string();
-        metric_vec(level_label).observe(level_stat.size_kb as f64);
-    }
-}
-
-fn single_level_stat_sstn<T: FnMut(String) -> Histogram>(
-    mut metric_vec: T,
-    level_stat: &TableSetStatistics,
-) {
-    if level_stat.cnt > 0 {
-        let level_label = level_stat.level_idx.to_string();
-        metric_vec(level_label).observe(level_stat.cnt as f64);
-    }
-}
-
-pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) {
-    metrics
-        .level_compact_frequency
-        .get_metric_with_label_values(&[&compact_metrics
-            .read_level_n
-            .as_ref()
-            .unwrap()
-            .level_idx
-            .to_string()])
-        .unwrap()
-        .inc();
-
-    single_level_stat_bytes(
-        |label| metrics.level_compact_read_curr.with_label_values(&[&label]),
-        compact_metrics.read_level_n.as_ref().unwrap(),
-    );
-    single_level_stat_bytes(
-        |label| metrics.level_compact_read_next.with_label_values(&[&label]),
-        compact_metrics.read_level_nplus1.as_ref().unwrap(),
-    );
-    single_level_stat_bytes(
-        |label| metrics.level_compact_write.with_label_values(&[&label]),
-        compact_metrics.write.as_ref().unwrap(),
-    );
-
-    single_level_stat_sstn(
-        |label| {
-            metrics
-                .level_compact_read_sstn_curr
-                .with_label_values(&[&label])
-        },
-        compact_metrics.read_level_n.as_ref().unwrap(),
-    );
-    single_level_stat_sstn(
-        |label| {
-            metrics
-                .level_compact_read_sstn_next
-                .with_label_values(&[&label])
-        },
-        compact_metrics.read_level_nplus1.as_ref().unwrap(),
-    );
-    single_level_stat_sstn(
-        |label| {
-            metrics
-                .level_compact_write_sstn
-                .with_label_values(&[&label])
-        },
-        compact_metrics.write.as_ref().unwrap(),
-    );
 }

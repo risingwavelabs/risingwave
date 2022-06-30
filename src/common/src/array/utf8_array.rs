@@ -17,13 +17,13 @@ use std::iter;
 use std::mem::size_of;
 
 use itertools::Itertools;
-use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
+use risingwave_pb::common::buffer::CompressionType;
+use risingwave_pb::common::Buffer;
+use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::error::Result;
 
 /// `Utf8Array` is a collection of Rust Utf8 `String`s.
 #[derive(Debug)]
@@ -113,6 +113,10 @@ impl Array for Utf8Array {
         &self.bitmap
     }
 
+    fn into_null_bitmap(self) -> Bitmap {
+        self.bitmap
+    }
+
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
     }
@@ -127,15 +131,15 @@ impl Array for Utf8Array {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
-        let array_builder = Utf8ArrayBuilder::new(capacity)?;
+    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+        let array_builder = Utf8ArrayBuilder::new(capacity);
         Ok(ArrayBuilderImpl::Utf8(array_builder))
     }
 }
 
 impl Utf8Array {
-    pub fn from_slice(data: &[Option<&str>]) -> Result<Self> {
-        let mut builder = <Self as Array>::Builder::new(data.len())?;
+    pub fn from_slice(data: &[Option<&str>]) -> ArrayResult<Self> {
+        let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
             builder.append(*i)?;
         }
@@ -154,17 +158,17 @@ pub struct Utf8ArrayBuilder {
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
         let mut offset = Vec::with_capacity(capacity + 1);
         offset.push(0);
-        Ok(Self {
+        Self {
             offset,
             data: Vec::with_capacity(capacity),
             bitmap: BitmapBuilder::with_capacity(capacity),
-        })
+        }
     }
 
-    fn append<'a>(&'a mut self, value: Option<&'a str>) -> Result<()> {
+    fn append<'a>(&'a mut self, value: Option<&'a str>) -> ArrayResult<()> {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -179,7 +183,7 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         Ok(())
     }
 
-    fn append_array(&mut self, other: &Utf8Array) -> Result<()> {
+    fn append_array(&mut self, other: &Utf8Array) -> ArrayResult<()> {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -191,7 +195,7 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         Ok(())
     }
 
-    fn finish(self) -> Result<Utf8Array> {
+    fn finish(self) -> ArrayResult<Utf8Array> {
         Ok(Utf8Array {
             bitmap: (self.bitmap).finish(),
             data: self.data,
@@ -207,7 +211,7 @@ impl Utf8ArrayBuilder {
 
     /// `append_partial` will add a partial dirty data of the new record.
     /// The partial data will keep untracked until `finish_partial` was called.
-    unsafe fn append_partial(&mut self, x: &str) -> Result<()> {
+    unsafe fn append_partial(&mut self, x: &str) -> ArrayResult<()> {
         self.data.extend_from_slice(x.as_bytes());
         Ok(())
     }
@@ -215,7 +219,7 @@ impl Utf8ArrayBuilder {
     /// `finish_partial` will create a new record based on the current dirty data.
     /// `finish_partial` was safe even if we don't call `append_partial`, which
     /// is equivalent to appending an empty string.
-    fn finish_partial(&mut self) -> Result<()> {
+    fn finish_partial(&mut self) -> ArrayResult<()> {
         self.offset.push(self.data.len());
         self.bitmap.append(true);
         Ok(())
@@ -228,16 +232,18 @@ pub struct BytesWriter {
 }
 
 impl BytesWriter {
-    /// `write_ref` will consume `BytesWriter` and pass the ownership
-    /// of `builder` to `BytesGuard`.
-    pub fn write_ref(mut self, value: &str) -> Result<BytesGuard> {
+    /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
+    pub fn write_ref(mut self, value: &str) -> ArrayResult<BytesGuard> {
         self.builder.append(Some(value))?;
         Ok(BytesGuard {
             builder: self.builder,
         })
     }
 
-    pub fn write_from_char_iter(self, iter: impl Iterator<Item = char>) -> Result<BytesGuard> {
+    /// `write_from_char_iter` will consume `BytesWriter` and write the characters from the `iter`.
+    ///
+    /// Prefer [`BytesWriter::begin`] for writing multiple string pieces.
+    pub fn write_from_char_iter(self, iter: impl Iterator<Item = char>) -> ArrayResult<BytesGuard> {
         let mut writer = self.begin();
         for c in iter {
             let mut buf = [0; 4];
@@ -247,8 +253,8 @@ impl BytesWriter {
         writer.finish()
     }
 
-    /// `begin` will create a `PartialBytesWriter`, which allow multiple
-    /// appendings to create a new record.
+    /// `begin` will create a `PartialBytesWriter`, which allow multiple appendings to create a new
+    /// record.
     pub fn begin(self) -> PartialBytesWriter {
         PartialBytesWriter {
             builder: self.builder,
@@ -264,7 +270,7 @@ impl PartialBytesWriter {
     /// `write_ref` will append partial dirty data to `builder`.
     /// `PartialBytesWriter::write_ref` is different from `BytesWriter::write_ref`
     /// in that it allows us to call it multiple times.
-    pub fn write_ref(&mut self, value: &str) -> Result<()> {
+    pub fn write_ref(&mut self, value: &str) -> ArrayResult<()> {
         // SAFETY: The dirty `builder` is owned by `PartialBytesWriter`.
         // We can't access it until `finish` was called.
         unsafe { self.builder.append_partial(value) }
@@ -273,7 +279,7 @@ impl PartialBytesWriter {
     /// `finish` will be called while the entire record is written.
     /// Exactly one new record was appended and the `builder` can be safely used,
     /// so we move the builder to `BytesGuard`.
-    pub fn finish(mut self) -> Result<BytesGuard> {
+    pub fn finish(mut self) -> ArrayResult<BytesGuard> {
         self.builder.finish_partial()?;
         Ok(BytesGuard {
             builder: self.builder,
@@ -302,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_utf8_builder() {
-        let mut builder = Utf8ArrayBuilder::new(0).unwrap();
+        let mut builder = Utf8ArrayBuilder::new(0);
         for i in 0..100 {
             if i % 2 == 0 {
                 builder.append(Some(&format!("{}", i))).unwrap();
@@ -315,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_utf8_partial_writer() -> Result<()> {
-        let builder = Utf8ArrayBuilder::new(0)?;
+        let builder = Utf8ArrayBuilder::new(0);
         let writer = builder.writer();
         let mut partial_writer = writer.begin();
         for _ in 0..2 {

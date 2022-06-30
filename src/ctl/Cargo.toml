@@ -1,16 +1,29 @@
 [package]
 name = "risingwave_ctl"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 risingwave_common = { path = "../common" }
+risingwave_frontend = { path = "../frontend" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
+size = "0.2"
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+] }
 tracing = { version = "0.1" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

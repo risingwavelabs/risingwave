@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use risingwave_common::array::{BytesGuard, BytesWriter};
-use risingwave_common::error::Result;
+
+use crate::Result;
 
 #[inline(always)]
 pub fn replace(s: &str, from_str: &str, to_str: &str, writer: BytesWriter) -> Result<BytesGuard> {
     if from_str.is_empty() {
-        return writer.write_ref(s);
+        return writer.write_ref(s).map_err(Into::into);
     }
     let mut last = 0;
     let mut writer = writer.begin();
@@ -29,7 +30,7 @@ pub fn replace(s: &str, from_str: &str, to_str: &str, writer: BytesWriter) -> Re
         last = start + from_str.len();
     }
     writer.write_ref(&s[last..])?;
-    writer.finish()
+    writer.finish().map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -50,7 +51,7 @@ mod tests {
         ];
 
         for (s, from_str, to_str, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1).unwrap();
+            let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let guard = replace(s, from_str, to_str, writer).unwrap();
             let array = guard.into_inner().finish().unwrap();

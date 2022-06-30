@@ -21,14 +21,15 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use super::{VirtualNode, VIRTUAL_NODE_COUNT};
 use crate::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, Row, StructRef,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk, ListRef, Row,
+    StructRef,
 };
 use crate::error::Result;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum,
+    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
+    VIRTUAL_NODE_COUNT,
 };
 use crate::util::hash_util::CRC32FastBuilder;
 
@@ -64,7 +65,7 @@ impl HashCode {
 pub trait HashKeySerializer {
     type K: HashKey;
     fn from_hash_code(hash_code: HashCode) -> Self;
-    fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) -> Result<()>;
+    fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>);
     fn into_hash_key(self) -> Self::K;
 }
 
@@ -96,16 +97,20 @@ pub trait HashKeySerDe<'a>: ScalarRef<'a> {
 pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
     type S: HashKeySerializer<K = Self>;
 
-    fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> Result<Vec<Self>> {
+    fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
         let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
-        Self::build_from_hash_code(column_idxes, data_chunk, hash_codes)
+        Ok(Self::build_from_hash_code(
+            column_idxes,
+            data_chunk,
+            hash_codes,
+        ))
     }
 
     fn build_from_hash_code(
         column_idxes: &[usize],
         data_chunk: &DataChunk,
         hash_codes: Vec<HashCode>,
-    ) -> Result<Vec<Self>> {
+    ) -> Vec<Self> {
         let mut serializers: Vec<Self::S> = hash_codes
             .into_iter()
             .map(Self::S::from_hash_code)
@@ -115,20 +120,18 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
             data_chunk
                 .column_at(*column_idx)
                 .array_ref()
-                .serialize_to_hash_key(&mut serializers[..])?;
+                .serialize_to_hash_key(&mut serializers[..]);
         }
 
-        Ok(serializers
+        serializers
             .into_iter()
             .map(Self::S::into_hash_key)
-            .collect())
+            .collect()
     }
 
     #[inline(always)]
     fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> Result<Row> {
-        let mut builders = data_types
-            .map(|dt| dt.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()?;
+        let mut builders: Vec<_> = data_types.map(|dt| dt.create_array_builder(1)).collect();
 
         self.deserialize_to_builders(&mut builders)?;
         builders
@@ -470,15 +473,15 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
         }
     }
 
-    fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) -> Result<()> {
-        ensure!(self.null_bitmap_idx < 8);
+    fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) {
+        assert!(self.null_bitmap_idx < 8);
         match data {
             Some(v) => {
                 let mask = 1u8 << self.null_bitmap_idx;
                 self.null_bitmap |= mask;
                 let data = v.serialize();
                 let ret = data.as_ref();
-                ensure!(self.left_size() >= ret.len());
+                assert!(self.left_size() >= ret.len());
                 self.buffer[self.data_len..(self.data_len + ret.len())].copy_from_slice(ret);
                 self.data_len += ret.len();
             }
@@ -488,7 +491,6 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
             }
         };
         self.null_bitmap_idx += 1;
-        Ok(())
     }
 
     fn into_hash_key(self) -> Self::K {
@@ -548,7 +550,7 @@ impl HashKeySerializer for SerializedKeySerializer {
         }
     }
 
-    fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) -> Result<()> {
+    fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) {
         match data {
             Some(v) => {
                 self.buffer.push(Some(v.to_owned_scalar().into()));
@@ -558,7 +560,6 @@ impl HashKeySerializer for SerializedKeySerializer {
                 self.has_null = true;
             }
         }
-        Ok(())
     }
 
     fn into_hash_key(self) -> SerializedKey {
@@ -570,16 +571,15 @@ impl HashKeySerializer for SerializedKeySerializer {
     }
 }
 
-fn serialize_array_to_hash_key<'a, A, S>(array: &'a A, serializers: &mut [S]) -> Result<()>
+fn serialize_array_to_hash_key<'a, A, S>(array: &'a A, serializers: &mut [S])
 where
     A: Array,
     A::RefItem<'a>: HashKeySerDe<'a>,
     S: HashKeySerializer,
 {
     for (item, serializer) in array.iter().zip_eq(serializers.iter_mut()) {
-        serializer.append(item)?;
+        serializer.append(item);
     }
-    Ok(())
 }
 
 fn deserialize_array_element_from_hash_key<'a, A, S>(
@@ -596,7 +596,7 @@ where
 }
 
 impl ArrayImpl {
-    fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut [S]) -> Result<()> {
+    fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut [S]) {
         macro_rules! impl_all_serialize_to_hash_key {
             ([$self:ident, $serializers: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match $self {
@@ -647,7 +647,9 @@ impl HashKey for SerializedKey {
         array_builders
             .iter_mut()
             .zip_eq(self.key)
-            .try_for_each(|(array_builder, key)| array_builder.append_datum(&key))
+            .try_for_each(|(array_builder, key)| {
+                array_builder.append_datum(&key).map_err(Into::into)
+            })
     }
 
     fn has_null(&self) -> bool {
@@ -870,7 +872,7 @@ mod tests {
 
         let mut array_builders = [0, 1]
             .iter()
-            .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2).unwrap()))
+            .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2)))
             .collect::<Vec<_>>();
 
         keys.into_iter()

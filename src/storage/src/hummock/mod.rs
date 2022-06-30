@@ -28,6 +28,8 @@ mod sstable;
 pub use sstable::*;
 
 pub mod compaction_executor;
+#[expect(dead_code)]
+mod compaction_group_client;
 pub mod compactor;
 #[cfg(test)]
 mod compactor_tests;
@@ -44,12 +46,14 @@ pub mod sstable_store;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
-pub mod test_runner;
 #[cfg(test)]
 pub(crate) mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
+
+#[cfg(target_os = "linux")]
+pub mod file_cache;
 
 pub use error::*;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
@@ -130,7 +134,7 @@ impl HummockStorage {
         key: &[u8],
         read_options: Arc<ReadOptions>,
         stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<Option<Bytes>> {
+    ) -> HummockResult<Option<Option<Bytes>>> {
         if table.value().surely_not_have_user_key(key) {
             stats.bloom_filter_true_negative_count += 1;
             return Ok(None);
@@ -147,7 +151,7 @@ impl HummockStorage {
         // Iterator gets us the key, we tell if it's the key we want
         // or key next to it.
         let value = match user_key(iter.key()) == key {
-            true => iter.value().into_user_value().map(Bytes::copy_from_slice),
+            true => Some(iter.value().into_user_value().map(Bytes::copy_from_slice)),
             false => None,
         };
         iter.collect_local_statistic(stats);

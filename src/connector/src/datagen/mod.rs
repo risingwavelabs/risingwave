@@ -32,7 +32,7 @@ pub struct DatagenProperties {
 
     /// default_rows_per_second =10
     /// when the split_num = 3 and default_rows_per_second =10
-    /// there will be three readers that generate respectly 4,3,3 message per second
+    /// there will be three readers that generate respectively 4,3,3 message per second
     #[serde(
         rename = "datagen.rows.per.second",
         default = "default_rows_per_second"
@@ -44,7 +44,7 @@ pub struct DatagenProperties {
     /// 'fields.v1.kind'='sequence',
     /// 'fields.v1.start'='1',
     /// 'fields.v1.end'='1000',
-    /// 'fields.v1.kind'='random',
+    /// 'fields.v2.kind'='random',
     /// datagen will create v1 by self-incrementing from 1 to 1000
     /// datagen will create v2 by randomly generating from default_min to default_max
     #[serde(flatten)]

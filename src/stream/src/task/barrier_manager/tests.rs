@@ -42,10 +42,10 @@ async fn test_managed_barrier_collection() -> Result<()> {
     // Send a barrier to all actors
     let epoch = 114514;
     let barrier = Barrier::new_test_barrier(epoch);
-    let mut collect_rx = manager
+    manager
         .send_barrier(&barrier, actor_ids.clone(), actor_ids)
-        .unwrap()
         .unwrap();
+    let mut collect_rx = manager.remove_collect_rx(barrier.epoch.prev);
 
     // Collect barriers from actors
     let collected_barriers = rxs
@@ -102,10 +102,10 @@ async fn test_managed_barrier_collection_before_send_request() -> Result<()> {
     manager.collect(extra_actor_id, &barrier).unwrap();
 
     // Send the barrier to all actors
-    let mut collect_rx = manager
+    manager
         .send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect)
-        .unwrap()
         .unwrap();
+    let mut collect_rx = manager.remove_collect_rx(barrier.epoch.prev);
 
     // Collect barriers from actors
     let collected_barriers = rxs

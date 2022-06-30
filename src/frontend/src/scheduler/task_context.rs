@@ -16,21 +16,44 @@ use std::sync::Arc;
 
 use risingwave_batch::executor::BatchMetrics;
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
+use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::error::Result;
-use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_source::SourceManagerRef;
 
+use crate::catalog::pg_catalog::SysCatalogReaderImpl;
+use crate::session::{AuthContext, FrontendEnv};
+
 /// Batch task execution context in frontend.
-#[derive(Clone, Default)]
-pub struct FrontendBatchTaskContext {}
+#[derive(Clone)]
+pub struct FrontendBatchTaskContext {
+    env: FrontendEnv,
+    auth_context: Arc<AuthContext>,
+}
+
+impl FrontendBatchTaskContext {
+    pub fn new(env: FrontendEnv, auth_context: Arc<AuthContext>) -> Self {
+        Self { env, auth_context }
+    }
+}
 
 impl BatchTaskContext for FrontendBatchTaskContext {
     fn get_task_output(&self, _task_output_id: TaskOutputId) -> Result<TaskOutput> {
         todo!()
     }
 
-    fn is_local_addr(&self, _peer_addr: &HostAddr) -> bool {
-        todo!()
+    fn catalog_reader_ref(&self) -> Option<SysCatalogReaderRef> {
+        Some(Arc::new(SysCatalogReaderImpl::new(
+            self.env.catalog_reader().clone(),
+            self.env.user_info_reader().clone(),
+            self.env.worker_node_manager_ref(),
+            self.env.meta_client_ref(),
+            self.auth_context.clone(),
+        )))
+    }
+
+    fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
+        is_local_address(self.env.server_address(), peer_addr)
     }
 
     fn source_manager_ref(&self) -> Option<SourceManagerRef> {

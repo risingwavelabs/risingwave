@@ -21,8 +21,8 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{CompactionConfig, KeyRange, Level, LevelType, SstableInfo};
 
 use super::SearchResult;
-use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
+use crate::hummock::compaction::CompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 
 const MIN_COMPACTION_BYTES: u64 = 2 * 1024 * 1024; // 1MB
@@ -56,20 +56,24 @@ impl CompactionPicker for TierCompactionPicker {
             }
             let mut compaction_bytes = table.file_size;
             let mut select_level_inputs = vec![table.clone()];
-            if table.file_size > self.config.min_compaction_bytes {
+            if table.file_size >= self.config.min_compaction_bytes {
                 // only merge small file until we support sub-level.
                 idx += 1;
                 continue;
             }
 
             let mut next_offset = idx + 1;
+            let max_compaction_bytes = std::cmp::min(
+                self.config.max_compaction_bytes,
+                self.config.max_bytes_for_level_base,
+            );
 
             for other in &levels[0].table_infos[idx + 1..] {
                 if level_handlers[0].is_pending_compact(&other.id) {
                     break;
                 }
                 // no need to trigger a bigger compaction
-                if compaction_bytes >= self.config.min_compaction_bytes {
+                if compaction_bytes >= max_compaction_bytes {
                     break;
                 }
                 compaction_bytes += other.file_size;
@@ -104,7 +108,7 @@ impl CompactionPicker for TierCompactionPicker {
                     level_idx: 0,
                     level_type: LevelType::Overlapping as i32,
                     table_infos: select_level_inputs,
-                    total_file_size: 0,
+                    total_file_size: compaction_bytes,
                 },
                 target_level: Level {
                     level_idx: 0,
@@ -113,6 +117,8 @@ impl CompactionPicker for TierCompactionPicker {
                     total_file_size: 0,
                 },
                 split_ranges: vec![],
+                compression_algorithm: "".to_string(),
+                target_file_size: 0,
             });
         }
         None
@@ -199,17 +205,24 @@ impl CompactionPicker for LevelCompactionPicker {
             select_level: Level {
                 level_idx: select_level as u32,
                 level_type: LevelType::Overlapping as i32,
+                total_file_size: select_level_inputs
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum(),
                 table_infos: select_level_inputs,
-                // no use
-                total_file_size: 0,
             },
             target_level: Level {
                 level_idx: target_level as u32,
                 level_type: LevelType::Nonoverlapping as i32,
+                total_file_size: target_level_inputs
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum(),
                 table_infos: target_level_inputs,
-                total_file_size: 0,
             },
             split_ranges: splits,
+            target_file_size: self.config.target_file_size_base,
+            compression_algorithm: "".to_string(),
         })
     }
 }
@@ -321,7 +334,7 @@ impl LevelCompactionPicker {
                         // we only extend L0 files when write-amplification does not increase.
                         let inc_compaction_size =
                             target_level_ssts.calc_inc_compaction_size(&tables);
-                        if select_compaction_bytes > 0
+                        if select_compaction_bytes > self.config.min_compaction_bytes
                             && (target_level_ssts.compaction_bytes + inc_compaction_size)
                                 / (select_compaction_bytes + other.file_size)
                                 > target_level_ssts.compaction_bytes / select_compaction_bytes
@@ -379,7 +392,8 @@ pub mod tests {
                 inf: false,
             }),
             file_size: (right - left + 1) as u64,
-            vnode_bitmaps: vec![],
+            table_ids: vec![],
+            unit_id: u64::MAX,
         }
     }
 
@@ -731,5 +745,47 @@ pub mod tests {
         assert_eq!(ret.select_level.table_infos[1].id, 2);
         assert_eq!(ret.target_level.table_infos[0].id, 4);
         assert_eq!(ret.target_level.table_infos[1].id, 5);
+    }
+
+    #[test]
+    fn test_compact_with_write_amplification_limit_2() {
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .min_compaction_bytes(32)
+                .build(),
+        );
+        let picker =
+            LevelCompactionPicker::new(0, 1, config, Arc::new(RangeOverlapStrategy::default()));
+
+        let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 10, 16, 2),
+                    generate_table(2, 1, 48, 64, 2),
+                    generate_table(3, 1, 320, 330, 2),
+                ],
+                total_file_size: 0,
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(4, 1, 10, 50, 2),
+                    generate_table(5, 1, 64, 256, 2),
+                    generate_table(6, 1, 320, 900, 2),
+                ],
+                total_file_size: 0,
+            },
+        ];
+
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+        assert_eq!(ret.select_level.table_infos.len(), 3);
+        assert_eq!(ret.select_level.table_infos.len(), 3);
     }
 }

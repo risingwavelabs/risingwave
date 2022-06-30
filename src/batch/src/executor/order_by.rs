@@ -50,7 +50,7 @@ pub struct OrderByExecutor {
     schema: Schema,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 impl OrderByExecutor {
     fn new(
         child: BoxedExecutor,
@@ -221,7 +221,7 @@ impl OrderByExecutor {
         self.collect_child_data().await?;
 
         loop {
-            let mut array_builders = self.schema().create_array_builders(self.chunk_size)?;
+            let mut array_builders = self.schema().create_array_builders(self.chunk_size);
 
             let mut chunk_size = 0usize;
             while !self.min_heap.is_empty() && chunk_size < self.chunk_size {

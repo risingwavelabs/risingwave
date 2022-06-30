@@ -247,7 +247,6 @@ drop materialized view m11;
 statement ok
 drop table t3;
 
-
 statement ok
 drop materialized view m14;
 
@@ -259,3 +258,53 @@ drop materialized view m13;
 
 statement ok
 drop table t4;
+
+statement ok
+create table t (v1 varchar, v2 varchar, v3 varchar);
+
+statement ok
+insert into
+    t
+values
+    (
+        'abc',
+        '2022-06-08 09:38:00',
+        'world'
+    ),
+    (
+        'abc',
+        '2022-06-08 09:39:00',
+        'world'
+    );
+
+statement ok
+flush
+
+statement ok
+create materialized view mv as
+select
+    *
+from
+    t
+group by
+    v1,
+    v2,
+    v3;
+
+statement ok
+create materialized view mv2 as
+select
+    max(v1) as v1
+from
+    mv
+where
+    v3 = 'world';
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

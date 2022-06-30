@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_stream"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,6 +24,7 @@ itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 madsim = "=0.2.0-alpha.3"
+maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -35,6 +36,7 @@ rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
@@ -55,6 +57,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
 tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
@@ -64,6 +67,5 @@ twox-hash = "1"
 url = "2"
 value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
-
 [dev-dependencies]
 assert_matches = "1"

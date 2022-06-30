@@ -118,7 +118,7 @@ impl Schema {
     }
 
     /// Create array builders for all fields in this schema.
-    pub fn create_array_builders(&self, capacity: usize) -> Result<Vec<ArrayBuilderImpl>> {
+    pub fn create_array_builders(&self, capacity: usize) -> Vec<ArrayBuilderImpl> {
         self.fields
             .iter()
             .map(|field| field.data_type.create_array_builder(capacity))
@@ -219,7 +219,7 @@ impl FromIterator<Field> for Schema {
 pub mod test_utils {
     use super::*;
 
-    fn field_n<const N: usize>(data_type: DataType) -> Schema {
+    pub fn field_n<const N: usize>(data_type: DataType) -> Schema {
         Schema::new(vec![Field::unnamed(data_type); N])
     }
 

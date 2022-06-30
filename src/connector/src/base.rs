@@ -19,6 +19,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
+use prost::Message;
+use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
 
 use crate::datagen::{
@@ -172,8 +174,8 @@ pub trait SplitMetaData: Sized {
 /// split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
+#[cfg(test)]
 mod tests {
-    #[allow(unused_imports)]
     use super::*;
 
     #[test]

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -57,7 +58,7 @@ impl std::fmt::Debug for FunctionCall {
                 ExprType::Cast => {
                     assert_eq!(self.inputs.len(), 1);
                     self.inputs[0].fmt(f)?;
-                    return write!(f, "::{:?}", self.return_type);
+                    write!(f, "::{:?}", self.return_type)
                 }
                 ExprType::Add => debug_binary_op(f, "+", &self.inputs),
                 ExprType::Subtract => debug_binary_op(f, "-", &self.inputs),
@@ -141,17 +142,27 @@ impl FunctionCall {
                     .map(|(i, input)| match i {
                         // 0-th arg must be string
                         0 => input.cast_implicit(DataType::Varchar),
-                        // subsequent can be any type
-                        _ => input.cast_explicit(DataType::Varchar),
+                        // subsequent can be any type, using the output format
+                        _ => input.cast_output(),
                     })
-                    .collect::<Result<Vec<_>>>()?;
+                    .try_collect()?;
+                Ok(DataType::Varchar)
+            }
+            ExprType::ConcatOp => {
+                inputs = inputs
+                    .into_iter()
+                    .map(|input| input.cast_explicit(DataType::Varchar))
+                    .try_collect()?;
                 Ok(DataType::Varchar)
             }
 
-            _ => infer_type(
-                func_type,
-                inputs.iter().map(|expr| expr.return_type()).collect(),
-            ),
+            _ => {
+                // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
+                // interface has been enhanced to support mutating (casting) inputs as well.
+                let ret;
+                (inputs, ret) = infer_type(func_type, inputs)?;
+                Ok(ret)
+            }
         }?;
         Ok(Self {
             func_type,
@@ -167,7 +178,9 @@ impl FunctionCall {
             Ok(Literal::new(None, target).into())
         } else if source == target {
             Ok(child)
-        } else if cast_ok(&source, &target, &allows) {
+        // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
+        // in frontend.
+        } else if child.is_unknown() || cast_ok(&source, &target, allows) {
             Ok(Self {
                 func_type: ExprType::Cast,
                 return_type: target,

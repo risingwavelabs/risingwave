@@ -17,19 +17,23 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
+    PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg, StreamLocalSimpleAgg, ToBatch,
+    ToStream,
 };
+use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::RequiredDist;
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Aggregation Call
@@ -49,11 +53,21 @@ pub struct PlanAggCall {
 
 impl fmt::Debug for PlanAggCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
-        self.inputs.iter().for_each(|child| {
-            builder.field(child);
-        });
-        builder.finish()
+        write!(f, "{}", self.agg_kind)?;
+        if !self.inputs.is_empty() {
+            write!(f, "(")?;
+            for (idx, input) in self.inputs.iter().enumerate() {
+                if idx == 0 && self.distinct {
+                    write!(f, "distinct ")?;
+                }
+                write!(f, "{:?}", input)?;
+                if idx != (self.inputs.len() - 1) {
+                    write!(f, ",")?;
+                }
+            }
+            write!(f, ")")?;
+        }
+        Ok(())
     }
 }
 
@@ -108,6 +122,183 @@ pub struct LogicalAgg {
     agg_calls: Vec<PlanAggCall>,
     group_keys: Vec<usize>,
     input: PlanRef,
+}
+
+impl LogicalAgg {
+    pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, HashMap<usize, i32>) {
+        let mut table_catalogs = vec![];
+        let mut column_mapping = HashMap::new();
+        let base = self.input.plan_base();
+        let schema = &base.schema;
+        let fields = schema.fields();
+        let append_only = self.input.append_only();
+        for agg_call in &self.agg_calls {
+            let mut columns = vec![];
+            let mut column_names = HashMap::new(); // avoid duplicate column name
+            let mut order_desc = vec![];
+            for &idx in &self.group_keys {
+                Self::add_column_desc(
+                    &mut columns,
+                    &mut column_mapping,
+                    &mut column_names,
+                    fields,
+                    idx,
+                );
+                order_desc.push(OrderedColumnDesc {
+                    column_desc: columns
+                        .last()
+                        .map(|col_catalog| col_catalog.column_desc.clone())
+                        .unwrap(),
+                    order: OrderType::Ascending,
+                })
+            }
+            match agg_call.agg_kind {
+                AggKind::Min | AggKind::Max | AggKind::StringAgg => {
+                    if !append_only {
+                        // Add sort key as part of pk.
+                        // TODO: Need to check whether string agg needs this.
+                        for input in &agg_call.inputs {
+                            Self::add_column_desc(
+                                &mut columns,
+                                &mut column_mapping,
+                                &mut column_names,
+                                fields,
+                                input.index,
+                            );
+                            order_desc.push(OrderedColumnDesc {
+                                column_desc: columns
+                                    .last()
+                                    .map(|col_catalog| col_catalog.column_desc.clone())
+                                    .unwrap(),
+                                order: if agg_call.agg_kind == AggKind::Min {
+                                    OrderType::Ascending
+                                } else {
+                                    OrderType::Descending
+                                },
+                            });
+                        }
+
+                        // Add upstream pk.
+                        for pk_index in &base.pk_indices {
+                            Self::add_column_desc(
+                                &mut columns,
+                                &mut column_mapping,
+                                &mut column_names,
+                                fields,
+                                *pk_index,
+                            );
+                            order_desc.push(OrderedColumnDesc {
+                                column_desc: columns
+                                    .last()
+                                    .map(|col_catalog| col_catalog.column_desc.clone())
+                                    .unwrap(),
+                                order: OrderType::Ascending,
+                            });
+                        }
+                    }
+
+                    // TODO: Remove this (3474)
+                    for input in &agg_call.inputs {
+                        Self::add_column_desc(
+                            &mut columns,
+                            &mut column_mapping,
+                            &mut column_names,
+                            fields,
+                            input.index,
+                        );
+                    }
+                }
+                AggKind::Sum
+                | AggKind::Count
+                | AggKind::RowCount
+                | AggKind::Avg
+                | AggKind::SingleValue
+                | AggKind::ApproxCountDistinct => {
+                    columns.push(ColumnCatalog {
+                        column_desc: ColumnDesc::unnamed(
+                            ColumnId::new(columns.len() as i32),
+                            agg_call.return_type.clone(),
+                        ),
+                        is_hidden: false,
+                    });
+                }
+            }
+            // Always reserve 1 for agg call value. See related issue (#3474).
+            let relational_pk_len = columns.len() - 1;
+            table_catalogs.push(TableCatalog {
+                id: TableId::placeholder(),
+                associated_source_id: None,
+                name: String::new(),
+                columns,
+                order_desc,
+                pks: (0..relational_pk_len).collect(),
+                is_index_on: None,
+                distribution_keys: base.dist.dist_column_indices().to_vec(),
+                appendonly: append_only,
+                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+                vnode_mapping: None,
+                properties: HashMap::default(),
+            });
+        }
+        (table_catalogs, column_mapping)
+    }
+
+    /// Add a column catalog to the end of `columns`. Also update the `column_mapping` and
+    /// `column_names`.
+    fn add_column_desc(
+        columns: &mut Vec<ColumnCatalog>,
+        column_mapping: &mut HashMap<usize, i32>,
+        column_names: &mut HashMap<String, i32>,
+        fields: &[Field],
+        input_index: usize,
+    ) {
+        // Maintain the input column index -> relational table index.
+        let column_id = columns.len() as i32;
+        column_mapping.insert(input_index, column_id);
+
+        // Add column desc.
+        let mut column_desc =
+            ColumnDesc::from_field_with_column_id(&fields[input_index], column_id);
+
+        // Avoid column name duplicate.
+        let column_name = column_desc.name.clone();
+        if let Some(occurence) = column_names.get_mut(&column_name) {
+            column_desc.name = format!("{}_{}", column_name, occurence);
+            *occurence += 1;
+        } else {
+            column_names.insert(column_name, 0);
+        }
+
+        columns.push(ColumnCatalog {
+            column_desc,
+            is_hidden: false,
+        });
+    }
+
+    /// Two phase streaming agg.
+    /// Should only be used iff input is distributed.
+    /// input must be converted to stream form.
+    fn gen_two_phase_streaming_agg_plan(&self, input_stream: PlanRef) -> Result<PlanRef> {
+        // partial agg
+        let partial_agg_plan =
+            StreamLocalSimpleAgg::new(self.clone_with_input(input_stream)).into();
+
+        let input =
+            RequiredDist::single().enforce_if_not_satisfies(partial_agg_plan, &Order::any())?;
+
+        // insert total agg
+        let total_agg_types = self
+            .agg_calls()
+            .iter()
+            .enumerate()
+            .map(|(partial_output_idx, agg_call)| {
+                agg_call.partial_to_total_agg_call(partial_output_idx)
+            })
+            .collect();
+        let total_agg_logical_plan =
+            LogicalAgg::new(total_agg_types, self.group_keys().to_vec(), input);
+        Ok(StreamGlobalSimpleAgg::new(total_agg_logical_plan).into())
+    }
 }
 
 /// `ExprHandler` extracts agg calls and references to group columns from select list, in
@@ -304,7 +495,7 @@ impl LogicalAgg {
         );
         let pk_indices = match group_keys.is_empty() {
             // simple agg
-            true => (0..schema.len()).collect(),
+            true => vec![],
             // group agg
             false => group_keys.clone(),
         };
@@ -606,21 +797,38 @@ impl ToBatch for LogicalAgg {
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self) -> Result<PlanRef> {
+        let input = self.input();
+        // simple-agg
         if self.group_keys().is_empty() {
-            Ok(StreamSimpleAgg::new(
-                self.clone_with_input(
-                    self.input()
-                        .to_stream_with_dist_required(&RequiredDist::single())?,
-                ),
-            )
-            .into())
+            // TODO: Other agg calls will be supported by stateful local agg eventually.
+            let agg_calls_can_use_two_phase = self
+                .agg_calls
+                .iter()
+                .all(|c| matches!(c.agg_kind, AggKind::Count | AggKind::Sum));
+
+            let input_stream = input.to_stream()?;
+            let input_distribution = input_stream.distribution();
+
+            // simple 2-phase-agg
+            if input_distribution.satisfies(&RequiredDist::AnyShard) && agg_calls_can_use_two_phase
+            {
+                self.gen_two_phase_streaming_agg_plan(input_stream)
+            // simple 1-phase-agg
+            } else {
+                Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
+                    input.to_stream_with_dist_required(&RequiredDist::single())?,
+                ))
+                .into())
+            }
+
+        // hash-agg
         } else {
-            Ok(StreamHashAgg::new(
-                self.clone_with_input(self.input().to_stream_with_dist_required(
-                    &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
-                )?),
+            Ok(
+                StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
+                    &RequiredDist::shard_by_key(input.schema().len(), self.group_keys()),
+                )?))
+                .into(),
             )
-            .into())
         }
     }
 

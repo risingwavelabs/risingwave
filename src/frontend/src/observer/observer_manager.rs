@@ -50,7 +50,7 @@ pub(crate) struct ObserverManager {
 const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 impl ObserverManager {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         meta_client: MetaClient,
         addr: HostAddr,

@@ -70,8 +70,7 @@ impl LocalSimpleAggExecutor {
                     .map(|idx| columns[*idx].array_ref())
                     .collect_vec();
                 state.apply_batch(&ops, visibility.as_ref(), &cols[..])
-            })
-            .map_err(StreamExecutorError::agg_state_error)?;
+            })?;
         Ok(())
     }
 
@@ -94,8 +93,7 @@ impl LocalSimpleAggExecutor {
                     None,
                 )
             })
-            .try_collect()
-            .map_err(StreamExecutorError::agg_state_error)?;
+            .try_collect()?;
 
         #[for_await]
         for msg in input {
@@ -109,21 +107,16 @@ impl LocalSimpleAggExecutor {
                     if is_dirty {
                         is_dirty = false;
 
-                        let mut builders = info
-                            .schema
-                            .create_array_builders(1)
-                            .map_err(StreamExecutorError::eval_error)?;
-                        states
-                            .iter_mut()
-                            .zip_eq(builders.iter_mut())
-                            .try_for_each(|(state, builder)| -> Result<_> {
+                        let mut builders = info.schema.create_array_builders(1);
+                        states.iter_mut().zip_eq(builders.iter_mut()).try_for_each(
+                            |(state, builder)| {
                                 let data = state.get_output()?;
                                 trace!("append_datum: {:?}", data);
                                 builder.append_datum(&data)?;
                                 state.reset();
-                                Ok(())
-                            })
-                            .map_err(StreamExecutorError::agg_state_error)?;
+                                Ok::<_, StreamExecutorError>(())
+                            },
+                        )?;
                         let columns: Vec<Column> = builders
                             .into_iter()
                             .map(|builder| -> Result<_> {

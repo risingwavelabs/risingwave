@@ -86,7 +86,7 @@ impl InsertExecutor {
             assert!(data_chunk.visibility().is_none());
 
             // add row-id column as first column
-            let mut builder = I64ArrayBuilder::new(len).unwrap();
+            let mut builder = I64ArrayBuilder::new(len);
             for _ in 0..len {
                 builder.append(Some(source_desc.next_row_id())).unwrap();
             }
@@ -116,7 +116,7 @@ impl InsertExecutor {
 
         // create ret value
         {
-            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1)?;
+            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_inserted as i64))?;
 
             let array = array_builder.finish()?;
@@ -164,6 +164,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::store::ReadOptions;
     use risingwave_storage::*;
 
     use super::*;
@@ -298,7 +299,16 @@ mod tests {
         // Data will be materialized in associated streaming task.
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
-        let store_content = store.scan(full_range, None, epoch).await?;
+        let store_content = store
+            .scan(
+                full_range,
+                None,
+                ReadOptions {
+                    epoch,
+                    table_id: Default::default(),
+                },
+            )
+            .await?;
         assert!(store_content.is_empty());
 
         handle.await.unwrap();

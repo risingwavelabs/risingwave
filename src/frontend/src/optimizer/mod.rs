@@ -34,6 +34,8 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::expr::InputRef;
+use crate::optimizer::plan_node::BatchExchange;
+use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
@@ -145,7 +147,7 @@ impl PlanRoot {
         // This rule assumes that filters have already been pushed down near to
         // their relevant joins.
         plan = {
-            let rules = vec![MultiJoinJoinRule::create(), MultiJoinFilterRule::create()];
+            let rules = vec![MergeMultiJoinRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
             heuristic_optimizer.optimize(plan)
         };
@@ -219,6 +221,13 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_local_with_order_required(&self.required_order)?;
 
+        // We remark that since the `to_local_with_order_required` does not enforce single
+        // distribution, we enforce at the root if needed.
+        plan = match plan.distribution() {
+            Distribution::Single => plan,
+            _ => BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into(),
+        };
+
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
             let exprs = self
@@ -250,7 +259,7 @@ impl PlanRoot {
             }
             Convention::Stream => self
                 .required_dist
-                .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
+                .enforce_if_not_satisfies(self.plan.clone(), &Order::any()),
             _ => unreachable!(),
         }?;
 
@@ -326,7 +335,7 @@ mod tests {
         let root = PlanRoot::new(
             values,
             RequiredDist::Any,
-            Order::any().clone(),
+            Order::any(),
             out_fields,
             out_names,
         );

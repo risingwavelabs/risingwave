@@ -23,7 +23,6 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk,
     Row, Utf8Array,
 };
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::for_all_variants;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar, ScalarImpl};
 
@@ -40,28 +39,29 @@ macro_rules! array_impl_add_datum {
                     inner.append(None)?;
                 }
             )*
-            (_, _) => return Err(ErrorCode::NotImplemented(
-                "Do not support values in insert values executor".to_string(), None.into(),
-            ).into()),
+            (_, _) => $crate::bail!(
+                "Do not support values in insert values executor".to_string(),
+            ),
         }
     };
 }
 
 macro_rules! gen_eval {
     { $macro:ident, $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
-        fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
+        fn eval(&self, data_chunk: &DataChunk) -> $crate::Result<ArrayRef> {
             paste! {
                 $(
-                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval(data_chunk)?;
+                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_checked(data_chunk)?;
                     let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
                 )*
 
                 let bitmap = data_chunk.get_visibility_ref();
-                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity())?;
+                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity());
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
                         for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
                             if !visible {
+                                output_array.append_null()?;
                                 continue;
                             }
                             $macro!(self, output_array, $([<v_ $arg:lower>],)*)
@@ -82,12 +82,12 @@ macro_rules! gen_eval {
         /// resulting datums are placed in their own arrays. The arrays are then handled in the same
         /// way as in `eval()`. This could be optimized to work on the datums directly
         /// instead of placing them in arrays.
-        fn eval_row(&self, row: &Row) -> Result<Datum> {
+        fn eval_row(&self, row: &Row) -> $crate::Result<Datum> {
             paste! {
                 $(
                     let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;
 
-                    let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1)?;
+                    let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1);
                     let [<ref_ $arg:lower>] = &mut [<builder_ $arg:lower>];
 
                     for_all_variants! {array_impl_add_datum, [<ref_ $arg:lower>], [<datum_ $arg:lower>]}
@@ -96,7 +96,7 @@ macro_rules! gen_eval {
                     let [<arr_ $arg:lower>]: &$arg = [<arr_ $arg:lower>].as_ref().into();
                 )*
 
-                let mut output_array = <$OA as Array>::Builder::new(1)?;
+                let mut output_array = <$OA as Array>::Builder::new(1);
                 for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
                     $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                 }
@@ -126,7 +126,7 @@ macro_rules! gen_expr_normal {
             pub struct $ty_name<
                 $($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> Result<OA::OwnedItem>,
+                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> $crate::Result<OA::OwnedItem>,
             > {
                 $([<expr_ $arg:lower>]: BoxedExpression,)*
                 return_type: DataType,
@@ -136,7 +136,7 @@ macro_rules! gen_expr_normal {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> Result<OA::OwnedItem> + Sized + Sync + Send,
+                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> $crate::Result<OA::OwnedItem> + Sized + Sync + Send,
             > fmt::Debug for $ty_name<$($arg, )* OA, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($ty_name))
@@ -149,8 +149,8 @@ macro_rules! gen_expr_normal {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> Result<OA::OwnedItem> + Sized + Sync + Send,
-            >    Expression for $ty_name<$($arg, )* OA, F>
+                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> $crate::Result<OA::OwnedItem> + Sized + Sync + Send,
+            > Expression for $ty_name<$($arg, )* OA, F>
             where
                 $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
                 for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
@@ -164,7 +164,7 @@ macro_rules! gen_expr_normal {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> Result<OA::OwnedItem> + Sized + Sync + Send,
+                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> $crate::Result<OA::OwnedItem> + Sized + Sync + Send,
             > $ty_name<$($arg, )* OA, F> {
                 #[allow(dead_code)]
                 pub fn new(
@@ -201,7 +201,7 @@ macro_rules! gen_expr_bytes {
         paste! {
             pub struct $ty_name<
                 $($arg: Array, )*
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> Result<BytesGuard>,
+                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> $crate::Result<BytesGuard>,
             > {
                 $([<expr_ $arg:lower>]: BoxedExpression,)*
                 return_type: DataType,
@@ -210,7 +210,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> Result<BytesGuard> + Sized + Sync + Send,
+                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> $crate::Result<BytesGuard> + Sized + Sync + Send,
             > fmt::Debug for $ty_name<$($arg, )* F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($ty_name))
@@ -222,7 +222,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> Result<BytesGuard> + Sized + Sync + Send,
+                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> $crate::Result<BytesGuard> + Sized + Sync + Send,
             > Expression for $ty_name<$($arg, )* F>
             where
                 $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
@@ -235,7 +235,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> Result<BytesGuard> + Sized + Sync + Send,
+                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )* BytesWriter) -> $crate::Result<BytesGuard> + Sized + Sync + Send,
             > $ty_name<$($arg, )* F> {
                 pub fn new(
                     $([<expr_ $arg:lower>]: BoxedExpression, )*
@@ -269,7 +269,7 @@ macro_rules! gen_expr_nullable {
             pub struct $ty_name<
                 $($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> Result<Option<OA::OwnedItem>>,
+                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> $crate::Result<Option<OA::OwnedItem>>,
             > {
                 $([<expr_ $arg:lower>]: BoxedExpression,)*
                 return_type: DataType,
@@ -279,7 +279,7 @@ macro_rules! gen_expr_nullable {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
+                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
             > fmt::Debug for $ty_name<$($arg, )* OA, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($ty_name))
@@ -292,7 +292,7 @@ macro_rules! gen_expr_nullable {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
+                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
             > Expression for $ty_name<$($arg, )* OA, F>
             where
                 $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
@@ -307,7 +307,7 @@ macro_rules! gen_expr_nullable {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
+                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
             > $ty_name<$($arg, )* OA, F> {
                 // Compile failed due to some GAT lifetime issues so make this field private.
                 // Check issues #742.
@@ -383,6 +383,7 @@ macro_rules! for_all_cmp_variants {
             { float32, decimal, float64, $general_f },
             { float64, decimal, float64, $general_f },
             { timestamp, timestamp, timestamp, $general_f },
+            { interval, interval, interval, $general_f },
             { date, date, date, $general_f },
             { boolean, boolean, boolean, $general_f },
             { timestamp, date, timestamp, $general_f },

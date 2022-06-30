@@ -16,13 +16,12 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk, Row};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
+use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
 pub struct CoalesceExpression {
@@ -39,18 +38,22 @@ impl Expression for CoalesceExpression {
         let children_array = self
             .children
             .iter()
-            .map(|c| c.eval(input))
+            .map(|c| c.eval_checked(input))
             .collect::<Result<Vec<_>>>()?;
-        let mut builder = self.return_type.create_array_builder(input.cardinality())?;
 
         let len = children_array[0].len();
+        let mut builder = self.return_type.create_array_builder(len);
+        let vis = input.vis();
+
         for i in 0..len {
             let mut data = None;
-            for array in &children_array {
-                let datum = array.datum_at(i);
-                if datum.is_some() {
-                    data = datum;
-                    break;
+            if vis.is_set(i) {
+                for array in &children_array {
+                    let datum = array.datum_at(i);
+                    if datum.is_some() {
+                        data = datum;
+                        break;
+                    }
                 }
             }
             builder.append_datum(&data)?;
@@ -84,13 +87,15 @@ impl CoalesceExpression {
 }
 
 impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type()? == Type::Coalesce);
+        ensure!(prost.get_expr_type().unwrap() == Type::Coalesce,);
 
-        let ret_type = DataType::from(prost.get_return_type()?);
-        let func_call_node = try_match_expand!(prost.get_rex_node().unwrap(), RexNode::FuncCall)?;
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
+            bail!("Expected RexNode::FuncCall");
+        };
 
         let children = func_call_node
             .children

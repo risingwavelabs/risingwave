@@ -23,11 +23,6 @@ use crate::planner::Planner;
 use crate::scheduler::{ExecutionContext, ExecutionContextRef};
 use crate::session::{OptimizerContext, SessionImpl};
 
-/// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
-/// until the entire dataflow is refreshed. In other words, every related table & MV will
-/// be able to see the write.
-pub static IMPLICIT_FLUSH: &str = "RW_IMPLICIT_FLUSH";
-
 pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
@@ -75,23 +70,22 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
     };
 
     // Implicitly flush the writes.
-    if let Some(flag) = session.get_config(IMPLICIT_FLUSH) {
-        if flag.is_set(false) {
-            flush_for_write(&session, stmt_type).await?;
-        }
+    if session.config().get_implicit_flush() {
+        flush_for_write(&session, stmt_type).await?;
     }
 
-    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
+    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
 }
 
 async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
-            client.flush().await
+            client.flush().await?;
         }
-        _ => Ok(()),
+        _ => {}
     }
+    Ok(())
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::once;
+
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -52,6 +54,33 @@ impl Binder {
                 )?)));
             }
             let function_type = match function_name.as_str() {
+                // comparison
+                "booleq" => {
+                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
+                    ExprType::Equal
+                }
+                "boolne" => {
+                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
+                    ExprType::NotEqual
+                }
+                // conditional
+                "coalesce" => ExprType::Coalesce,
+                "nullif" => {
+                    inputs = Self::rewrite_nullif_to_case_when(inputs)?;
+                    ExprType::Case
+                }
+                // mathematical
+                "round" => {
+                    if inputs.len() >= 2 {
+                        ExprType::RoundDigit
+                    } else {
+                        ExprType::Round
+                    }
+                }
+                "ceil" => ExprType::Ceil,
+                "floor" => ExprType::Floor,
+                "abs" => ExprType::Abs,
+                // string
                 "substr" => ExprType::Substr,
                 "length" => ExprType::Length,
                 "upper" => ExprType::Upper,
@@ -63,37 +92,26 @@ impl Binder {
                 "rtrim" => ExprType::Rtrim,
                 "md5" => ExprType::Md5,
                 "to_char" => ExprType::ToChar,
-                "nullif" => {
-                    inputs = Self::rewrite_nullif_to_case_when(inputs)?;
-                    ExprType::Case
+                "concat" => {
+                    inputs = Self::rewrite_concat_to_concat_ws(inputs)?;
+                    ExprType::ConcatWs
                 }
                 "concat_ws" => ExprType::ConcatWs,
                 "split_part" => ExprType::SplitPart,
-                "coalesce" => ExprType::Coalesce,
-                "round" => {
-                    inputs = Self::rewrite_round_args(inputs);
-                    if inputs.len() >= 2 {
-                        ExprType::RoundDigit
-                    } else {
-                        ExprType::Round
-                    }
-                }
-                "ceil" => {
-                    inputs = Self::rewrite_round_args(inputs);
-                    ExprType::Ceil
-                }
-                "floor" => {
-                    inputs = Self::rewrite_round_args(inputs);
-                    ExprType::Floor
-                }
-                "abs" => ExprType::Abs,
-                "booleq" => {
-                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
-                    ExprType::Equal
-                }
-                "boolne" => {
-                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
-                    ExprType::NotEqual
+                "char_length" => ExprType::CharLength,
+                "character_length" => ExprType::CharLength,
+                "repeat" => ExprType::Repeat,
+                "ascii" => ExprType::Ascii,
+                "octet_length" => ExprType::OctetLength,
+                "bit_length" => ExprType::BitLength,
+                // special
+                "pg_typeof" if inputs.len() == 1 => {
+                    let input = &inputs[0];
+                    let v = match input.is_unknown() {
+                        true => "unknown".into(),
+                        false => input.return_type().to_string(),
+                    };
+                    return Ok(ExprImpl::literal_varchar(v));
                 }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
@@ -113,6 +131,20 @@ impl Binder {
         }
     }
 
+    fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.is_empty() {
+            Err(ErrorCode::BindError(
+                "Function `Concat` takes at least 1 arguments (0 given)".to_string(),
+            )
+            .into())
+        } else {
+            let inputs = once(ExprImpl::literal_varchar("".to_string()))
+                .chain(inputs)
+                .collect();
+            Ok(inputs)
+        }
+    }
+
     /// Make sure inputs only have 2 value and rewrite the arguments.
     /// Nullif(expr1,expr2) -> Case(Equal(expr1 = expr2),null,expr1).
     fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
@@ -125,50 +157,6 @@ impl Binder {
                 inputs[0].clone(),
             ];
             Ok(inputs)
-        }
-    }
-
-    /// Rewrite the arguments to be consistent with the `round, ceil, floor` signature:
-    /// Round:
-    /// - round(Decimal, Int32) -> Decimal
-    /// - round(Decimal) -> Decimal
-    /// - round(Float64) -> Float64
-    /// - Extend: round(Int16, Int32, Int64, Float32) -> Decimal
-    ///
-    /// Ceil:
-    /// - ceil(Decimal) -> Decimal
-    /// - ceil(Float) -> Float64
-    /// - Extend: ceil(Int16, Int32, Int64, Float32) -> Decimal
-    ///
-    /// Floor:
-    /// - floor(Decimal) -> Decimal
-    /// - floor(Float) -> Float64
-    /// - Extend: floor(Int16, Int32, Int64, Float32) -> Decimal
-    fn rewrite_round_args(mut inputs: Vec<ExprImpl>) -> Vec<ExprImpl> {
-        if inputs.len() == 1 {
-            let input = inputs.pop().unwrap();
-            match input.return_type() {
-                risingwave_common::types::DataType::Float64 => vec![input],
-                _ => vec![input
-                    .clone()
-                    .cast_implicit(DataType::Decimal)
-                    .unwrap_or(input)],
-            }
-        } else if inputs.len() == 2 {
-            let digits = inputs.pop().unwrap();
-            let input = inputs.pop().unwrap();
-            vec![
-                input
-                    .clone()
-                    .cast_implicit(DataType::Decimal)
-                    .unwrap_or(input),
-                digits
-                    .clone()
-                    .cast_implicit(DataType::Int32)
-                    .unwrap_or(digits),
-            ]
-        } else {
-            inputs
         }
     }
 

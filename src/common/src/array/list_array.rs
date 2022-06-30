@@ -24,11 +24,10 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, List
 use risingwave_pb::expr::ListValue as ProstListValue;
 
 use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, RowRef,
-    NULL_VAL_FOR_HASH,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
+    RowRef, NULL_VAL_FOR_HASH,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::error::Result;
 use crate::types::{
     display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
 };
@@ -48,12 +47,12 @@ impl ArrayBuilder for ListArrayBuilder {
     type ArrayType = ListArray;
 
     #[cfg(not(test))]
-    fn new(_capacity: usize) -> Result<Self> {
+    fn new(_capacity: usize) -> Self {
         panic!("Must use with_meta.")
     }
 
     #[cfg(test)]
-    fn new(capacity: usize) -> Result<Self> {
+    fn new(capacity: usize) -> Self {
         Self::with_meta(
             capacity,
             ArrayMeta::List {
@@ -63,21 +62,21 @@ impl ArrayBuilder for ListArrayBuilder {
         )
     }
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self {
         if let ArrayMeta::List { datatype } = meta {
-            Ok(Self {
+            Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 offsets: vec![0],
-                value: Box::new(datatype.create_array_builder(capacity)?),
+                value: Box::new(datatype.create_array_builder(capacity)),
                 value_type: *datatype,
                 len: 0,
-            })
+            }
         } else {
             panic!("must be ArrayMeta::List");
         }
     }
 
-    fn append(&mut self, value: Option<ListRef<'_>>) -> Result<()> {
+    fn append(&mut self, value: Option<ListRef<'_>>) -> ArrayResult<()> {
         match value {
             None => {
                 self.bitmap.append(false);
@@ -98,7 +97,7 @@ impl ArrayBuilder for ListArrayBuilder {
         Ok(())
     }
 
-    fn append_array(&mut self, other: &ListArray) -> Result<()> {
+    fn append_array(&mut self, other: &ListArray) -> ArrayResult<()> {
         self.bitmap.append_bitmap(&other.bitmap);
         let last = *self.offsets.last().unwrap();
         self.offsets
@@ -108,7 +107,7 @@ impl ArrayBuilder for ListArrayBuilder {
         Ok(())
     }
 
-    fn finish(self) -> Result<ListArray> {
+    fn finish(self) -> ArrayResult<ListArray> {
         Ok(ListArray {
             bitmap: self.bitmap.finish(),
             offsets: self.offsets,
@@ -120,7 +119,7 @@ impl ArrayBuilder for ListArrayBuilder {
 }
 
 impl ListArrayBuilder {
-    pub fn append_row_ref(&mut self, row: RowRef) -> Result<()> {
+    pub fn append_row_ref(&mut self, row: RowRef) -> ArrayResult<()> {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
         self.offsets.push(last + row.size());
@@ -190,6 +189,10 @@ impl Array for ListArray {
         &self.bitmap
     }
 
+    fn into_null_bitmap(self) -> Bitmap {
+        self.bitmap
+    }
+
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
     }
@@ -202,13 +205,13 @@ impl Array for ListArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> Result<super::ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayResult<super::ArrayBuilderImpl> {
         let array_builder = ListArrayBuilder::with_meta(
             capacity,
             ArrayMeta::List {
                 datatype: Box::new(self.value_type.clone()),
             },
-        )?;
+        );
         Ok(ArrayBuilderImpl::List(array_builder))
     }
 
@@ -220,7 +223,7 @@ impl Array for ListArray {
 }
 
 impl ListArray {
-    pub fn from_protobuf(array: &ProstArray) -> Result<ArrayImpl> {
+    pub fn from_protobuf(array: &ProstArray) -> ArrayResult<ArrayImpl> {
         ensure!(
             array.values.is_empty(),
             "Must have no buffer in a list array"
@@ -244,9 +247,9 @@ impl ListArray {
         null_bitmap: &[bool],
         values: Vec<Option<ArrayImpl>>,
         value_type: DataType,
-    ) -> Result<ListArray> {
+    ) -> ArrayResult<ListArray> {
         let cardinality = null_bitmap.len();
-        let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
+        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let mut offsets = vec![0];
         let mut values = values.into_iter().peekable();
         let mut builderimpl = values.peek().unwrap().as_ref().unwrap().create_builder(0)?;
@@ -355,7 +358,7 @@ impl<'a> ListRef<'a> {
         }
     }
 
-    pub fn value_at(&self, index: usize) -> Result<DatumRef<'a>> {
+    pub fn value_at(&self, index: usize) -> ArrayResult<DatumRef<'a>> {
         match self {
             ListRef::Indexed { arr, .. } => {
                 if index <= arr.value.len() {
@@ -499,8 +502,7 @@ mod tests {
             ArrayMeta::List {
                 datatype: Box::new(DataType::Int32),
             },
-        )
-        .unwrap();
+        );
         list_values.iter().for_each(|v| {
             builder
                 .append(v.as_ref().map(|s| s.as_scalar_ref()))
@@ -534,8 +536,7 @@ mod tests {
             ArrayMeta::List {
                 datatype: Box::new(DataType::Int32),
             },
-        )
-        .unwrap();
+        );
         builder.append_array(&part1).unwrap();
         builder.append_array(&part2).unwrap();
 
@@ -648,8 +649,7 @@ mod tests {
                     datatype: Box::new(DataType::Int32),
                 }),
             },
-        )
-        .unwrap();
+        );
         nested_list_values.iter().for_each(|v| {
             builder
                 .append(v.as_ref().map(|s| s.as_scalar_ref()))

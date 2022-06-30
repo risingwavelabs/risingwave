@@ -50,8 +50,8 @@ pub trait TestStreamChunk {
 pub struct BigStreamChunk(StreamChunk);
 
 impl BigStreamChunk {
-    #[allow(clippy::if_same_then_else)]
-    #[allow(clippy::needless_bool)]
+    #[expect(clippy::if_same_then_else)]
+    #[expect(clippy::needless_bool)]
     pub fn new(capacity: usize) -> Self {
         let ops = (0..capacity)
             .map(|i| {
@@ -78,8 +78,8 @@ impl BigStreamChunk {
                 }
             })
             .collect_vec()
-            .try_into()
-            .unwrap();
+            .into_iter()
+            .collect();
 
         let col = {
             let array = I32Array::from_slice(
@@ -130,7 +130,7 @@ impl TestStreamChunk for WhatEverStreamChunk {
             Op::UpdateDelete,
             Op::UpdateInsert,
         ];
-        let visibility = Some(vec![true, true, false, true, true].try_into().unwrap());
+        let visibility = Some(vec![true, true, false, true, true].into_iter().collect());
         let col1 = Column::from(crate::array!(
             I32Array,
             [Some(1), Some(2), None, Some(3), Some(4)],

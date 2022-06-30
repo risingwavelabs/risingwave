@@ -29,10 +29,10 @@ use console::style;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
-    preflight_check, AwsS3Config, CompactorService, ComputeNodeService, ConfigExpander,
-    ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService, GrafanaService,
-    JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService, ServiceConfig,
-    Task, ZooKeeperService, RISEDEV_SESSION_NAME,
+    compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
+    ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
+    GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService,
+    ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -218,7 +218,7 @@ fn task_main(
                 writeln!(
                     log_buffer,
                     "* Run {} to start Postgres interactive shell.",
-                    style(format!("psql -h localhost -p {}", c.port))
+                    style(format!("psql -h localhost -p {} -d dev -U root", c.port))
                         .blue()
                         .bold()
                 )?;
@@ -384,6 +384,16 @@ fn main() -> Result<()> {
             }
             println!("-------------------------------");
             println!();
+
+            let risectl_env = match compute_risectl_env(&services) {
+                Ok(x) => x,
+                Err(_) => "".into(),
+            };
+
+            std::fs::write(
+                Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
+                &risectl_env,
+            )?;
 
             println!("All services started successfully.");
 

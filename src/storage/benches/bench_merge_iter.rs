@@ -13,25 +13,25 @@
 // limitations under the License.
 
 use std::cell::RefCell;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::executor::block_on;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_storage::hummock::iterator::{
     BoxedForwardHummockIterator, Forward, HummockIterator, MergeIterator, OrderedAwareMergeIterator,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::monitor::StateStoreMetrics;
+use tokio::sync::mpsc;
 
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,
     batch_count: usize,
 ) -> Vec<BoxedForwardHummockIterator> {
     let mut iterators = Vec::new();
-    let buffer_tracker = Arc::new(AtomicUsize::new(0));
     for i in 0..batch_count {
         let mut batch_data = vec![];
         for j in 0..batch_size {
@@ -40,7 +40,12 @@ fn gen_interleave_shared_buffer_batch_iter(
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
-        let batch = SharedBufferBatch::new(batch_data, 2333, buffer_tracker.clone());
+        let batch = SharedBufferBatch::new(
+            batch_data,
+            2333,
+            mpsc::unbounded_channel().0,
+            StaticCompactionGroupId::StateDefault.into(),
+        );
         iterators.push(Box::new(batch.into_forward_iter()) as BoxedForwardHummockIterator);
     }
     iterators

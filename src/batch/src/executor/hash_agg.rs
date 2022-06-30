@@ -215,13 +215,13 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         let mut result = groups.into_iter();
         let cardinality = DEFAULT_CHUNK_BUFFER_SIZE;
         loop {
-            let mut group_builders = self
+            let mut group_builders: Vec<_> = self
                 .group_key_types
                 .iter()
                 .map(|datatype| datatype.create_array_builder(cardinality))
-                .collect::<Result<Vec<_>>>()?;
+                .collect();
 
-            let mut agg_builders = self
+            let mut agg_builders: Vec<_> = self
                 .agg_factories
                 .iter()
                 .map(|agg_factory| {
@@ -229,7 +229,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                         .get_return_type()
                         .create_array_builder(cardinality)
                 })
-                .collect::<Result<Vec<_>>>()?;
+                .collect();
 
             let mut has_next = false;
             let mut array_len = 0;

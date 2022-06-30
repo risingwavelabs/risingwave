@@ -19,6 +19,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -31,6 +32,13 @@
 #![feature(backtrace)]
 #![feature(fn_traits)]
 #![feature(assert_matches)]
+#![feature(let_else)]
+#![feature(lint_reasons)]
 
+pub mod error;
 pub mod expr;
 pub mod vector_op;
+
+pub use error::ExprError;
+pub use risingwave_common::{bail, ensure};
+pub type Result<T> = std::result::Result<T, ExprError>;

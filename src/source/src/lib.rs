@@ -20,6 +20,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -28,7 +29,7 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(mutex_unlock)]
+#![feature(lint_reasons)]
 
 use std::fmt::Debug;
 
@@ -49,6 +50,7 @@ mod manager;
 
 mod common;
 pub mod connector_source;
+pub mod monitor;
 mod row_id;
 mod table_v2;
 
@@ -70,7 +72,7 @@ pub enum SourceImpl {
     Connector(ConnectorSource),
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
     TableV2(TableV2StreamReader),
     Connector(ConnectorSourceReader),

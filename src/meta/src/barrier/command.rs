@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::SplitImpl;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{AddMutation, DispatcherMutation, NothingMutation, StopMutation};
+use risingwave_pb::data::{AddMutation, DispatcherMutation, StopMutation};
+use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
@@ -39,7 +42,7 @@ pub enum Command {
     ///
     /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
-    Plain(Mutation),
+    Plain(Option<Mutation>),
 
     /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableId`]. The
     /// catalog has ensured that this materialized view is safe to be dropped by reference counts
@@ -60,12 +63,13 @@ pub enum Command {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
         dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
+        source_state: HashMap<ActorId, Vec<SplitImpl>>,
     },
 }
 
 impl Command {
     pub fn checkpoint() -> Self {
-        Self::Plain(Mutation::Nothing(NothingMutation {}))
+        Self::Plain(None)
     }
 
     pub fn creating_table_id(&self) -> Option<TableId> {
@@ -76,38 +80,44 @@ impl Command {
             _ => None,
         }
     }
+
+    /// If we need to send a barrier to modify actor configuration, we will pause the barrier
+    /// injection. return true
+    pub fn should_pause_inject_barrier(&self) -> bool {
+        !matches!(self, Command::Plain(_))
+    }
 }
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<'a, S> {
+pub struct CommandContext<S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
     client_pool: StreamClientPoolRef,
 
     /// Resolved info in this barrier loop.
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
-    pub info: &'a BarrierActorInfo,
+    pub info: Arc<BarrierActorInfo>,
 
-    pub prev_epoch: &'a Epoch,
-    pub curr_epoch: &'a Epoch,
+    pub prev_epoch: Epoch,
+    pub curr_epoch: Epoch,
 
-    command: Command,
+    pub command: Command,
 }
 
-impl<'a, S> CommandContext<'a, S> {
+impl<S: MetaStore> CommandContext<S> {
     pub fn new(
         fragment_manager: FragmentManagerRef<S>,
         client_pool: StreamClientPoolRef,
-        info: &'a BarrierActorInfo,
-        prev_epoch: &'a Epoch,
-        curr_epoch: &'a Epoch,
+        info: BarrierActorInfo,
+        prev_epoch: Epoch,
+        curr_epoch: Epoch,
         command: Command,
     ) -> Self {
         Self {
             fragment_manager,
             client_pool,
-            info,
+            info: Arc::new(info),
             prev_epoch,
             curr_epoch,
             command,
@@ -115,21 +125,25 @@ impl<'a, S> CommandContext<'a, S> {
     }
 }
 
-impl<S> CommandContext<'_, S>
+impl<S> CommandContext<S>
 where
     S: MetaStore,
 {
     /// Generate a mutation for the given command.
-    pub async fn to_mutation(&self) -> Result<Mutation> {
+    pub async fn to_mutation(&self) -> Result<Option<Mutation>> {
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
                 let actors = self.fragment_manager.get_table_actor_ids(table_id).await?;
-                Mutation::Stop(StopMutation { actors })
+                Some(Mutation::Stop(StopMutation { actors }))
             }
 
-            Command::CreateMaterializedView { dispatches, .. } => {
+            Command::CreateMaterializedView {
+                dispatches,
+                source_state,
+                ..
+            } => {
                 let mutations = dispatches
                     .iter()
                     .map(
@@ -140,7 +154,24 @@ where
                         },
                     )
                     .collect();
-                Mutation::Add(AddMutation { mutations })
+
+                let actor_splits = source_state
+                    .iter()
+                    .filter(|(_, splits)| !splits.is_empty())
+                    .map(|(actor_id, splits)| {
+                        (
+                            *actor_id,
+                            ConnectorSplits {
+                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        )
+                    })
+                    .collect();
+
+                Some(Mutation::Add(AddMutation {
+                    mutations,
+                    actor_splits,
+                }))
             }
         };
 
@@ -178,7 +209,7 @@ where
                             request_id,
                             actor_ids: actors.to_owned(),
                         };
-                        client.drop_actors(request).await.to_rw_result()?;
+                        client.drop_actors(request).await?;
 
                         Ok::<_, RwError>(())
                     }
@@ -194,6 +225,7 @@ where
                 table_fragments,
                 dispatches,
                 table_sink_map,
+                source_state: _,
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {

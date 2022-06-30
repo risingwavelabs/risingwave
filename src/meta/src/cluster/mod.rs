@@ -23,6 +23,7 @@ use std::time::{Duration, SystemTime};
 use itertools::Itertools;
 use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_common::try_match_expand;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -35,7 +36,6 @@ use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
 
 pub type WorkerId = u32;
-pub type ParallelUnitId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
 pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
 
@@ -218,7 +218,7 @@ where
                     _ = min_interval.tick() => {},
                     // Shutdown
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Heartbeat checker is shutting down");
+                        tracing::info!("Heartbeat checker is stopped");
                         return;
                     }
                 }

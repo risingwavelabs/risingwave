@@ -14,21 +14,24 @@
 
 use std::fmt::Debug;
 use std::future::Future;
+use std::iter::repeat_with;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::channel::mpsc::Sender;
-use futures::{SinkExt, Stream};
+use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use tokio::sync::mpsc::Sender;
 use tracing::event;
 
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
 use crate::task::{ActorId, DispatcherId, SharedContext};
 
@@ -146,7 +149,9 @@ pub struct DispatchExecutor {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
     actor_id: u32,
+    actor_id_str: String,
     context: Arc<SharedContext>,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl DispatchExecutorInner {
@@ -162,6 +167,11 @@ impl DispatchExecutorInner {
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Chunk(chunk) => {
+                self.metrics
+                    .actor_out_record_cnt
+                    .with_label_values(&[&self.actor_id_str])
+                    .inc_by(chunk.cardinality() as _);
+
                 if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
                     self.single_inner_mut().dispatch_data(chunk).await?;
@@ -221,8 +231,9 @@ impl DispatchExecutorInner {
 
             Mutation::AddOutput(adds) => {
                 for dispatcher in &mut self.dispatchers {
-                    if let Some(downstream_actor_infos) =
-                        adds.get(&(self.actor_id, dispatcher.get_dispatcher_id()))
+                    if let Some(downstream_actor_infos) = adds
+                        .map
+                        .get(&(self.actor_id, dispatcher.get_dispatcher_id()))
                     {
                         let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                         for downstream_actor_info in downstream_actor_infos {
@@ -267,13 +278,16 @@ impl DispatchExecutor {
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
         context: Arc<SharedContext>,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
             input,
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
+                actor_id_str: actor_id.to_string(),
                 context,
+                metrics,
             },
         }
     }
@@ -525,21 +539,22 @@ impl Dispatcher for HashDataDispatcher {
                 .unwrap()
                 .iter()
                 .map(|hash| *hash as usize % VIRTUAL_NODE_COUNT)
-                .collect::<Vec<_>>();
+                .collect_vec();
+
+            let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
+                .take(num_outputs)
+                .collect_vec();
+            let mut last_hash_value_when_update_delete: usize = 0;
+            let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
             let (ops, columns, visibility) = chunk.into_inner();
 
-            let mut vis_maps = vec![vec![]; num_outputs];
-            let mut last_hash_value_when_update_delete: usize = 0;
-            let mut new_ops: Vec<Op> = Vec::with_capacity(ops.len());
             match visibility {
                 None => {
                     hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
                         // get visibility map for every output chunk
-                        for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                            vis_map.push(
-                                self.hash_mapping[*hash] == self.outputs[output_idx].actor_id(),
-                            );
+                        for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
+                            vis_map.append(self.hash_mapping[*hash] == output.actor_id());
                         }
                         // The 'update' message, noted by an UpdateDelete and a successive
                         // UpdateInsert, need to be rewritten to common
@@ -566,11 +581,10 @@ impl Dispatcher for HashDataDispatcher {
                         .zip_eq(visibility.iter())
                         .zip_eq(ops)
                         .for_each(|((hash, visible), op)| {
-                            for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                                vis_map.push(
-                                    visible
-                                        && self.hash_mapping[*hash]
-                                            == self.outputs[output_idx].actor_id(),
+                            for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
+                            {
+                                vis_map.append(
+                                    visible && self.hash_mapping[*hash] == output.actor_id(),
                                 );
                             }
                             if !visible {
@@ -602,7 +616,7 @@ impl Dispatcher for HashDataDispatcher {
                 .zip_eq(self.outputs.iter_mut())
                 .zip_eq(self.fragment_ids.iter())
             {
-                let vis_map = vis_map.try_into().unwrap();
+                let vis_map = vis_map.finish();
                 // columns is not changed in this function
                 let new_stream_chunk =
                     StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
@@ -770,7 +784,6 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};
 
-    use futures::channel::mpsc::channel;
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
     use madsim::collections::HashMap;
@@ -778,12 +791,13 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
+    use tokio::sync::mpsc::channel;
 
     use super::*;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::ActorContext;
+    use crate::executor::{ActorContext, AddOutput};
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -920,19 +934,22 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
-        let (mut tx, rx) = channel(16);
+        let (tx, rx) = channel(16);
         let input = Box::new(ReceiverExecutor::new(
             schema.clone(),
             vec![],
             rx,
             ActorContext::create(),
             0,
+            0,
+            Arc::new(StreamingMetrics::unused()),
         ));
         let data_sink = Arc::new(Mutex::new(vec![]));
         let actor_id = 233;
         let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
         let dispatcher_id = 666;
+        let metrics = Arc::new(StreamingMetrics::unused());
 
         let executor = Box::new(DispatchExecutor::new(
             input,
@@ -942,6 +959,7 @@ mod tests {
             ))],
             actor_id,
             ctx.clone(),
+            metrics,
         ))
         .execute();
         pin_mut!(executor);
@@ -985,13 +1003,16 @@ mod tests {
         add_local_channels(ctx.clone(), vec![(233, 245)]);
         add_remote_channels(ctx.clone(), 233, vec![246]);
         tx.send(Message::Barrier(
-            Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput({
-                let mut actors = HashMap::default();
-                actors.insert(
-                    (233, 666),
-                    vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
-                );
-                actors
+            Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput(AddOutput {
+                map: {
+                    let mut actors = HashMap::default();
+                    actors.insert(
+                        (233, 666),
+                        vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
+                    );
+                    actors
+                },
+                ..Default::default()
             })),
         ))
         .await
@@ -1042,7 +1063,7 @@ mod tests {
 
         let mut start = 19260817i32..;
         let mut builders = (0..dimension)
-            .map(|_| I32ArrayBuilder::new(cardinality).unwrap())
+            .map(|_| I32ArrayBuilder::new(cardinality))
             .collect_vec();
         let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
         let mut output_ops = vec![vec![]; num_outputs];

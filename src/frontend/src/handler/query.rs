@@ -13,23 +13,22 @@
 // limitations under the License.
 
 use futures_async_stream::for_await;
+use log::debug;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::error::Result;
+use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
 use tracing::info;
 
 use crate::binder::{Binder, BoundStatement};
-use crate::config::QueryMode;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{
     BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
 };
 use crate::session::OptimizerContext;
-
-pub static QUERY_MODE: &str = "query_mode";
 
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
@@ -43,13 +42,12 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         binder.bind(stmt)?
     };
 
-    let query_mode = session
-        .get_config(QUERY_MODE)
-        .map(|entry| entry.get_val(QueryMode::default()))
-        .unwrap_or_default();
+    let query_mode = session.config().get_query_mode();
+
+    debug!("query_mode:{:?}", query_mode);
 
     let (data_stream, pg_descs) = match query_mode {
-        QueryMode::Local => local_execute(context, bound).await?,
+        QueryMode::Local => local_execute(context, bound)?,
         QueryMode::Distributed => distribute_execute(context, bound).await?,
     };
 
@@ -64,7 +62,7 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         _ => unreachable!(),
     };
 
-    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
+    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {
@@ -113,7 +111,7 @@ async fn distribute_execute(
     ))
 }
 
-async fn local_execute(
+fn local_execute(
     context: OptimizerContext,
     stmt: BoundStatement,
 ) -> Result<(BoxedDataChunkStream, Vec<PgFieldDescriptor>)> {
@@ -143,9 +141,9 @@ async fn local_execute(
         (query, pg_descs)
     };
 
-    let hummock_snapshot_manager = session.env().hummock_snapshot_manager().clone();
+    let front_env = session.env();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(query, hummock_snapshot_manager, "");
+    let execution = LocalQueryExecution::new(query, front_env.clone(), "", session.auth_context());
     Ok((Box::pin(execution.run()), pg_descs))
 }

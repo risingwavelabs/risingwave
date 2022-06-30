@@ -16,7 +16,6 @@ use crate::hummock::iterator::concat_inner::ConcatIteratorInner;
 use crate::hummock::BackwardSSTableIterator;
 
 /// Iterates backwards on multiple non-overlapping tables.
-#[allow(dead_code)]
 pub type BackwardConcatIterator = ConcatIteratorInner<BackwardSSTableIterator>;
 
 /// Mirrors the tests used for `SSTableIterator`
