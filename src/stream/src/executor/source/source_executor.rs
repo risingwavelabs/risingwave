@@ -810,7 +810,8 @@ mod tests {
 
         let mut materialize = MaterializeExecutor::new(
             Box::new(source_exec),
-            keyspace.clone(),
+            MemoryStateStore::new(),
+            TableId::from(0x2333),
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,

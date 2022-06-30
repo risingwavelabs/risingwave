@@ -24,7 +24,7 @@ use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
@@ -178,7 +178,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
         mut data_types: Vec<DataType>,
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         dist_key_indices: Option<Vec<usize>>,
         metrics: Arc<StreamingMetrics>,
         actor_id: u64,
@@ -204,7 +205,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let order_types = vec![OrderType::Ascending; table_pk_indices.len()];
 
         let state_table = StateTable::new(
-            keyspace,
+            store,
+            table_id,
             column_descs,
             order_types,
             dist_key_indices,

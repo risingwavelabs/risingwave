@@ -214,7 +214,8 @@ pub mod global_simple_agg {
     /// Relational pk = `table_desc.len` - 1.
     /// it's test only.
     pub fn generate_state_table<S: StateStore>(
-        ks: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         agg_call: &AggCall,
         group_keys: &[usize],
         pk_indices: &[usize],
@@ -228,7 +229,8 @@ pub mod global_simple_agg {
         let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
 
         StateTable::new(
-            ks,
+            store,
+            table_id,
             table_desc,
             // Primary key do not includes group key.
             vec![
@@ -249,7 +251,7 @@ pub mod global_simple_agg {
         )
     }
     use itertools::Itertools;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
@@ -273,7 +275,8 @@ pub mod global_simple_agg {
             .zip_eq(agg_calls.iter())
             .map(|(ks, agg_call)| {
                 generate_state_table(
-                    ks.clone(),
+                    store,
+                    table_id,
                     agg_call,
                     &key_indices,
                     &pk_indices,

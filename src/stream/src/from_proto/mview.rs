@@ -41,8 +41,6 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .map(|id| ColumnId::from(*id))
             .collect();
 
-        let keyspace = Keyspace::table_root(store, &table_id);
-
         let distribution_keys = node
             .distribution_keys
             .iter()
@@ -51,7 +49,8 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
-            keyspace,
+            store,
+            table_id,
             keys,
             column_ids,
             params.executor_id,
@@ -72,8 +71,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
-
-        let keyspace = Keyspace::table_root(store, &TableId::from(arrange_node.table_id));
+        let table_id = TableId::from(arrange_node.table_id);
 
         let keys = arrange_node
             .get_table_info()?
@@ -97,7 +95,8 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
 
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
-            keyspace,
+            store,
+            table_id,
             keys,
             column_ids,
             params.executor_id,

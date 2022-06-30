@@ -14,7 +14,7 @@
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::{Keyspace, StateStore};
@@ -40,7 +40,8 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         cache_size: Option<usize>,
         total_count: (usize, usize),
         executor_id: u64,
@@ -57,7 +58,8 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 order_pairs,
                 offset_and_limit,
                 pk_indices,
-                keyspace,
+                store,
+                table_id,
                 cache_size,
                 total_count,
                 executor_id,
@@ -113,7 +115,8 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         cache_size: Option<usize>,
         total_count: (usize, usize),
         executor_id: u64,
@@ -127,8 +130,6 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             .iter()
             .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
-        let lower_sub_keyspace = keyspace.append_u8(b'l');
-        let higher_sub_keyspace = keyspace.append_u8(b'h');
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
         Ok(Self {
@@ -143,7 +144,8 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             managed_lower_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
                 total_count.0,
-                lower_sub_keyspace,
+                store.clone(),
+                table_id.clone(),
                 row_data_types.clone(),
                 ordered_row_deserializer.clone(),
                 internal_key_indices.clone(),
@@ -151,7 +153,8 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             managed_higher_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
                 total_count.1,
-                higher_sub_keyspace,
+                store.clone(),
+                table_id.clone(),
                 row_data_types,
                 ordered_row_deserializer,
                 internal_key_indices.clone(),
@@ -284,9 +287,10 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_storage::memory::MemoryStateStore;
 
     use crate::executor::test_utils::{create_in_memory_keyspace, MockSource};
     use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
@@ -373,7 +377,8 @@ mod tests {
                 order_pairs,
                 (3, None),
                 vec![0, 1],
-                keyspace,
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
                 Some(2),
                 (0, 0),
                 1,
@@ -447,7 +452,8 @@ mod tests {
                 order_pairs,
                 (0, Some(5)),
                 vec![0, 1],
-                keyspace,
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
                 Some(2),
                 (0, 0),
                 1,
@@ -527,7 +533,8 @@ mod tests {
                 order_pairs,
                 (3, Some(4)),
                 vec![0, 1],
-                keyspace,
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
                 Some(2),
                 (0, 0),
                 1,

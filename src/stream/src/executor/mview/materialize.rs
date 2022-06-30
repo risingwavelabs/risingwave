@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
@@ -44,7 +44,8 @@ pub struct MaterializeExecutor<S: StateStore> {
 impl<S: StateStore> MaterializeExecutor<S> {
     pub fn new(
         input: BoxedExecutor,
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
@@ -70,7 +71,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
         Self {
             input,
             state_table: StateTable::new(
-                keyspace,
+                store,
+                table_id,
                 column_descs,
                 arrange_order_types,
                 Some(distribution_keys),
@@ -225,7 +227,8 @@ mod tests {
             CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types, vec![0]);
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
-            keyspace,
+            memory_state_store,
+            table_id,
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             1,

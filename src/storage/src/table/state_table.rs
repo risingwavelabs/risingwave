@@ -22,7 +22,7 @@ use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
@@ -57,12 +57,14 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
     // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         _dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        let keyspace = Keyspace::table_root(store, &table_id);
         Self::new_without_distribution(keyspace, columns, order_types, pk_indices)
     }
 

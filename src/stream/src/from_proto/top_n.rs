@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::cache;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::sort_util::OrderPair;
 
@@ -41,7 +42,6 @@ impl ExecutorBuilder for TopNExecutorBuilder {
         let cache_size = Some(1024);
         let total_count = (0, 0, 0);
         let table_id = TableId::new(node.get_table_id());
-        let keyspace = Keyspace::table_root(store, &table_id);
         let key_indices = node
             .get_distribution_keys()
             .iter()
@@ -53,7 +53,8 @@ impl ExecutorBuilder for TopNExecutorBuilder {
             order_pairs,
             (node.offset as usize, limit),
             params.pk_indices,
-            keyspace,
+            store,
+            table_id,
             cache_size,
             total_count,
             params.executor_id,

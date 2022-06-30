@@ -19,7 +19,7 @@ use futures::stream::StreamExt;
 use itertools::Itertools;
 use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -59,7 +59,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     pub fn new(
         top_n_count: Option<usize>,
         total_count: usize,
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
         pk_indices: PkIndices,
@@ -85,7 +86,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = StateTable::new(keyspace, column_descs, order_types, None, pk_indices);
+        let state_table =
+            StateTable::new(store, table_id, column_descs, order_types, None, pk_indices);
         Self {
             top_n: BTreeMap::new(),
             state_table,
@@ -322,9 +324,10 @@ mod tests {
         let ordered_row_deserializer = OrderedRowDeserializer::new(data_types.clone(), order_types);
 
         ManagedTopNState::<S, TOP_N_TYPE>::new(
-            Some(2),
+            Some(0),
             row_count,
-            Keyspace::table_root(store.clone(), &TableId::from(0x2333)),
+            store.clone(),
+            TableId::from(0x2333),
             data_types,
             ordered_row_deserializer,
             vec![0_usize, 1_usize],

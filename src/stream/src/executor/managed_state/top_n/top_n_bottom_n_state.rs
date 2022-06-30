@@ -21,7 +21,7 @@ use futures::pin_mut;
 use futures::stream::StreamExt;
 use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::table::state_table::StateTable;
@@ -61,7 +61,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     pub fn new(
         cache_size: Option<usize>,
         total_count: usize,
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
         pk_indices: PkIndices,
@@ -75,7 +76,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             })
             .collect::<Vec<_>>();
         let state_table =
-            StateTable::new(keyspace.clone(), column_descs, order_type, None, pk_indices);
+            StateTable::new(store, table_id, column_descs, order_type, None, pk_indices);
+        let keyspace = Keyspace::table_root(store, &table_id);
         Self {
             top_n: BTreeMap::new(),
             bottom_n: BTreeMap::new(),
@@ -334,7 +336,8 @@ mod tests {
         ManagedTopNBottomNState::new(
             Some(1),
             row_count,
-            Keyspace::table_root(store.clone(), &TableId::from(0x2333)),
+            store.clone(),
+            TableId::from(0x2333),
             data_types,
             ordered_row_deserializer,
             vec![0_usize, 1_usize],
