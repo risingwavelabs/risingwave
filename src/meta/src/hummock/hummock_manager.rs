@@ -928,9 +928,13 @@ where
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
         // Verify all table_ids have already been registered to compaction group.
-        // Prerequisite: `commit_epoch` should be called before any compaction group unregistration
-        // within the same epoch. So that a being dropped table is still a valid compaction group
-        // member.
+        //
+        // We don't expect any dropped table_ids here. Because
+        // GlobalStreamManager::drop_materialized_view:
+        //
+        // 1. first cause CN to sync tables and stop actors.
+        //
+        // 2. then unregister tables from compaction group.
         for (compaction_group_id, sst) in &sstables {
             let compaction_group = self
                 .compaction_group_manager
