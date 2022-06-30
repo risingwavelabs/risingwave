@@ -18,6 +18,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -25,7 +26,7 @@ use super::{
     PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin, StreamProject,
     ToBatch, ToStream,
 };
-use crate::expr::{ExprImpl, ExprType};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchNestedLoopJoin, EqJoinPredicate, LogicalFilter,
     StreamDynamicFilter, StreamFilter,
@@ -798,16 +799,38 @@ impl ToStream for LogicalJoin {
                 return Err(nested_loop_join_error);
             }
 
+            // Right side must have exactly one column (prior to being converted to stream)
+            if self.right().schema().len() != 1 {
+                return Err(nested_loop_join_error);
+            }
+
             // Check if the join condition is a correlated comparison
             let conj = &predicate.other_cond().conjunctions;
 
-            let left_ref_index = if let Some(expr) = conj.first() && conj.len() == 1
+            let (left_ref_index, new_expr) = if let Some(expr) = conj.first() && conj.len() == 1
             {
-                if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
+                if let Some((left_ref, op, right_ref)) = expr.as_comparison_cond()
                     && left_ref.index < self.left().schema().len()
                     && right_ref.index >= self.left().schema().len()
                 {
-                    left_ref.index
+                    (
+                        left_ref.index,
+                        ExprImpl::FunctionCall(Box::new(
+                            FunctionCall::new(
+                                op,
+                                vec![
+                                    ExprImpl::InputRef(Box::new(InputRef {
+                                        index: 0,
+                                        data_type: left_ref.data_type
+                                    })),
+                                    ExprImpl::InputRef(Box::new(InputRef {
+                                        index: 1,
+                                        data_type: right_ref.data_type
+                                    }))
+                                ],
+                            )?
+                        ))
+                    )
                 } else {
                     return Err(nested_loop_join_error);
                 }
@@ -836,7 +859,13 @@ impl ToStream for LogicalJoin {
                 Distribution::Single
             );
 
-            let plan = StreamDynamicFilter::new(predicate.other_cond().clone(), left, right).into();
+            let plan = StreamDynamicFilter::new(
+                left_ref_index,
+                Condition::with_expr(new_expr),
+                left,
+                right,
+            )
+            .into();
 
             if self.output_indices != (0..self.internal_column_num()).collect::<Vec<_>>() {
                 let logical_project = LogicalProject::with_mapping(

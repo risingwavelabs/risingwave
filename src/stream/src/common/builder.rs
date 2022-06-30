@@ -158,6 +158,9 @@ impl StreamChunkBuilder {
     }
 
     pub fn take(&mut self) -> Result<Option<StreamChunk>> {
+        if self.size == 0 {
+            return Ok(None);
+        }
         self.size = 0;
         let new_arrays: Vec<ArrayImpl> = self
             .column_builders

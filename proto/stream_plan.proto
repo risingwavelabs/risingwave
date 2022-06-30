@@ -109,18 +109,17 @@ message HashJoinNode {
 
 message DynamicFilterNode {
   uint32 left_key = 1;
-  uint32 right_key = 2;
   // Must be one of <, <=, >, >=
   expr.ExprNode condition = 3;
   // Used for internal table states.
-  catalog.Table left_table = 4;
+  // catalog.Table left_table = 4;
 
-  repeated uint32 dist_key_l = 8;
+  // uint32 dist_key_l = 8;
   // It is true when the right side of the inequality predicate is monotonically:
   // - decreasing for <, <=, increasing for >, >=
-  bool is_monotonic = 10;
+  // bool is_monotonic = 10;
   // the output indices of current node
-  repeated uint32 output_indices = 11;
+  //repeated uint32 output_indices = 11;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta

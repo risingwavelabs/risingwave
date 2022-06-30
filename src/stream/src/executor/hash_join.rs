@@ -590,16 +590,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         Row(new_row)
     }
 
-    fn bool_from_array_ref(array_ref: ArrayRef) -> bool {
-        let bool_array = array_ref.as_ref().as_bool();
-        bool_array.value_at(0).unwrap_or_else(|| {
-            panic!(
-                "Some thing wrong with the expression result. Bool array: {:?}",
-                bool_array
-            )
-        })
-    }
-
     #[try_stream(ok = Message, error = RwError)]
     async fn eq_join_oneside<'a, const SIDE: SideTypePrimitive>(
         mut side_l: &'a mut JoinSide<K, S>,
@@ -645,7 +635,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 let new_row =
                     Self::row_concat(row_update, update_start_pos, row_matched, matched_start_pos);
 
-                cond_match = Self::bool_from_array_ref(cond.eval(&new_row, output_data_types)?);
+                // This can never be null??
+                cond_match = *cond.eval(&new_row)?.unwrap().as_bool();
             }
             Ok(cond_match)
         };

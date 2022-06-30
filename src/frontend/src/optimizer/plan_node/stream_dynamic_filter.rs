@@ -14,7 +14,9 @@
 use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::DynamicFilterNode;
 
+use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -25,12 +27,13 @@ pub struct StreamDynamicFilter {
     /// The predicate (formed with exactly one of < , <=, >, >=)
     predicate: Condition,
     // dist_key_l: Distribution,
+    left_index: usize,
     left: PlanRef,
     right: PlanRef,
 }
 
 impl StreamDynamicFilter {
-    pub fn new(predicate: Condition, left: PlanRef, right: PlanRef) -> Self {
+    pub fn new(left_index: usize, predicate: Condition, left: PlanRef, right: PlanRef) -> Self {
         // TODO: derive from input
         let base = PlanBase::new_stream(
             left.ctx(),
@@ -45,6 +48,7 @@ impl StreamDynamicFilter {
             predicate,
             left,
             right,
+            left_index,
         }
     }
 }
@@ -65,7 +69,7 @@ impl PlanTreeNodeBinary for StreamDynamicFilter {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.predicate.clone(), left, right)
+        Self::new(self.left_index, self.predicate.clone(), left, right)
     }
 }
 
@@ -73,6 +77,12 @@ impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 
 impl ToStreamProst for StreamDynamicFilter {
     fn to_stream_prost_body(&self) -> NodeBody {
-        unimplemented!()
+        NodeBody::DynamicFilter(DynamicFilterNode {
+            left_key: self.left_index as u32,
+            condition: self
+                .predicate
+                .as_expr_unless_true()
+                .map(|x| x.to_expr_proto()),
+        })
     }
 }
