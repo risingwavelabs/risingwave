@@ -17,11 +17,10 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
+use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_expr::expr::{build_from_prost, RowExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
@@ -66,12 +65,10 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             source_l,
             source_r,
             key_l,
-            key_r,
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
             cond: condition,
             comparator,
-            op_info: params.op_info,
             // keyspace_l: Keyspace::table_root(store.clone(), &TableId { table_id: 0 }),
             // keyspace_r: Keyspace::table_root(store, &right_table_id),
             actor_id: params.actor_id as u64,
@@ -88,12 +85,10 @@ struct DynamicFilterExecutorDispatcherArgs {
     source_l: Box<dyn Executor>,
     source_r: Box<dyn Executor>,
     key_l: usize,
-    key_r: usize,
     pk_indices: PkIndices,
     executor_id: u64,
     cond: RowExpression,
     comparator: ExprNodeType,
-    op_info: String,
     actor_id: u64,
     metrics: Arc<StreamingMetrics>,
 }
@@ -107,12 +102,10 @@ impl HashKeyDispatcher for DynamicFilterExecutorDispatcher {
             args.source_l,
             args.source_r,
             args.key_l,
-            args.key_r,
             args.pk_indices,
             args.executor_id,
             args.cond,
             args.comparator,
-            args.op_info,
             args.actor_id,
             args.metrics,
         )))

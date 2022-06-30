@@ -40,13 +40,10 @@ pub struct DynamicFilterExecutor {
     source_l: BoxedExecutor,
     source_r: BoxedExecutor,
     key_l: usize,
-    key_r: usize,
     pk_indices: PkIndices,
-    executor_id: u64,
     identity: String,
     cond: RowExpression,
     comparator: ExprNodeType,
-    op_info: String,
     actor_id: u64,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
@@ -57,12 +54,10 @@ impl DynamicFilterExecutor {
         source_l: BoxedExecutor,
         source_r: BoxedExecutor,
         key_l: usize,
-        key_r: usize,
         pk_indices: PkIndices,
         executor_id: u64,
         cond: RowExpression,
         comparator: ExprNodeType,
-        op_info: String,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -71,13 +66,10 @@ impl DynamicFilterExecutor {
             source_l,
             source_r,
             key_l,
-            key_r,
             pk_indices,
-            executor_id,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             cond,
             comparator,
-            op_info,
             actor_id,
             metrics,
             schema,
@@ -109,7 +101,7 @@ impl DynamicFilterExecutor {
         for msg in aligned_stream {
             match msg? {
                 AlignedMessage::Left(chunk) => {
-                    // TODO: refactor into `apply_batch`
+                    // TODO: refactor into fn: `apply_batch`
                     // Reuse the logic from `FilterExecutor`
                     let chunk = chunk.compact()?; // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
@@ -176,8 +168,9 @@ impl DynamicFilterExecutor {
                             }
                         }
 
-                        // null key in predicate should never be stored (it will never satisfy the
-                        // filter condition)
+                        // Store the rows without a null left key
+                        // null key in left side of predicate should never be stored
+                        // (it will never satisfy the filter condition)
                         if let Some(val) = left_val {
                             match *op {
                                 Op::Insert | Op::UpdateInsert => {
@@ -207,11 +200,13 @@ impl DynamicFilterExecutor {
 
                     if new_visibility.num_high_bits() > 0 {
                         let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
-                        println!("yielding {} rows (from updates)", new_chunk.cardinality());
                         yield Message::Chunk(new_chunk)
                     }
                 }
                 AlignedMessage::Right(chunk) => {
+                    // Store the latest update to the right value
+                    // (This should eventually be persisted via `StateTable` as well - at the
+                    // barrier)
                     let chunk = chunk.compact()?; // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
@@ -232,19 +227,13 @@ impl DynamicFilterExecutor {
                 }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
-                    // We assume that the `Datum`s are of the same type...?
-                    // TODO: refactor into flush range
+                    // TODO: refactor into fn `flush_range`
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
                         let curr_is_some = curr.is_some();
-                        let prev_is_some = prev.is_some();
-                        // Impl only for GT for now (LHS > RHS)
-                        // TODO: use proto for this
-                        // We assume that LHS has the same type as RHS for now
                         let (range, is_insert) = match (curr.clone(), prev) {
                             (Some(c), None) | (None, Some(c)) => {
-                                // TODO: improve the logic here...!
                                 let range = match self.comparator {
                                     GreaterThan => (Excluded(c), Unbounded),
                                     GreaterThanOrEqual => (Included(c), Unbounded),
@@ -285,12 +274,6 @@ impl DynamicFilterExecutor {
                         };
 
                         for (_, rows) in state.range(range) {
-                            println!(
-                                "yielding {} rows. prev is some: {}, current is some: {}",
-                                rows.len(),
-                                prev_is_some,
-                                curr_is_some,
-                            );
                             for row in rows {
                                 if let Some(chunk) = stream_chunk_builder
                                     .append_row_matched(
@@ -308,10 +291,10 @@ impl DynamicFilterExecutor {
                             .take()
                             .map_err(StreamExecutorError::eval_error)?
                         {
-                            println!("Yielding chunk of cardinality: {}", chunk.cardinality());
                             yield Message::Chunk(chunk);
                         }
                     }
+                    // TODO: We will persist `prev_epoch_value` to the `StateTable` as well
                     prev_epoch_value = Some(curr);
                     yield Message::Barrier(barrier);
                 }
@@ -337,3 +320,5 @@ impl Executor for DynamicFilterExecutor {
         self.identity.as_str()
     }
 }
+
+// TODO: unit tests - test each comparator. With inserts and deletes. With updates on RHS.
