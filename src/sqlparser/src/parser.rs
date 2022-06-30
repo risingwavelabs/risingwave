@@ -561,7 +561,7 @@ impl Parser {
     pub fn parse_function(&mut self, name: ObjectName) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
         let distinct = self.parse_all_or_distinct()?;
-        let args = self.parse_optional_args()?;
+        let (args, order_by) = self.parse_optional_args()?;
         let over = if self.parse_keyword(Keyword::OVER) {
             // TBD: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
@@ -571,7 +571,7 @@ impl Parser {
             } else {
                 vec![]
             };
-            let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+            let order_by_window = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
                 self.parse_comma_separated(Parser::parse_order_by_expr)?
             } else {
                 vec![]
@@ -586,7 +586,7 @@ impl Parser {
 
             Some(WindowSpec {
                 partition_by,
-                order_by,
+                order_by: order_by_window,
                 window_frame,
             })
         } else {
@@ -598,6 +598,7 @@ impl Parser {
             args,
             over,
             distinct,
+            order_by,
         }))
     }
 
@@ -2780,10 +2781,10 @@ impl Parser {
         } else {
             let name = self.parse_object_name()?;
             // Postgres,table-valued functions:
-            let args = if self.consume_token(&Token::LParen) {
+            let (args, _) = if self.consume_token(&Token::LParen) {
                 self.parse_optional_args()?
             } else {
-                vec![]
+                (vec![], vec![])
             };
             let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
             Ok(TableFactor::Table { name, alias, args })
@@ -3050,13 +3051,20 @@ impl Parser {
         }
     }
 
-    pub fn parse_optional_args(&mut self) -> Result<Vec<FunctionArg>, ParserError> {
+    pub fn parse_optional_args(
+        &mut self,
+    ) -> Result<(Vec<FunctionArg>, Vec<OrderByExpr>), ParserError> {
         if self.consume_token(&Token::RParen) {
-            Ok(vec![])
+            Ok((vec![], vec![]))
         } else {
             let args = self.parse_comma_separated(Parser::parse_function_args)?;
+            let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+                self.parse_comma_separated(Parser::parse_order_by_expr)?
+            } else {
+                vec![]
+            };
             self.expect_token(&Token::RParen)?;
-            Ok(args)
+            Ok((args, order_by))
         }
     }
 
