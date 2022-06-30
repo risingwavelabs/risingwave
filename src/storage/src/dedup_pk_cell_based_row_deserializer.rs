@@ -22,6 +22,7 @@ use risingwave_common::util::ordered::OrderedRowDeserializer;
 
 use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
 
+/// Similar to [`CellBasedRowDeserializer`], but for dedup pk cell encoding.
 #[derive(Clone)]
 pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
     pk_deserializer: OrderedRowDeserializer,
@@ -29,11 +30,13 @@ pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMappin
 
     // Maps pk fields with:
     // 1. same value and memcomparable encoding,
-    // 2. corresponding row positions. e.g. _row_id is unlikely to be part of selected row.
+    // 2. corresponding row positions.
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
 impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<Desc> {
+    /// Create a [`DedupPkCellBasedRowDeserializer`]
+    /// to decode cell based row with dedup pk encoding.
     pub fn new(column_mapping: Desc, pk_descs: &[OrderedColumnDesc]) -> Self {
         let (pk_data_types, pk_order_types) = pk_descs
             .iter()
@@ -68,6 +71,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
         }
     }
 
+    /// Places dedupped pk `Datum`s back into `Row`.
     fn replace_dedupped_datums_into_row(&self, pk_datums: Vec<Datum>, row: Row) -> Row {
         let Row(mut row_inner) = row;
         for (pk_idx, datum) in pk_datums.into_iter().enumerate() {
@@ -78,6 +82,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
         Row(row_inner)
     }
 
+    /// Replaces missing `Datum`s in raw deserialized results.
     fn replace_dedupped_datums(
         &self,
         raw_result: Option<(VirtualNode, Vec<u8>, Row)>,
@@ -94,8 +99,8 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
         }
     }
 
-    /// When we encounter a new key, we can be sure that the previous row has been fully
-    /// deserialized. Then we return the key and the value of the previous row.
+    /// Functionally the same as [`CellBasedRowDeserializer::deserialize`],
+    /// but with dedup pk encoding.
     pub fn deserialize(
         &mut self,
         raw_key: impl AsRef<[u8]>,
@@ -105,6 +110,8 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
         self.replace_dedupped_datums(raw_result)
     }
 
+    /// Functionally the same as [`CellBasedRowDeserializer::deserialize_without_vnode`],
+    /// but with dedup pk encoding.
     // TODO: remove this once we refactored lookup in delta join with cell-based table
     pub fn deserialize_without_vnode(
         &mut self,
@@ -115,14 +122,15 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
         self.replace_dedupped_datums(raw_result)
     }
 
-    /// Take the remaining data out of the deserializer.
+    /// Functionally the same as [`CellBasedRowDeserializer::take`],
+    /// but with dedup pk encoding.
     pub fn take(&mut self) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
         let raw_result = self.inner.take();
         self.replace_dedupped_datums(raw_result)
     }
 
-    /// Since [`DedupPkCellBasedRowDeserializer`] can be repetitively used with different inputs,
-    /// it needs to be reset so that pk and data are both cleared for the next use.
+    /// Functionally the same as [`CellBasedRowDeserializer::reset`],
+    /// but with dedup pk encoding.
     pub fn reset(&mut self) {
         self.inner.reset()
     }
