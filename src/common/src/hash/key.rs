@@ -131,9 +131,7 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 
     #[inline(always)]
     fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> Result<Row> {
-        let mut builders: Vec<_> = data_types
-            .map(|dt| dt.create_array_builder(1))
-            .try_collect()?;
+        let mut builders: Vec<_> = data_types.map(|dt| dt.create_array_builder(1)).collect();
 
         self.deserialize_to_builders(&mut builders)?;
         builders
@@ -874,7 +872,7 @@ mod tests {
 
         let mut array_builders = [0, 1]
             .iter()
-            .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2).unwrap()))
+            .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2)))
             .collect::<Vec<_>>();
 
         keys.into_iter()

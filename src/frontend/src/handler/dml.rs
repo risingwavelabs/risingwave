@@ -15,7 +15,6 @@
 use futures_async_stream::for_await;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
-use risingwave_common::session_config::IMPLICIT_FLUSH;
 use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
@@ -71,10 +70,8 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
     };
 
     // Implicitly flush the writes.
-    if let Some(flag) = session.get_config(IMPLICIT_FLUSH) {
-        if flag.is_set(false) {
-            flush_for_write(&session, stmt_type).await?;
-        }
+    if session.config().get_implicit_flush() {
+        flush_for_write(&session, stmt_type).await?;
     }
 
     Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs, true))

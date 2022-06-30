@@ -73,9 +73,9 @@ impl Expression for CaseExpression {
                 )
             })
             .collect_vec();
-        let mut output_array = self.return_type().create_array_builder(input.capacity())?;
+        let mut output_array = self.return_type().create_array_builder(input.capacity());
         for idx in 0..input.capacity() {
-            if vis.is_set(idx).unwrap() {
+            if vis.is_set(idx) {
                 if let Some((_, t)) = when_thens
                     .iter()
                     .map(|(w, t)| (w.value_at(idx), t.value_at(idx)))

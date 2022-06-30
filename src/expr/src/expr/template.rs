@@ -56,7 +56,7 @@ macro_rules! gen_eval {
                 )*
 
                 let bitmap = data_chunk.get_visibility_ref();
-                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity())?;
+                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity());
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
                         for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
@@ -87,7 +87,7 @@ macro_rules! gen_eval {
                 $(
                     let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;
 
-                    let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1)?;
+                    let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1);
                     let [<ref_ $arg:lower>] = &mut [<builder_ $arg:lower>];
 
                     for_all_variants! {array_impl_add_datum, [<ref_ $arg:lower>], [<datum_ $arg:lower>]}
@@ -96,7 +96,7 @@ macro_rules! gen_eval {
                     let [<arr_ $arg:lower>]: &$arg = [<arr_ $arg:lower>].as_ref().into();
                 )*
 
-                let mut output_array = <$OA as Array>::Builder::new(1)?;
+                let mut output_array = <$OA as Array>::Builder::new(1);
                 for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
                     $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                 }
