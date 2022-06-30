@@ -19,12 +19,43 @@ pub mod state_table;
 #[cfg(test)]
 pub mod test_relational_table;
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 
 use crate::error::StorageResult;
+
+/// Represents the distribution for a specific table instance.
+pub struct Distribution {
+    /// Indices of distribution keys for computing vnode, based on the all columns of the table.
+    pub dist_key_indices: Vec<usize>,
+
+    /// Virtual nodes that the table is partitioned into.
+    pub vnodes: Arc<Bitmap>,
+}
+
+impl Distribution {
+    /// Fallback distribution for singleton or tests.
+    pub fn fallback() -> Self {
+        lazy_static::lazy_static! {
+            /// A bitmap that only the vnode `0x00` is set. Used for fallback or no distribution.
+            static ref FALLBACK_VNODES: Arc<Bitmap> = {
+                let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
+                vnodes.set(0, true);
+                vnodes.finish().into()
+            };
+        }
+        Self {
+            dist_key_indices: vec![],
+            vnodes: FALLBACK_VNODES.clone(),
+        }
+    }
+}
 
 // TODO: GAT-ify this trait or remove this trait
 #[async_trait::async_trait]

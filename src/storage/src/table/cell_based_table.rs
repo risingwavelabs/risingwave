@@ -24,17 +24,17 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use log::trace;
 use risingwave_common::array::Row;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema};
 use risingwave_common::error::RwError;
-use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{next_key, prefixed_range, range_of_prefix};
 
 use super::mem_table::RowOp;
-use super::TableIter;
+use super::{Distribution, TableIter};
 use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
@@ -94,13 +94,12 @@ pub struct CellBasedTableBase<S: StateStore, SER: RowSerializer, const T: Access
     // FIXME: revisit constructions and usages.
     pk_indices: Vec<usize>,
 
-    /// Indices of distribution keys for computing vnode. None if vnode falls to default value.
+    /// Indices of distribution keys for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
-    // TODO: make the the indices and the vnode bitmap into a struct.
     dist_key_indices: Vec<usize>,
 
-    /// Indices of distribution keys for computing vnode. None if vnode falls to default value.
+    /// Indices of distribution keys for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
 
@@ -135,8 +134,7 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
         column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        dist_key_indices: Vec<usize>,
-        vnodes: Arc<Bitmap>,
+        distribution: Distribution,
     ) -> Self {
         Self::new_inner(
             keyspace,
@@ -144,8 +142,7 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
             column_ids,
             order_types,
             pk_indices,
-            dist_key_indices,
-            vnodes,
+            distribution,
         )
     }
 
@@ -166,8 +163,7 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
             column_ids,
             order_types,
             pk_indices,
-            vec![],
-            Self::fallback_vnodes(),
+            Distribution::fallback(),
         )
     }
 }
@@ -180,8 +176,7 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        dist_key_indices: Vec<usize>,
-        vnodes: Arc<Bitmap>,
+        distribution: Distribution,
     ) -> Self {
         let column_ids = columns.iter().map(|c| c.column_id).collect();
 
@@ -191,8 +186,7 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
             column_ids,
             order_types,
             pk_indices,
-            dist_key_indices,
-            vnodes,
+            distribution,
         )
     }
 
@@ -207,8 +201,7 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
             columns,
             order_types,
             pk_indices,
-            vec![],
-            Self::fallback_vnodes(),
+            Distribution::fallback(),
         )
     }
 }
@@ -223,26 +216,16 @@ impl<S: StateStore, SER: RowSerializer> From<CellBasedTableBase<S, SER, READ_WRI
 }
 
 impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
-    /// Returns a bitmap that only the vnode `0x00` is set. Used for fallback or no distribution.
-    pub(super) fn fallback_vnodes() -> Arc<Bitmap> {
-        lazy_static::lazy_static! {
-            static ref FALLBACK_VNODES: Arc<Bitmap> = {
-                let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
-                vnodes.set(0, true);
-                vnodes.finish().into()
-            };
-        }
-        FALLBACK_VNODES.clone()
-    }
-
     fn new_inner(
         keyspace: Keyspace<S>,
         table_columns: Vec<ColumnDesc>,
         column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        dist_key_indices: Vec<usize>,
-        vnodes: Arc<Bitmap>,
+        Distribution {
+            dist_key_indices,
+            vnodes,
+        }: Distribution,
     ) -> Self {
         let row_serializer = SER::create(&pk_indices, &table_columns, &column_ids);
 
@@ -306,7 +289,9 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         assert!(
             self.vnodes.is_set(vnode as usize).unwrap(),
             "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
-            vnode, self.table_columns, self.dist_key_indices
+            vnode,
+            self.table_columns,
+            self.dist_key_indices
         );
         vnode
     }

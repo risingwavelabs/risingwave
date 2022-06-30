@@ -29,7 +29,7 @@ use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::{
     BatchDedupPkIter, CellBasedIter, CellBasedTable,
 };
-use risingwave_storage::table::TableIter;
+use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use crate::executor::monitor::BatchMetrics;
@@ -189,6 +189,10 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let vnodes = Bitmap::all_high_bits(VIRTUAL_NODE_COUNT); // TODO: use vnodes from scheduler to parallelize scan
+        let distribution = Distribution {
+            vnodes: vnodes.into(),
+            dist_key_indices,
+        };
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
@@ -199,8 +203,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 column_ids,
                 order_types,
                 pk_indices,
-                dist_key_indices,
-                vnodes.into(),
+                distribution,
             );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {

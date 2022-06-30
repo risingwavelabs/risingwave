@@ -23,6 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::Distribution;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::error::StreamExecutorError;
@@ -65,25 +66,21 @@ impl<S: StateStore> MaterializeExecutor<S> {
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
-        let state_table = match vnodes {
-            Some(vnodes) => StateTable::new_with_distribution(
-                keyspace,
-                columns,
-                arrange_order_types,
-                arrange_columns.clone(),
-                distribution_keys,
+        let distribution = match vnodes {
+            Some(vnodes) => Distribution {
+                dist_key_indices: distribution_keys,
                 vnodes,
-            ),
-            None => {
-                assert!(distribution_keys.is_empty());
-                StateTable::new_without_distribution(
-                    keyspace,
-                    columns,
-                    arrange_order_types,
-                    arrange_columns.clone(),
-                )
-            }
+            },
+            None => Distribution::fallback(),
         };
+
+        let state_table = StateTable::new_with_distribution(
+            keyspace,
+            columns,
+            arrange_order_types,
+            arrange_columns.clone(),
+            distribution,
+        );
 
         Self {
             input,
