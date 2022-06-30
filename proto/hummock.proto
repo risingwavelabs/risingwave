@@ -162,7 +162,7 @@ message CompactStatus {
 
 message CompactionGroup {
   uint64 id = 1;
-  repeated bytes member_prefixes = 2;
+  repeated uint32 member_table_ids = 2;
   CompactionConfig compaction_config = 3;
   map<uint32, TableOption> table_id_to_options = 4;
 }

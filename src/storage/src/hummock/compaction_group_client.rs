@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::compaction_group::Prefix;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionGroup;
 use risingwave_rpc_client::HummockMetaClient;
@@ -29,7 +29,7 @@ pub trait CompactionGroupClient: Send + Sync + 'static {
     /// Updates local cache
     async fn update(&self) -> HummockResult<()>;
     /// Tries to get from local cache
-    fn get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId>;
+    fn get_compaction_group_id(&self, table_id: StateTableId) -> Option<CompactionGroupId>;
 }
 
 /// `CompactionGroupClientImpl` maintains compaction group metadata cache.
@@ -60,19 +60,19 @@ impl CompactionGroupClient for CompactionGroupClientImpl {
         Ok(())
     }
 
-    fn get_compaction_group_id(&self, prefix: Prefix) -> Option<CompactionGroupId> {
-        self.inner.read().get(&prefix)
+    fn get_compaction_group_id(&self, table_id: StateTableId) -> Option<CompactionGroupId> {
+        self.inner.read().get(&table_id)
     }
 }
 
 #[derive(Default)]
 struct CompactionGroupClientInner {
-    index: HashMap<Prefix, CompactionGroupId>,
+    index: HashMap<StateTableId, CompactionGroupId>,
 }
 
 impl CompactionGroupClientInner {
-    fn get(&self, prefix: &Prefix) -> Option<CompactionGroupId> {
-        self.index.get(prefix).cloned()
+    fn get(&self, table_id: &StateTableId) -> Option<CompactionGroupId> {
+        self.index.get(table_id).cloned()
     }
 
     fn set_index(&mut self, compaction_groups: Vec<CompactionGroup>) {
@@ -80,15 +80,14 @@ impl CompactionGroupClientInner {
         let new_entries = compaction_groups
             .into_iter()
             .flat_map(|cg| {
-                cg.member_prefixes
+                cg.member_table_ids
                     .into_iter()
-                    .map(|prefix| (cg.id, prefix))
+                    .map(|table_id| (cg.id, table_id))
                     .collect_vec()
             })
             .collect_vec();
-        for (cg_id, prefix) in new_entries {
-            let prefix: [u8; 4] = prefix.try_into().expect("invalid prefix");
-            self.index.insert(Prefix::from(prefix), cg_id);
+        for (cg_id, table_id) in new_entries {
+            self.index.insert(table_id, cg_id);
         }
     }
 }
@@ -112,7 +111,7 @@ impl CompactionGroupClient for DummyCompactionGroupClient {
         Ok(())
     }
 
-    fn get_compaction_group_id(&self, _prefix: Prefix) -> Option<CompactionGroupId> {
+    fn get_compaction_group_id(&self, _table_id: StateTableId) -> Option<CompactionGroupId> {
         Some(self.compaction_group_id)
     }
 }

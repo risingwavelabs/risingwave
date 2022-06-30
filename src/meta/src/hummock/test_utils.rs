@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::{Prefix, StaticCompactionGroupId};
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSSTableId, LocalSstableInfo,
@@ -168,13 +168,7 @@ pub async fn register_table_ids_to_compaction_group<S>(
         .register_for_test(
             &table_ids
                 .iter()
-                .map(|table_id| {
-                    (
-                        Prefix::from(*table_id),
-                        compaction_group_id,
-                        TableOption::default(),
-                    )
-                })
+                .map(|table_id| (*table_id, compaction_group_id, TableOption::default()))
                 .collect_vec(),
         )
         .await
@@ -188,12 +182,7 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
     S: MetaStore,
 {
     compaction_group_manager_ref
-        .unregister_for_test(
-            &table_ids
-                .iter()
-                .map(|table_id| Prefix::from(*table_id))
-                .collect_vec(),
-        )
+        .unregister_for_test(table_ids)
         .await
         .unwrap();
 }

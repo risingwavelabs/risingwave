@@ -23,7 +23,6 @@ use prost::Message;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::Prefix;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
     HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo,
@@ -857,9 +856,7 @@ where
                 .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id));
             for table_id in &sst.table_ids {
                 assert!(
-                    compaction_group
-                        .member_prefixes()
-                        .contains(&Prefix::from(*table_id)),
+                    compaction_group.member_table_ids().contains(table_id),
                     "table {} doesn't belong to compaction group {}",
                     table_id,
                     compaction_group_id

@@ -57,7 +57,6 @@ pub mod file_cache;
 pub use error::*;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::Prefix;
 use value::*;
 
 use self::iterator::HummockIterator;
@@ -189,10 +188,9 @@ impl HummockStorage {
     }
 
     fn get_compaction_group_id(&self, table_id: TableId) -> CompactionGroupId {
-        let prefix = Prefix::from(table_id.table_id);
         self.compaction_group_client
-            .get_compaction_group_id(prefix)
-            .unwrap_or_else(|| panic!("{} matches a compaction group", prefix))
+            .get_compaction_group_id(table_id.table_id)
+            .unwrap_or_else(|| panic!("{} matches a compaction group", table_id.table_id))
     }
 
     pub async fn update_compaction_group_cache(&self) -> HummockResult<()> {
