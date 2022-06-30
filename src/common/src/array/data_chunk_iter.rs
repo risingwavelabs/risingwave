@@ -37,6 +37,14 @@ impl DataChunk {
             idx: Some(0),
         }
     }
+
+    /// Get an iterator for all rows in the chunk, and a `None` represents an invisible row.
+    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<RowRef>> {
+        DataChunkRefIterWithHoles {
+            chunk: self,
+            idx: 0,
+        }
+    }
 }
 
 struct DataChunkRefIter<'a> {
@@ -64,6 +72,34 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
                     }
                 }
             }
+        }
+    }
+}
+
+struct DataChunkRefIterWithHoles<'a> {
+    chunk: &'a DataChunk,
+    idx: usize,
+}
+
+impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
+    type Item = Option<RowRef<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let len = self.chunk.capacity();
+        let vis = self.chunk.vis();
+        if self.idx == len {
+            None
+        } else {
+            let ret = Some(if !vis.is_set(self.idx).unwrap() {
+                None
+            } else {
+                Some(RowRef {
+                    chunk: self.chunk,
+                    idx: self.idx,
+                })
+            });
+            self.idx += 1;
+            ret
         }
     }
 }

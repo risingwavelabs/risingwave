@@ -187,10 +187,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 .iter()
                 .map(|desc| desc.column_desc.data_type.clone()),
         );
-        warn!(
-            "scan_range: {:#?}\npk_prefix_value: {:#?}",
-            scan_range, pk_prefix_value
-        );
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
@@ -201,7 +197,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 column_ids,
                 order_types,
                 pk_indices,
-                None,
             );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
