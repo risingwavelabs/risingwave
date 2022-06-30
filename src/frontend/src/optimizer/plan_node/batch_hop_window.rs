@@ -39,12 +39,7 @@ impl BatchHopWindow {
             .i2o_col_mapping()
             .rewrite_provided_distribution(logical.input().distribution());
         // TODO: Derive order from input
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            distribution,
-            Order::any().clone(),
-        );
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), distribution, Order::any());
         BatchHopWindow { base, logical }
     }
 }

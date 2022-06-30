@@ -52,7 +52,7 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> Stat
 }
 
 pub async fn scan(table_id: String) -> Result<()> {
-    let hummock_opts = HummockServiceOpts::from_env()?;
+    let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta, hummock) = hummock_opts.create_hummock_store().await?;
     let table = get_table_catalog(meta.clone(), table_id).await?;
     print_table_catalog(&table);
@@ -63,5 +63,7 @@ pub async fn scan(table_id: String) -> Result<()> {
         let item = item?;
         println!("{:?}", item);
     }
+
+    hummock_opts.shutdown().await;
     Ok(())
 }

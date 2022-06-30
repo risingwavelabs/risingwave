@@ -24,6 +24,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::WriteOptions;
 use risingwave_storage::StateStore;
 
 use super::{Batch, Operations, PerfMetrics};
@@ -189,7 +190,16 @@ impl Operations {
                         .map(|(k, v)| (k, StorageValue::new(Default::default(), v)))
                         .collect_vec();
                     let epoch = ctx.epoch.load(Ordering::Acquire);
-                    store.ingest_batch(batch, epoch).await.unwrap();
+                    store
+                        .ingest_batch(
+                            batch,
+                            WriteOptions {
+                                epoch,
+                                table_id: Default::default(),
+                            },
+                        )
+                        .await
+                        .unwrap();
                     let last_batch = i + 1 == l;
                     if ctx.epoch_barrier_finish(last_batch) {
                         store.sync(Some(epoch)).await.unwrap();

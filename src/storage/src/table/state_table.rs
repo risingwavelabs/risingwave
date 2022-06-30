@@ -16,50 +16,98 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{Index, RangeBounds};
+use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::CellBasedTable;
+use super::cell_based_table::{CellBasedTableBase, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
+use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
+use crate::row_serializer::RowSerializer;
 use crate::{Keyspace, StateStore};
 
+/// Identical to `StateTable`. Used when we want to
+/// rows to have dedup pk cell encoding.
+pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
+
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
+pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
+
+/// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
+/// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTable<S: StateStore> {
+pub struct StateTableBase<S: StateStore, SER: RowSerializer> {
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTable<S>,
-
-    pk_indices: Vec<usize>,
+    cell_based_table: CellBasedTableBase<S, SER, READ_WRITE>,
 }
 
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
+    /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
+    // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
-        dist_key_indices: Option<Vec<usize>>,
+        _dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_without_distribution(keyspace, columns, order_types, pk_indices)
+    }
+
+    /// Create a state table without distribution, used for singleton executors and tests.
+    pub fn new_without_distribution(
+        keyspace: Keyspace<S>,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            keyspace,
+            columns,
+            order_types,
+            pk_indices,
+            vec![],
+            CellBasedTableBase::<S, SER, READ_WRITE>::fallback_vnodes(),
+        )
+    }
+
+    /// Create a state table with distribution specified with `dist_key_indices` and `vnodes`.
+    pub fn new_with_distribution(
+        keyspace: Keyspace<S>,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        dist_key_indices: Vec<usize>,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTable::new(
+            cell_based_table: CellBasedTableBase::new(
                 keyspace,
-                column_descs,
+                columns,
                 order_types,
+                pk_indices,
                 dist_key_indices,
+                vnodes,
             ),
-            pk_indices,
         }
+    }
+
+    /// Get the underlying [`CellBasedTableBase`]. Should only be used for tests.
+    pub fn cell_based_table(&self) -> &CellBasedTableBase<S, SER, READ_WRITE> {
+        &self.cell_based_table
     }
 
     fn pk_serializer(&self) -> &OrderedRowSerializer {
@@ -67,8 +115,8 @@ impl<S: StateStore> StateTable<S> {
     }
 
     // TODO: remove, should not be exposed to user
-    pub fn get_pk_indices(&self) -> &[usize] {
-        &self.pk_indices
+    pub fn pk_indices(&self) -> &[usize] {
+        self.cell_based_table.pk_indices()
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -78,7 +126,11 @@ impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table. This function will return a Cow. If the value is from
     /// memtable, it will be a [`Cow::Borrowed`]. If is from cell based table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Cow<Row>>> {
+    pub async fn get_row<'a>(
+        &'a self,
+        pk: &'_ Row,
+        epoch: u64,
+    ) -> StorageResult<Option<Cow<'a, Row>>> {
         let pk_bytes = serialize_pk(pk, self.pk_serializer());
         let mem_table_res = self.mem_table.get_row_op(&pk_bytes);
         match mem_table_res {
@@ -103,7 +155,7 @@ impl<S: StateStore> StateTable<S> {
     /// the table.
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
         let mut datums = vec![];
-        for pk_index in &self.pk_indices {
+        for pk_index in self.pk_indices() {
             datums.push(value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
@@ -116,7 +168,7 @@ impl<S: StateStore> StateTable<S> {
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
         let mut datums = vec![];
-        for pk_index in &self.pk_indices {
+        for pk_index in self.pk_indices() {
             datums.push(old_value.index(*pk_index).clone());
         }
         let pk = Row::new(datums);
@@ -127,8 +179,8 @@ impl<S: StateStore> StateTable<S> {
 
     /// Update a row. The old and new value should have the same pk.
     pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
-        let pk = old_value.by_indices(&self.pk_indices);
-        debug_assert_eq!(pk, new_value.by_indices(&self.pk_indices));
+        let pk = old_value.by_indices(self.pk_indices());
+        debug_assert_eq!(pk, new_value.by_indices(self.pk_indices()));
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.update(pk_bytes, old_value, new_value);
         Ok(())
@@ -138,14 +190,6 @@ impl<S: StateStore> StateTable<S> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.cell_based_table
             .batch_write_rows(mem_table, new_epoch)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn commit_with_value_meta(&mut self, new_epoch: u64) -> StorageResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.cell_based_table
-            .batch_write_rows_with_value_meta(mem_table, new_epoch)
             .await?;
         Ok(())
     }
@@ -202,7 +246,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<RowStream<'_, S>> {
+    ) -> StorageResult<RowStream<'a, S>> {
         let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);

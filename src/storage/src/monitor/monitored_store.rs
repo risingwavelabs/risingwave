@@ -14,7 +14,6 @@
 
 use std::ops::RangeBounds;
 use std::sync::Arc;
-use std::time::Instant;
 
 use bytes::Bytes;
 use futures::Future;
@@ -56,15 +55,21 @@ where
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
+        // start time takes iterator build time into account
+        let start_time = minstant::Instant::now();
+
+        // wait for iterator creation (e.g. seek)
         let iter = iter
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
+        // create a monitored iterator to collect metrics
         let monitored = MonitoredStateStoreIter {
             inner: iter,
             total_items: 0,
             total_size: 0,
-            start_time: Instant::now(),
+            start_time,
+            scan_time: minstant::Instant::now(),
             stats: self.stats.clone(),
         };
         Ok(monitored)
@@ -83,12 +88,12 @@ where
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
-                .get(key, epoch)
+                .get(key, read_options)
                 .await
                 .inspect_err(|e| error!("Failed in get: {:?}", e))?;
             timer.observe_duration();
@@ -106,7 +111,7 @@ where
         &self,
         key_range: R,
         limit: Option<usize>,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -116,7 +121,7 @@ where
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(key_range, limit, epoch)
+                .scan(key_range, limit, read_options)
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();
@@ -133,7 +138,7 @@ where
         &self,
         key_range: R,
         limit: Option<usize>,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -143,7 +148,7 @@ where
             let timer = self.stats.range_backward_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(key_range, limit, epoch)
+                .scan(key_range, limit, read_options)
                 .await
                 .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
             timer.observe_duration();
@@ -159,7 +164,7 @@ where
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             if kv_pairs.is_empty() {
@@ -172,7 +177,7 @@ where
             let timer = self.stats.write_batch_duration.start_timer();
             let batch_size = self
                 .inner
-                .ingest_batch(kv_pairs, epoch)
+                .ingest_batch(kv_pairs, write_options)
                 .await
                 .inspect_err(|e| error!("Failed in ingest_batch: {:?}", e))?;
             timer.observe_duration();
@@ -182,21 +187,28 @@ where
         }
     }
 
-    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move { self.monitored_iter(self.inner.iter(key_range, epoch)).await }
-    }
-
-    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
+    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.monitored_iter(self.inner.backward_iter(key_range, epoch))
+            self.monitored_iter(self.inner.iter(key_range, read_options))
+                .await
+        }
+    }
+
+    fn backward_iter<R, B>(
+        &self,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::BackwardIterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move {
+            self.monitored_iter(self.inner.backward_iter(key_range, read_options))
                 .await
         }
     }
@@ -229,11 +241,11 @@ where
     fn replicate_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        write_options: WriteOptions,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
             self.inner
-                .replicate_batch(kv_pairs, epoch)
+                .replicate_batch(kv_pairs, write_options)
                 .await
                 .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
         }
@@ -249,7 +261,8 @@ pub struct MonitoredStateStoreIter<I> {
     inner: I,
     total_items: usize,
     total_size: usize,
-    start_time: Instant,
+    start_time: minstant::Instant,
+    scan_time: minstant::Instant,
     stats: Arc<StateStoreMetrics>,
 }
 
@@ -286,6 +299,9 @@ impl<I> Drop for MonitoredStateStoreIter<I> {
         self.stats
             .iter_duration
             .observe(self.start_time.elapsed().as_secs_f64());
+        self.stats
+            .iter_scan_duration
+            .observe(self.scan_time.elapsed().as_secs_f64());
         self.stats.iter_item.observe(self.total_items as f64);
         self.stats.iter_size.observe(self.total_size as f64);
     }

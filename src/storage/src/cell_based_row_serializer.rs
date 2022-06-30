@@ -14,34 +14,46 @@
 
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
-use risingwave_common::util::ordered::{
-    serialize_pk_and_column_id, serialize_pk_and_row, SENTINEL_CELL_ID,
-};
+use risingwave_common::types::VirtualNode;
+use risingwave_common::util::ordered::serialize_pk_and_row;
 
-type KeyBytes = Vec<u8>;
-type ValueBytes = Vec<u8>;
+use crate::row_serializer::{KeyBytes, RowSerializer, ValueBytes};
+
 #[derive(Clone)]
-pub struct CellBasedRowSerializer {}
-impl Default for CellBasedRowSerializer {
-    fn default() -> Self {
-        Self::new()
+pub struct CellBasedRowSerializer {
+    column_ids: Vec<ColumnId>,
+}
+
+impl CellBasedRowSerializer {
+    pub fn new(column_ids: Vec<ColumnId>) -> Self {
+        Self { column_ids }
     }
 }
-impl CellBasedRowSerializer {
-    pub fn new() -> Self {
-        Self {}
+
+impl RowSerializer for CellBasedRowSerializer {
+    fn create(
+        _pk_indices: &[usize],
+        _column_descs: &[ColumnDesc],
+        column_ids: &[ColumnId],
+    ) -> Self {
+        Self {
+            column_ids: column_ids.to_vec(),
+        }
     }
 
-    /// Serialize key and value.
-    pub fn serialize(
+    /// Serialize key and value. The `row` must be in the same order with the column ids in this
+    /// serializer.
+    fn serialize(
         &mut self,
+        vnode: VirtualNode,
         pk: &[u8],
         row: Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
-        let res = serialize_pk_and_row(pk, &row, column_ids)?
+        // TODO: avoid this allocation
+        let key = [vnode.to_be_bytes().as_slice(), pk].concat();
+        let res = serialize_pk_and_row(&key, &row, &self.column_ids)?
             .into_iter()
             .flatten()
             .collect_vec();
@@ -51,32 +63,21 @@ impl CellBasedRowSerializer {
     /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
     /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
     /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
-    pub fn serialize_without_filter(
+    fn serialize_without_filter(
         &mut self,
+        vnode: VirtualNode,
         pk: &[u8],
         row: Row,
-        column_ids: &[ColumnId],
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
-        let res = serialize_pk_and_row(pk, &row, column_ids)?;
+        // TODO: avoid this allocation
+        let key = [vnode.to_be_bytes().as_slice(), pk].concat();
+        let res = serialize_pk_and_row(&key, &row, &self.column_ids)?;
         Ok(res)
     }
 
-    /// Different from [`CellBasedRowSerializer::serialize`], only serialize key into cell key (With
-    /// column id appended).
-    pub fn serialize_cell_key(
-        &mut self,
-        pk: &[u8],
-        row: &Row,
-        column_ids: &[ColumnId],
-    ) -> Result<Vec<KeyBytes>> {
-        let mut results = Vec::with_capacity(column_ids.len());
-        for (index, col_id) in column_ids.iter().enumerate() {
-            if row[index].is_none() {
-                continue;
-            }
-            results.push(serialize_pk_and_column_id(pk, col_id)?);
-        }
-        results.push(serialize_pk_and_column_id(pk, &SENTINEL_CELL_ID)?);
-        Ok(results)
+    /// Get column ids used by cell serializer to serialize.
+    /// TODO: This should probably not be exposed to user.
+    fn column_ids(&self) -> &[ColumnId] {
+        &self.column_ids
     }
 }

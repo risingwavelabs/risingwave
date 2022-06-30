@@ -12,6 +12,13 @@ cargo-cache: &cargo-cache
     - ".cargo/registry/cache"
     - ".cargo/git/db"
 
+auto-retry: &auto-retry
+  automatic:
+    - exit_status: -1  # Agent was lost
+      limit: 2
+    - exit_status: 255 # Forced agent shutdown
+      limit: 2
+
 steps:
   - label: "build"
     command: "ci/scripts/build.sh -t debug -p dev"
@@ -23,6 +30,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end test"
     command: "ci/scripts/e2e-test.sh -p dev"
@@ -35,6 +43,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
+    retry: *auto-retry
 
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh"
@@ -47,6 +56,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
+    retry: *auto-retry
 
   - label: "unit test"
     command: "ci/scripts/unit-test.sh"
@@ -62,6 +72,7 @@ steps:
           environment:
             - CODECOV_TOKEN
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-simulation-test.sh"
@@ -84,3 +95,4 @@ steps:
       - shellcheck#v1.2.0:
           files: ./**/*.sh
     timeout_in_minutes: 5
+    retry: *auto-retry

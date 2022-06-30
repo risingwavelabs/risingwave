@@ -14,10 +14,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
 
 use itertools::Itertools;
-use log::{debug, info};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
@@ -35,7 +33,7 @@ use uuid::Uuid;
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
-use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
+use crate::manager::{DatabaseId, HashMappingManagerRef, MetaSrvEnv, SchemaId};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
@@ -59,6 +57,13 @@ pub struct CreateMaterializedViewContext {
     pub table_id_offset: u32,
     /// Internal TableID for MaterializedView.
     pub internal_table_id_set: HashSet<u32>,
+    /// SchemaId of mview
+    pub schema_id: SchemaId,
+    /// DatabaseId of mview
+    pub database_id: DatabaseId,
+    /// Name of mview, for internal table name generation.
+    pub mview_name: String,
+    pub table_properties: HashMap<String, String>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -270,9 +275,8 @@ where
             mut upstream_node_actors,
             table_sink_map,
             dependent_table_ids,
-            affiliated_source: _,
-            table_id_offset: _,
-            internal_table_id_set: _,
+            table_properties,
+            ..
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
         let nodes = self
@@ -550,7 +554,7 @@ where
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
-            .start_create_table_fragments(table_fragments.clone())
+            .start_create_table_fragments(table_fragments.clone(), table_properties)
             .await?;
 
         let table_id = table_fragments.table_id();
@@ -613,21 +617,6 @@ where
 
         Ok(())
     }
-
-    /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self) -> Result<()> {
-        let start = Instant::now();
-
-        debug!("start barrier flush");
-        self.barrier_manager
-            .wait_for_next_barrier_to_collect()
-            .await?;
-
-        let elapsed = Instant::now().duration_since(start);
-        info!("barrier flushed in {:?}", elapsed);
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -653,6 +642,8 @@ mod tests {
         DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse, *,
     };
     use tokio::sync::oneshot::Sender;
+    #[cfg(feature = "failpoints")]
+    use tokio::sync::Notify;
     use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};
 
@@ -666,6 +657,7 @@ mod tests {
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::{FragmentManager, SourceManager};
+    use crate::MetaOpts;
 
     struct FakeFragmentState {
         actor_streams: Mutex<HashMap<ActorId, StreamActor>>,
@@ -809,7 +801,7 @@ mod tests {
 
             sleep(Duration::from_secs(1));
 
-            let env = MetaSrvEnv::for_test().await;
+            let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {
@@ -1122,5 +1114,153 @@ mod tests {
 
         services.stop().await;
         Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(all(test, feature = "failpoints"))]
+    async fn test_failpoints_drop_mv_recovery() {
+        let inject_barrier_err = "inject_barrier_err";
+        let inject_barrier_err_success = "inject_barrier_err_success";
+        let services = MockServices::start("127.0.0.1", 12335).await.unwrap();
+
+        let table_ref_id = TableRefId {
+            schema_ref_id: None,
+            table_id: 0,
+        };
+        let table_id = TableId::from(&Some(table_ref_id.clone()));
+
+        let actors = (0..5)
+            .map(|i| StreamActor {
+                actor_id: i,
+                // A dummy node to avoid panic.
+                nodes: Some(risingwave_pb::stream_plan::StreamNode {
+                    node_body: Some(
+                        risingwave_pb::stream_plan::stream_node::NodeBody::Materialize(
+                            risingwave_pb::stream_plan::MaterializeNode {
+                                table_ref_id: Some(table_ref_id.clone()),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                    operator_id: 1,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+
+        let mut fragments = BTreeMap::default();
+        fragments.insert(
+            0,
+            Fragment {
+                fragment_id: 0,
+                fragment_type: FragmentType::Sink as i32,
+                distribution_type: FragmentDistributionType::Hash as i32,
+                actors: actors.clone(),
+                vnode_mapping: None,
+            },
+        );
+        let internal_table_id = HashSet::from([2, 3, 5, 7]);
+
+        let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
+
+        let ctx = CreateMaterializedViewContext::default();
+
+        services
+            .global_stream_manager
+            .create_materialized_view(table_fragments, ctx)
+            .await
+            .unwrap();
+
+        for actor in actors {
+            let mut scheduled_actor = services
+                .state
+                .actor_streams
+                .lock()
+                .unwrap()
+                .get(&actor.get_actor_id())
+                .cloned()
+                .unwrap();
+            scheduled_actor.vnode_bitmap.take().unwrap();
+            assert_eq!(scheduled_actor, actor);
+            assert!(services
+                .state
+                .actor_ids
+                .lock()
+                .unwrap()
+                .contains(&actor.get_actor_id()));
+            assert_eq!(
+                services
+                    .state
+                    .actor_infos
+                    .lock()
+                    .unwrap()
+                    .get(&actor.get_actor_id())
+                    .cloned()
+                    .unwrap(),
+                HostAddress {
+                    host: "127.0.0.1".to_string(),
+                    port: 12335,
+                }
+            );
+        }
+
+        let sink_actor_ids = services
+            .fragment_manager
+            .get_table_sink_actor_ids(&table_id)
+            .await
+            .unwrap();
+        let actor_ids = services
+            .fragment_manager
+            .get_table_actor_ids(&table_id)
+            .await
+            .unwrap();
+        assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
+        let notify = Arc::new(Notify::new());
+        let notify1 = notify.clone();
+
+        // test recovery.
+        fail::cfg(inject_barrier_err, "return").unwrap();
+        tokio::spawn(async move {
+            fail::cfg_callback(inject_barrier_err_success, move || {
+                fail::remove(inject_barrier_err);
+                fail::remove(inject_barrier_err_success);
+                notify.notify_one();
+            })
+            .unwrap();
+        });
+        notify1.notified().await;
+
+        let table_fragments = services
+            .global_stream_manager
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id)
+            .await
+            .unwrap();
+        assert_eq!(4, table_fragments.internal_table_ids().len());
+
+        // test drop materialized_view
+        services
+            .global_stream_manager
+            .drop_materialized_view(&table_fragments.table_id())
+            .await
+            .unwrap();
+
+        // test get table_fragment;
+        let select_err_1 = services
+            .global_stream_manager
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_fragments.table_id())
+            .await
+            .unwrap_err();
+
+        // TODO: check memory and metastore consistent
+        assert_eq!(
+            select_err_1.to_string(),
+            "internal error: table_fragment not exist: id=0"
+        );
+
+        services.stop().await;
     }
 }

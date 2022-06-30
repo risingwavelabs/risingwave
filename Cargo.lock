@@ -1097,6 +1097,7 @@ dependencies = [
  "clap 2.34.0",
  "criterion-plot",
  "csv",
+ "futures",
  "itertools",
  "lazy_static",
  "num-traits",
@@ -1109,6 +1110,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -1272,6 +1274,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b2466559f260f48ad25fe6317b3c8dac77b5bdb5763ac7d9d6103530663bc90"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "ctor"
+version = "0.1.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f877be4f7c9f246b183111634f75baa039715e3f46ce860677d3b19a69fb229c"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2664,6 +2676,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "minstant"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cb320648b7883b43ce5dfbc5c6f4a84038194c3f67b4fcb7d05c994e6006557"
+dependencies = [
+ "ctor",
+ "libc",
+ "wasi 0.7.0",
+]
+
+[[package]]
 name = "mio"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3826,6 +3849,7 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32fast",
+ "criterion",
  "either",
  "farmhash",
  "futures",
@@ -3858,6 +3882,7 @@ dependencies = [
  "static_assertions",
  "tempfile",
  "thiserror",
+ "tikv-jemallocator",
  "tokio-stream",
  "tracing",
  "tracing-futures",
@@ -3944,6 +3969,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "auto_enums",
+ "bitflags",
  "byteorder",
  "bytes",
  "chrono",
@@ -3951,6 +3977,7 @@ dependencies = [
  "crc32fast",
  "either",
  "futures",
+ "humantime",
  "hyper",
  "itertools",
  "lazy_static",
@@ -3967,9 +3994,12 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
+ "regex",
  "risingwave_pb",
  "rust_decimal",
  "serde",
+ "serde_derive",
+ "serde_json",
  "smallvec",
  "spin 0.9.3",
  "thiserror",
@@ -4308,6 +4338,7 @@ dependencies = [
  "derivative",
  "either",
  "etcd-client",
+ "fail",
  "futures",
  "hex",
  "hyper",
@@ -4331,6 +4362,7 @@ dependencies = [
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_test_runner",
  "serde",
  "serde_derive",
  "serde_json",
@@ -4453,6 +4485,7 @@ dependencies = [
  "num-traits",
  "parking_lot",
  "paste",
+ "prometheus",
  "prost",
  "protobuf",
  "protobuf-codegen-pure",
@@ -4518,6 +4551,7 @@ dependencies = [
  "log",
  "madsim",
  "madsim-tokio",
+ "paste",
  "rand 0.8.5",
  "risingwave_frontend",
  "risingwave_sqlparser",
@@ -4531,6 +4565,7 @@ version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",
+ "auto_enums",
  "bitvec",
  "byteorder",
  "bytes",
@@ -4539,6 +4574,7 @@ dependencies = [
  "criterion",
  "crossbeam",
  "dashmap",
+ "dyn-clone",
  "either",
  "enum-as-inner",
  "fail",
@@ -4555,6 +4591,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "minstant",
  "moka",
  "nix",
  "num-integer",
@@ -5866,6 +5903,12 @@ dependencies = [
 
 [[package]]
 name = "wasi"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b89c3ce4ce14bdc6fb6beaf9ec7928ca331de5df7e5ea278375642a2f478570d"
+
+[[package]]
+name = "wasi"
 version = "0.9.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cccddf32554fecc6acb585f82a32a72e28b48f8c4c1883ddfeeeaa96f7d8e519"
@@ -6066,17 +6109,21 @@ name = "workspace-hack"
 version = "0.1.9"
 dependencies = [
  "anyhow",
+ "auto_enums",
+ "auto_enums_derive",
  "axum",
  "bstr",
  "bytes",
  "cc",
  "chrono",
+ "criterion",
  "crossbeam-deque",
  "digest",
  "either",
  "fail",
  "fixedbitset",
  "frunk_core",
+ "futures",
  "futures-channel",
  "futures-core",
  "futures-executor",

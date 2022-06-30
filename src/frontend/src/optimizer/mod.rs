@@ -134,7 +134,7 @@ impl PlanRoot {
         // This rule assumes that filters have already been pushed down near to
         // their relevant joins.
         plan = {
-            let rules = vec![MultiJoinJoinRule::create(), MultiJoinFilterRule::create()];
+            let rules = vec![MergeMultiJoinRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
             heuristic_optimizer.optimize(plan)
         };
@@ -246,7 +246,7 @@ impl PlanRoot {
             }
             Convention::Stream => self
                 .required_dist
-                .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
+                .enforce_if_not_satisfies(self.plan.clone(), &Order::any()),
             _ => unreachable!(),
         }?;
 
@@ -322,7 +322,7 @@ mod tests {
         let root = PlanRoot::new(
             values,
             RequiredDist::Any,
-            Order::any().clone(),
+            Order::any(),
             out_fields,
             out_names,
         );

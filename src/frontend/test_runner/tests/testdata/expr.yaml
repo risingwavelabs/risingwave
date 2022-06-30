@@ -122,8 +122,15 @@
   batch_plan: |
     BatchValues { rows: [[RoundDigit(42:Int32::Decimal, 2:Int32)]] }
 - sql: |
-    values(round('abc'));
-  binder_error: 'Feature is not yet implemented: Round[Varchar], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+    values(round(true));
+  binder_error: 'Feature is not yet implemented: Round[Boolean], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- sql: |
+    -- Single quoted literal can be treated as number without error.
+    values(round('123'));
+    -- When it is invalid, PostgreSQL reports error during explain, but we have to wait until execution as of now.
+    -- values(round('abc'));
+  batch_plan: |
+    BatchValues { rows: [[Round('123':Varchar::Float64)]] }
 - sql: |
     values(extract(hour from timestamp '2001-02-16 20:38:40'));
   batch_plan: |
@@ -201,8 +208,8 @@
   binder_error: 'Bind error: Nullif function must contain 2 arguments'
 - sql: |
     create table t (v1 int);
-    select nullif(v1, 'a') from t;
-  binder_error: 'Feature is not yet implemented: Equal[Int32, Varchar], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+    select nullif(v1, true) from t;
+  binder_error: 'Feature is not yet implemented: Equal[Int32, Boolean], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1) as expr from t;
@@ -227,8 +234,8 @@
   binder_error: 'Bind error: Function `Coalesce` takes at least 1 arguments (0 given)'
 - sql: |
     create table t (v1 int);
-    select coalesce(1,'a') from t;
-  binder_error: 'Bind error: types Int32 and Varchar cannot be matched'
+    select coalesce(1,true) from t;
+  binder_error: 'Bind error: types Int32 and Boolean cannot be matched'
 - sql: |
     create table t (v1 varchar);
     select concat_ws(v1, 1) as expr from t;
@@ -286,4 +293,39 @@
     select ':' || true;
   batch_plan: |
     BatchProject { exprs: [ConcatOp(':':Varchar, true:Boolean::Varchar)] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select substr('hello', NULL);
+  batch_plan: |
+    BatchProject { exprs: [Substr('hello':Varchar, null:Int32)] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select substr(NULL, 1);
+  batch_plan: |
+    BatchProject { exprs: [Substr(null:Varchar, 1:Int32)] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof('123');
+  batch_plan: |
+    BatchProject { exprs: ['unknown':Varchar] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof(round(null));
+  batch_plan: |
+    BatchProject { exprs: ['double precision':Varchar] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof(row(true, 1, 'hello'));
+  batch_plan: |
+    BatchProject { exprs: ['record':Varchar] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof(array[1, 2]);
+  batch_plan: |
+    BatchProject { exprs: ['integer[]':Varchar] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select pg_typeof(array[array[1, 2], array[3, 4]]);
+  batch_plan: |
+    BatchProject { exprs: ['integer[][]':Varchar] }
       BatchValues { rows: [[]] }

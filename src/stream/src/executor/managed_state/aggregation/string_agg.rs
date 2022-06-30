@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
 use madsim::collections::BTreeMap;
@@ -28,7 +27,6 @@ use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
-use super::ManagedTableState;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 
 pub struct ManagedStringAggState<S: StateStore> {
@@ -154,8 +152,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
     }
 }
 
-#[async_trait]
-impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
+impl<S: StateStore> ManagedStringAggState<S> {
     async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -285,9 +282,9 @@ mod tests {
     use risingwave_common::array::{I64Array, Op, Utf8Array};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_storage::store::WriteOptions;
     use risingwave_storage::{Keyspace, StateStore};
 
-    use super::super::ManagedTableState;
     use super::*;
     use crate::executor::test_utils::create_in_memory_keyspace;
 
@@ -357,11 +354,14 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi||def||abc".to_string()))
         );
 
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Insert and delete.
@@ -391,11 +391,14 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Deletion.
@@ -426,11 +429,14 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Check output after flush.
@@ -519,11 +525,14 @@ mod tests {
             .unwrap();
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.get_row_count();
 
@@ -551,11 +560,14 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         let row_count = managed_state.get_row_count();

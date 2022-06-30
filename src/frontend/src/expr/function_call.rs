@@ -156,10 +156,13 @@ impl FunctionCall {
                 Ok(DataType::Varchar)
             }
 
-            _ => infer_type(
-                func_type,
-                inputs.iter().map(|expr| expr.return_type()).collect(),
-            ),
+            _ => {
+                // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
+                // interface has been enhanced to support mutating (casting) inputs as well.
+                let ret;
+                (inputs, ret) = infer_type(func_type, inputs)?;
+                Ok(ret)
+            }
         }?;
         Ok(Self {
             func_type,
@@ -175,7 +178,9 @@ impl FunctionCall {
             Ok(Literal::new(None, target).into())
         } else if source == target {
             Ok(child)
-        } else if cast_ok(&source, &target, &allows) {
+        // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
+        // in frontend.
+        } else if child.is_unknown() || cast_ok(&source, &target, allows) {
             Ok(Self {
                 func_type: ExprType::Cast,
                 return_type: target,

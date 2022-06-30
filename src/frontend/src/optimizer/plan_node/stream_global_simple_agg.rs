@@ -23,12 +23,12 @@ use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::Distribution;
 
 #[derive(Debug, Clone)]
-pub struct StreamSimpleAgg {
+pub struct StreamGlobalSimpleAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
 }
 
-impl StreamSimpleAgg {
+impl StreamGlobalSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
@@ -41,7 +41,7 @@ impl StreamSimpleAgg {
 
         // Simple agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
-        StreamSimpleAgg { base, logical }
+        StreamGlobalSimpleAgg { base, logical }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -49,19 +49,19 @@ impl StreamSimpleAgg {
     }
 }
 
-impl fmt::Display for StreamSimpleAgg {
+impl fmt::Display for StreamGlobalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlySimpleAgg")
+            f.debug_struct("StreamAppendOnlyGlobalSimpleAgg")
         } else {
-            f.debug_struct("StreamSimpleAgg")
+            f.debug_struct("StreamGlobalSimpleAgg")
         };
         builder.field("aggs", &self.agg_calls());
         builder.finish()
     }
 }
 
-impl PlanTreeNodeUnary for StreamSimpleAgg {
+impl PlanTreeNodeUnary for StreamGlobalSimpleAgg {
     fn input(&self) -> PlanRef {
         self.logical.input()
     }
@@ -70,13 +70,12 @@ impl PlanTreeNodeUnary for StreamSimpleAgg {
         Self::new(self.logical.clone_with_input(input))
     }
 }
-impl_plan_tree_node_for_unary! { StreamSimpleAgg }
+impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
 
-impl ToStreamProst for StreamSimpleAgg {
+impl ToStreamProst for StreamGlobalSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let (internal_tables, column_mapping) = self.logical.infer_internal_table_catalog();
-        // TODO: local or global simple agg?
         ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
