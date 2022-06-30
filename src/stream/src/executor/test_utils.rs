@@ -226,6 +226,7 @@ pub mod global_simple_agg {
         // Always leave 1 space for agg call value.
         let relational_pk_len = table_desc.len() - 1;
         let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
+
         StateTable::new(
             ks,
             table_desc,
@@ -256,7 +257,7 @@ pub mod global_simple_agg {
     use risingwave_storage::{Keyspace, StateStore};
 
     use crate::executor::aggregation::{generate_agg_schema, AggCall};
-    use crate::executor::{BoxedExecutor, Executor, PkIndices, SimpleAggExecutor};
+    use crate::executor::{BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices};
 
     pub fn new_boxed_simple_agg_executor(
         keyspace: Vec<Keyspace<impl StateStore>>,
@@ -283,15 +284,8 @@ pub mod global_simple_agg {
             .collect();
 
         Box::new(
-            SimpleAggExecutor::new(
-                input,
-                agg_calls,
-                pk_indices,
-                executor_id,
-                key_indices,
-                state_tables,
-            )
-            .unwrap(),
+            GlobalSimpleAggExecutor::new(input, agg_calls, pk_indices, executor_id, state_tables)
+                .unwrap(),
         )
     }
 }

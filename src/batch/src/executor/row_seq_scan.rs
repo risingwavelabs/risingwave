@@ -197,7 +197,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 column_ids,
                 order_types,
                 pk_indices,
-                None,
             );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {

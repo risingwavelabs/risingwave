@@ -14,36 +14,37 @@
 
 //! Contains configurations that could be accessed via "set" command.
 
-use risingwave_common::error::ErrorCode::InvalidConfigValue;
-use risingwave_common::error::RwError;
-use risingwave_common::session_config::QUERY_MODE;
+use std::str::FromStr;
 
-use crate::config::QueryMode::{Distributed, Local};
+use super::{ConfigEntry, CONFIG_KEYS, QUERY_MODE};
+use crate::error::ErrorCode::InvalidConfigValue;
+use crate::error::RwError;
 
-#[derive(Debug, Clone)]
+#[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum QueryMode {
     Local,
+
+    #[default]
     Distributed,
 }
 
-impl Default for QueryMode {
-    fn default() -> Self {
-        Distributed
+impl ConfigEntry for QueryMode {
+    fn entry_name() -> &'static str {
+        CONFIG_KEYS[QUERY_MODE]
     }
 }
 
-/// Parse query mode from string.
-impl<'a> TryFrom<&'a str> for QueryMode {
-    type Error = RwError;
+impl FromStr for QueryMode {
+    type Err = RwError;
 
-    fn try_from(s: &'a str) -> Result<Self, RwError> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("local") {
-            Ok(Local)
+            Ok(Self::Local)
         } else if s.eq_ignore_ascii_case("distributed") {
-            Ok(Distributed)
+            Ok(Self::Distributed)
         } else {
             Err(InvalidConfigValue {
-                config_entry: QUERY_MODE.to_string(),
+                config_entry: Self::entry_name().to_string(),
                 config_value: s.to_string(),
             })?
         }
@@ -52,16 +53,20 @@ impl<'a> TryFrom<&'a str> for QueryMode {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-
-    use crate::config::QueryMode;
+    use super::*;
 
     #[test]
     fn parse_query_mode() {
-        assert_matches!("local".try_into().unwrap(), QueryMode::Local);
-        assert_matches!("Local".try_into().unwrap(), QueryMode::Local);
-        assert_matches!("distributed".try_into().unwrap(), QueryMode::Distributed);
-        assert_matches!("diStributed".try_into().unwrap(), QueryMode::Distributed);
-        assert!(QueryMode::try_from("ab").is_err());
+        assert_eq!("local".parse::<QueryMode>().unwrap(), QueryMode::Local);
+        assert_eq!("Local".parse::<QueryMode>().unwrap(), QueryMode::Local);
+        assert_eq!(
+            "distributed".parse::<QueryMode>().unwrap(),
+            QueryMode::Distributed
+        );
+        assert_eq!(
+            "diStributed".parse::<QueryMode>().unwrap(),
+            QueryMode::Distributed
+        );
+        assert!("ab".parse::<QueryMode>().is_err());
     }
 }
