@@ -49,7 +49,16 @@ impl Binder {
         match set_expr {
             SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
             SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?))),
-            _ => Err(ErrorCode::NotImplemented(format!("{:?}", set_expr), None.into()).into()),
+            SetExpr::Query(q) => Err(ErrorCode::NotImplemented(
+                format!("Parenthesized SELECT subquery: ({:})\nYou can try to remove the parentheses if they are optional", q),
+                3584.into(),
+            )
+            .into()),
+            _ => Err(ErrorCode::NotImplemented(
+                format!("unsupported set expr: {:}", set_expr),
+                None.into(),
+            )
+            .into()),
         }
     }
 }
