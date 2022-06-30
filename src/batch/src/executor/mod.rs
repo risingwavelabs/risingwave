@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod delete;
+mod error;
 mod expand;
 mod filter;
 mod generic_exchange;
