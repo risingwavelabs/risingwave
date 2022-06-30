@@ -15,18 +15,13 @@
 
 use std::ops::Deref;
 
-
-
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{OrderedColumnDesc};
-use risingwave_common::error::{Result};
+use risingwave_common::catalog::OrderedColumnDesc;
+use risingwave_common::error::Result;
 use risingwave_common::types::{Datum, VirtualNode};
-use risingwave_common::util::ordered::{OrderedRowDeserializer};
-
-
+use risingwave_common::util::ordered::OrderedRowDeserializer;
 
 use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
-
 
 #[derive(Clone)]
 pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
@@ -113,17 +108,146 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
         raw_key: impl AsRef<[u8]>,
         cell: impl AsRef<[u8]>,
     ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
-        self.inner.deserialize_without_vnode(raw_key, cell)
+        let raw_result = self.inner.deserialize_without_vnode(raw_key, cell)?;
+        self.replace_dedupped_datums(raw_result)
     }
 
     /// Take the remaining data out of the deserializer.
     pub fn take(&mut self) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
-        Ok(self.inner.take())
+        let raw_result = self.inner.take();
+        self.replace_dedupped_datums(raw_result)
     }
 
-    /// Since [`CellBasedRowDeserializer`] can be repetitively used with different inputs,
+    /// Since [`DedupPkCellBasedRowDeserializer`] can be repetitively used with different inputs,
     /// it needs to be reset so that pk and data are both cleared for the next use.
     pub fn reset(&mut self) {
         self.inner.reset()
+    }
+}
+
+mod tests {
+    use bytes::Bytes;
+    use itertools::Itertools;
+    use risingwave_common::array::Row;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::{DataType, ScalarImpl, VIRTUAL_NODE_SIZE};
+    use risingwave_common::util::ordered::serialize_pk_and_row;
+    use risingwave_common::util::ordered::OrderedRowSerializer;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::catalog::OrderedColumnDesc;
+
+    use crate::dedup_pk_cell_based_row_deserializer::ColumnDescMapping;
+    use crate::dedup_pk_cell_based_row_deserializer::DedupPkCellBasedRowDeserializer;
+
+    #[test]
+    fn test_cell_based_deserializer() {
+        let pk_indices = [0];
+        let column_ids = vec![
+            ColumnId::from(5),
+            ColumnId::from(3),
+            ColumnId::from(7),
+            ColumnId::from(1),
+        ];
+        let dedup_column_ids = vec![
+            ColumnId::from(3),
+            ColumnId::from(7),
+            ColumnId::from(1),
+        ];
+        let table_column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
+            ColumnDesc::unnamed(column_ids[2], DataType::Int64),
+            ColumnDesc::unnamed(column_ids[3], DataType::Float64),
+        ];
+        let dedup_table_column_descs = vec![
+            ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
+            ColumnDesc::unnamed(column_ids[2], DataType::Int64),
+            ColumnDesc::unnamed(column_ids[3], DataType::Float64),
+        ];
+        let order_types = vec![
+            OrderType::Ascending,
+            OrderType::Ascending,
+            OrderType::Ascending,
+            OrderType::Ascending,
+        ];
+        // let table_ordered_column_descs =
+        //     table_column_descs.iter().zip_eq(order_types.iter()).map(
+        //         |(column_desc, order_type)| {
+        //             OrderedColumnDesc {
+        //                 column_desc: column_desc.clone(),
+        //                 order: order_type.clone(),
+        //             }
+        //         }
+        //     );
+        //                                                             vec![
+        //     OrderedColumnDesc { column_desc: table_column_descs[0].clone(), order: order_types[0]},
+        //     OrderedColumnDesc { column_desc: table_column_descs[1].clone(), order: order_types[1]},
+        //     OrderedColumnDesc { column_desc: table_column_descs[2].clone(), order: order_types[2]},
+        //     OrderedColumnDesc { column_desc: table_column_descs[3].clone(), order: order_types[3]},
+        // ];
+
+        let pk_serializer = OrderedRowSerializer::new(vec![OrderType::Ascending]);
+
+        let row1 = Row(vec![
+            Some(ScalarImpl::Int32(2018)), // pk cannot be null
+            Some(ScalarImpl::Utf8("abc".to_string())),
+            Some(ScalarImpl::Int64(1500)),
+            Some(ScalarImpl::Float64(233.3f64.into())),
+        ]);
+        let dedup_row1 = Row(vec![
+            Some(ScalarImpl::Utf8("abc".to_string())),
+            Some(ScalarImpl::Int64(1500)),
+            Some(ScalarImpl::Float64(233.3f64.into())),
+        ]);
+        let mut pk1 = vec![0; VIRTUAL_NODE_SIZE];
+        pk_serializer.serialize(&Row(vec![Some(ScalarImpl::Int32(2018))]), &mut pk1);
+
+        let row2 = Row(vec![Some(ScalarImpl::Int32(2019)), None, None, None]);
+        let dedup_row2 = Row(vec![None, None, None]);
+        let mut pk2 = vec![1; VIRTUAL_NODE_SIZE];
+        pk_serializer.serialize(&Row(vec![Some(ScalarImpl::Int32(2019))]), &mut pk2);
+
+        let row3 = Row(vec![
+            Some(ScalarImpl::Int32(2020)),
+            None,
+            Some(ScalarImpl::Int64(2021)),
+            Some(ScalarImpl::Float64(666.6f64.into())),
+        ]);
+        let dedup_row3 = Row(vec![
+            None,
+            Some(ScalarImpl::Int64(2021)),
+            Some(ScalarImpl::Float64(666.6f64.into())),
+        ]);
+        let mut pk3 = vec![2; VIRTUAL_NODE_SIZE];
+        pk_serializer.serialize(&Row(vec![Some(ScalarImpl::Int32(2020))]), &mut pk3);
+
+        let bytes1 = serialize_pk_and_row(&pk1, &dedup_row1.clone(), &dedup_column_ids).unwrap();
+        let bytes2 = serialize_pk_and_row(&pk2, &dedup_row2.clone(), &dedup_column_ids).unwrap();
+        let bytes3 = serialize_pk_and_row(&pk3, &dedup_row3.clone(), &dedup_column_ids).unwrap();
+        let bytes = [bytes1, bytes2, bytes3].concat().into_iter().flatten().collect_vec();
+
+        // ------- Init dedup pk cell based row deserializer
+        let column_mapping = ColumnDescMapping::new(table_column_descs.clone());
+
+        let pk_descs = vec![
+            OrderedColumnDesc { column_desc: table_column_descs[0].clone(), order: order_types[0]},
+        ];
+
+        let mut deserializer = DedupPkCellBasedRowDeserializer::new(column_mapping, &pk_descs);
+
+        let mut actual = vec![];
+        for (key_bytes, value_bytes) in bytes {
+            let pk_and_row = deserializer
+                .deserialize(&Bytes::from(key_bytes), &Bytes::from(value_bytes))
+                .unwrap();
+            if let Some((_vnode, _pk, row)) = pk_and_row {
+                actual.push(row);
+            }
+        }
+        let (_vnode, _pk, row) = deserializer.take().unwrap().unwrap();
+        actual.push(row);
+
+        let expected = vec![row1, row2, row3];
+        assert_eq!(expected, actual);
     }
 }
