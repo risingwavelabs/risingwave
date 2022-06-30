@@ -815,6 +815,7 @@ impl ToStream for LogicalJoin {
                 {
                     (
                         left_ref.index,
+                        // Rewrite the expression with input a row with two columns
                         ExprImpl::FunctionCall(Box::new(
                             FunctionCall::new(
                                 op,
