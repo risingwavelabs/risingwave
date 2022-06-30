@@ -54,7 +54,7 @@ impl fmt::Display for BatchExpand {
         // TODO: rewrite here.
         write!(
             f,
-            "BatchExpand {{ expanded_keys: {:?} }}",
+            "BatchExpand {{ expanded_keys: {:#?} }}",
             self.expanded_keys()
         )
     }

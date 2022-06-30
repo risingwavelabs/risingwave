@@ -19,8 +19,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
 use super::{
-    BatchExpand, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
-    ToStream,
+    BatchExpand, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
+    StreamExpand, ToBatch, ToStream,
 };
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
@@ -163,11 +163,15 @@ impl ToBatch for LogicalExpand {
 
 impl ToStream for LogicalExpand {
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        todo!()
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        let (expand, out_col_change) = self.rewrite_with_input(input, input_col_change);
+        Ok((expand.into(), out_col_change))
     }
 
     fn to_stream(&self) -> Result<PlanRef> {
-        todo!()
+        let new_input = self.input().to_stream()?;
+        let new_logical = self.clone_with_input(new_input);
+        Ok(StreamExpand::new(new_logical).into())
     }
 }
 
