@@ -67,8 +67,10 @@ where
             let mut info = self.resolve_actor_info(None).await;
             let mut new_epoch = prev_epoch.next();
 
-            // Migrate expired actors to newly joined node by changing actor_map
-            self.migrate_actors(&mut info).await;
+            if self.enable_migrate {
+                // Migrate expired actors to newly joined node by changing actor_map
+                self.migrate_actors(&mut info).await;
+            }
 
             // Reset all compute nodes, stop and drop existing actors.
             self.reset_compute_nodes(&info, &prev_epoch, &new_epoch)

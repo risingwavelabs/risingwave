@@ -161,6 +161,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             opts.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
+                enable_migrate: true, // enable by default
                 checkpoint_interval,
                 max_idle_ms,
                 in_flight_barrier_nums,
