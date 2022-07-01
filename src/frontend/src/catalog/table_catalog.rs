@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
+use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -58,7 +59,7 @@ pub struct TableCatalog {
 
     /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
     /// table.
-    pub vnode_mapping: Option<Vec<u32>>,
+    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 
     pub properties: HashMap<String, String>,
 }
@@ -94,6 +95,7 @@ impl TableCatalog {
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_keys: self.distribution_keys.clone(),
             appendonly: self.appendonly,
+            vnode_mapping: self.vnode_mapping.clone(),
         }
     }
 

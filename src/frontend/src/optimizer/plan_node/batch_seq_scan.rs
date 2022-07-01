@@ -177,6 +177,8 @@ impl ToBatchProst for BatchSeqScan {
                     .map(ColumnId::get_id)
                     .collect(),
                 scan_range: Some(self.scan_range.to_protobuf()),
+                // To be filled by the scheduler.
+                vnode_bitmap: None,
             })
         }
     }
