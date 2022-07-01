@@ -129,10 +129,7 @@ where
         request: Request<PinSnapshotRequest>,
     ) -> Result<Response<PinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .pin_snapshot(req.context_id, req.last_pinned)
-            .await;
+        let result = self.hummock_manager.pin_snapshot(req.context_id).await;
         match result {
             Ok(hummock_snapshot) => Ok(Response::new(PinSnapshotResponse {
                 status: None,
@@ -306,6 +303,20 @@ where
             Ok(sstable_id_infos) => Ok(Response::new(ListSstableIdInfosResponse {
                 status: None,
                 sstable_id_infos,
+            })),
+            Err(e) => Err(tonic_err(e)),
+        }
+    }
+
+    async fn get_epoch(
+        &self,
+        _request: Request<GetEpochRequest>,
+    ) -> Result<Response<GetEpochResponse>, Status> {
+        let result = self.hummock_manager.get_last_epoch();
+        match result {
+            Ok(hummock_snapshot) => Ok(Response::new(GetEpochResponse {
+                status: None,
+                snapshot: Some(hummock_snapshot),
             })),
             Err(e) => Err(tonic_err(e)),
         }

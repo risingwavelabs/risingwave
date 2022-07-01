@@ -46,10 +46,7 @@ async fn test_unpin_snapshot_before() {
     let epoch = 0;
 
     for _ in 0..2 {
-        let pin_result = hummock_manager
-            .pin_snapshot(context_id, u64::MAX)
-            .await
-            .unwrap();
+        let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
         assert_eq!(pin_result.epoch, epoch);
         let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
         assert_eq!(pinned_snapshots[0].context_id, context_id);
@@ -371,14 +368,8 @@ async fn test_release_context_resource() {
         .pin_version(context_id_2, u64::MAX)
         .await
         .unwrap();
-    hummock_manager
-        .pin_snapshot(context_id_1, u64::MAX)
-        .await
-        .unwrap();
-    hummock_manager
-        .pin_snapshot(context_id_2, u64::MAX)
-        .await
-        .unwrap();
+    hummock_manager.pin_snapshot(context_id_1).await.unwrap();
+    hummock_manager.pin_snapshot(context_id_2).await.unwrap();
     assert_eq!(
         pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
         2
@@ -651,7 +642,7 @@ async fn test_pin_snapshot_response_lost() {
     // Pin a snapshot with smallest last_pin
     // [ e0 ] -> [ e0:pinned ]
     let mut epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, INVALID_EPOCH)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;
@@ -674,7 +665,7 @@ async fn test_pin_snapshot_response_lost() {
     // Assume the response of the previous rpc is lost.
     // [ e0:pinned, e1 ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, INVALID_EPOCH)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;
@@ -683,7 +674,7 @@ async fn test_pin_snapshot_response_lost() {
     // Assume the response of the previous rpc is lost.
     // [ e0, e1:pinned ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, INVALID_EPOCH)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;
@@ -706,7 +697,7 @@ async fn test_pin_snapshot_response_lost() {
     // Use correct snapshot id.
     // [ e0, e1:pinned, e2 ] -> [ e0, e1:pinned, e2:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, epoch_recorded_in_frontend)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;
@@ -729,7 +720,7 @@ async fn test_pin_snapshot_response_lost() {
     // Use u64::MAX as epoch to pin greatest snapshot
     // [ e0, e1:pinned, e2:pinned, e3 ] -> [ e0, e1:pinned, e2:pinned, e3::pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, u64::MAX)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;

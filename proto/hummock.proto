@@ -99,10 +99,17 @@ message UnpinVersionResponse {
 
 message PinSnapshotRequest {
   uint32 context_id = 1;
-  uint64 last_pinned = 2;
 }
 
 message PinSnapshotResponse {
+  common.Status status = 1;
+  HummockSnapshot snapshot = 2;
+}
+
+message GetEpochRequest {
+}
+
+message GetEpochResponse {
   common.Status status = 1;
   HummockSnapshot snapshot = 2;
 }
@@ -283,6 +290,7 @@ service HummockManagerService {
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
+  rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
   rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);

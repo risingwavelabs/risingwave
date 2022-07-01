@@ -467,14 +467,30 @@ where
     }
 
     /// Make sure `max_commited_epoch` is pinned and return it.
-    /// Assume that frontend will only pass the latest epoch value recorded by frontend to
-    /// `last_pinned`. Meta will unpin snapshots which are pinned and in (`last_pinned`,
-    /// `max_commited_epoch`).
-    pub async fn pin_snapshot(
-        &self,
-        _context_id: HummockContextId,
-        _last_pinned: HummockEpoch,
-    ) -> Result<HummockSnapshot> {
+    pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
+        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        let mut guard = self.versioning.write().await;
+        let mut pinned_snapshots = VarTransaction::new(&mut guard.pinned_snapshots);
+        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedSnapshot {
+                context_id,
+                minimal_pinned_snapshot: max_committed_epoch,
+            },
+        );
+        if context_pinned_snapshot.minimal_pinned_snapshot == u64::MAX {
+            context_pinned_snapshot.minimal_pinned_snapshot = max_committed_epoch;
+        }
+
+        if context_pinned_snapshot.minimal_pinned_snapshot == max_committed_epoch {
+            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+        }
+        Ok(HummockSnapshot {
+            epoch: max_committed_epoch,
+        })
+    }
+
+    pub fn get_last_epoch(&self) -> Result<HummockSnapshot> {
         let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
         Ok(HummockSnapshot {
             epoch: max_committed_epoch,

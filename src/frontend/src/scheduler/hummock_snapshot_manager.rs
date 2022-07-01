@@ -43,7 +43,7 @@ impl HummockSnapshotManager {
         if core_guard.is_outdated {
             let epoch = self
                 .meta_client
-                .pin_snapshot(core_guard.last_pinned)
+                .pin_snapshot()
                 .await
                 .map_err(|_e| PinSnapshot(query_id.clone(), core_guard.last_pinned))?;
             core_guard.is_outdated = false;
