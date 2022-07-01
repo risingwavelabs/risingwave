@@ -51,7 +51,7 @@ mod iter_utils;
 pub type AccessType = bool;
 /// Table with `READ_ONLY` is used for batch scan or point lookup.
 pub const READ_ONLY: AccessType = false;
-/// Table with `READ_WRITE` is used for streaming executors through [`StateTable`].
+/// Table with `READ_WRITE` is used for streaming executors through `StateTable`.
 pub const READ_WRITE: AccessType = true;
 
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
