@@ -1,5 +1,3 @@
-control sortmode rowsort
-
 query T rowsort
 show schemas;
 ----
