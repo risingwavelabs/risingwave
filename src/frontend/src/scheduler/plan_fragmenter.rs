@@ -393,7 +393,13 @@ impl BatchPlanFragmenter {
                 // Check out the comments for `has_table_scan` in `QueryStage`.
                 if let Some(scan_node) = node.as_batch_seq_scan() {
                     let table_desc = scan_node.logical().table_desc();
-                    let is_singleton = builder.parallelism == 1;
+
+                    // FIXME: workaround because batch parallel scan on ordered mv may have unorderd
+                    // results. should do a merge sort after parallel scan.
+                    // Tracking issue: <https://github.com/singularity-data/risingwave/issues/3583>
+                    let is_singleton = true;
+                    // let is_singleton = builder.parallelism == 1;
+
                     assert!(
                         builder.table_scan_info.is_none()
                             || builder

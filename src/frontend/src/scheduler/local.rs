@@ -114,6 +114,7 @@ impl LocalQueryExecution {
     fn create_plan_fragment(&self) -> SchedulerResult<PlanFragment> {
         let root_stage_id = self.query.root_stage_id();
         let root_stage = self.query.stage_graph.stages.get(&root_stage_id).unwrap();
+        assert_eq!(root_stage.parallelism, 1);
         let second_stage_id = self.query.stage_graph.get_child_stages(&root_stage_id);
         let plan_node_prost = match second_stage_id {
             None => {
@@ -249,7 +250,11 @@ impl LocalQueryExecution {
                     ),
                     };
 
-                    let workers = self.front_env.worker_node_manager().list_worker_nodes();
+                    let workers = if second_stage.parallelism == 1 {
+                        vec![self.front_env.worker_node_manager().next_random()?]
+                    } else {
+                        self.front_env.worker_node_manager().list_worker_nodes()
+                    };
                     *sources = workers
                         .iter()
                         .enumerate()
