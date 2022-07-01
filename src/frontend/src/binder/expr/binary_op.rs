@@ -52,11 +52,9 @@ impl Binder {
             BinaryOperator::Concat => return self.bind_concat_op(bound_left, bound_right),
 
             _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("binary op: {:?}", op),
-                    112.into(),
+                return Err(
+                    ErrorCode::NotImplemented(format!("binary op: {:?}", op), 112.into()).into(),
                 )
-                .into())
             }
         };
         Ok(FunctionCall::new(func_type, vec![bound_left, bound_right])?.into())
