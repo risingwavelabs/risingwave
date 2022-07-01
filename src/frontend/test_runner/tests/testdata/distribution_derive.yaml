@@ -52,3 +52,21 @@
           StreamExchange { dist: HashShard([0]) }
             StreamProject { exprs: [($0 + $1), $0, $2] }
               StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }
+- sql: |
+    create table t1 (row_id int, uid int, v int, created_at timestamp);
+    select * from hop(t1, created_at, interval '15' minute, interval '30' minute);
+  logical_plan: |
+    LogicalProject { exprs: [$1, $2, $3, $4, $5, $6] }
+      LogicalHopWindow { time_col: $4, slide: 00:15:00, size: 00:30:00, output_indices: all }
+        LogicalScan { table: t1, columns: [_row_id, row_id, uid, v, created_at] }
+  optimized_logical_plan: |
+    LogicalHopWindow { time_col: $3, slide: 00:15:00, size: 00:30:00, output_indices: all }
+      LogicalScan { table: t1, columns: [row_id, uid, v, created_at] }
+  batch_plan: |
+    BatchHopWindow { time_col: $3, slide: 00:15:00, size: 00:30:00, output_indices: all }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: t1, columns: [row_id, uid, v, created_at] }
+  stream_plan: |
+    StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, _row_id(hidden)], pk_columns: [_row_id, window_start] }
+      StreamHopWindow { time_col: $3, slide: 00:15:00, size: 00:30:00, output_indices: [0, 1, 2, 3, 5, 6, 4] }
+        StreamTableScan { table: t1, columns: [row_id, uid, v, created_at, _row_id], pk_indices: [4] }
