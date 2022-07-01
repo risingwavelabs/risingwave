@@ -200,9 +200,9 @@ async fn test_table_v2_materialize() -> Result<()> {
         .collect_vec();
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
     let table = CellBasedTable::new_for_test(
-        keyspace,
+        memory_state_store.clone(),
+        source_table_id,
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0],

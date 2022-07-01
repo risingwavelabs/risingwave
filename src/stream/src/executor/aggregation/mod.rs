@@ -34,7 +34,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
@@ -431,15 +431,11 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
                 .map(|pk_index| *pk_index as usize)
                 .collect();
 
-            let keyspace = Keyspace::table_root(
-                store.clone(),
-                &risingwave_common::catalog::TableId::new(table_catalog.id),
-            );
-
             match vnodes.clone() {
                 // Hash Agg
                 Some(vnodes) => StateTable::new_with_distribution(
-                    keyspace,
+                    store.clone(),
+                    risingwave_common::catalog::TableId::new(table_catalog.id),
                     columns,
                     order_types,
                     pk_indices,
@@ -449,7 +445,13 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
                 // Simple Agg
                 None => {
                     assert!(dist_key_indices.is_empty());
-                    StateTable::new_without_distribution(keyspace, columns, order_types, pk_indices)
+                    StateTable::new_without_distribution(
+                        store.clone(),
+                        risingwave_common::catalog::TableId::new(table_catalog.id),
+                        columns,
+                        order_types,
+                        pk_indices,
+                    )
                 }
             }
         };

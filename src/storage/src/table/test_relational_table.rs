@@ -1234,8 +1234,13 @@ async fn test_dedup_cell_based_table_iter_with(
     let ordered_row_serializer = OrderedRowSerializer::new(order_types.clone());
 
     // ---------- Init table for writes
-    let table =
-        CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types, pk_indices.clone());
+    let table = CellBasedTable::new_for_test(
+        state_store.clone(),
+        TableId::from(0x1111),
+        row_descs,
+        order_types,
+        pk_indices.clone(),
+    );
 
     for Row(row) in rows.clone() {
         // ---------- Serialize to cell repr
@@ -1790,7 +1795,6 @@ async fn test_state_table_iter_with_prefix() {
 async fn test_dedup_pk_table_write_with_cell_based_read() {
     // ---------- init state store
     let state_store = MemoryStateStore::new();
-    let keyspace = Keyspace::table_root(state_store.clone(), &TableId::from(0x42));
 
     // ---------- declare table layout
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -1840,7 +1844,8 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
 
     // ---------- Init reader
     let table = CellBasedTable::new_for_test(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         actual_column_descs,
         order_types,
         pk_indices,

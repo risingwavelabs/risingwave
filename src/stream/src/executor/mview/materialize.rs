@@ -175,7 +175,6 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::cell_based_table::CellBasedTable;
-    use risingwave_storage::Keyspace;
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
@@ -217,14 +216,18 @@ mod tests {
             ],
         );
 
-        let keyspace = Keyspace::table_root(memory_state_store.clone(), &table_id);
         let order_types = vec![OrderType::Ascending];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
-        let table =
-            CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types, vec![0]);
+        let table = CellBasedTable::new_for_test(
+            memory_state_store.clone(),
+            table_id,
+            column_descs,
+            order_types,
+            vec![0],
+        );
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
             memory_state_store,
