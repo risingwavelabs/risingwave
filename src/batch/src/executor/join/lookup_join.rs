@@ -15,12 +15,13 @@
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::plan_common::CellBasedTableDesc;
 
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::{
@@ -35,10 +36,11 @@ pub struct LookupJoinExecutor {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     probe_side_source: RowLevelIter,
-    probe_side_schema: Vec<DataType>,
+    probe_side_data_types: Vec<DataType>,
     probe_side_idxs: Vec<usize>,
-    build_side: RowLevelIter,
-    build_side_schema: Vec<DataType>,
+    build_side_table_desc: CellBasedTableDesc,
+    build_side_column_ids: Vec<i32>,
+    build_side_data_types: Vec<DataType>,
     build_side_idxs: Vec<usize>,
     chunk_builder: DataChunkBuilder,
     schema: Schema,
@@ -115,7 +117,7 @@ impl LookupJoinExecutor {
             let const_row_chunk = convert_row_to_chunk(
                 &probe_row,
                 build_side_chunk.capacity(),
-                &self.probe_side_schema,
+                &self.probe_side_data_types,
             )?;
 
             let new_chunk = concatenate(&const_row_chunk, &build_side_chunk)?;
@@ -150,7 +152,7 @@ impl LookupJoinExecutor {
                 .values()
                 .collect_vec();
 
-            for _ in 0..self.build_side_schema.len() {
+            for _ in 0..self.build_side_data_types.len() {
                 probe_datum_refs.push(None);
             }
 
@@ -176,10 +178,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutor {
         source: &ExecutorBuilder<C>,
         mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 2,
-            "LookupJoinExeuctor should have 2 children!"
-        );
+        ensure!(inputs.len() == 1, "LookupJoinExeuctor should have 1 child!");
 
         let lookup_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -192,21 +191,26 @@ impl BoxedExecutorBuilder for LookupJoinExecutor {
             Err(_) => None,
         };
 
-        let left_child = inputs.remove(0);
-        let probe_side_schema = left_child.schema().data_types();
+        let probe_child = inputs.remove(0);
+        let probe_side_data_types = probe_child.schema().data_types();
 
-        let right_child = inputs.remove(0);
-        let build_side_schema = right_child.schema().data_types();
+        let build_side_schema = Schema {
+            fields: lookup_join_node
+                .get_build_side_schema()
+                .iter()
+                .map(Field::from)
+                .collect(),
+        };
 
         let output_indices: Vec<usize> = lookup_join_node
-            .output_indices
+            .get_output_indices()
             .iter()
             .map(|&x| x as usize)
             .collect();
 
         let fields = [
-            left_child.schema().fields.clone(),
-            right_child.schema().fields.clone(),
+            probe_child.schema().fields.clone(),
+            build_side_schema.fields.clone(),
         ]
         .concat();
         let original_schema = Schema { fields };
@@ -216,23 +220,26 @@ impl BoxedExecutorBuilder for LookupJoinExecutor {
             .collect();
 
         let mut probe_side_idxs = vec![];
-        for left_key in lookup_join_node.get_left_key() {
-            probe_side_idxs.push(*left_key as usize)
+        for probe_side_key in lookup_join_node.get_probe_side_key() {
+            probe_side_idxs.push(*probe_side_key as usize)
         }
 
         let mut build_side_idxs = vec![];
-        for right_key in lookup_join_node.get_right_key() {
-            build_side_idxs.push(*right_key as usize)
+        for build_side_key in lookup_join_node.get_build_side_key() {
+            build_side_idxs.push(*build_side_key as usize)
         }
+
+        let build_side_table_desc = lookup_join_node.get_build_side_table_desc()?;
 
         Ok(Box::new(Self {
             join_type,
             condition,
-            probe_side_source: RowLevelIter::new(left_child),
-            probe_side_schema,
+            probe_side_source: RowLevelIter::new(probe_child),
+            probe_side_data_types,
             probe_side_idxs,
-            build_side: RowLevelIter::new(right_child),
-            build_side_schema,
+            build_side_table_desc: build_side_table_desc.clone(),
+            build_side_column_ids: lookup_join_node.get_build_side_column_ids().to_vec(),
+            build_side_data_types: build_side_schema.data_types(),
             build_side_idxs,
             chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: actual_schema,
