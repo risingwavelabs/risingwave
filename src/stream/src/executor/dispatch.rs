@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 use std::future::Future;
+use std::iter::repeat_with;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -22,6 +23,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -537,21 +539,24 @@ impl Dispatcher for HashDataDispatcher {
                 .unwrap()
                 .iter()
                 .map(|hash| *hash as usize % VIRTUAL_NODE_COUNT)
-                .collect::<Vec<_>>();
+                .collect_vec();
+
+            tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, hash_values);
+
+            let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
+                .take(num_outputs)
+                .collect_vec();
+            let mut last_hash_value_when_update_delete: usize = 0;
+            let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
             let (ops, columns, visibility) = chunk.into_inner();
 
-            let mut vis_maps = vec![vec![]; num_outputs];
-            let mut last_hash_value_when_update_delete: usize = 0;
-            let mut new_ops: Vec<Op> = Vec::with_capacity(ops.len());
             match visibility {
                 None => {
                     hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
                         // get visibility map for every output chunk
-                        for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                            vis_map.push(
-                                self.hash_mapping[*hash] == self.outputs[output_idx].actor_id(),
-                            );
+                        for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
+                            vis_map.append(self.hash_mapping[*hash] == output.actor_id());
                         }
                         // The 'update' message, noted by an UpdateDelete and a successive
                         // UpdateInsert, need to be rewritten to common
@@ -578,11 +583,10 @@ impl Dispatcher for HashDataDispatcher {
                         .zip_eq(visibility.iter())
                         .zip_eq(ops)
                         .for_each(|((hash, visible), op)| {
-                            for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                                vis_map.push(
-                                    visible
-                                        && self.hash_mapping[*hash]
-                                            == self.outputs[output_idx].actor_id(),
+                            for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
+                            {
+                                vis_map.append(
+                                    visible && self.hash_mapping[*hash] == output.actor_id(),
                                 );
                             }
                             if !visible {
@@ -614,7 +618,7 @@ impl Dispatcher for HashDataDispatcher {
                 .zip_eq(self.outputs.iter_mut())
                 .zip_eq(self.fragment_ids.iter())
             {
-                let vis_map = vis_map.try_into().unwrap();
+                let vis_map = vis_map.finish();
                 // columns is not changed in this function
                 let new_stream_chunk =
                     StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
@@ -791,6 +795,7 @@ mod tests {
     use risingwave_common::catalog::Schema;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
+    use static_assertions::const_assert_eq;
     use tokio::sync::mpsc::channel;
 
     use super::*;
@@ -828,6 +833,9 @@ mod tests {
     }
 
     async fn test_hash_dispatcher_complex_inner() {
+        // This test only works when VIRTUAL_NODE_COUNT is 256.
+        const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
         let output_data_vecs = (0..num_outputs)
@@ -869,13 +877,13 @@ mod tests {
             *output_data_vecs[0].lock().unwrap()[0].as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I
-                +  4 6 8 D
-                +  5 7 9 D
+                +  4 6 8
+                +  5 7 9
                 +  0 0 0
                 -  1 1 1 D
                 U- 2 0 2
                 U+ 2 0 2
-                -  3 3 2    // Should rewrite UpdateDelete to Delete
+                -  3 3 2 D  // Should rewrite UpdateDelete to Delete
                 +  3 3 4    // Should rewrite UpdateInsert to Insert",
             )
         );
@@ -883,13 +891,13 @@ mod tests {
             *output_data_vecs[1].lock().unwrap()[0].as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I
-                +  4 6 8
-                +  5 7 9
+                +  4 6 8 D
+                +  5 7 9 D
                 +  0 0 0 D
                 -  1 1 1 D  // Should keep original invisible mark
                 U- 2 0 2 D  // Should keep UpdateDelete
                 U+ 2 0 2 D  // Should keep UpdateInsert
-                -  3 3 2 D  // Should rewrite UpdateDelete to Delete
+                -  3 3 2    // Should rewrite UpdateDelete to Delete
                 +  3 3 4 D  // Should rewrite UpdateInsert to Insert",
             )
         );
@@ -1061,7 +1069,7 @@ mod tests {
 
         let mut start = 19260817i32..;
         let mut builders = (0..dimension)
-            .map(|_| I32ArrayBuilder::new(cardinality).unwrap())
+            .map(|_| I32ArrayBuilder::new(cardinality))
             .collect_vec();
         let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
         let mut output_ops = vec![vec![]; num_outputs];

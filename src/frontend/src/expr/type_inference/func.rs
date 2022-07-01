@@ -26,7 +26,7 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
     let actuals = inputs
         .iter()
-        .map(|e| match e.is_null() {
+        .map(|e| match e.is_unknown() {
             true => None,
             false => Some(e.return_type().into()),
         })
@@ -565,7 +565,13 @@ fn build_type_derive_map() -> FuncSigMap {
     for e in [E::Replace, E::Translate] {
         map.insert(e, vec![T::Varchar, T::Varchar, T::Varchar], T::Varchar);
     }
-    for e in [E::Length, E::Ascii, E::CharLength] {
+    for e in [
+        E::Length,
+        E::Ascii,
+        E::CharLength,
+        E::OctetLength,
+        E::BitLength,
+    ] {
         map.insert(e, vec![T::Varchar], T::Int32);
     }
     map.insert(E::Position, vec![T::Varchar, T::Varchar], T::Int32);

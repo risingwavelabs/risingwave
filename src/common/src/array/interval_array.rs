@@ -27,7 +27,7 @@ mod tests {
     #[test]
     fn test_interval_array() {
         let cardinality = 5;
-        let mut array_builder = IntervalArrayBuilder::new(cardinality).unwrap();
+        let mut array_builder = IntervalArrayBuilder::new(cardinality);
         for _ in 0..cardinality {
             let v = IntervalUnit::from_ymd(1, 0, 0);
             array_builder.append(Some(v)).unwrap();

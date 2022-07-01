@@ -30,6 +30,7 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::ParallelUnitMapping;
+use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
@@ -342,6 +343,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
+        _grantor: UserName,
     ) -> Result<()> {
         let privileges = privileges
             .into_iter()
@@ -366,7 +368,10 @@ impl UserInfoWriter for MockUserInfoWriter {
         &self,
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
+        _granted_by: Option<UserName>,
+        _revoke_by: UserName,
         revoke_grant_option: bool,
+        _cascade: bool,
     ) -> Result<()> {
         for user_name in users {
             if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
@@ -425,6 +430,13 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn flush(&self) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn list_table_fragments(
+        &self,
+        _table_ids: &[u32],
+    ) -> RpcResult<HashMap<u32, TableFragmentInfo>> {
+        Ok(HashMap::default())
     }
 
     async fn unpin_snapshot(&self, _epoch: u64) -> RpcResult<()> {
