@@ -87,7 +87,7 @@ impl StreamChunkBuilder {
         let column_builders = data_types_after_mapping
             .iter()
             .map(|datatype| datatype.create_array_builder(reduced_capacity))
-            .try_collect()?;
+            .collect();
         let output_mapping = {
             let mut mapping = vec![None; original_data_types.len()];
             for (i, &output_index) in output_indices.iter().enumerate() {
