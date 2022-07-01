@@ -323,7 +323,6 @@ where
         );
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
-
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
             .await?
             .into_iter()
