@@ -26,7 +26,7 @@ mod tests {
     use risingwave_common::util::epoch::Epoch;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{get_epoch, get_table_id};
+    use risingwave_hummock_sdk::key::get_table_id;
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
@@ -426,7 +426,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_drop_key_by_ttl() {
-        // TODO: reduce cost time of test (which cause by commit_epoch 1000 times)
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -448,14 +447,15 @@ mod tests {
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
 
         let existing_table_id = 2;
-        let kv_count = 1001;
-        let base_epoch = Epoch(0);
+        let kv_count = 11;
+        // let base_epoch = Epoch(0);
+        let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
-        let millisec_for_epoch: u64 = 1 << 16;
+        let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         let mut epoch_set = BTreeSet::new();
         for _ in 0..kv_count {
-            epoch += millisec_for_epoch;
+            epoch += millisec_interval_epoch;
             epoch_set.insert(epoch);
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
@@ -469,11 +469,11 @@ mod tests {
         }
 
         storage.sync(None).await.unwrap();
-        for epoch in epoch_set {
+        for epoch in &epoch_set {
             hummock_meta_client
                 .commit_epoch(
-                    epoch,
-                    storage.local_version_manager.get_uncommitted_ssts(epoch),
+                    *epoch,
+                    storage.local_version_manager.get_uncommitted_ssts(*epoch),
                 )
                 .await
                 .unwrap();
@@ -503,7 +503,6 @@ mod tests {
                 ttl: ttl_expire_second,
             },
         )]);
-        let watermark = compact_task.watermark;
 
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id, async { true })
@@ -539,7 +538,8 @@ mod tests {
                 .meta
                 .key_count;
         }
-        assert_eq!(ttl_expire_second * 1000, key_count); // ttl will clean the key (which epoch < epoch - ttl)
+        let expect_count = kv_count as u32 - ttl_expire_second;
+        assert_eq!(expect_count, key_count); // ttl will clean the key (which epoch < epoch - ttl)
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
@@ -568,15 +568,9 @@ mod tests {
             .await
             .unwrap();
         let mut scan_count = 0;
-        let min_epoch = Epoch(watermark).subtract_ms((ttl_expire_second * 1000) as u64);
         for (k, _) in scan_result {
             let table_id = get_table_id(&k).unwrap();
-            let epoch = Epoch(get_epoch(&k));
             assert_eq!(table_id, existing_table_id);
-            if epoch < min_epoch {
-                tracing::info!("epoch {:?} min_epoch {:?}", epoch, min_epoch);
-            }
-            assert!(epoch >= min_epoch);
             scan_count += 1;
         }
         assert_eq!(key_count, scan_count);
